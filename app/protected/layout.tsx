@@ -2,6 +2,7 @@ import { AuthButton } from "@/components/auth-button";
 import { hasEnvVars } from "@/lib/utils";
 import { EnvVarWarning } from "@/components/env-var-warning";
 import Link from "next/link";
+import Image from "next/image";
 import { Suspense } from "react";
 
 export default function ProtectedLayout({
@@ -14,11 +15,15 @@ export default function ProtectedLayout({
       <nav className="w-full flex justify-center border-b border-white/5 h-14">
         <div className="w-full flex justify-between items-center px-6 text-sm">
           <div className="flex items-center gap-6">
-            <Link
-              href="/protected"
-              className="font-bold text-white tracking-tight text-base"
-            >
-              Warbird Pro
+            <Link href="/protected" className="flex items-center">
+              <Image
+                src="/warbird-logo.svg"
+                alt="Warbird Pro"
+                width={180}
+                height={36}
+                priority
+                className="h-8 w-auto"
+              />
             </Link>
           </div>
           <div className="flex items-center gap-4">

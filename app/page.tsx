@@ -9,9 +9,8 @@ export default function Home() {
       {/* Nav */}
       <nav className="w-full flex justify-center h-20" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <div className="w-full max-w-6xl flex justify-between items-center px-6">
-          <span className="text-white font-bold text-lg tracking-tight">
-            WARBIRD<span className="text-white/40 font-light ml-1">PRO</span>
-          </span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/warbird-logo.svg" alt="Warbird Pro" className="h-10 w-auto" />
           <Link
             href="/auth/login"
             className="text-sm text-white/70 hover:text-white transition-colors duration-200"
