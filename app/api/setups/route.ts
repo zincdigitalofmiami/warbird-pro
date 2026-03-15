@@ -32,15 +32,18 @@ export async function GET() {
 
     if (recentError) throw new Error(recentError.message);
 
-    // Active measured moves
+    // Active measured moves (ACTIVE only — FORMING is not in the signal_status enum)
     const { data: measuredMoves, error: mmError } = await supabase
       .from("measured_moves")
       .select("*")
-      .in("status", ["ACTIVE", "FORMING"])
+      .eq("status", "ACTIVE")
       .order("ts", { ascending: false })
       .limit(10);
 
-    if (mmError) throw new Error(mmError.message);
+    if (mmError) {
+      // Table may not exist yet or be empty — not fatal
+      console.error("measured_moves query error:", mmError.message);
+    }
 
     return NextResponse.json({
       active: activeSetups ?? [],
