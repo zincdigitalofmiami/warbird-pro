@@ -9,8 +9,8 @@ const defaultUrl = process.env.VERCEL_URL
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
-  title: "Next.js and Supabase Starter Kit",
-  description: "The fastest way to build apps with Next.js and Supabase",
+  title: "Warbird Pro — MES Intelligence Platform",
+  description: "Real-time MES futures intelligence. Fibonacci setups, measured moves, macro context, and ML-powered forecasting.",
 };
 
 const geistSans = Geist({
