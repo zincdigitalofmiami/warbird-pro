@@ -1,11 +1,12 @@
 /**
  * Auto-Fibonacci Engine — Multi-Period Confluence (TSoFib approach)
  *
- * Replaces single swing-pair anchor with Fibonacci-sequence lookback periods
- * (21, 34, 55, 89, 144 bars) to find the highest-confluence fib anchor.
+ * Ported line-for-line from the Rabid Raccoon Pine Script v6 indicator.
+ * Uses Fibonacci-sequence lookback periods (8, 13, 21, 34, 55 bars)
+ * to find the highest-confluence fib anchor.
  *
- * Algorithm (ported from TSoFib Pine Script):
- *   1. For each period N in [21, 34, 55, 89, 144]:
+ * Algorithm (from rabid-raccoon.pine lines 244-395):
+ *   1. For each period N in [8, 13, 21, 34, 55]:
  *      - highN = highest high over last N bars
  *      - lowN  = lowest low over last N bars
  *      - Derive retracement levels at 0.382, 0.5, 0.618
@@ -26,7 +27,8 @@ import { FIB_COLORS } from './colors'
 
 const FIB_RATIOS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]
 const FIB_EXTENSIONS = [1.236, 1.618]
-const FIB_LOOKBACKS = [21, 34, 55, 89, 144] as const
+// Matches rabid-raccoon.pine exactly: Fibonacci-sequence lookback periods
+const FIB_LOOKBACKS = [8, 13, 21, 34, 55] as const
 
 /** Confluence tolerance: levels within this fraction of range are "the same" */
 const CONFLUENCE_TOLERANCE = 0.001 // 0.1 %
@@ -90,10 +92,10 @@ function buildLevels(anchorHigh: number, anchorLow: number, isBullish: boolean):
 /**
  * calculateFibonacciMultiPeriod
  *
- * Uses Fibonacci-sequence lookback periods (21, 34, 55, 89, 144) to find the
+ * Uses Fibonacci-sequence lookback periods (8, 13, 21, 34, 55) to find the
  * highest-confluence anchor pair, then returns a full FibResult.
  *
- * Falls back to the largest period (144) if no confluence is detected.
+ * Falls back to the largest period (55) if no confluence is detected.
  *
  * @param candles  Full OHLCV array (chronological, oldest first)
  */

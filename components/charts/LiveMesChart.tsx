@@ -27,6 +27,7 @@ import type { PivotLine, PivotTimeframe } from "@/lib/pivots";
 import { ForecastTargetsPrimitive } from "@/lib/charts/ForecastTargetsPrimitive";
 import { SetupMarkersPrimitive } from "@/lib/charts/SetupMarkersPrimitive";
 import { PivotLinesPrimitive } from "@/lib/charts/PivotLinesPrimitive";
+import { FibLinesPrimitive } from "@/lib/charts/FibLinesPrimitive";
 import { mapMeasuredMoveAndCoreToTargets } from "@/lib/charts/blendTargets";
 import { ensureFutureWhitespace } from "@/lib/charts/ensureFutureWhitespace";
 import { calculateFibonacciMultiPeriod } from "@/lib/fibonacci";
@@ -243,6 +244,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
     const primitiveRef = useRef<ForecastTargetsPrimitive | null>(null);
     const setupPrimitiveRef = useRef<SetupMarkersPrimitive | null>(null);
     const pivotPrimitiveRef = useRef<PivotLinesPrimitive | null>(null);
+    const fibPrimitiveRef = useRef<FibLinesPrimitive | null>(null);
     const initialViewportAppliedRef = useRef(false);
     const displayEventPhase = getEventDisplayPhase(eventPhase);
 
@@ -414,11 +416,15 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       const pivotPrimitive = new PivotLinesPrimitive();
       series.attachPrimitive(pivotPrimitive);
 
+      const fibPrimitive = new FibLinesPrimitive();
+      series.attachPrimitive(fibPrimitive);
+
       chartRef.current = chart;
       seriesRef.current = series;
       primitiveRef.current = primitive;
       setupPrimitiveRef.current = setupPrimitive;
       pivotPrimitiveRef.current = pivotPrimitive;
+      fibPrimitiveRef.current = fibPrimitive;
 
       const resizeObserver = new ResizeObserver(() => {
         chart.applyOptions({ autoSize: true });
@@ -430,12 +436,14 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         series.detachPrimitive(primitive);
         series.detachPrimitive(setupPrimitive);
         series.detachPrimitive(pivotPrimitive);
+        series.detachPrimitive(fibPrimitive);
         chart.remove();
         chartRef.current = null;
         seriesRef.current = null;
         primitiveRef.current = null;
         setupPrimitiveRef.current = null;
         pivotPrimitiveRef.current = null;
+        fibPrimitiveRef.current = null;
       };
     }, []);
 
@@ -786,6 +794,36 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       pivotPrimitiveRef.current.setPivots(mapped, PIVOT_COLORS);
     }, [pivotData, lastPrice]);
 
+    // --- Compute and wire fibonacci Pivot/Zone/Targets/Magnet from candle data ---
+    useEffect(() => {
+      if (!fibPrimitiveRef.current) return;
+
+      const realPoints = realPointsRef.current;
+      if (realPoints.length < 55) {
+        fibPrimitiveRef.current.setFibResult(null);
+        return;
+      }
+
+      const candles = realPoints.map(toCandle);
+      const fibResult = calculateFibonacciMultiPeriod(candles);
+      if (!fibResult) {
+        fibPrimitiveRef.current.setFibResult(null);
+        return;
+      }
+
+      // Map the anchor bar index to gap-free time for line start
+      const anchorIdx = Math.min(
+        fibResult.anchorHighBarIndex,
+        fibResult.anchorLowBarIndex,
+      );
+      const anchorGfTime =
+        pointsRef.current.length > anchorIdx
+          ? pointsRef.current[anchorIdx].time
+          : undefined;
+
+      fibPrimitiveRef.current.setFibResult(fibResult, anchorGfTime);
+    }, [lastPrice]);
+
     const changeColor = priceChange >= 0 ? TV.bull.bright : TV.bear.bright;
 
     return (
@@ -940,6 +978,13 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
               ))}
             </>
           )}
+          <div className="h-3 w-px bg-white/10" />
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-px" style={{ backgroundColor: "#4caf50" }} />
+            <span className="text-[10px] text-white/40 uppercase tracking-wider">
+              Fib
+            </span>
+          </div>
           {setups && setups.length > 0 && (
             <>
               <div className="flex items-center gap-2">

@@ -25,6 +25,12 @@ export default function ProtectedLayout({
                 className="h-8 w-auto"
               />
             </Link>
+            <Link href="/protected" className="text-white/40 hover:text-white/70 transition-colors text-xs uppercase tracking-wider font-medium">
+              Dashboard
+            </Link>
+            <Link href="/protected/admin" className="text-white/40 hover:text-white/70 transition-colors text-xs uppercase tracking-wider font-medium">
+              Admin
+            </Link>
           </div>
           <div className="flex items-center gap-4">
             {!hasEnvVars ? (
