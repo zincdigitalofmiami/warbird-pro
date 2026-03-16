@@ -57,8 +57,8 @@ export async function GET(request: Request) {
       gapStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     }
 
-    // Databento historical API has ~15-30 min delay
-    const gapEnd = new Date(now.getTime() - 30 * 60 * 1000);
+    // Databento historical API has a short delay; 5 min buffer is plenty
+    const gapEnd = new Date(now.getTime() - 5 * 60 * 1000);
 
     // Nothing to fill if gap window is too small
     if (gapEnd.getTime() - gapStart.getTime() < 60_000) {
