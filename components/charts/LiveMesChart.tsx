@@ -980,9 +980,9 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
           )}
           <div className="h-3 w-px bg-white/10" />
           <div className="flex items-center gap-1.5">
-            <div className="w-3 h-px" style={{ backgroundColor: "#4caf50" }} />
+            <div className="w-3 h-px" style={{ backgroundColor: "#FF9800" }} />
             <span className="text-[10px] text-white/40 uppercase tracking-wider">
-              Fib
+              AutoFib
             </span>
           </div>
           {setups && setups.length > 0 && (
