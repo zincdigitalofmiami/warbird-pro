@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 import databento as db
 from supabase import create_client
+from mes_aggregation import aggregate_mes_timeframes
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
@@ -42,30 +43,6 @@ def is_weekend_bar(ts: int) -> bool:
     if wd == 6 and h < 23:  # Sunday before open
         return True
     return False
-
-
-def aggregate_to_15m(bars_1m: list[dict]) -> list[dict]:
-    """Aggregate 1m bars into 15m bars."""
-    buckets: dict[int, dict] = {}
-    for bar in bars_1m:
-        ts = bar["ts_epoch"]
-        bucket_ts = (ts // 900) * 900
-        if bucket_ts not in buckets:
-            buckets[bucket_ts] = {
-                "ts_epoch": bucket_ts,
-                "open": bar["open"],
-                "high": bar["high"],
-                "low": bar["low"],
-                "close": bar["close"],
-                "volume": bar["volume"],
-            }
-        else:
-            b = buckets[bucket_ts]
-            b["high"] = max(b["high"], bar["high"])
-            b["low"] = min(b["low"], bar["low"])
-            b["close"] = bar["close"]
-            b["volume"] += bar["volume"]
-    return sorted(buckets.values(), key=lambda x: x["ts_epoch"])
 
 
 def backfill(start: datetime, end: datetime):
@@ -136,26 +113,37 @@ def backfill(start: datetime, end: datetime):
                 rows = [{k: v for k, v in b.items() if k != "ts_epoch"} for b in batch]
                 supabase.table("mes_1m").upsert(rows).execute()
 
-            # Aggregate and upsert 15m bars
-            bars_15m = aggregate_to_15m(bars_1m)
-            for i in range(0, len(bars_15m), BATCH_SIZE):
-                batch = bars_15m[i : i + BATCH_SIZE]
-                rows = [
-                    {
-                        "ts": datetime.fromtimestamp(b["ts_epoch"], tz=timezone.utc).isoformat(),
-                        "open": b["open"],
-                        "high": b["high"],
-                        "low": b["low"],
-                        "close": b["close"],
-                        "volume": b["volume"],
-                    }
-                    for b in batch
-                ]
-                supabase.table("mes_15m").upsert(rows).execute()
+            aggregated = aggregate_mes_timeframes(bars_1m)
+            timeframe_counts: dict[str, int] = {}
+
+            for table_name, timeframe_bars in aggregated.items():
+                timeframe_counts[table_name] = len(timeframe_bars)
+                for i in range(0, len(timeframe_bars), BATCH_SIZE):
+                    batch = timeframe_bars[i : i + BATCH_SIZE]
+                    rows = [
+                        {
+                            "ts": datetime.fromtimestamp(
+                                b["ts_epoch"], tz=timezone.utc
+                            ).isoformat(),
+                            "open": b["open"],
+                            "high": b["high"],
+                            "low": b["low"],
+                            "close": b["close"],
+                            "volume": b["volume"],
+                        }
+                        for b in batch
+                    ]
+                    supabase.table(table_name).upsert(rows, on_conflict="ts").execute()
 
             total_1m += len(bars_1m)
-            total_15m += len(bars_15m)
-            print(f"{len(bars_1m)} 1m bars, {len(bars_15m)} 15m bars")
+            total_15m += timeframe_counts.get("mes_15m", 0)
+            print(
+                f"{len(bars_1m)} 1m | "
+                f"{timeframe_counts.get('mes_15m', 0)} 15m | "
+                f"{timeframe_counts.get('mes_1h', 0)} 1h | "
+                f"{timeframe_counts.get('mes_4h', 0)} 4h | "
+                f"{timeframe_counts.get('mes_1d', 0)} 1d"
+            )
 
         except Exception as e:
             print(f"ERROR: {e}")

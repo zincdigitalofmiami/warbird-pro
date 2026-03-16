@@ -9,6 +9,7 @@ import math, os, signal, sys, time
 from datetime import datetime, timezone
 import databento as db
 from supabase import create_client
+from mes_aggregation import floor_interval, mes_session_day_start
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
@@ -38,7 +39,13 @@ def is_weekend(ts):
 def main():
     print(f"Live MES feed → Supabase")
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    buckets = {}
+    bucket_configs = {
+        "mes_15m": {"bucket_fn": lambda ts: floor_interval(ts, 900), "retention": 900},
+        "mes_1h": {"bucket_fn": lambda ts: floor_interval(ts, 3600), "retention": 3600},
+        "mes_4h": {"bucket_fn": lambda ts: floor_interval(ts, 14_400), "retention": 14_400},
+        "mes_1d": {"bucket_fn": mes_session_day_start, "retention": 86_400},
+    }
+    buckets = {table: {} for table in bucket_configs}
     count = 0
     last_flush = time.time()
 
@@ -66,34 +73,49 @@ def main():
             continue
         count += 1
 
-        bts = (ts_s // 900) * 900
-        if bts not in buckets:
-            buckets[bts] = {"ts": datetime.fromtimestamp(bts, tz=timezone.utc).isoformat(), "open": round(o,2), "high": round(h,2), "low": round(l,2), "close": round(c,2), "volume": int(v)}
-        else:
-            b = buckets[bts]
-            b["high"] = max(b["high"], round(h,2))
-            b["low"] = min(b["low"], round(l,2))
-            b["close"] = round(c,2)
-            b["volume"] += int(v)
+        for table, config in bucket_configs.items():
+            bucket_ts = config["bucket_fn"](ts_s)
+            table_buckets = buckets[table]
+            if bucket_ts not in table_buckets:
+                table_buckets[bucket_ts] = {
+                    "ts": datetime.fromtimestamp(bucket_ts, tz=timezone.utc).isoformat(),
+                    "open": round(o, 2),
+                    "high": round(h, 2),
+                    "low": round(l, 2),
+                    "close": round(c, 2),
+                    "volume": int(v),
+                }
+            else:
+                bucket = table_buckets[bucket_ts]
+                bucket["high"] = max(bucket["high"], round(h, 2))
+                bucket["low"] = min(bucket["low"], round(l, 2))
+                bucket["close"] = round(c, 2)
+                bucket["volume"] += int(v)
 
         now = time.time()
-        if now - last_flush >= 60 or len(buckets) > 2:
-            cur = (ts_s // 900) * 900
-            for k, bd in list(buckets.items()):
-                try:
-                    supabase.table("mes_15m").upsert(bd, on_conflict="ts").execute()
-                except Exception as e:
-                    print(f"  15m ERR: {e}")
-                if k < cur - 900: del buckets[k]
+        if now - last_flush >= 60 or len(buckets["mes_15m"]) > 2:
+            for table, config in bucket_configs.items():
+                current_bucket = config["bucket_fn"](ts_s)
+                retention = config["retention"]
+                for bucket_ts, bucket_data in list(buckets[table].items()):
+                    try:
+                        supabase.table(table).upsert(bucket_data, on_conflict="ts").execute()
+                    except Exception as e:
+                        print(f"  {table} ERR: {e}")
+                    if bucket_ts < current_bucket - retention:
+                        del buckets[table][bucket_ts]
             last_flush = now
 
         if count % 15 == 0:
             dt = datetime.fromtimestamp(ts_s, tz=timezone.utc)
             print(f"  [{dt.strftime('%H:%M:%S')}] {count} bars | {c:.2f}")
 
-    for bd in buckets.values():
-        try: supabase.table("mes_15m").upsert(bd, on_conflict="ts").execute()
-        except: pass
+    for table, table_buckets in buckets.items():
+        for bucket_data in table_buckets.values():
+            try:
+                supabase.table(table).upsert(bucket_data, on_conflict="ts").execute()
+            except Exception:
+                pass
     print(f"Done. {count} bars.")
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isMarketOpen, isWeekendBar, floorToMinute, floorTo15m } from "@/lib/market-hours";
+import { isMarketOpen, isWeekendBar } from "@/lib/market-hours";
 import { fetchOhlcv, type OhlcvBar } from "@/lib/ingestion/databento";
+import { aggregateMesTimeframes } from "@/lib/mes-aggregation";
 
 export const maxDuration = 60;
 
@@ -110,36 +111,51 @@ export async function GET(request: Request) {
       if (error) throw new Error(`mes_1m upsert failed: ${error.message}`);
     }
 
-    // Aggregate to 15m and upsert
-    const fifteenMinBars = aggregateTo15m(validBars);
-    if (fifteenMinBars.length > 0) {
-      const mes15mRows = fifteenMinBars.map((b) => ({
-        ts: new Date(b.time * 1000).toISOString(),
-        open: b.open,
-        high: b.high,
-        low: b.low,
-        close: b.close,
-        volume: b.volume,
+    const { bars15m, bars1h, bars4h, bars1d } = aggregateMesTimeframes(validBars);
+
+    const aggregatedTables = [
+      ["mes_15m", bars15m],
+      ["mes_1h", bars1h],
+      ["mes_4h", bars4h],
+      ["mes_1d", bars1d],
+    ] as const;
+
+    let aggregatedRows = 0;
+    for (const [tableName, tableBars] of aggregatedTables) {
+      if (tableBars.length === 0) continue;
+
+      const rows = tableBars.map((bar) => ({
+        ts: new Date(bar.time * 1000).toISOString(),
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        volume: bar.volume,
       }));
 
       const { error } = await supabase
-        .from("mes_15m")
-        .upsert(mes15mRows, { onConflict: "ts" });
-      if (error) throw new Error(`mes_15m upsert failed: ${error.message}`);
+        .from(tableName)
+        .upsert(rows, { onConflict: "ts" });
+      if (error) throw new Error(`${tableName} upsert failed: ${error.message}`);
+
+      aggregatedRows += rows.length;
     }
 
     // Log to job_log
     await supabase.from("job_log").insert({
       job_name: "mes-catchup",
-      status: "OK",
-      rows_written: validBars.length,
+      status: "SUCCESS",
+      rows_affected: validBars.length + aggregatedRows,
       duration_ms: Date.now() - startTime,
     });
 
     return NextResponse.json({
       success: true,
       gaps_filled: validBars.length,
-      bars_15m: fifteenMinBars.length,
+      bars_15m: bars15m.length,
+      bars_1h: bars1h.length,
+      bars_4h: bars4h.length,
+      bars_1d: bars1d.length,
       duration_ms: Date.now() - startTime,
     });
   } catch (e) {
@@ -149,7 +165,7 @@ export async function GET(request: Request) {
     try {
       await supabase.from("job_log").insert({
         job_name: "mes-catchup",
-        status: "ERROR",
+        status: "FAILED",
         error_message: message,
         duration_ms: Date.now() - startTime,
       });
@@ -159,24 +175,4 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ error: message }, { status: 500 });
   }
-}
-
-// Aggregate 1m bars into 15m bars
-function aggregateTo15m(bars: OhlcvBar[]): OhlcvBar[] {
-  const buckets = new Map<number, OhlcvBar>();
-
-  for (const bar of bars) {
-    const key = floorTo15m(bar.time);
-    const existing = buckets.get(key);
-    if (!existing) {
-      buckets.set(key, { ...bar, time: key });
-    } else {
-      existing.high = Math.max(existing.high, bar.high);
-      existing.low = Math.min(existing.low, bar.low);
-      existing.close = bar.close;
-      existing.volume += bar.volume;
-    }
-  }
-
-  return Array.from(buckets.values()).sort((a, b) => a.time - b.time);
 }

@@ -10,9 +10,8 @@
       "args": ["-y", "shadcn@latest", "mcp"]
     },
     "supabase": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "supabase", "mcp"]
+      "type": "http",
+      "url": "https://mcp.supabase.com/mcp?project_ref=qhwgrzqjcdtdqppvhhme"
     }
   }
 }

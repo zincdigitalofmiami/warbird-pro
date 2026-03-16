@@ -43,7 +43,7 @@ End-to-end latency: < 2 seconds venue-to-chart.
 - [x] Supabase integration (17 env vars)
 - [x] 56 shadcn/ui components
 - [x] Tailwind v4, build passing
-- [x] MCP servers: memory, context7, sequentialthinking, shadcn, supabase
+- [x] MCP servers: memory, sequentialthinking, shadcn, supabase
 - [x] CLAUDE.md, AGENTS.md
 
 ### Phase 2 — Database
