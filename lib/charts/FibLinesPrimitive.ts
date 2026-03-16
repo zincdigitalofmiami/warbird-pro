@@ -47,16 +47,16 @@ const COLORS = {
 
 // --- All 10 fib ratios ---
 const ALL_LEVELS: { ratio: number; label: string; color: string; width: number }[] = [
-  { ratio: 0,     label: "ZERO",     color: COLORS.anchor,      width: 2 },
+  { ratio: 0,     label: "ZERO",     color: COLORS.anchor,      width: 1 },
   { ratio: 0.236, label: ".236",     color: COLORS.retracement, width: 1 },
   { ratio: 0.382, label: ".382",     color: COLORS.retracement, width: 1 },
   { ratio: 0.5,   label: "Pivot",    color: COLORS.pivot,       width: 2 },
   { ratio: 0.618, label: ".618",     color: COLORS.retracement, width: 1 },
   { ratio: 0.786, label: ".786",     color: COLORS.retracement, width: 1 },
-  { ratio: 1.0,   label: "1",        color: COLORS.anchor,      width: 2 },
-  { ratio: 1.236, label: "TARGET 1", color: COLORS.target,      width: 1 },
-  { ratio: 1.618, label: "TARGET 2", color: COLORS.target,      width: 1 },
-  { ratio: 2.0,   label: "TARGET 3", color: COLORS.target,      width: 1 },
+  { ratio: 1.0,   label: "1",        color: COLORS.anchor,      width: 1 },
+  { ratio: 1.236, label: "TARGET 1", color: COLORS.target,      width: 2 },
+  { ratio: 1.618, label: "TARGET 2", color: COLORS.target,      width: 2 },
+  { ratio: 2.0,   label: "TARGET 3", color: COLORS.target,      width: 2 },
 ];
 
 const PIVOT_FILL_OPACITY = 0.08; // Subtle orange zone around pivot
