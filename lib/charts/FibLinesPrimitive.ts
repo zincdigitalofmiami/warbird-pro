@@ -313,29 +313,7 @@ export class FibLinesPrimitive implements ISeriesPrimitive<Time> {
   }
 
   autoscaleInfo(): AutoscaleInfo | null {
-    if (!this._fibResult) return null;
-    const fib = this._fibResult;
-    const range = fib.anchorHigh - fib.anchorLow;
-    if (range <= 0) return null;
-
-    const base = fib.isBullish ? fib.anchorLow : fib.anchorHigh;
-    const dir = fib.isBullish ? 1 : -1;
-
-    // Compute min/max across all 10 levels so chart autoscale includes targets
-    let minPrice = Infinity;
-    let maxPrice = -Infinity;
-    for (const level of ALL_LEVELS) {
-      const price = base + dir * range * level.ratio;
-      if (price < minPrice) minPrice = price;
-      if (price > maxPrice) maxPrice = price;
-    }
-
-    return {
-      priceRange: {
-        minValue: minPrice,
-        maxValue: maxPrice,
-      },
-    };
+    return null;
   }
 }
 
