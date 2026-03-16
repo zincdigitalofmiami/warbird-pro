@@ -284,24 +284,8 @@ export class FibLinesPrimitive implements ISeriesPrimitive<Time> {
 
     this._paneView.update(elements, zoneBand, priceToY, anchorStartX);
 
-    // Axis views for key levels
+    // No axis labels — keep the price axis clean like TradingView
     this._axisViews = [];
-    const axisLevels = [
-      { label: "Pivot", ratio: 0.5, color: COLORS.pivot },
-      { label: "ZERO", ratio: 0, color: COLORS.anchor },
-      { label: "1", ratio: 1.0, color: COLORS.anchor },
-      { label: "T1", ratio: 1.236, color: COLORS.target },
-      { label: "T2", ratio: 1.618, color: COLORS.target },
-    ];
-    for (const al of axisLevels) {
-      const price = priceAt(al.ratio);
-      const coord = series.priceToCoordinate(price);
-      if (coord != null) {
-        this._axisViews.push(
-          new FibAxisView(`${al.label} ${price.toFixed(2)}`, coord, al.color),
-        );
-      }
-    }
   }
 
   paneViews(): readonly IPrimitivePaneView[] {
