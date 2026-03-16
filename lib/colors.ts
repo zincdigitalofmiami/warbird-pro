@@ -42,11 +42,11 @@ export const TV = {
 // Fibonacci level colors — matches Kirk's TradingView Auto Fib Retracement
 export const FIB_COLORS: Record<number, string> = {
   0:     '#FFFFFF',   // white — anchor (ZERO)
-  0.236: '#00BCD4',   // cyan — retracement
-  0.382: '#00BCD4',   // cyan — retracement
-  0.5:   '#FF9800',   // orange — pivot ("Half Way Mother Fu")
-  0.618: '#00BCD4',   // cyan — retracement
-  0.786: '#00BCD4',   // cyan — retracement
+  0.236: '#808080',   // 50% white — retracement
+  0.382: '#808080',   // 50% white — retracement
+  0.5:   '#FF9800',   // orange — pivot
+  0.618: '#808080',   // 50% white — retracement
+  0.786: '#808080',   // 50% white — retracement
   1.0:   '#FFFFFF',   // white — anchor (1)
   1.236: '#4CAF50',   // green — TARGET 1
   1.618: '#4CAF50',   // green — TARGET 2

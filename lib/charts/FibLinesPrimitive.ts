@@ -40,7 +40,7 @@ import type { FibResult } from "@/lib/types";
 // --- Colors matching Kirk's TradingView Auto Fib ---
 const COLORS = {
   anchor: "#FFFFFF",      // white — 0 and 1 levels
-  retracement: "#00BCD4", // cyan — .236, .382, .618, .786
+  retracement: "#808080", // 50% white — .236, .382, .618, .786
   pivot: "#FF9800",       // orange — .5 level
   target: "#4CAF50",      // green — TARGET 1, 2, 3
 } as const;
@@ -117,13 +117,12 @@ class FibRenderer implements IPrimitivePaneRenderer {
         }
       }
 
-      // Draw lines + labels
+      // Draw lines only — no text labels (matches TradingView)
       for (const el of this._elements) {
         const y = this._priceToY(el.price);
         if (y == null) continue;
         if (y < -30 || y > mediaSize.height + 30) continue;
 
-        // Solid horizontal line
         ctx.strokeStyle = hexToRgba(el.color, 0.85);
         ctx.lineWidth = el.lineWidth;
         ctx.setLineDash([]);
@@ -131,17 +130,6 @@ class FibRenderer implements IPrimitivePaneRenderer {
         ctx.moveTo(x0, y);
         ctx.lineTo(mediaSize.width, y);
         ctx.stroke();
-
-        // Label — right-aligned like TradingView
-        ctx.font = '10px -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
-        ctx.fillStyle = hexToRgba(el.color, 0.9);
-        ctx.textBaseline = "bottom";
-        ctx.textAlign = "right";
-        ctx.fillText(
-          `${el.label}  ${el.price.toFixed(2)}`,
-          mediaSize.width - 70,
-          y - 3,
-        );
       }
     });
   }
