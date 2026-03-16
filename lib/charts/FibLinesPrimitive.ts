@@ -1,25 +1,26 @@
 /**
- * Lightweight Charts Series Primitive: AutoFib Structure
+ * Lightweight Charts Series Primitive: Auto Fib Retracement
  *
- * Matches Kirk's "AutoFib Structure + Intermarket Alerts" Pine Script v6 EXACTLY.
+ * Matches Kirk's TradingView Auto Fib Retracement EXACTLY.
+ * Settings: Depth=10, Deviation=3, Reverse=checked
  *
- * From the Pine Script settings:
- *   pivotRatio     = 0.50   → PIVOT (white, width 2)
- *   zoneLoRatio    = 0.618  → Decision Zone low border (orange, width 2)
- *   zoneHiRatio    = 0.786  → Decision Zone high border (orange, width 2)
- *   target1Ratio   = 1.236  → Target 1 (aqua, width 1)
- *   target2Ratio   = 1.618  → Target 2 (blue, width 1)
- *   dnMagnet1Ratio = 0.382  → Down Magnet 1 (teal, width 1)
- *   dnMagnet2Ratio = 0.236  → Down Magnet 2 (teal, width 1)
+ * 10 levels total:
+ *   ZERO (0)       — white, width 2
+ *   .236           — cyan, width 1
+ *   .382           — cyan, width 1
+ *   Pivot (.5)     — orange, width 2, zone fill
+ *   .618           — cyan, width 1
+ *   .786           — cyan, width 1
+ *   1              — white, width 2
+ *   TARGET 1 (1.236) — green, width 1
+ *   TARGET 2 (1.618) — green, width 1
+ *   TARGET 3 (2.0)   — green, width 1
  *
- * Zone fill between .618 and .786 with orange at zoneFillOpacity (88).
- *
- * Colors from Kirk's Pine settings:
- *   Pivot = white
- *   Zone = orange
- *   Target 1 = aqua
- *   Target 2 = blue
- *   Down Magnet = teal
+ * Colors from Kirk's TradingView:
+ *   Anchors (0, 1) = white
+ *   Retracements (.236, .382, .618, .786) = cyan
+ *   Pivot (.5) = orange
+ *   Targets (1.236, 1.618, 2.0) = green
  */
 
 import type {
@@ -36,35 +37,29 @@ import type {
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import type { FibResult } from "@/lib/types";
 
-// --- Kirk's EXACT colors from Pine Script groupStyle inputs ---
+// --- Colors matching Kirk's TradingView Auto Fib ---
 const COLORS = {
-  pivot: "#FFFFFF",       // color.white
-  zone: "#FF9800",        // color.orange
-  target1: "#00BCD4",     // color.aqua
-  target2: "#2196F3",     // color.blue
-  downMagnet: "#009688",  // color.teal
+  anchor: "#FFFFFF",      // white — 0 and 1 levels
+  retracement: "#00BCD4", // cyan — .236, .382, .618, .786
+  pivot: "#FF9800",       // orange — .5 level
+  target: "#4CAF50",      // green — TARGET 1, 2, 3
 } as const;
 
-// --- Kirk's EXACT ratios from Pine Script groupStruct inputs ---
-const RATIOS = {
-  pivot: 0.5,
-  zoneLo: 0.618,
-  zoneHi: 0.786,
-  target1: 1.236,
-  target2: 1.618,
-  dnMagnet1: 0.382,
-  dnMagnet2: 0.236,
-} as const;
+// --- All 10 fib ratios ---
+const ALL_LEVELS: { ratio: number; label: string; color: string; width: number }[] = [
+  { ratio: 0,     label: "ZERO",     color: COLORS.anchor,      width: 2 },
+  { ratio: 0.236, label: ".236",     color: COLORS.retracement, width: 1 },
+  { ratio: 0.382, label: ".382",     color: COLORS.retracement, width: 1 },
+  { ratio: 0.5,   label: "Pivot",    color: COLORS.pivot,       width: 2 },
+  { ratio: 0.618, label: ".618",     color: COLORS.retracement, width: 1 },
+  { ratio: 0.786, label: ".786",     color: COLORS.retracement, width: 1 },
+  { ratio: 1.0,   label: "1",        color: COLORS.anchor,      width: 2 },
+  { ratio: 1.236, label: "TARGET 1", color: COLORS.target,      width: 1 },
+  { ratio: 1.618, label: "TARGET 2", color: COLORS.target,      width: 1 },
+  { ratio: 2.0,   label: "TARGET 3", color: COLORS.target,      width: 1 },
+];
 
-// --- Kirk's EXACT widths from Pine Script groupStyle inputs ---
-const WIDTHS = {
-  pivot: 2,
-  zone: 2,
-  target: 1,
-  downMagnet: 1,
-} as const;
-
-const ZONE_FILL_OPACITY = 0.12; // Pine: 88 transparency → 12% opacity
+const PIVOT_FILL_OPACITY = 0.08; // Subtle orange zone around pivot
 
 // --- Visual element for rendering ---
 
@@ -117,7 +112,7 @@ class FibRenderer implements IPrimitivePaneRenderer {
         if (topY != null && botY != null) {
           const y0 = Math.min(topY, botY);
           const h = Math.abs(botY - topY);
-          ctx.fillStyle = hexToRgba(this._zone.color, ZONE_FILL_OPACITY);
+          ctx.fillStyle = hexToRgba(this._zone.color, PIVOT_FILL_OPACITY);
           ctx.fillRect(x0, y0, mediaSize.width - x0, h);
         }
       }
@@ -137,12 +132,16 @@ class FibRenderer implements IPrimitivePaneRenderer {
         ctx.lineTo(mediaSize.width, y);
         ctx.stroke();
 
-        // Label
+        // Label — right-aligned like TradingView
         ctx.font = '10px -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
         ctx.fillStyle = hexToRgba(el.color, 0.9);
         ctx.textBaseline = "bottom";
-        ctx.textAlign = "left";
-        ctx.fillText(el.label, x0 + 8, y - 3);
+        ctx.textAlign = "right";
+        ctx.fillText(
+          `${el.label}  ${el.price.toFixed(2)}`,
+          mediaSize.width - 70,
+          y - 3,
+        );
       }
     });
   }
@@ -259,94 +258,48 @@ export class FibLinesPrimitive implements ISeriesPrimitive<Time> {
       return;
     }
 
-    // Direction-aware price computation (matches Pine: fibBase + fibDir * fibRange * ratio)
+    // Direction-aware price computation
     const base = fib.isBullish ? fib.anchorLow : fib.anchorHigh;
     const dir = fib.isBullish ? 1 : -1;
     const priceAt = (ratio: number) => base + dir * range * ratio;
 
+    // Build all 10 elements
     const elements: FibElement[] = [];
+    for (const level of ALL_LEVELS) {
+      const price = priceAt(level.ratio);
+      elements.push({
+        price,
+        label: level.label,
+        color: level.color,
+        lineWidth: level.width,
+      });
+    }
 
-    // PIVOT: .5 — white, width 2
-    const pivotPrice = priceAt(RATIOS.pivot);
-    elements.push({
-      price: pivotPrice,
-      label: `Pivot ${pivotPrice.toFixed(2)}`,
-      color: COLORS.pivot,
-      lineWidth: WIDTHS.pivot,
-    });
-
-    // DECISION ZONE borders: .618 and .786 — orange, width 2
-    const zoneLoPrice = priceAt(RATIOS.zoneLo);
-    const zoneHiPrice = priceAt(RATIOS.zoneHi);
-    elements.push({
-      price: zoneLoPrice,
-      label: `.618 ${zoneLoPrice.toFixed(2)}`,
-      color: COLORS.zone,
-      lineWidth: WIDTHS.zone,
-    });
-    elements.push({
-      price: zoneHiPrice,
-      label: `.786 ${zoneHiPrice.toFixed(2)}`,
-      color: COLORS.zone,
-      lineWidth: WIDTHS.zone,
-    });
-
-    // Zone fill between .618 and .786
+    // Zone fill between .382 and .618 (around the pivot)
     const zoneBand: ZoneBand = {
-      topPrice: Math.max(zoneLoPrice, zoneHiPrice),
-      botPrice: Math.min(zoneLoPrice, zoneHiPrice),
-      color: COLORS.zone,
+      topPrice: Math.max(priceAt(0.382), priceAt(0.618)),
+      botPrice: Math.min(priceAt(0.382), priceAt(0.618)),
+      color: COLORS.pivot,
     };
-
-    // TARGET 1: 1.236 — aqua, width 1
-    const t1Price = priceAt(RATIOS.target1);
-    elements.push({
-      price: t1Price,
-      label: `T1 ${t1Price.toFixed(2)}`,
-      color: COLORS.target1,
-      lineWidth: WIDTHS.target,
-    });
-
-    // TARGET 2: 1.618 — blue, width 1
-    const t2Price = priceAt(RATIOS.target2);
-    elements.push({
-      price: t2Price,
-      label: `T2 ${t2Price.toFixed(2)}`,
-      color: COLORS.target2,
-      lineWidth: WIDTHS.target,
-    });
-
-    // DOWN MAGNET 1: .382 — teal, width 1
-    const dn1Price = priceAt(RATIOS.dnMagnet1);
-    elements.push({
-      price: dn1Price,
-      label: `Mag .382 ${dn1Price.toFixed(2)}`,
-      color: COLORS.downMagnet,
-      lineWidth: WIDTHS.downMagnet,
-    });
-
-    // DOWN MAGNET 2: .236 — teal, width 1
-    const dn2Price = priceAt(RATIOS.dnMagnet2);
-    elements.push({
-      price: dn2Price,
-      label: `Mag .236 ${dn2Price.toFixed(2)}`,
-      color: COLORS.downMagnet,
-      lineWidth: WIDTHS.downMagnet,
-    });
 
     this._paneView.update(elements, zoneBand, priceToY, anchorStartX);
 
-    // Axis views for pivot + zone + targets
+    // Axis views for key levels
     this._axisViews = [];
-    const axisElements = [
-      { label: `Pivot ${pivotPrice.toFixed(2)}`, price: pivotPrice, color: COLORS.pivot },
-      { label: `.618 ${zoneLoPrice.toFixed(2)}`, price: zoneLoPrice, color: COLORS.zone },
-      { label: `.786 ${zoneHiPrice.toFixed(2)}`, price: zoneHiPrice, color: COLORS.zone },
+    const axisLevels = [
+      { label: "Pivot", ratio: 0.5, color: COLORS.pivot },
+      { label: "ZERO", ratio: 0, color: COLORS.anchor },
+      { label: "1", ratio: 1.0, color: COLORS.anchor },
+      { label: "T1", ratio: 1.236, color: COLORS.target },
+      { label: "T2", ratio: 1.618, color: COLORS.target },
     ];
-    for (const ae of axisElements) {
-      const coord = series.priceToCoordinate(ae.price);
+    for (const al of axisLevels) {
+      const price = priceAt(al.ratio);
+      const coord = series.priceToCoordinate(price);
       if (coord != null) {
-        this._axisViews.push(new FibAxisView(ae.label, coord, ae.color));
+        this._axisViews.push(
+          new FibAxisView(`${al.label} ${price.toFixed(2)}`, coord, al.color),
+        );
       }
     }
   }

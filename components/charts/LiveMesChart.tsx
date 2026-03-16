@@ -22,11 +22,9 @@ import {
   UTCTimestamp,
 } from "lightweight-charts";
 import { createClient } from "@/lib/supabase/client";
-import type { ForecastResponse, MeasuredMove, CandleData } from "@/lib/types";
-import type { PivotLine, PivotTimeframe } from "@/lib/pivots";
+import type { ForecastResponse, MeasuredMove, CandleData, FibResult } from "@/lib/types";
 import { ForecastTargetsPrimitive } from "@/lib/charts/ForecastTargetsPrimitive";
 import { SetupMarkersPrimitive } from "@/lib/charts/SetupMarkersPrimitive";
-import { PivotLinesPrimitive } from "@/lib/charts/PivotLinesPrimitive";
 import { FibLinesPrimitive } from "@/lib/charts/FibLinesPrimitive";
 import { mapMeasuredMoveAndCoreToTargets } from "@/lib/charts/blendTargets";
 import { ensureFutureWhitespace } from "@/lib/charts/ensureFutureWhitespace";
@@ -54,14 +52,6 @@ const DEFAULT_BAR_SPACING = 10;
 const MIN_BAR_SPACING = 8;
 const MAX_TOUCH_MARKERS = 1;
 const MAX_HOOK_MARKERS = 1;
-
-// ─── Pivot Line Colors (per timeframe) ──────────────────────────────────────
-const PIVOT_COLORS: Record<PivotTimeframe, string> = {
-  D: "#FFFFFF",  // white  — daily
-  W: "#F23645",  // TradingView red — weekly
-  M: "#F23645",  // TradingView red — monthly
-  Y: "#F23645",  // TradingView red — yearly
-};
 
 // ─── Gap-Free Time Mapping ──────────────────────────────────────────────────
 
@@ -243,8 +233,9 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
     const seriesRef = useRef<ISeriesApi<"Candlestick", Time> | null>(null);
     const primitiveRef = useRef<ForecastTargetsPrimitive | null>(null);
     const setupPrimitiveRef = useRef<SetupMarkersPrimitive | null>(null);
-    const pivotPrimitiveRef = useRef<PivotLinesPrimitive | null>(null);
     const fibPrimitiveRef = useRef<FibLinesPrimitive | null>(null);
+    // Structural break locking — persist fib anchor across ticks
+    const lockedFibRef = useRef<FibResult | null>(null);
     const initialViewportAppliedRef = useRef(false);
     const displayEventPhase = getEventDisplayPhase(eventPhase);
 
@@ -265,7 +256,6 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
     const [priceChange, setPriceChange] = useState<number>(0);
     const [sessionHigh, setSessionHigh] = useState<number | null>(null);
     const [sessionLow, setSessionLow] = useState<number | null>(null);
-    const [pivotData, setPivotData] = useState<PivotLine[]>([]);
 
     /** Look up gap-free time for a real timestamp, snapping to nearest 15m bar */
     const realToGapFree = (
@@ -413,9 +403,6 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       const setupPrimitive = new SetupMarkersPrimitive();
       series.attachPrimitive(setupPrimitive);
 
-      const pivotPrimitive = new PivotLinesPrimitive();
-      series.attachPrimitive(pivotPrimitive);
-
       const fibPrimitive = new FibLinesPrimitive();
       series.attachPrimitive(fibPrimitive);
 
@@ -423,7 +410,6 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       seriesRef.current = series;
       primitiveRef.current = primitive;
       setupPrimitiveRef.current = setupPrimitive;
-      pivotPrimitiveRef.current = pivotPrimitive;
       fibPrimitiveRef.current = fibPrimitive;
 
       const resizeObserver = new ResizeObserver(() => {
@@ -435,14 +421,12 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         resizeObserver.disconnect();
         series.detachPrimitive(primitive);
         series.detachPrimitive(setupPrimitive);
-        series.detachPrimitive(pivotPrimitive);
         series.detachPrimitive(fibPrimitive);
         chart.remove();
         chartRef.current = null;
         seriesRef.current = null;
         primitiveRef.current = null;
         setupPrimitiveRef.current = null;
-        pivotPrimitiveRef.current = null;
         fibPrimitiveRef.current = null;
       };
     }, []);
@@ -742,76 +726,43 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       });
     }, [chartSetups, lastPrice]);
 
-    // --- Fetch pivot levels (once on mount) ---
-    useEffect(() => {
-      let cancelled = false;
-      async function fetchPivots() {
-        try {
-          const res = await fetch("/api/pivots/mes");
-          if (!res.ok) return;
-          const json = await res.json();
-          if (!cancelled && json.pivots) {
-            setPivotData(json.pivots as PivotLine[]);
-          }
-        } catch {
-          // Pivots are supplementary — never break the chart
-        }
-      }
-      fetchPivots();
-      return () => {
-        cancelled = true;
-      };
-    }, []);
-
-    // --- Wire pivot data to primitive ---
-    useEffect(() => {
-      if (!pivotPrimitiveRef.current) return;
-      if (pivotData.length === 0) {
-        pivotPrimitiveRef.current.setPivots([], PIVOT_COLORS);
-        return;
-      }
-
-      const firstGf = pointsRef.current[0]?.time;
-      const mapped = pivotData.map((p) => ({
-        ...p,
-        startTime:
-          (() => {
-            if (p.startTime == null) return firstGf;
-            const exact = realToGapFree(p.startTime);
-            if (exact != null) return exact;
-            const realPoints = realPointsRef.current;
-            for (const rp of realPoints) {
-              if (rp.time >= p.startTime) return realToGapFree(rp.time);
-            }
-            for (let i = realPoints.length - 1; i >= 0; i--) {
-              if (realPoints[i].time <= p.startTime) {
-                return realToGapFree(realPoints[i].time);
-              }
-            }
-            return firstGf;
-          })() ?? firstGf,
-      }));
-      pivotPrimitiveRef.current.setPivots(mapped, PIVOT_COLORS);
-    }, [pivotData, lastPrice]);
-
-    // --- Compute and wire fibonacci Pivot/Zone/Targets/Magnet from candle data ---
+    // --- Compute and wire fibonacci levels from candle data (with structural break locking) ---
     useEffect(() => {
       if (!fibPrimitiveRef.current) return;
 
       const realPoints = realPointsRef.current;
       if (realPoints.length < 55) {
         fibPrimitiveRef.current.setFibResult(null);
+        lockedFibRef.current = null;
         return;
       }
 
+      const currentPrice = realPoints[realPoints.length - 1].close;
+      const locked = lockedFibRef.current;
+
+      // Structural break locking: if current price is within the locked anchor
+      // range, keep the existing fib (don't recompute to a narrower range)
+      if (locked && currentPrice <= locked.anchorHigh && currentPrice >= locked.anchorLow) {
+        const anchorIdx = Math.min(locked.anchorHighBarIndex, locked.anchorLowBarIndex);
+        const anchorGfTime = pointsRef.current.length > anchorIdx
+          ? pointsRef.current[anchorIdx].time
+          : undefined;
+        fibPrimitiveRef.current.setFibResult(locked, anchorGfTime);
+        return;
+      }
+
+      // Structural break OR first computation — recompute
       const candles = realPoints.map(toCandle);
       const fibResult = calculateFibonacciMultiPeriod(candles);
       if (!fibResult) {
         fibPrimitiveRef.current.setFibResult(null);
+        lockedFibRef.current = null;
         return;
       }
 
-      // Map the anchor bar index to gap-free time for line start
+      // Lock the new anchor
+      lockedFibRef.current = fibResult;
+
       const anchorIdx = Math.min(
         fibResult.anchorHighBarIndex,
         fibResult.anchorLowBarIndex,
@@ -962,27 +913,29 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
               Bearish
             </span>
           </div>
-          {pivotData.length > 0 && (
-            <>
-              <div className="h-3 w-px bg-white/10" />
-              {(["D", "W", "M", "Y"] as PivotTimeframe[]).map((tf) => (
-                <div key={tf} className="flex items-center gap-1.5">
-                  <div
-                    className="w-3 h-px"
-                    style={{ backgroundColor: PIVOT_COLORS[tf] }}
-                  />
-                  <span className="text-[10px] text-white/40 uppercase tracking-wider">
-                    {{ D: "Daily", W: "Weekly", M: "Monthly", Y: "Yearly" }[tf]}
-                  </span>
-                </div>
-              ))}
-            </>
-          )}
           <div className="h-3 w-px bg-white/10" />
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-px" style={{ backgroundColor: "#FFFFFF" }} />
+            <span className="text-[10px] text-white/40 uppercase tracking-wider">
+              Anchor
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-px" style={{ backgroundColor: "#00BCD4" }} />
+            <span className="text-[10px] text-white/40 uppercase tracking-wider">
+              Fib
+            </span>
+          </div>
           <div className="flex items-center gap-1.5">
             <div className="w-3 h-px" style={{ backgroundColor: "#FF9800" }} />
             <span className="text-[10px] text-white/40 uppercase tracking-wider">
-              AutoFib
+              Pivot
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-px" style={{ backgroundColor: "#4CAF50" }} />
+            <span className="text-[10px] text-white/40 uppercase tracking-wider">
+              Target
             </span>
           </div>
           {setups && setups.length > 0 && (

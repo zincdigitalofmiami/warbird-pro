@@ -1,21 +1,13 @@
 /**
  * Auto-Fibonacci Engine — Multi-Period Confluence (TSoFib approach)
  *
- * Ported line-for-line from the Rabid Raccoon Pine Script v6 indicator.
  * Uses Fibonacci-sequence lookback periods (8, 13, 21, 34, 55 bars)
  * to find the highest-confluence fib anchor.
  *
- * Algorithm (from rabid-raccoon.pine lines 244-395):
- *   1. For each period N in [8, 13, 21, 34, 55]:
- *      - highN = highest high over last N bars
- *      - lowN  = lowest low over last N bars
- *      - Derive retracement levels at 0.382, 0.5, 0.618
- *   2. Cluster detection: count how many periods produce a level within
- *      `confluenceTolerance` (0.1% of range) of each other.
- *   3. Score each period pair by its confluence count; pick the anchor
- *      whose retracements have the most agreement across periods.
- *   4. Direction: isBullish = most recent bar's close is above the 0.5 level
- *      of the winning anchor (price is in upper half of the range).
+ * Scoring weights confluence count × range so wider anchors are
+ * preferred over narrow high-confluence short-period ones.
+ *
+ * Returns 10 levels: ZERO, .236, .382, Pivot, .618, .786, 1, T1, T2, T3
  */
 
 import { CandleData, FibLevel, FibResult } from './types'
@@ -26,7 +18,8 @@ import { FIB_COLORS } from './colors'
 // ---------------------------------------------------------------------------
 
 const FIB_RATIOS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0]
-const FIB_EXTENSIONS = [1.236, 1.618]
+const FIB_EXTENSIONS = [1.236, 1.618, 2.0]
+
 // Matches rabid-raccoon.pine exactly: Fibonacci-sequence lookback periods
 const FIB_LOOKBACKS = [8, 13, 21, 34, 55] as const
 
@@ -37,15 +30,16 @@ const CONFLUENCE_TOLERANCE = 0.001 // 0.1 %
 const CONFLUENCE_RATIOS = [0.382, 0.5, 0.618]
 
 const FIB_LABELS: Record<number, string> = {
-  0:     '0',
+  0:     'ZERO',
   0.236: '.236',
   0.382: '.382',
-  0.5:   '.5',
+  0.5:   'Pivot',
   0.618: '.618',
   0.786: '.786',
   1.0:   '1',
-  1.236: '1.236',
-  1.618: '1.618',
+  1.236: 'TARGET 1',
+  1.618: 'TARGET 2',
+  2.0:   'TARGET 3',
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +80,7 @@ function buildLevels(anchorHigh: number, anchorLow: number, isBullish: boolean):
 }
 
 // ---------------------------------------------------------------------------
-// Public API — Multi-Period Confluence (primary)
+// Public API — Multi-Period Confluence
 // ---------------------------------------------------------------------------
 
 /**
@@ -95,7 +89,8 @@ function buildLevels(anchorHigh: number, anchorLow: number, isBullish: boolean):
  * Uses Fibonacci-sequence lookback periods (8, 13, 21, 34, 55) to find the
  * highest-confluence anchor pair, then returns a full FibResult.
  *
- * Falls back to the largest period (55) if no confluence is detected.
+ * Scoring: confluence_count × range — prevents short-period narrow anchors
+ * from dominating over wider longer-period anchors.
  *
  * @param candles  Full OHLCV array (chronological, oldest first)
  */
@@ -105,7 +100,6 @@ export function calculateFibonacciMultiPeriod(candles: CandleData[]): FibResult 
     return null
   }
 
-  // Step 1: compute high/low for each lookback period using the last N bars
   type PeriodAnchor = {
     period: number
     high: number
@@ -148,8 +142,9 @@ export function calculateFibonacciMultiPeriod(candles: CandleData[]): FibResult 
 
   if (anchors.length === 0) return null
 
-  // Step 2: score each anchor by counting how many OTHER period levels fall
-  // within tolerance of its own midLevels (confluence vote)
+  // Score each anchor: confluence count × range
+  // This prevents short-period narrow anchors from winning just because
+  // 8, 13, 21 all see the same tiny swing and "agree"
   let bestAnchor = anchors[anchors.length - 1]
   let bestScore = -1
 
@@ -157,25 +152,26 @@ export function calculateFibonacciMultiPeriod(candles: CandleData[]): FibResult 
     const anchor = anchors[a]
     const tolerance = anchor.range * CONFLUENCE_TOLERANCE
 
-    let score = 0
+    let confluenceCount = 0
     for (let b = 0; b < anchors.length; b++) {
       if (a === b) continue
       for (const levelA of anchor.midLevels) {
         for (const levelB of anchors[b].midLevels) {
           if (Math.abs(levelA - levelB) <= tolerance) {
-            score++
+            confluenceCount++
           }
         }
       }
     }
 
+    // Weight by range so wider anchors win over narrow high-confluence ones
+    const score = confluenceCount * anchor.range
     if (score > bestScore) {
       bestScore = score
       bestAnchor = anchor
     }
   }
 
-  // Step 3: determine direction from the current close vs. 0.5 level
   const lastClose = candles[n - 1].close
   const midpoint = bestAnchor.low + bestAnchor.range * 0.5
   const isBullish = lastClose >= midpoint
