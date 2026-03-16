@@ -938,7 +938,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
 
         {/* Chart */}
         <div className="relative w-full" style={{ height: "80vh" }}>
-          <div className="absolute bottom-3 left-3 z-20 rounded-md border border-orange-500/25 bg-black/35 px-3 py-1.5">
+          <div className="absolute bottom-12 left-3 z-20 rounded-md border border-orange-500/25 bg-black/35 px-3 py-1.5">
             <div className="text-[10px] uppercase tracking-[0.18em] text-orange-300/80">
               Regime Anchor
             </div>
@@ -952,7 +952,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
               alt=""
               width={300}
               height={300}
-              className="opacity-[0.10]"
+              className="opacity-[0.25]"
               unoptimized
               priority
             />
