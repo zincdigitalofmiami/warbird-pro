@@ -48,8 +48,8 @@ class RegimeAnchorRenderer implements IPrimitivePaneRenderer {
       context.font = "11px Georgia, serif";
       context.fillStyle = this.anchor?.color ?? "#ff9800";
       context.textAlign = "left";
-      context.textBaseline = "top";
-      context.fillText(this.anchor?.label ?? "", x + 6, 10);
+      context.textBaseline = "bottom";
+      context.fillText(this.anchor?.label ?? "", x + 6, mediaSize.height - 10);
       context.restore();
     });
   }
