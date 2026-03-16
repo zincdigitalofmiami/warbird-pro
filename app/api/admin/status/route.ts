@@ -26,9 +26,15 @@ export async function GET() {
       "mes_1d",
       "cross_asset_1h",
       "cross_asset_1d",
+      "warbird_daily_bias",
+      "warbird_structure_4h",
+      "warbird_forecasts_1h",
+      "warbird_triggers_15m",
+      "warbird_conviction",
       "warbird_setups",
+      "warbird_setup_events",
+      "warbird_risk",
       "measured_moves",
-      "forecasts",
       "vol_states",
       "trade_scores",
     ];
@@ -169,7 +175,7 @@ export async function GET() {
     const { data: activeSetups } = await supabase
       .from("warbird_setups")
       .select("*")
-      .in("phase", ["TOUCHED", "HOOKED", "GO_FIRED", "TP1_HIT"])
+      .in("status", ["ACTIVE", "RUNNER_ACTIVE", "TP1_HIT"])
       .order("ts", { ascending: false })
       .limit(30);
 
@@ -182,17 +188,24 @@ export async function GET() {
       .order("ts", { ascending: false })
       .limit(100);
 
+    const { data: recentEvents } = await supabase
+      .from("warbird_setup_events")
+      .select("*")
+      .gte("ts", weekAgo)
+      .order("ts", { ascending: false })
+      .limit(100);
+
     // --- Symbols ---
     const { data: symbols } = await supabase
       .from("symbols")
-      .select("symbol_code, display_name, data_source, is_active")
-      .order("symbol_code");
+      .select("code, display_name, data_source, is_active")
+      .order("code");
 
     // --- Latest Forecasts ---
     const { data: forecasts } = await supabase
-      .from("forecasts")
+      .from("warbird_forecasts_1h")
       .select("*")
-      .order("created_at", { ascending: false })
+      .order("ts", { ascending: false })
       .limit(20);
 
     // --- Measured Moves ---
@@ -207,6 +220,7 @@ export async function GET() {
       jobLogs: jobLogs ?? [],
       activeSetups: activeSetups ?? [],
       recentSetups: recentSetups ?? [],
+      recentEvents: recentEvents ?? [],
       symbols: symbols ?? [],
       forecasts: forecasts ?? [],
       measuredMoves: measuredMoves ?? [],

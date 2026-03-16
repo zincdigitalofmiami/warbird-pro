@@ -71,7 +71,7 @@ export async function GET(request: Request) {
       });
     }
 
-    const bars = await fetchOhlcv({
+    const bars1m = await fetchOhlcv({
       dataset: "GLBX.MDP3",
       symbol: "MES.c.0",
       stypeIn: "continuous",
@@ -80,10 +80,20 @@ export async function GET(request: Request) {
       schema: "ohlcv-1m",
     });
 
-    // Filter out weekend bars
-    const validBars = bars.filter((b) => !isWeekendBar(b.time));
+    const bars1h = await fetchOhlcv({
+      dataset: "GLBX.MDP3",
+      symbol: "MES.c.0",
+      stypeIn: "continuous",
+      start: gapStart.toISOString(),
+      end: gapEnd.toISOString(),
+      schema: "ohlcv-1h",
+    });
 
-    if (validBars.length === 0) {
+    // Filter out weekend bars
+    const validBars1m = bars1m.filter((b) => !isWeekendBar(b.time));
+    const validBars1h = bars1h.filter((b) => !isWeekendBar(b.time));
+
+    if (validBars1m.length === 0 && validBars1h.length === 0) {
       return NextResponse.json({
         success: true,
         gaps_filled: 0,
@@ -93,7 +103,7 @@ export async function GET(request: Request) {
     }
 
     // Upsert 1m bars
-    const mes1mRows = validBars.map((b) => ({
+    const mes1mRows = validBars1m.map((b) => ({
       ts: new Date(b.time * 1000).toISOString(),
       open: b.open,
       high: b.high,
@@ -111,11 +121,26 @@ export async function GET(request: Request) {
       if (error) throw new Error(`mes_1m upsert failed: ${error.message}`);
     }
 
-    const { bars15m, bars1h, bars4h, bars1d } = aggregateMesTimeframes(validBars);
+    const mes1hRows = validBars1h.map((b) => ({
+      ts: new Date(b.time * 1000).toISOString(),
+      open: b.open,
+      high: b.high,
+      low: b.low,
+      close: b.close,
+      volume: b.volume,
+    }));
+
+    if (mes1hRows.length > 0) {
+      const { error } = await supabase
+        .from("mes_1h")
+        .upsert(mes1hRows, { onConflict: "ts" });
+      if (error) throw new Error(`mes_1h upsert failed: ${error.message}`);
+    }
+
+    const { bars15m, bars4h, bars1d } = aggregateMesTimeframes(validBars1m, validBars1h);
 
     const aggregatedTables = [
       ["mes_15m", bars15m],
-      ["mes_1h", bars1h],
       ["mes_4h", bars4h],
       ["mes_1d", bars1d],
     ] as const;
@@ -145,15 +170,15 @@ export async function GET(request: Request) {
     await supabase.from("job_log").insert({
       job_name: "mes-catchup",
       status: "SUCCESS",
-      rows_affected: validBars.length + aggregatedRows,
+      rows_affected: validBars1m.length + mes1hRows.length + aggregatedRows,
       duration_ms: Date.now() - startTime,
     });
 
     return NextResponse.json({
       success: true,
-      gaps_filled: validBars.length,
+      gaps_filled: validBars1m.length,
       bars_15m: bars15m.length,
-      bars_1h: bars1h.length,
+      bars_1h: mes1hRows.length,
       bars_4h: bars4h.length,
       bars_1d: bars1d.length,
       duration_ms: Date.now() - startTime,

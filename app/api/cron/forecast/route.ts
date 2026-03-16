@@ -5,8 +5,7 @@ import { isMarketOpen } from "@/lib/market-hours";
 export const maxDuration = 60;
 
 // Runs every hour on weekdays at :30.
-// Reads latest predictions from the forecasts table (written by predict-warbird.py)
-// and serves them via API. Also checks for stale predictions and logs status.
+// Health-checks the canonical warbird_forecasts_1h table and records staleness.
 
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -27,10 +26,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    // Get latest forecasts (last 4 hours to catch all horizons)
+    // Get latest 1H forecasts from the last 4 hours
     const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
     const { data: forecasts, error } = await supabase
-      .from("forecasts")
+      .from("warbird_forecasts_1h")
       .select("*")
       .gte("ts", cutoff)
       .order("ts", { ascending: false });
@@ -59,14 +58,13 @@ export async function GET(request: Request) {
     // Log to job_log
     await supabase.from("job_log").insert({
       job_name: "forecast-check",
-      status: forecasts && forecasts.length > 0 ? "OK" : "NO_DATA",
-      rows_written: 0,
+      status: forecasts && forecasts.length > 0 ? "SUCCESS" : "SKIPPED",
+      rows_affected: forecasts?.length ?? 0,
       duration_ms: duration,
-      meta: {
-        forecast_count: forecasts?.length ?? 0,
-        stale,
-        current_price: currentPrice,
-      },
+      error_message:
+        forecasts && forecasts.length > 0
+          ? null
+          : `No warbird_forecasts_1h rows found since ${cutoff} (stale=${stale}, current_price=${currentPrice ?? "n/a"})`,
     });
 
     return NextResponse.json({
@@ -82,10 +80,10 @@ export async function GET(request: Request) {
 
     await supabase.from("job_log").insert({
       job_name: "forecast-check",
-      status: "ERROR",
-      rows_written: 0,
+      status: "FAILED",
+      rows_affected: 0,
       duration_ms: duration,
-      meta: { error: message },
+      error_message: message,
     });
 
     return NextResponse.json({ error: message, duration_ms: duration }, { status: 500 });

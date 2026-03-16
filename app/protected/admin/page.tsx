@@ -34,7 +34,7 @@ interface JobLogEntry {
   id: number;
   job_name: string;
   status: string;
-  rows_written: number | null;
+  rows_affected: number | null;
   error_message: string | null;
   duration_ms: number | null;
   created_at: string;
@@ -44,20 +44,19 @@ interface SetupEntry {
   id: number;
   ts: string;
   symbol_code: string;
-  timeframe: string;
   direction: string;
-  phase: string;
+  status: string;
   entry_price: number | null;
   stop_loss: number | null;
   tp1: number | null;
   tp2: number | null;
-  confidence: number | null;
-  pivot_level: number | null;
-  pivot_type: string | null;
+  conviction_level: string | null;
+  fib_level: number | null;
+  fib_ratio: number | null;
 }
 
 interface SymbolEntry {
-  symbol_code: string;
+  code: string;
   display_name: string;
   data_source: string;
   is_active: boolean;
@@ -65,11 +64,15 @@ interface SymbolEntry {
 
 interface ForecastEntry {
   id: number;
+  ts: string;
   symbol_code: string;
-  horizon: string;
-  target_type: string;
-  predicted_value: number | null;
-  actual_value: number | null;
+  bias_1h: string;
+  target_price_1h: number | null;
+  target_price_4h: number | null;
+  target_mae_1h: number | null;
+  target_mfe_1h: number | null;
+  confidence: number | null;
+  model_version: string | null;
   created_at: string;
 }
 
@@ -112,14 +115,15 @@ function coverageStatusColor(staleness: string): string {
   return "bg-red-500/20 text-red-400 border-red-500/30";
 }
 
-function phaseColor(phase: string): string {
-  switch (phase) {
-    case "TOUCHED": return "bg-amber-500/20 text-amber-400 border-amber-500/30";
-    case "HOOKED": return "bg-cyan-500/20 text-cyan-400 border-cyan-500/30";
-    case "GO_FIRED": return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+function statusColor(status: string): string {
+  switch (status) {
+    case "ACTIVE": return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+    case "RUNNER_ACTIVE": return "bg-cyan-500/20 text-cyan-400 border-cyan-500/30";
     case "TP1_HIT": return "bg-blue-500/20 text-blue-400 border-blue-500/30";
     case "TP2_HIT": return "bg-purple-500/20 text-purple-400 border-purple-500/30";
+    case "RUNNER_EXITED": return "bg-amber-500/20 text-amber-300 border-amber-500/30";
     case "STOPPED": return "bg-red-500/20 text-red-400 border-red-500/30";
+    case "PULLBACK_REVERSAL": return "bg-orange-500/20 text-orange-300 border-orange-500/30";
     case "EXPIRED": return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
     default: return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
   }
@@ -303,7 +307,7 @@ export default function AdminPage() {
                 Active Setups ({data.activeSetups.length})
               </CardTitle>
               <CardDescription className="text-white/30 text-xs">
-                TOUCHED, HOOKED, GO_FIRED, TP1_HIT
+                ACTIVE, RUNNER_ACTIVE, TP1_HIT
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -315,13 +319,13 @@ export default function AdminPage() {
                     <TableHeader>
                       <TableRow className="border-white/5">
                         <TableHead className="text-white/30 text-[10px]">Time</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Phase</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Status</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Dir</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Entry</TableHead>
                         <TableHead className="text-white/30 text-[10px]">SL</TableHead>
                         <TableHead className="text-white/30 text-[10px]">TP1</TableHead>
                         <TableHead className="text-white/30 text-[10px]">TP2</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Conf</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Conviction</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -329,8 +333,8 @@ export default function AdminPage() {
                         <TableRow key={s.id} className="border-white/5">
                           <TableCell className="text-white/50 text-xs font-mono">{formatTs(s.ts)}</TableCell>
                           <TableCell>
-                            <Badge variant="outline" className={`text-[10px] ${phaseColor(s.phase)}`}>
-                              {s.phase}
+                            <Badge variant="outline" className={`text-[10px] ${statusColor(s.status)}`}>
+                              {s.status}
                             </Badge>
                           </TableCell>
                           <TableCell className={`text-xs font-medium ${directionColor(s.direction)}`}>
@@ -349,7 +353,7 @@ export default function AdminPage() {
                             {s.tp2?.toFixed(2) ?? "—"}
                           </TableCell>
                           <TableCell className="text-white/40 text-xs tabular-nums">
-                            {s.confidence != null ? `${(s.confidence * 100).toFixed(0)}%` : "—"}
+                            {s.conviction_level ?? "—"}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -376,12 +380,12 @@ export default function AdminPage() {
                     <TableHeader>
                       <TableRow className="border-white/5">
                         <TableHead className="text-white/30 text-[10px]">Time</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Phase</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Status</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Dir</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Entry</TableHead>
                         <TableHead className="text-white/30 text-[10px]">SL</TableHead>
                         <TableHead className="text-white/30 text-[10px]">TP1</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Pivot</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Fib</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -389,8 +393,8 @@ export default function AdminPage() {
                         <TableRow key={s.id} className="border-white/5">
                           <TableCell className="text-white/50 text-xs font-mono">{formatTs(s.ts)}</TableCell>
                           <TableCell>
-                            <Badge variant="outline" className={`text-[10px] ${phaseColor(s.phase)}`}>
-                              {s.phase}
+                            <Badge variant="outline" className={`text-[10px] ${statusColor(s.status)}`}>
+                              {s.status}
                             </Badge>
                           </TableCell>
                           <TableCell className={`text-xs font-medium ${directionColor(s.direction)}`}>
@@ -406,7 +410,7 @@ export default function AdminPage() {
                             {s.tp1?.toFixed(2) ?? "—"}
                           </TableCell>
                           <TableCell className="text-white/30 text-xs">
-                            {s.pivot_type ?? "—"}
+                            {s.fib_ratio != null ? s.fib_ratio.toFixed(3) : "—"}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -517,7 +521,7 @@ export default function AdminPage() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-white/50 text-xs tabular-nums">
-                            {j.rows_written ?? "—"}
+                            {j.rows_affected ?? "—"}
                           </TableCell>
                           <TableCell className="text-white/40 text-xs tabular-nums">
                             {j.duration_ms != null ? `${j.duration_ms}ms` : "—"}
@@ -543,7 +547,7 @@ export default function AdminPage() {
                 Forecasts ({data.forecasts.length})
               </CardTitle>
               <CardDescription className="text-white/30 text-xs">
-                Latest model predictions from AutoGluon + GARCH
+                Latest 1H core forecaster outputs
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -559,30 +563,42 @@ export default function AdminPage() {
                   <Table>
                     <TableHeader>
                       <TableRow className="border-white/5">
-                        <TableHead className="text-white/30 text-[10px]">Created</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Time</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Symbol</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Horizon</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Target</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Predicted</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Actual</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Bias</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">1H Price</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">4H Price</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">MAE</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">MFE</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Conf</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {data.forecasts.map((f) => (
                         <TableRow key={f.id} className="border-white/5">
                           <TableCell className="text-white/50 text-xs font-mono">
-                            {formatTs(f.created_at)}
+                            {formatTs(f.ts)}
                           </TableCell>
                           <TableCell className="text-white/70 text-xs font-mono">
                             {f.symbol_code}
                           </TableCell>
-                          <TableCell className="text-white/50 text-xs">{f.horizon}</TableCell>
-                          <TableCell className="text-white/50 text-xs">{f.target_type}</TableCell>
+                          <TableCell className={`text-xs font-medium ${f.bias_1h === "BULL" ? "text-cyan-400" : f.bias_1h === "BEAR" ? "text-red-400" : "text-white/40"}`}>
+                            {f.bias_1h}
+                          </TableCell>
                           <TableCell className="text-cyan-400/70 text-xs tabular-nums">
-                            {f.predicted_value?.toFixed(2) ?? "—"}
+                            {f.target_price_1h?.toFixed(2) ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-emerald-400/70 text-xs tabular-nums">
+                            {f.target_price_4h?.toFixed(2) ?? "—"}
                           </TableCell>
                           <TableCell className="text-white/50 text-xs tabular-nums">
-                            {f.actual_value?.toFixed(2) ?? "pending"}
+                            {f.target_mae_1h?.toFixed(2) ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-white/50 text-xs tabular-nums">
+                            {f.target_mfe_1h?.toFixed(2) ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-white/50 text-xs tabular-nums">
+                            {f.confidence != null ? `${(f.confidence * 100).toFixed(0)}%` : "—"}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -609,7 +625,7 @@ export default function AdminPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
                 {data.symbols.map((s) => (
                   <div
-                    key={s.symbol_code}
+                    key={s.code}
                     className={`flex items-center justify-between px-3 py-2 rounded-md border ${
                       s.is_active
                         ? "bg-white/[0.02] border-white/[0.06]"
@@ -618,7 +634,7 @@ export default function AdminPage() {
                   >
                     <div className="flex flex-col">
                       <span className="text-white/70 text-xs font-mono font-medium">
-                        {s.symbol_code}
+                        {s.code}
                       </span>
                       <span className="text-white/30 text-[10px]">
                         {s.display_name}

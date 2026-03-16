@@ -60,7 +60,11 @@ def aggregate_ohlcv(
 def aggregate_mes_timeframes(bars_1m: list[dict]) -> dict[str, list[dict]]:
     return {
         "mes_15m": aggregate_ohlcv(bars_1m, lambda ts: floor_interval(ts, 900)),
-        "mes_1h": aggregate_ohlcv(bars_1m, lambda ts: floor_interval(ts, 3600)),
-        "mes_4h": aggregate_ohlcv(bars_1m, lambda ts: floor_interval(ts, 14_400)),
-        "mes_1d": aggregate_ohlcv(bars_1m, mes_session_day_start),
+    }
+
+
+def aggregate_mes_from_1h(bars_1h: list[dict]) -> dict[str, list[dict]]:
+    return {
+        "mes_4h": aggregate_ohlcv(bars_1h, lambda ts: floor_interval(ts, 14_400)),
+        "mes_1d": aggregate_ohlcv(bars_1h, mes_session_day_start),
     }

@@ -130,16 +130,27 @@ function aggregateBars(
   return Array.from(buckets.values()).sort((a, b) => a.time - b.time);
 }
 
-export function aggregateMesTimeframes(bars: OhlcvBar[]): {
+export function aggregateMes15mFrom1m(bars: OhlcvBar[]): OhlcvBar[] {
+  return aggregateBars(bars, (timeSec) => floorInterval(timeSec, 900));
+}
+
+export function aggregateMes4hFrom1h(bars: OhlcvBar[]): OhlcvBar[] {
+  return aggregateBars(bars, (timeSec) => floorInterval(timeSec, 14_400));
+}
+
+export function aggregateMes1dFrom1h(bars: OhlcvBar[]): OhlcvBar[] {
+  return aggregateBars(bars, getMesSessionDayStart);
+}
+
+export function aggregateMesTimeframes(bars1m: OhlcvBar[], bars1h: OhlcvBar[] = []): {
   bars15m: OhlcvBar[];
-  bars1h: OhlcvBar[];
   bars4h: OhlcvBar[];
   bars1d: OhlcvBar[];
 } {
+  const canonical1h = bars1h.length > 0 ? bars1h : aggregateBars(bars1m, (timeSec) => floorInterval(timeSec, 3600));
   return {
-    bars15m: aggregateBars(bars, (timeSec) => floorInterval(timeSec, 900)),
-    bars1h: aggregateBars(bars, (timeSec) => floorInterval(timeSec, 3600)),
-    bars4h: aggregateBars(bars, (timeSec) => floorInterval(timeSec, 14_400)),
-    bars1d: aggregateBars(bars, getMesSessionDayStart),
+    bars15m: aggregateMes15mFrom1m(bars1m),
+    bars4h: aggregateMes4hFrom1h(canonical1h),
+    bars1d: aggregateMes1dFrom1h(canonical1h),
   };
 }

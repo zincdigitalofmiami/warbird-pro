@@ -16,21 +16,25 @@ import {
   createChart,
   IChartApi,
   ISeriesApi,
+  LineSeries,
   LineStyle,
   TickMarkType,
   Time,
   UTCTimestamp,
 } from "lightweight-charts";
 import { createClient } from "@/lib/supabase/client";
-import type { ForecastResponse, MeasuredMove, CandleData, FibResult } from "@/lib/types";
+import type { CandleData, FibResult } from "@/lib/types";
 import { ForecastTargetsPrimitive } from "@/lib/charts/ForecastTargetsPrimitive";
 import { SetupMarkersPrimitive } from "@/lib/charts/SetupMarkersPrimitive";
 import { FibLinesPrimitive } from "@/lib/charts/FibLinesPrimitive";
-import { mapMeasuredMoveAndCoreToTargets } from "@/lib/charts/blendTargets";
 import { ensureFutureWhitespace } from "@/lib/charts/ensureFutureWhitespace";
 import { calculateFibonacciMultiPeriod } from "@/lib/fibonacci";
 import { getEventDisplayPhase } from "@/lib/event-display";
 import type { SetupCandidate } from "@/lib/setup-candidates";
+import { RegimeAnchorPrimitive } from "@/lib/charts/RegimeAnchorPrimitive";
+import { REGIME_LABEL, REGIME_START_ISO } from "@/lib/warbird/constants";
+import { warbirdSignalToTargets } from "@/lib/warbird/projection";
+import type { WarbirdSignal } from "@/lib/warbird/types";
 import TV from "@/lib/colors";
 
 type MesPoint = {
@@ -220,20 +224,22 @@ export interface LiveMesChartHandle {
 }
 
 interface LiveMesChartProps {
-  forecast?: ForecastResponse | null;
+  signal?: WarbirdSignal | null;
   setups?: SetupCandidate[];
   eventPhase?: string;
   eventLabel?: string;
 }
 
 const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
-  function LiveMesChart({ forecast, setups, eventPhase, eventLabel }, ref) {
+  function LiveMesChart({ signal, setups, eventPhase, eventLabel }, ref) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const seriesRef = useRef<ISeriesApi<"Candlestick", Time> | null>(null);
+    const whitespaceSeriesRef = useRef<ISeriesApi<"Line", Time> | null>(null);
     const primitiveRef = useRef<ForecastTargetsPrimitive | null>(null);
     const setupPrimitiveRef = useRef<SetupMarkersPrimitive | null>(null);
     const fibPrimitiveRef = useRef<FibLinesPrimitive | null>(null);
+    const regimePrimitiveRef = useRef<RegimeAnchorPrimitive | null>(null);
     // Structural break locking — persist fib anchor across ticks
     const lockedFibRef = useRef<FibResult | null>(null);
     const initialViewportAppliedRef = useRef(false);
@@ -269,14 +275,6 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         Math.round(realTime / BAR_INTERVAL_SEC) * BAR_INTERVAL_SEC;
       return realToGf.get(snapped);
     };
-
-    const activeMove = useMemo<MeasuredMove | null>(() => {
-      if (!forecast?.measuredMoves) return null;
-      const active = forecast.measuredMoves.filter(
-        (m) => m.status === "ACTIVE",
-      );
-      return active.length > 0 ? active[0] : null;
-    }, [forecast]);
 
     const chartSetups = useMemo(
       () =>
@@ -397,6 +395,14 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         },
       });
 
+      const whitespaceSeries = chart.addSeries(LineSeries, {
+        color: "rgba(255,255,255,0)",
+        lineWidth: 1,
+        lastValueVisible: false,
+        priceLineVisible: false,
+        crosshairMarkerVisible: false,
+      });
+
       const primitive = new ForecastTargetsPrimitive();
       series.attachPrimitive(primitive);
 
@@ -406,11 +412,16 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       const fibPrimitive = new FibLinesPrimitive();
       series.attachPrimitive(fibPrimitive);
 
+      const regimePrimitive = new RegimeAnchorPrimitive();
+      series.attachPrimitive(regimePrimitive);
+
       chartRef.current = chart;
       seriesRef.current = series;
+      whitespaceSeriesRef.current = whitespaceSeries;
       primitiveRef.current = primitive;
       setupPrimitiveRef.current = setupPrimitive;
       fibPrimitiveRef.current = fibPrimitive;
+      regimePrimitiveRef.current = regimePrimitive;
 
       const resizeObserver = new ResizeObserver(() => {
         chart.applyOptions({ autoSize: true });
@@ -422,12 +433,16 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         series.detachPrimitive(primitive);
         series.detachPrimitive(setupPrimitive);
         series.detachPrimitive(fibPrimitive);
+        series.detachPrimitive(regimePrimitive);
+        chart.removeSeries(whitespaceSeries);
         chart.remove();
         chartRef.current = null;
         seriesRef.current = null;
+        whitespaceSeriesRef.current = null;
         primitiveRef.current = null;
         setupPrimitiveRef.current = null;
         fibPrimitiveRef.current = null;
+        regimePrimitiveRef.current = null;
       };
     }, []);
 
@@ -455,8 +470,27 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         }
       };
 
+      const buildWhitespaceData = (
+        lastGfTime: number,
+        lastRealTime: number,
+        map: TimeMap,
+      ) => {
+        const whitespace = ensureFutureWhitespace(
+          lastGfTime,
+          BAR_INTERVAL_SEC,
+          RIGHT_PADDING_BARS,
+        );
+        for (let i = 0; i < whitespace.length; i += 1) {
+          const wsGfTime = whitespace[i].time as number;
+          const wsRealTime = lastRealTime + BAR_INTERVAL_SEC * (i + 1);
+          map.gfToReal.set(wsGfTime, wsRealTime);
+          map.realToGf.set(wsRealTime, wsGfTime);
+        }
+        return whitespace;
+      };
+
       const rebuildAndRender = (rawPoints: MesPoint[]) => {
-        if (!seriesRef.current || rawPoints.length === 0) return;
+        if (!seriesRef.current || !whitespaceSeriesRef.current || rawPoints.length === 0) return;
 
         realPointsRef.current = rawPoints;
         const { gfPoints, map } = buildGapFreeMapping(rawPoints);
@@ -465,17 +499,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
 
         const lastGfTime = gfPoints[gfPoints.length - 1].time;
         const lastRealTime = rawPoints[rawPoints.length - 1].time;
-        const whitespace = ensureFutureWhitespace(
-          lastGfTime,
-          BAR_INTERVAL_SEC,
-          RIGHT_PADDING_BARS,
-        );
-        for (let i = 0; i < whitespace.length; i++) {
-          const wsGfTime = whitespace[i].time as number;
-          const wsRealTime = lastRealTime + BAR_INTERVAL_SEC * (i + 1);
-          map.gfToReal.set(wsGfTime, wsRealTime);
-          map.realToGf.set(wsRealTime, wsGfTime);
-        }
+        const whitespace = buildWhitespaceData(lastGfTime, lastRealTime, map);
 
         return { gfPoints, whitespace, map };
       };
@@ -485,11 +509,8 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
           const result = rebuildAndRender(rawPoints);
           if (!result || !seriesRef.current) return;
 
-          const chartData = [
-            ...result.gfPoints.map(toChartPoint),
-            ...result.whitespace,
-          ];
-          seriesRef.current.setData(chartData);
+          seriesRef.current.setData(result.gfPoints.map(toChartPoint));
+          whitespaceSeriesRef.current?.setData(result.whitespace);
 
           updateSessionStats(rawPoints);
 
@@ -557,8 +578,35 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
                 close: newPoint.close,
               });
             }
+          } else if (
+            realPointsRef.current.length === 0 ||
+            realTime > realPointsRef.current[realPointsRef.current.length - 1].time
+          ) {
+            realPointsRef.current = [...realPointsRef.current, newPoint];
+            const lastGfTime =
+              pointsRef.current.length > 0
+                ? pointsRef.current[pointsRef.current.length - 1].time
+                : realTime;
+            const nextGfTime =
+              pointsRef.current.length > 0
+                ? lastGfTime + BAR_INTERVAL_SEC
+                : realTime;
+
+            timeMapRef.current.realToGf.set(realTime, nextGfTime);
+            timeMapRef.current.gfToReal.set(nextGfTime, realTime);
+
+            const gfPoint = { ...newPoint, time: nextGfTime };
+            pointsRef.current = [...pointsRef.current, gfPoint];
+            seriesRef.current.update(toChartPoint(gfPoint));
+
+            const whitespace = buildWhitespaceData(
+              nextGfTime,
+              realTime,
+              timeMapRef.current,
+            );
+            whitespaceSeriesRef.current?.setData(whitespace);
           } else {
-            // New bar — merge and rebuild gap-free mapping
+            // Out-of-order bar — merge and rebuild gap-free mapping
             const realByTime = new Map(
               realPointsRef.current.map((p) => [p.time, p] as const),
             );
@@ -572,10 +620,8 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
 
             const range =
               chartRef.current?.timeScale().getVisibleLogicalRange();
-            seriesRef.current.setData([
-              ...result.gfPoints.map(toChartPoint),
-              ...result.whitespace,
-            ]);
+            seriesRef.current.setData(result.gfPoints.map(toChartPoint));
+            whitespaceSeriesRef.current?.setData(result.whitespace);
             if (range) {
               chartRef.current?.timeScale().setVisibleLogicalRange(range);
             }
@@ -663,11 +709,11 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       };
     }, []);
 
-    // --- Wire forecast targets to primitive ---
+    // --- Wire Warbird forecast targets to primitive ---
     useEffect(() => {
       if (!primitiveRef.current) return;
 
-      if (!activeMove || pointsRef.current.length === 0) {
+      if (!signal || pointsRef.current.length === 0) {
         primitiveRef.current.setTargets([]);
         return;
       }
@@ -676,18 +722,14 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       const lastGfTime = gfPoints[gfPoints.length - 1].time;
       const futureEnd = lastGfTime + BAR_INTERVAL_SEC * 16;
 
-      const candles = realPointsRef.current.map(toCandle);
-      const fib = calculateFibonacciMultiPeriod(candles);
-
-      const targets = mapMeasuredMoveAndCoreToTargets(
-        activeMove,
-        fib,
+      const targets = warbirdSignalToTargets(
+        signal,
         lastGfTime,
         futureEnd,
       );
 
       primitiveRef.current.setTargets(targets);
-    }, [activeMove, lastPrice]);
+    }, [signal, lastPrice]);
 
     // --- Wire setup candidates to primitive ---
     useEffect(() => {
@@ -773,6 +815,23 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
           : undefined;
 
       fibPrimitiveRef.current.setFibResult(fibResult, anchorGfTime);
+    }, [lastPrice]);
+
+    useEffect(() => {
+      if (!regimePrimitiveRef.current) return;
+      const regimeTime = realToGapFree(
+        Math.floor(new Date(REGIME_START_ISO).getTime() / 1000),
+      );
+
+      regimePrimitiveRef.current.setAnchor(
+        regimeTime != null
+          ? {
+              time: regimeTime,
+              label: `Regime ${REGIME_LABEL} · Jan 20 2025`,
+              color: "rgba(255,152,0,0.8)",
+            }
+          : null,
+      );
     }, [lastPrice]);
 
     const changeColor = priceChange >= 0 ? TV.bull.bright : TV.bear.bright;
@@ -879,6 +938,14 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
 
         {/* Chart */}
         <div className="relative w-full" style={{ height: "80vh" }}>
+          <div className="absolute top-3 right-3 z-20 rounded-md border border-orange-500/25 bg-black/35 px-3 py-1.5">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-orange-300/80">
+              Regime Anchor
+            </div>
+            <div className="text-[11px] text-white/70">
+              {REGIME_LABEL} · Jan 20, 2025
+            </div>
+          </div>
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
             <Image
               src="/chart_watermark.svg"
@@ -942,26 +1009,11 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
             <>
               <div className="flex items-center gap-2">
                 <div
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: "#787b86" }}
-                />
-                <span className="text-[10px] text-white/40 uppercase tracking-wider">
-                  Touch
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-0 h-0 border-l-[4px] border-r-[4px] border-b-[6px] border-transparent border-b-[#F23645]" />
-                <span className="text-[10px] text-white/40 uppercase tracking-wider">
-                  Hook
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div
                   className="w-2.5 h-2.5 rotate-45"
                   style={{ backgroundColor: "#26C6DA" }}
                 />
                 <span className="text-[10px] text-white/40 uppercase tracking-wider">
-                  GO
+                  Setup
                 </span>
               </div>
             </>

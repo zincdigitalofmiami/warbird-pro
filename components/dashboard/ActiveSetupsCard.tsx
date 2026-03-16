@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 
 interface SetupCounts {
-  touched: number;
-  hooked: number;
-  goFired: number;
+  active: number;
+  runners: number;
+  counterTrend: number;
   tp1Hit: number;
+  tp2Hit: number;
   stopped: number;
   expired: number;
-  measuredMoves: number;
+  pullbackReversal: number;
 }
 
 export default function ActiveSetupsCard() {
@@ -19,21 +20,27 @@ export default function ActiveSetupsCard() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const res = await fetch("/api/setups");
-        const json = await res.json();
-
-        const active = json.active ?? [];
-        const recent = json.recent ?? [];
-        const mm = json.measuredMoves ?? [];
+        const historyRes = await fetch("/api/warbird/history?days=7&limit=100");
+        const signalRes = await fetch("/api/warbird/signal");
+        const history = await historyRes.json();
+        const signal = await signalRes.json();
+        const active = (history.setups ?? []).filter((s: { status: string }) =>
+          ["ACTIVE", "RUNNER_ACTIVE", "TP1_HIT"].includes(s.status),
+        );
+        const recent = history.events ?? [];
+        const currentSignalSetup = signal.setup;
 
         setCounts({
-          touched: active.filter((s: { phase: string }) => s.phase === "TOUCHED").length,
-          hooked: active.filter((s: { phase: string }) => s.phase === "HOOKED").length,
-          goFired: active.filter((s: { phase: string }) => s.phase === "GO_FIRED").length,
-          tp1Hit: [...active, ...recent].filter((s: { phase: string }) => s.phase === "TP1_HIT").length,
-          stopped: recent.filter((s: { phase: string }) => s.phase === "STOPPED").length,
-          expired: recent.filter((s: { phase: string }) => s.phase === "EXPIRED").length,
-          measuredMoves: mm.length,
+          active: active.filter((s: { status: string }) => s.status === "ACTIVE").length,
+          runners: active.filter((s: { status: string }) => s.status === "RUNNER_ACTIVE").length,
+          counterTrend: active.filter((s: { counter_trend: boolean }) => s.counter_trend).length,
+          tp1Hit: recent.filter((e: { event_type: string }) => e.event_type === "TP1_HIT").length,
+          tp2Hit: recent.filter((e: { event_type: string }) => e.event_type === "TP2_HIT").length,
+          stopped: recent.filter((e: { event_type: string }) => e.event_type === "STOPPED").length,
+          expired: recent.filter((e: { event_type: string }) => e.event_type === "EXPIRED").length,
+          pullbackReversal:
+            recent.filter((e: { event_type: string }) => e.event_type === "PULLBACK_REVERSAL").length +
+            (currentSignalSetup?.status === "PULLBACK_REVERSAL" ? 1 : 0),
         });
       } catch {
         // silent
@@ -65,16 +72,17 @@ export default function ActiveSetupsCard() {
         <div className="space-y-2">
           <div className="flex justify-between items-center">
             <div className="flex gap-4">
-              <PhaseTag label="Touch" count={counts.touched} color="#ffb464" />
-              <PhaseTag label="Hook" count={counts.hooked} color="#26C6DA" />
-              <PhaseTag label="Go" count={counts.goFired} color="#4CAF50" />
+              <PhaseTag label="Active" count={counts.active} color="#4CAF50" />
+              <PhaseTag label="Runner" count={counts.runners} color="#26C6DA" />
+              <PhaseTag label="Counter" count={counts.counterTrend} color="#ffb464" />
             </div>
           </div>
           <div className="flex gap-4 text-xs text-white/30 pt-2" style={{ borderTop: "1px solid rgba(255,255,255,0.04)" }}>
             <span>TP1 <span className="text-white/50">{counts.tp1Hit}</span></span>
+            <span>TP2 <span className="text-white/50">{counts.tp2Hit}</span></span>
             <span>Stopped <span className="text-white/50">{counts.stopped}</span></span>
             <span>Expired <span className="text-white/50">{counts.expired}</span></span>
-            <span>MM <span className="text-white/50">{counts.measuredMoves}</span></span>
+            <span>Reversal <span className="text-white/50">{counts.pullbackReversal}</span></span>
           </div>
         </div>
       )}

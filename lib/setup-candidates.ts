@@ -1,9 +1,9 @@
 /**
  * Setup Candidate Types & Utilities
  *
- * Engine-neutral setup candidate contract. In warbird-pro, candidates are
- * sourced from the warbird_setups Supabase table rather than a local engine.
- * The chart's SetupMarkersPrimitive depends on this contract.
+ * Engine-neutral setup candidate contract. In Warbird v1, candidates are
+ * sourced from the canonical warbird_setups table and mapped to the chart's
+ * trigger-focused marker contract.
  */
 
 export type SetupDirection = 'BULLISH' | 'BEARISH'
@@ -98,40 +98,40 @@ export function fromWarbirdSetup(row: {
   id: number
   ts: string
   direction: string
-  phase: string
+  status: string
   entry_price: number | null
   stop_loss: number | null
   tp1: number | null
   tp2: number | null
-  confidence: number | null
-  pivot_level: number | null
-  pivot_type: string | null
-  measured_move_target: number | null
+  fib_level: number | null
+  fib_ratio: number | null
+  conviction_level: string | null
+  counter_trend?: boolean | null
+  runner_eligible?: boolean | null
+  notes?: string | null
   created_at: string
 }): SetupCandidate {
   const ts = new Date(row.ts).getTime() / 1000
 
   return {
     id: String(row.id),
-    sourceFamily: 'HOOK_REJECTION',
-    triggerType: 'RETRACE_REJECTION',
-    direction: row.direction as SetupDirection,
-    phase: mapPhase(row.phase),
-    thesis: '',
-    structuralReason: '',
+    sourceFamily: 'MEASURED_MOVE',
+    triggerType: 'MEASURED_MOVE_RETRACE',
+    direction: row.direction === 'LONG' ? 'BULLISH' : 'BEARISH',
+    phase: mapStatus(row.status),
+    thesis: row.notes ?? '',
+    structuralReason: row.conviction_level ?? '',
     candidateTime: ts,
-    referenceLevel: row.pivot_level ?? row.entry_price ?? 0,
+    referenceLevel: row.fib_level ?? row.entry_price ?? 0,
     entryZoneLow: row.entry_price,
     entryZoneHigh: row.entry_price,
     invalidationLevel: row.stop_loss,
-    impulseContext: 'RETRACE',
-    liquidityContext: 'RESTING_LEVEL',
-    structureContext: 'FIB_REJECTION',
-    fibLevel: row.pivot_level ?? 0,
-    fibRatio: 0.618,
-    touchTime: ts,
-    touchPrice: row.pivot_level ?? undefined,
-    goTime: row.phase === 'GO_FIRED' ? ts : undefined,
+    impulseContext: row.counter_trend ? 'REVERSAL' : 'CONTINUATION',
+    liquidityContext: row.runner_eligible ? 'EXPANSION' : 'UNSPECIFIED',
+    structureContext: 'MEASURED_MOVE',
+    fibLevel: row.fib_level ?? row.entry_price ?? 0,
+    fibRatio: row.fib_ratio ?? 0.5,
+    goTime: ts,
     entry: row.entry_price ?? undefined,
     stopLoss: row.stop_loss ?? undefined,
     tp1: row.tp1 ?? undefined,
@@ -141,17 +141,20 @@ export function fromWarbirdSetup(row: {
   }
 }
 
-function mapPhase(dbPhase: string): SetupLifecyclePhase {
-  switch (dbPhase) {
-    case 'TOUCHED': return 'CONTACT'
-    case 'HOOKED': return 'CONFIRMED'
-    case 'GO_FIRED': return 'TRIGGERED'
+function mapStatus(status: string): SetupLifecyclePhase {
+  switch (status) {
+    case 'ACTIVE':
     case 'TP1_HIT':
     case 'TP2_HIT':
-    case 'STOPPED_OUT':
+    case 'RUNNER_ACTIVE':
+      return 'TRIGGERED'
+    case 'RUNNER_EXITED':
+    case 'STOPPED':
     case 'EXPIRED':
+    case 'PULLBACK_REVERSAL':
       return 'EXPIRED'
-    default: return 'AWAITING_CONTACT'
+    default:
+      return 'AWAITING_CONTACT'
   }
 }
 
