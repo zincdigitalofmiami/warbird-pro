@@ -1,109 +1,158 @@
-<a href="https://demo-nextjs-with-supabase.vercel.app/">
-  <img alt="Next.js and Supabase Starter Kit - the fastest way to build apps with Next.js and Supabase" src="https://demo-nextjs-with-supabase.vercel.app/opengraph-image.png">
-  <h1 align="center">Next.js and Supabase Starter Kit</h1>
-</a>
+# Warbird Pro
 
-<p align="center">
- The fastest way to build apps with Next.js and Supabase
-</p>
+Real-time MES futures trading dashboard. Supabase + Next.js + Lightweight Charts.
 
-<p align="center">
-  <a href="#features"><strong>Features</strong></a> ·
-  <a href="#demo"><strong>Demo</strong></a> ·
-  <a href="#deploy-to-vercel"><strong>Deploy to Vercel</strong></a> ·
-  <a href="#clone-and-run-locally"><strong>Clone and run locally</strong></a> ·
-  <a href="#feedback-and-issues"><strong>Feedback and issues</strong></a>
-  <a href="#more-supabase-examples"><strong>More Examples</strong></a>
-</p>
-<br/>
+**Live:** [warbird-pro.vercel.app](https://warbird-pro.vercel.app)
+**Repo:** [github.com/zincdigitalofmiami/warbird-pro](https://github.com/zincdigitalofmiami/warbird-pro)
+**Plan:** [`~/.claude/plans/gentle-giggling-mccarthy.md`](/Users/zincdigital/.claude/plans/gentle-giggling-mccarthy.md)
 
-## Features
+---
 
-- Works across the entire [Next.js](https://nextjs.org) stack
-  - App Router
-  - Pages Router
-  - Proxy
-  - Client
-  - Server
-  - It just works!
-- supabase-ssr. A package to configure Supabase Auth to use cookies
-- Password-based authentication block installed via the [Supabase UI Library](https://supabase.com/ui/docs/nextjs/password-based-auth)
-- Styling with [Tailwind CSS](https://tailwindcss.com)
-- Components with [shadcn/ui](https://ui.shadcn.com/)
-- Optional deployment with [Supabase Vercel Integration and Vercel deploy](#deploy-your-own)
-  - Environment variables automatically assigned to Vercel project
+## Stack
 
-## Demo
+| Layer | Tech |
+|-------|------|
+| Framework | Next.js (App Router) on Vercel |
+| Database | Supabase (Postgres, Auth, Realtime, RLS) |
+| UI | Tailwind v4, shadcn/ui (56 components) |
+| Chart | Lightweight Charts v5.1.0 |
+| Dashboard | Recharts |
+| Live data | Python sidecar (Databento Live API) |
+| Scheduling | Vercel Cron Jobs (20 jobs) |
 
-You can view a fully working demo at [demo-nextjs-with-supabase.vercel.app](https://demo-nextjs-with-supabase.vercel.app/).
+## Architecture
 
-## Deploy to Vercel
+```
+Databento Live API (MES.c.0, GLBX.MDP3)
+  -> Python sidecar (scripts/live-feed.py, ~60MB RAM)
+    -> Supabase mes_1m + mes_15m (upsert)
+      -> Supabase Realtime (WebSocket push)
+        -> LiveMesChart series.update() (instant render)
 
-Vercel deployment will guide you through creating a Supabase account and project.
+Vercel Cron (every 5 min)
+  -> Databento Historical API
+    -> Fills gaps in mes_1m from sidecar downtime
+```
 
-After installation of the Supabase integration, all relevant environment variables will be assigned to the project so the deployment is fully functioning.
+End-to-end latency: < 2 seconds venue-to-chart.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&project-name=nextjs-with-supabase&repository-name=nextjs-with-supabase&demo-title=nextjs-with-supabase&demo-description=This+starter+configures+Supabase+Auth+to+use+cookies%2C+making+the+user%27s+session+available+throughout+the+entire+Next.js+app+-+Client+Components%2C+Server+Components%2C+Route+Handlers%2C+Server+Actions+and+Middleware.&demo-url=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2F&external-id=https%3A%2F%2Fgithub.com%2Fvercel%2Fnext.js%2Ftree%2Fcanary%2Fexamples%2Fwith-supabase&demo-image=https%3A%2F%2Fdemo-nextjs-with-supabase.vercel.app%2Fopengraph-image.png)
+## What's Done (Phases 1-4 partial)
 
-The above will also clone the Starter kit to your GitHub, you can clone that locally and develop locally.
+### Phase 1 — Developer Tooling
+- [x] GitHub repo, Vercel deployment
+- [x] Supabase integration (17 env vars)
+- [x] 56 shadcn/ui components
+- [x] Tailwind v4, build passing
+- [x] MCP servers: memory, context7, sequentialthinking, shadcn, supabase
+- [x] CLAUDE.md, AGENTS.md
 
-If you wish to just develop locally and not deploy to Vercel, [follow the steps below](#clone-and-run-locally).
+### Phase 2 — Database
+- [x] 9 SQL migrations (enums, symbols, MES data, cross-asset, econ, news, trading, RLS, realtime)
+- [x] Admin client (`lib/supabase/admin.ts`)
+- [x] Seed data: 60 symbols (34 active, 26 inactive), 31 FRED series, sources
+- [x] RLS on all tables, Realtime on mes_1m/mes_15m/warbird_setups/forecasts
 
-## Clone and run locally
+### Phase 3 — Chart Port
+- [x] Lightweight Charts v5.1.0 installed
+- [x] All chart library files ported (types, colors, primitives, fibonacci, pivots, etc.)
+- [x] LiveMesChart.tsx with gap-free time mapping
+- [x] FibLinesPrimitive: 10 levels (ZERO through TARGET 3), multi-period confluence scoring
+- [x] Fib colors: white anchors, 50% white retracements, orange pivot, green targets
+- [x] No text labels on fibs — clean lines only (matches TradingView)
+- [x] Structural break locking (fib anchor persists until price breaks range)
+- [x] Pivots removed from chart
+- [x] SetupMarkersPrimitive ported (renamed from BhgMarkersPrimitive)
+- [x] ForecastTargetsPrimitive ported
+- [x] Chart data API (`/api/live/mes15m`)
 
-1. You'll first need a Supabase project which can be made [via the Supabase dashboard](https://database.new)
+### Phase 4 — MES Live Data (partial)
+- [x] Python sidecar (`scripts/live-feed.py`) — streams Databento Live OHLCV-1m
+- [x] Vercel Cron catch-up (`/api/cron/mes-catchup`) — 5-min gap fill
+- [x] `lib/market-hours.ts` — isMarketOpen(), isWeekendBar()
+- [x] `lib/ingestion/databento.ts` — Historical API client
+- [ ] **Supabase Realtime subscription in chart** (chart still uses polling, not WebSocket push)
+- [ ] **Sidecar reliability** (systemd/supervisor, auto-restart, health monitoring)
 
-2. Create a Next.js app using the Supabase Starter template npx command
+## What's Left
 
-   ```bash
-   npx create-next-app --example with-supabase with-supabase-app
-   ```
+### Phase 4 — MES Live Data (remaining)
+- [ ] Wire Supabase Realtime into LiveMesChart for instant `series.update()` on new rows
+- [ ] Sidecar process management (systemd or supervisor, not tmux)
+- [ ] Health check endpoint for sidecar status
 
-   ```bash
-   yarn create next-app --example with-supabase with-supabase-app
-   ```
+### Phase 5 — Economic & News Data Pipelines
+- [ ] 10 FRED cron routes (rates, yields, vol, inflation, fx, labor, activity, commodities, money, indexes)
+- [ ] Cross-asset cron (non-MES futures from Databento)
+- [ ] News signal cron
+- [ ] Economic calendar cron
+- [ ] GPR index cron
+- [ ] Trump Effect cron (Federal Register + EPU)
+- [ ] `lib/ingestion/fred.ts` — FRED API client
 
-   ```bash
-   pnpm create next-app --example with-supabase with-supabase-app
-   ```
+### Phase 6 — Signal Engine
+- [ ] `/api/cron/detect-setups` — Warbird setup state machine (Touch -> Hook -> Go -> TP/SL)
+- [ ] `/api/cron/measured-moves` — Daily measured move scan
+- [ ] `/api/cron/score-trades` — Trade outcome scoring
+- [ ] `lib/setup-engine.ts` — needs real data wiring (logic ported, not connected)
+- [ ] Setup markers rendering on chart from live `warbird_setups` table
+- [ ] Pivot lines restored (if desired) from separate data source
 
-3. Use `cd` to change into the app's directory
+### Phase 7 — Dashboard Cards
+- [ ] MarketSummaryCard — MES price, change%, sparkline
+- [ ] ActiveSetupsCard — setup counts by phase
+- [ ] SessionStatsCard — session high/low/range/volume
+- [ ] ModelConfidenceCard — hidden until Phase 8
 
-   ```bash
-   cd with-supabase-app
-   ```
+### Phase 8 — Model Integration (deferred)
+- [ ] AutoGluon training pipeline (`scripts/train-warbird.py`)
+- [ ] Inference cron (`/api/cron/forecast`)
+- [ ] Dataset builder (`scripts/build-dataset.py`)
+- [ ] ForecastTargetsPrimitive rendering live predictions
 
-4. Rename `.env.example` to `.env.local` and update the following:
+## Cron Jobs (20 total, Vercel Pro limit: 100)
 
-  ```env
-  NEXT_PUBLIC_SUPABASE_URL=[INSERT SUPABASE PROJECT URL]
-  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=[INSERT SUPABASE PROJECT API PUBLISHABLE OR ANON KEY]
-  ```
-  > [!NOTE]
-  > This example uses `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, which refers to Supabase's new **publishable** key format.
-  > Both legacy **anon** keys and new **publishable** keys can be used with this variable name during the transition period. Supabase's dashboard may show `NEXT_PUBLIC_SUPABASE_ANON_KEY`; its value can be used in this example.
-  > See the [full announcement](https://github.com/orgs/supabase/discussions/29260) for more information.
+| Schedule | Route | Purpose |
+|----------|-------|---------|
+| `*/5 * * * *` | `/api/cron/mes-catchup` | MES gap fill (backup) |
+| `15 * * * *` | `/api/cron/cross-asset` | Non-MES futures |
+| `0 5-14 * * *` | `/api/cron/fred/[category]` | 10 FRED series |
+| `0 15 * * *` | `/api/cron/econ-calendar` | Econ calendar |
+| `0 16 * * *` | `/api/cron/news` | News signals |
+| `0 19 * * *` | `/api/cron/gpr` | Geopolitical risk |
+| `30 19 * * *` | `/api/cron/trump-effect` | Federal Register + EPU |
+| `3,18,33,48 * * * 1-5` | `/api/cron/detect-setups` | Setup detection |
+| `0 18 * * 1-5` | `/api/cron/measured-moves` | Measured moves |
+| `10,25,40,55 * * * 1-5` | `/api/cron/score-trades` | Trade scoring |
+| `30 * * * 1-5` | `/api/cron/forecast` | ML inference |
 
-  Both `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` can be found in [your Supabase project's API settings](https://supabase.com/dashboard/project/_?showConnect=true)
+## Database (9 migrations)
 
-5. You can now run the Next.js local development server:
+**MES:** `mes_1m`, `mes_15m`, `mes_1h`, `mes_4h`, `mes_1d`
+**Cross-asset:** `cross_asset_1h`, `cross_asset_1d`, `options_stats_1d`, `options_ohlcv_1d`
+**Economic:** 10 domain tables (rates, yields, vol, inflation, fx, labor, activity, commodities, money, indexes)
+**News:** `econ_news_1d`, `policy_news_1d`, `macro_reports_1d`, `econ_calendar`, `news_signals`, `geopolitical_risk_1d`, `trump_effect_1d`
+**Trading:** `warbird_setups`, `trade_scores`, `measured_moves`, `vol_states`, `forecasts`
+**Meta:** `symbols`, `sources`, `series_catalog`, `models`, `coverage_log`, `job_log`
 
-   ```bash
-   npm run dev
-   ```
+## Local Development
 
-   The starter kit should now be running on [localhost:3000](http://localhost:3000/).
+```bash
+npm install
+npm run dev          # Next.js on :3000
+```
 
-6. This template comes with the default shadcn/ui style initialized. If you instead want other ui.shadcn styles, delete `components.json` and [re-install shadcn/ui](https://ui.shadcn.com/docs/installation/next)
+### Live feed sidecar (requires Databento subscription)
+```bash
+pip install databento supabase
+python scripts/live-feed.py
+```
 
-> Check out [the docs for Local Development](https://supabase.com/docs/guides/getting-started/local-development) to also run Supabase locally.
-
-## Feedback and issues
-
-Please file feedback and issues over on the [Supabase GitHub org](https://github.com/supabase/supabase/issues/new/choose).
-
-## More Supabase examples
-
-- [Next.js Subscription Payments Starter](https://github.com/vercel/nextjs-subscription-payments)
-- [Cookie-based Auth and the Next.js 13 App Router (free course)](https://youtube.com/playlist?list=PL5S4mPUpp4OtMhpnp93EFSo42iQ40XjbF)
-- [Supabase Auth and the Next.js App Router](https://github.com/supabase/supabase/tree/master/examples/auth/nextjs)
+### Environment variables
+```
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY
+DATABENTO_API_KEY
+FRED_API_KEY
+CRON_SECRET
+```
