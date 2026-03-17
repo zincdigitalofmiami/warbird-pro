@@ -8,7 +8,7 @@
 
 insert into symbols (code, display_name, short_name, description, tick_size, data_source, dataset, databento_symbol, fred_symbol, is_active) values
   -- Active DATABENTO futures (16)
-  ('MES', 'MES', 'Micro S&P', 'Micro E-mini S&P 500 Futures', 0.25, 'DATABENTO', 'GLBX.MDP3', 'MES.c.0', null, true),
+  ('MES', 'MES', 'Micro S&P', 'Micro E-mini S&P 500 Futures', 0.25, 'DATABENTO', 'GLBX.MDP3', 'MES.v.0', null, true),
   ('ES', 'ES', 'E-mini S&P', 'E-mini S&P 500 Futures', 0.25, 'DATABENTO', 'GLBX.MDP3', 'ES.c.0', null, true),
   ('NQ', 'NQ', 'E-mini Nasdaq', 'E-mini Nasdaq-100 Futures', 0.25, 'DATABENTO', 'GLBX.MDP3', 'NQ.c.0', null, true),
   ('YM', 'YM', 'E-mini Dow', 'E-mini Dow Jones Futures', 1, 'DATABENTO', 'GLBX.MDP3', 'YM.c.0', null, true),

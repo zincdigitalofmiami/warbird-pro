@@ -73,7 +73,7 @@ export async function GET(request: Request) {
 
     const bars1m = await fetchOhlcv({
       dataset: "GLBX.MDP3",
-      symbol: "MES.c.0",
+      symbol: "MES.v.0",
       stypeIn: "continuous",
       start: gapStart.toISOString(),
       end: gapEnd.toISOString(),
@@ -82,7 +82,7 @@ export async function GET(request: Request) {
 
     const bars1h = await fetchOhlcv({
       dataset: "GLBX.MDP3",
-      symbol: "MES.c.0",
+      symbol: "MES.v.0",
       stypeIn: "continuous",
       start: gapStart.toISOString(),
       end: gapEnd.toISOString(),
