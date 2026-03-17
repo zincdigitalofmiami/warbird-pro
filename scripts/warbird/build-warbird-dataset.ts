@@ -1,7 +1,10 @@
 import { writeFile } from "node:fs/promises";
 import { createClient } from "@supabase/supabase-js";
 import { buildDailyBiasLayer } from "@/scripts/warbird/daily-layer";
+import { buildFibGeometry } from "@/scripts/warbird/fib-engine";
 import { REGIME_START_ISO, WARBIRD_DEFAULT_SYMBOL } from "@/lib/warbird/constants";
+import type { CandleData } from "@/lib/types";
+import type { WarbirdBias } from "@/lib/warbird/types";
 
 type OhlcvRow = {
   ts: string;
@@ -31,16 +34,9 @@ type NewsSignalRow = {
   confidence: number | null;
 };
 
-type MacroReportRow = {
-  ts: string;
-  report_type: string;
-  surprise: number | null;
-};
-
 type SetupRow = {
   ts: string;
   counter_trend: boolean;
-  runner_eligible: boolean;
 };
 
 const FRED_TABLES = [
@@ -85,6 +81,17 @@ async function fetchAll<T>(table: string, select = "*", filters: Record<string, 
   }
 
   return rows;
+}
+
+function toCandle(row: OhlcvRow): CandleData {
+  return {
+    time: Math.floor(new Date(row.ts).getTime() / 1000),
+    open: Number(row.open),
+    high: Number(row.high),
+    low: Number(row.low),
+    close: Number(row.close),
+    volume: Number(row.volume),
+  };
 }
 
 function ema(values: number[], length: number): Array<number | null> {
@@ -164,6 +171,87 @@ function percentileRank(values: number[], length: number): Array<number | null> 
   return result;
 }
 
+function rollingCorrelation(
+  xValues: number[],
+  yValues: number[],
+  window: number,
+): Array<number | null> {
+  const result: Array<number | null> = Array(xValues.length).fill(null);
+  for (let i = window - 1; i < xValues.length; i++) {
+    const xSlice = xValues.slice(i - window + 1, i + 1);
+    const ySlice = yValues.slice(i - window + 1, i + 1);
+    const xMean = xSlice.reduce((s, v) => s + v, 0) / window;
+    const yMean = ySlice.reduce((s, v) => s + v, 0) / window;
+    let num = 0, xDen = 0, yDen = 0;
+    for (let j = 0; j < window; j++) {
+      const dx = xSlice[j] - xMean;
+      const dy = ySlice[j] - yMean;
+      num += dx * dy;
+      xDen += dx * dx;
+      yDen += dy * dy;
+    }
+    const denom = Math.sqrt(xDen * yDen);
+    result[i] = denom === 0 ? null : num / denom;
+  }
+  return result;
+}
+
+function computeTargets(
+  bars: OhlcvRow[],
+  startIndex: number,
+  entry: number,
+  stopLoss: number,
+  tp1: number,
+  tp2: number,
+  direction: "LONG" | "SHORT",
+): {
+  reached_tp1: number;
+  reached_tp2: number;
+  setup_stopped: number;
+  max_favorable_excursion: number;
+  max_adverse_excursion: number;
+} {
+  let reachedTp1 = 0;
+  let reachedTp2 = 0;
+  let setupStopped = 0;
+  let maxFav = 0;
+  let maxAdv = 0;
+
+  for (let i = startIndex + 1; i < bars.length && i < startIndex + 100; i++) {
+    const bar = bars[i];
+    const high = Number(bar.high);
+    const low = Number(bar.low);
+
+    if (direction === "LONG") {
+      const fav = high - entry;
+      const adv = entry - low;
+      maxFav = Math.max(maxFav, fav);
+      maxAdv = Math.max(maxAdv, adv);
+
+      if (low <= stopLoss) { setupStopped = 1; break; }
+      if (high >= tp2) { reachedTp2 = 1; reachedTp1 = 1; break; }
+      if (high >= tp1) { reachedTp1 = 1; }
+    } else {
+      const fav = entry - low;
+      const adv = high - entry;
+      maxFav = Math.max(maxFav, fav);
+      maxAdv = Math.max(maxAdv, adv);
+
+      if (high >= stopLoss) { setupStopped = 1; break; }
+      if (low <= tp2) { reachedTp2 = 1; reachedTp1 = 1; break; }
+      if (low <= tp1) { reachedTp1 = 1; }
+    }
+  }
+
+  return {
+    reached_tp1: reachedTp1,
+    reached_tp2: reachedTp2,
+    setup_stopped: setupStopped,
+    max_favorable_excursion: maxFav,
+    max_adverse_excursion: maxAdv,
+  };
+}
+
 function chicagoParts(date: Date) {
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Chicago",
@@ -194,15 +282,14 @@ function csvEscape(value: unknown): string {
 }
 
 async function buildDataset(outputPath: string) {
-  const [mes1hRows, mes1dRows, crossAssetRows, calendarRows, newsRows, macroRows, gprRows, trumpRows, setups] =
+  const [mes1hRows, mes1dRows, crossAssetRows, calendarRows, newsRows, gprRows, trumpRows, setups] =
     await Promise.all([
       fetchAll<OhlcvRow>("mes_1h"),
       fetchAll<OhlcvRow>("mes_1d"),
       fetchAll<OhlcvRow>("cross_asset_1h"),
       fetchAll<CalendarRow>("econ_calendar"),
       fetchAll<NewsSignalRow>("news_signals"),
-      fetchAll<MacroReportRow>("macro_reports_1d"),
-      fetchAll<{ ts: string; gpr_daily: number }>("geopolitical_risk_1d"),
+      fetchAll<{ ts: string; series_id: string; value: number }>("geopolitical_risk_1d"),
       fetchAll<{ ts: string; event_type: string }>("trump_effect_1d"),
       fetchAll<SetupRow>("warbird_setups"),
     ]);
@@ -267,7 +354,60 @@ async function buildDataset(outputPath: string) {
     return 0.3 + Math.max(0, Math.min(1, progress)) * 0.7;
   });
 
-  const lines: string[] = [];
+  // Pre-compute cross-asset data structures
+  const crossBySymbol = new Map<string, OhlcvRow[]>();
+  for (const row of crossAssetRows) {
+    const list = crossBySymbol.get(row.symbol_code ?? "") ?? [];
+    list.push(row);
+    crossBySymbol.set(row.symbol_code ?? "", list);
+  }
+  for (const list of crossBySymbol.values()) {
+    list.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+  }
+
+  const crossSymbols = [...new Set(crossAssetRows.map((row) => row.symbol_code).filter(Boolean))] as string[];
+
+  // Pre-compute MES 1H closes for correlation
+  const mesCloses = ordered1h.map((r) => Number(r.close));
+
+  // Pre-compute rolling correlations for all cross-asset symbols
+  const corrMap = new Map<string, { c20: (number | null)[]; c60: (number | null)[] }>();
+  for (const symbol of crossSymbols) {
+    const symbolBars = crossBySymbol.get(symbol) ?? [];
+    const symbolCloses = ordered1h.map((bar) => {
+      const tsMs = new Date(bar.ts).getTime();
+      const match = [...symbolBars]
+        .filter((sb) => new Date(sb.ts).getTime() <= tsMs)
+        .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())[0];
+      return match ? Number(match.close) : null;
+    });
+    let last = symbolCloses.find((v) => v !== null) ?? 0;
+    const filled = symbolCloses.map((v) => { if (v !== null) last = v; return last; });
+    corrMap.set(symbol, {
+      c20: rollingCorrelation(mesCloses, filled, 20),
+      c60: rollingCorrelation(mesCloses, filled, 60),
+    });
+  }
+
+  // ATR computation
+  const atr1h: Array<number | null> = Array(ordered1h.length).fill(null);
+  for (let i = 1; i < ordered1h.length; i++) {
+    if (i >= 14) {
+      const trSlice = [];
+      for (let j = i - 13; j <= i; j++) {
+        trSlice.push(
+          Math.max(
+            ranges[j],
+            j > 0 ? Math.abs(highs[j] - closes[j - 1]) : ranges[j],
+            j > 0 ? Math.abs(lows[j] - closes[j - 1]) : ranges[j],
+          ),
+        );
+      }
+      atr1h[i] = trSlice.reduce((s, v) => s + v, 0) / 14;
+    }
+  }
+
+  // Build header
   const header = [
     "timestamp",
     "open",
@@ -290,6 +430,7 @@ async function buildDataset(outputPath: string) {
     "rolling_std_20",
     "rolling_std_50",
     "vol_ratio_5_20",
+    "atr_1h",
     "daily_bias",
     "price_vs_200d_ma",
     "distance_from_200d_ma_pct",
@@ -313,14 +454,12 @@ async function buildDataset(outputPath: string) {
     "high_impact_today",
     "setup_frequency_7d",
     "counter_trend_recent_20",
-    "runner_eligible_recent_20",
-    "target_price_1h",
-    "target_price_4h",
-    "target_mae_1h",
-    "target_mae_4h",
-    "target_mfe_1h",
-    "target_mfe_4h",
-    "sample_weight",
+    "fib_level",
+    "fib_quality",
+    "fib_confluence_score",
+    "measured_move_present",
+    "measured_move_quality",
+    "direction",
   ];
 
   for (const seriesId of [...fredBySeries.keys()].sort()) {
@@ -329,12 +468,23 @@ async function buildDataset(outputPath: string) {
     header.push(`fred_${seriesId.toLowerCase()}_pctile_20`);
   }
 
-  const crossSymbols = [...new Set(crossAssetRows.map((row) => row.symbol_code).filter(Boolean))] as string[];
   for (const symbol of crossSymbols) {
     header.push(`ca_${symbol.toLowerCase()}_close`);
     header.push(`ca_${symbol.toLowerCase()}_ret_1h`);
+    header.push(`corr_${symbol.toLowerCase()}_20`);
+    header.push(`corr_${symbol.toLowerCase()}_60`);
   }
 
+  header.push(
+    "reached_tp1",
+    "reached_tp2",
+    "setup_stopped",
+    "max_favorable_excursion",
+    "max_adverse_excursion",
+    "sample_weight",
+  );
+
+  const lines: string[] = [];
   lines.push(header.join(","));
 
   const fredState = new Map<string, number>();
@@ -344,23 +494,38 @@ async function buildDataset(outputPath: string) {
     fredIndex.set(seriesId, 0);
   }
 
-  const crossBySymbol = new Map<string, OhlcvRow[]>();
-  for (const row of crossAssetRows) {
-    const list = crossBySymbol.get(row.symbol_code ?? "") ?? [];
-    list.push(row);
-    crossBySymbol.set(row.symbol_code ?? "", list);
-  }
-  for (const list of crossBySymbol.values()) {
-    list.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
-  }
+  // Main loop: only rows where fib geometry fires
+  const MIN_LOOKBACK = 55;
+  let setupCount = 0;
 
-  for (let index = 0; index < ordered1h.length; index += 1) {
+  for (let index = MIN_LOOKBACK; index < ordered1h.length; index++) {
     const row = ordered1h[index];
     const tsMs = new Date(row.ts).getTime();
     const tsDate = new Date(row.ts);
-    const chicago = chicagoParts(tsDate);
     const dailyIndex = ordered1d.findLastIndex((daily) => new Date(daily.ts).getTime() <= tsMs);
     const dailyFeature = dailyIndex >= 0 ? dailyFeatures[dailyIndex] : null;
+    const currentBias = (dailyFeature?.bias ?? "NEUTRAL") as WarbirdBias;
+
+    // Build fib geometry — skip bars where no setup fires
+    const candles = ordered1h.slice(0, index + 1).map(toCandle);
+    const geometry = buildFibGeometry(candles, currentBias);
+    if (!geometry) continue;
+
+    // Need enough future bars for target computation
+    if (index + 10 >= ordered1h.length) continue;
+
+    // Forward-scan targets
+    const targets = computeTargets(
+      ordered1h,
+      index,
+      geometry.entry,
+      geometry.stopLoss,
+      geometry.tp1,
+      geometry.tp2,
+      geometry.direction,
+    );
+
+    const chicago = chicagoParts(tsDate);
 
     const nextHighImpact = calendarRows
       .filter((event) => event.importance >= 3 && new Date(event.ts).getTime() >= tsMs)
@@ -422,6 +587,7 @@ async function buildDataset(outputPath: string) {
         volumeMean5[index] && volumeMean20[index]
           ? (volumeMean5[index] as number) / (volumeMean20[index] as number)
           : null,
+      atr_1h: atr1h[index],
       daily_bias: dailyFeature?.bias ?? "NEUTRAL",
       price_vs_200d_ma: dailyFeature?.price_vs_200d_ma ?? null,
       distance_from_200d_ma_pct: dailyFeature?.distance_pct ?? null,
@@ -440,7 +606,7 @@ async function buildDataset(outputPath: string) {
         Math.floor((tsMs - new Date(REGIME_START_ISO).getTime()) / (24 * 60 * 60 * 1000)),
       ),
       regime_label: "trump_2",
-      gpr_level: gpr?.gpr_daily ?? null,
+      gpr_level: gpr?.value ?? null,
       trump_events_7d: trumpEvents7d,
       news_layers_24h: news24h.length,
       news_net_sentiment_24h: news24h.reduce((sum, news) => {
@@ -454,28 +620,17 @@ async function buildDataset(outputPath: string) {
       high_impact_today: highImpactToday ? 1 : 0,
       setup_frequency_7d: setups7d.length,
       counter_trend_recent_20: setups20.filter((setup) => setup.counter_trend).length,
-      runner_eligible_recent_20: setups20.filter((setup) => setup.runner_eligible).length,
-      target_price_1h: ordered1h[index + 1]?.close ?? null,
-      target_price_4h: ordered1h[index + 4]?.close ?? null,
-      target_mae_1h:
-        index + 1 < ordered1h.length
-          ? Math.max(0, row.close - Math.min(...ordered1h.slice(index + 1, index + 2).map((item) => Number(item.low))))
-          : null,
-      target_mae_4h:
-        index + 4 < ordered1h.length
-          ? Math.max(0, row.close - Math.min(...ordered1h.slice(index + 1, index + 5).map((item) => Number(item.low))))
-          : null,
-      target_mfe_1h:
-        index + 1 < ordered1h.length
-          ? Math.max(0, Math.max(...ordered1h.slice(index + 1, index + 2).map((item) => Number(item.high))) - row.close)
-          : null,
-      target_mfe_4h:
-        index + 4 < ordered1h.length
-          ? Math.max(0, Math.max(...ordered1h.slice(index + 1, index + 5).map((item) => Number(item.high))) - row.close)
-          : null,
+      fib_level: geometry.fibLevel,
+      fib_quality: geometry.quality,
+      fib_confluence_score: null,
+      measured_move_present: geometry.measuredMove ? 1 : 0,
+      measured_move_quality: geometry.measuredMove ? geometry.quality : null,
+      direction: geometry.direction,
+      ...targets,
       sample_weight: sampleWeight[index],
     };
 
+    // FRED features with forward-fill
     for (const [seriesId, seriesRows] of fredBySeries.entries()) {
       let pointer = fredIndex.get(seriesId) ?? 0;
       while (
@@ -511,12 +666,13 @@ async function buildDataset(outputPath: string) {
           : null;
     }
 
+    // Cross-asset features + correlations
     for (const symbol of crossSymbols) {
-      const rows = crossBySymbol.get(symbol) ?? [];
-      const latest = [...rows]
+      const caRows = crossBySymbol.get(symbol) ?? [];
+      const latest = [...caRows]
         .filter((item) => new Date(item.ts).getTime() <= tsMs)
         .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())[0];
-      const previous = [...rows]
+      const previous = [...caRows]
         .filter((item) => new Date(item.ts).getTime() < tsMs)
         .sort((a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime())[0];
       baseRow[`ca_${symbol.toLowerCase()}_close`] = latest?.close ?? null;
@@ -524,13 +680,21 @@ async function buildDataset(outputPath: string) {
         latest && previous && Number(previous.close) !== 0
           ? ((Number(latest.close) - Number(previous.close)) / Number(previous.close)) * 100
           : null;
+      const corr = corrMap.get(symbol);
+      baseRow[`corr_${symbol.toLowerCase()}_20`] = corr?.c20[index] ?? null;
+      baseRow[`corr_${symbol.toLowerCase()}_60`] = corr?.c60[index] ?? null;
     }
 
     lines.push(header.map((column) => csvEscape(baseRow[column])).join(","));
+    setupCount++;
+
+    if (setupCount % 100 === 0) {
+      console.log(`  ${setupCount} setup rows emitted (at bar ${index}/${ordered1h.length})`);
+    }
   }
 
   await writeFile(outputPath, `${lines.join("\n")}\n`, "utf8");
-  console.log(`Wrote ${ordered1h.length} rows to ${outputPath}`);
+  console.log(`Wrote ${setupCount} setup rows to ${outputPath}`);
 }
 
 async function main() {
@@ -538,7 +702,7 @@ async function main() {
   const outputPath =
     outputArgIndex >= 0 && process.argv[outputArgIndex + 1]
       ? process.argv[outputArgIndex + 1]
-      : "datasets/warbird_dataset_1h.csv";
+      : "data/warbird-dataset.csv";
 
   await buildDataset(outputPath);
 }
