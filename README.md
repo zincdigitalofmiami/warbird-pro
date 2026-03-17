@@ -1,154 +1,81 @@
 # Warbird Pro
 
-Real-time MES futures trading dashboard. Supabase + Next.js + Lightweight Charts.
+Canonical Warbird v1 MES trading platform on Next.js, Supabase, Databento, and Lightweight Charts.
 
-**Live:** [warbird-pro.vercel.app](https://warbird-pro.vercel.app)
-**Repo:** [github.com/zincdigitalofmiami/warbird-pro](https://github.com/zincdigitalofmiami/warbird-pro)
-**Plan:** [`~/.claude/plans/gentle-giggling-mccarthy.md`](/Users/zincdigital/.claude/plans/gentle-giggling-mccarthy.md)
+**Live:** [warbird-pro.vercel.app](https://warbird-pro.vercel.app)  
+**Repo:** [github.com/zincdigitalofmiami/warbird-pro](https://github.com/zincdigitalofmiami/warbird-pro)  
+**Canonical spec:** [WARBIRD_CANONICAL.md](/Volumes/Satechi%20Hub/warbird-pro/WARBIRD_CANONICAL.md)
 
----
+## Source Of Truth
 
-## Stack
+Use these in order:
 
-| Layer | Tech |
-|-------|------|
-| Framework | Next.js (App Router) on Vercel |
-| Database | Supabase (Postgres, Auth, Realtime, RLS) |
-| UI | Tailwind v4, shadcn/ui (56 components) |
-| Chart | Lightweight Charts v5.1.0 |
-| Dashboard | Recharts |
-| Live data | Python sidecar (Databento Live API) |
-| Scheduling | Vercel Cron Jobs (20 jobs) |
+1. [WARBIRD_CANONICAL.md](/Volumes/Satechi%20Hub/warbird-pro/WARBIRD_CANONICAL.md)
+2. Live Supabase migrations in [supabase/migrations](/Volumes/Satechi%20Hub/warbird-pro/supabase/migrations)
+3. Active Warbird routes and libs in `app/api/warbird/*` and `lib/warbird/*`
 
-## Architecture
+Older build-plan language is not authoritative where it conflicts.
 
-```
-Databento Live API (MES.c.0, GLBX.MDP3)
-  -> Python sidecar (scripts/live-feed.py, ~60MB RAM)
-    -> Supabase mes_1m + mes_15m (upsert)
-      -> Supabase Realtime (WebSocket push)
-        -> LiveMesChart series.update() (instant render)
+## Current Architecture
 
-Vercel Cron (every 5 min)
-  -> Databento Historical API
-    -> Fills gaps in mes_1m from sidecar downtime
-```
+### Warbird v1
 
-End-to-end latency: < 2 seconds venue-to-chart.
+- Daily bias: macro directional shadow
+- 4H structure: confirms or denies trend
+- 1H core forecaster: the only ML model in v1
+- 1H fib geometry: the only fib-anchor timeframe
+- 15M trigger: rule-based entry confirmation against 1H context
 
-## What's Done (Phases 1-4 partial)
+### MES Timeframe Authority
 
-### Phase 1 — Developer Tooling
-- [x] GitHub repo, Vercel deployment
-- [x] Supabase integration (17 env vars)
-- [x] 56 shadcn/ui components
-- [x] Tailwind v4, build passing
-- [x] MCP servers: memory, sequentialthinking, shadcn, supabase
-- [x] CLAUDE.md, AGENTS.md
+- `mes_1m`: direct from Databento
+- `mes_1h`: direct from Databento
+- `mes_1d`: direct from Databento for macro bias only
+- `mes_15m`: derived from stored `mes_1m`
+- `mes_4h`: derived from stored `mes_1h`
 
-### Phase 2 — Database
-- [x] 9 SQL migrations (enums, symbols, MES data, cross-asset, econ, news, trading, RLS, realtime)
-- [x] Admin client (`lib/supabase/admin.ts`)
-- [x] Seed data: 60 symbols (34 active, 26 inactive), 31 FRED series, sources
-- [x] RLS on all tables, Realtime on mes_1m/mes_15m/warbird_setups/forecasts
+This is the intended steady-state authority map. Do not create multiple live writer paths for the same timeframe.
 
-### Phase 3 — Chart Port
-- [x] Lightweight Charts v5.1.0 installed
-- [x] All chart library files ported (types, colors, primitives, fibonacci, pivots, etc.)
-- [x] LiveMesChart.tsx with gap-free time mapping
-- [x] FibLinesPrimitive: 10 levels (ZERO through TARGET 3), multi-period confluence scoring
-- [x] Fib colors: white anchors, 50% white retracements, orange pivot, green targets
-- [x] No text labels on fibs — clean lines only (matches TradingView)
-- [x] Structural break locking (fib anchor persists until price breaks range)
-- [x] Pivots removed from chart
-- [x] SetupMarkersPrimitive ported (renamed from BhgMarkersPrimitive)
-- [x] ForecastTargetsPrimitive ported
-- [x] Chart data API (`/api/live/mes15m`)
+### Production Boundary
 
-### Phase 4 — MES Live Data (partial)
-- [x] Python sidecar (`scripts/live-feed.py`) — streams Databento Live OHLCV-1m
-- [x] Vercel Cron catch-up (`/api/cron/mes-catchup`) — 5-min gap fill
-- [x] `lib/market-hours.ts` — isMarketOpen(), isWeekendBar()
-- [x] `lib/ingestion/databento.ts` — Historical API client
-- [ ] **Supabase Realtime subscription in chart** (chart still uses polling, not WebSocket push)
-- [ ] **Sidecar reliability** (systemd/supervisor, auto-restart, health monitoring)
+- Local machines are for training, heavy calculations, and research processing only.
+- Production ingestion, cron jobs, reconciliation, and chart-serving must not depend on local machines.
+- If bar continuity is not provable, fib/model/setup logic is not safe.
 
-## What's Left
+## Current Repo Reality
 
-### Phase 4 — MES Live Data (remaining)
-- [ ] Wire Supabase Realtime into LiveMesChart for instant `series.update()` on new rows
-- [ ] Sidecar process management (systemd or supervisor, not tmux)
-- [ ] Health check endpoint for sidecar status
+- Canonical cutover is in place: legacy `forecasts` is gone and Warbird v1 writes to normalized `warbird_*` tables.
+- Active API surface is `app/api/warbird/signal` and `app/api/warbird/history`.
+- `mes-catchup` exists as a reconciliation route, but it is not the primary data path and is currently unscheduled while its behavior is being audited.
+- The repo still contains some stale legacy scaffolding and documentation from the pre-cutover build plan.
 
-### Phase 5 — Economic & News Data Pipelines
-- [ ] 10 FRED cron routes (rates, yields, vol, inflation, fx, labor, activity, commodities, money, indexes)
-- [ ] Cross-asset cron (non-MES futures from Databento)
-- [ ] News signal cron
-- [ ] Economic calendar cron
-- [ ] GPR index cron
-- [ ] Trump Effect cron (Federal Register + EPU)
-- [ ] `lib/ingestion/fred.ts` — FRED API client
+## Immediate Priorities
 
-### Phase 6 — Signal Engine
-- [ ] `/api/cron/detect-setups` — Warbird setup state machine (Touch -> Hook -> Go -> TP/SL)
-- [ ] `/api/cron/measured-moves` — Daily measured move scan
-- [ ] `/api/cron/score-trades` — Trade outcome scoring
-- [ ] `lib/setup-engine.ts` — needs real data wiring (logic ported, not connected)
-- [ ] Setup markers rendering on chart from live `warbird_setups` table
-- [ ] Pivot lines restored (if desired) from separate data source
+1. Keep docs aligned to canonical Warbird v1 and the current MES authority map.
+2. Restore and verify hosted MES continuity for `mes_1m`, `mes_1h`, `mes_15m`, `mes_4h`, and `mes_1d`.
+3. Fill missing support data needed for trigger and model validation.
+4. Dry-test deterministic engine logic before spending time on training.
+5. Train only after continuity and upstream data integrity are proven.
 
-### Phase 7 — Dashboard Cards
-- [ ] MarketSummaryCard — MES price, change%, sparkline
-- [ ] ActiveSetupsCard — setup counts by phase
-- [ ] SessionStatsCard — session high/low/range/volume
-- [ ] ModelConfidenceCard — hidden until Phase 8
+## Runtime Components
 
-### Phase 8 — Model Integration (deferred)
-- [ ] AutoGluon training pipeline (`scripts/train-warbird.py`)
-- [ ] Inference cron (`/api/cron/forecast`)
-- [ ] Dataset builder (`scripts/build-dataset.py`)
-- [ ] ForecastTargetsPrimitive rendering live predictions
-
-## Cron Jobs (20 total, Vercel Pro limit: 100)
-
-| Schedule | Route | Purpose |
-|----------|-------|---------|
-| `*/5 * * * *` | `/api/cron/mes-catchup` | MES gap fill (backup) |
-| `15 * * * *` | `/api/cron/cross-asset` | Non-MES futures |
-| `0 5-14 * * *` | `/api/cron/fred/[category]` | 10 FRED series |
-| `0 15 * * *` | `/api/cron/econ-calendar` | Econ calendar |
-| `0 16 * * *` | `/api/cron/news` | News signals |
-| `0 19 * * *` | `/api/cron/gpr` | Geopolitical risk |
-| `30 19 * * *` | `/api/cron/trump-effect` | Federal Register + EPU |
-| `3,18,33,48 * * * 1-5` | `/api/cron/detect-setups` | Setup detection |
-| `0 18 * * 1-5` | `/api/cron/measured-moves` | Measured moves |
-| `10,25,40,55 * * * 1-5` | `/api/cron/score-trades` | Trade scoring |
-| `30 * * * 1-5` | `/api/cron/forecast` | ML inference |
-
-## Database (9 migrations)
-
-**MES:** `mes_1m`, `mes_15m`, `mes_1h`, `mes_4h`, `mes_1d`
-**Cross-asset:** `cross_asset_1h`, `cross_asset_1d`, `options_stats_1d`, `options_ohlcv_1d`
-**Economic:** 10 domain tables (rates, yields, vol, inflation, fx, labor, activity, commodities, money, indexes)
-**News:** `econ_news_1d`, `policy_news_1d`, `macro_reports_1d`, `econ_calendar`, `news_signals`, `geopolitical_risk_1d`, `trump_effect_1d`
-**Trading:** `warbird_setups`, `trade_scores`, `measured_moves`, `vol_states`, `forecasts`
-**Meta:** `symbols`, `sources`, `series_catalog`, `models`, `coverage_log`, `job_log`
+- App runtime: Next.js App Router on Vercel
+- Database: Supabase Postgres + Auth + Realtime + RLS
+- Live market data: Databento
+- Live feed sidecar: [scripts/live-feed.py](/Volumes/Satechi%20Hub/warbird-pro/scripts/live-feed.py)
+- Historical backfill: [scripts/backfill.py](/Volumes/Satechi%20Hub/warbird-pro/scripts/backfill.py)
+- Canonical Warbird engine: [scripts/warbird](/Volumes/Satechi%20Hub/warbird-pro/scripts/warbird)
 
 ## Local Development
 
 ```bash
 npm install
-npm run dev          # Next.js on :3000
+npm run dev
 ```
 
-### Live feed sidecar (requires Databento subscription)
-```bash
-pip install databento supabase
-python scripts/live-feed.py
-```
+### Required environment variables
 
-### Environment variables
-```
+```text
 NEXT_PUBLIC_SUPABASE_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY
 SUPABASE_SERVICE_ROLE_KEY

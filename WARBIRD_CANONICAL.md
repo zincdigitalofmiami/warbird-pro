@@ -8,7 +8,7 @@ This is the single source of truth for Warbird Pro. All other planning docs, AGE
 
 ## 1. WHAT WARBIRD IS
 
-Warbird is an ML-powered S&P 500 Micro E-mini (MES) futures intelligence platform. It combines a multi-timeframe conviction system with a machine learning core forecaster to produce trade signals with probabilistic targets, risk-calibrated stops, and runner management.
+Warbird is an ML-powered S&P 500 Micro E-mini (MES) futures intelligence platform. It combines a multi-timeframe conviction system with a machine learning core forecaster to produce trade signals with probabilistic targets and risk-calibrated stops.
 
 It is NOT a simple candlestick pattern matcher. The old Touch → Hook → Go state machine (ported from BHG/rabid-raccoon) is legacy scaffolding and does not represent the real methodology.
 

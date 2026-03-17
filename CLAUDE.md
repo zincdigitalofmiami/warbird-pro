@@ -3,31 +3,40 @@ Read and follow AGENTS.md at the repository root.
 ## Quick Reference
 
 - **Plan:** `/Users/zincdigital/.claude/plans/gentle-giggling-mccarthy.md`
+- **Canonical spec:** `/Volumes/Satechi Hub/warbird-pro/WARBIRD_CANONICAL.md`
 - **Live:** warbird-pro.vercel.app
 - **Repo:** github.com/zincdigitalofmiami/warbird-pro
 - **DB:** Supabase (check env vars, NOT Prisma)
 
-## Current Status (2026-03-15)
+## Current Status (2026-03-16)
 
-**Phases 1-3 complete. Phase 4 partial. Phases 5-8 not started.**
+Canonical Warbird v1 cutover is the active architecture. Older phase-plan language is not authoritative where it conflicts.
 
-### Done
+### Locked Rules
+- 1H is the only fib-anchor timeframe.
+- MES authority map:
+  - `mes_1m` direct from source
+  - `mes_1h` direct from source
+  - `mes_1d` direct from source for macro bias only
+  - `mes_15m` derived from stored `mes_1m`
+  - `mes_4h` derived from stored `mes_1h`
+- Local machines are for training/calculations/research only.
+- Production ingestion, crons, reconciliation, and chart-serving must not depend on local machines.
+
+### Repo Reality
 - Auth flow (login, signup, forgot-password, protected routes)
-- 9 SQL migrations applied, seed data loaded (60 symbols, 31 FRED series)
+- 10 SQL migrations in repo, including the canonical Warbird v1 cutover
 - MES 15m chart rendering with gap-free time mapping
-- 10 fib levels (ZERO through TARGET 3), multi-period confluence scoring
-- Fib lines: clean (no text labels, no axis labels), correct colors and widths
-- Python sidecar streaming Databento Live -> mes_1m + mes_15m
-- Vercel Cron catch-up every 5 min (gap recovery)
-- 20 cron routes defined in vercel.json
+- Canonical Warbird routes exist at `/api/warbird/signal` and `/api/warbird/history`
+- Python sidecar and backfill writers exist, but production data continuity still needs verification
+- `mes-catchup` is a reconciliation route, not a second primary writer
 
 ### Next Up (in order)
-1. Wire Supabase Realtime into LiveMesChart (replace polling with WebSocket push)
-2. Sidecar reliability (process management, health check)
-3. Phase 5: FRED + cross-asset + news data pipelines (15 cron routes)
-4. Phase 6: Signal engine (detect-setups, measured-moves, score-trades)
-5. Phase 7: Dashboard cards (MarketSummary, ActiveSetups, SessionStats)
-6. Phase 8: ML model integration (deferred until training completes)
+1. Keep docs aligned to canonical Warbird v1 and the current MES authority map
+2. Restore and verify hosted MES continuity for direct-source and derived bars
+3. Fill missing support data needed for trigger/model validation
+4. Dry-test deterministic engine logic
+5. Train only after data continuity is proven
 
 ## Absolute Rules
 
