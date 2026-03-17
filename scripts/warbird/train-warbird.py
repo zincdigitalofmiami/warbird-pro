@@ -2,9 +2,9 @@
 """
 Canonical Warbird v1 training pipeline.
 
-Trains the 1H core forecaster bundle against the canonical dataset. AutoGluon
-still requires one label per predictor, so this script trains a single model
-bundle with six locked heads.
+Trains the Warbird v1 model bundle against the canonical dataset. AutoGluon
+trains one predictor per target: 3 binary (TP1/TP2/stopped) + 2 regression
+(MFE/MAE). RF included in ensemble.
 """
 
 from __future__ import annotations
@@ -15,14 +15,13 @@ from pathlib import Path
 
 import pandas as pd
 
-TARGETS = [
-    "target_price_1h",
-    "target_price_4h",
-    "target_mae_1h",
-    "target_mae_4h",
-    "target_mfe_1h",
-    "target_mfe_4h",
-]
+TARGET_CONFIG = {
+    "reached_tp1":           {"problem_type": "binary",     "eval_metric": "roc_auc"},
+    "reached_tp2":           {"problem_type": "binary",     "eval_metric": "roc_auc"},
+    "setup_stopped":         {"problem_type": "binary",     "eval_metric": "roc_auc"},
+    "max_favorable_excursion": {"problem_type": "regression", "eval_metric": "root_mean_squared_error"},
+    "max_adverse_excursion":   {"problem_type": "regression", "eval_metric": "root_mean_squared_error"},
+}
 
 DROP_COLS = {
     "timestamp",
@@ -31,6 +30,12 @@ DROP_COLS = {
     "low",
     "close",
     "volume",
+    "target_price_1h",
+    "target_price_4h",
+    "target_mae_1h",
+    "target_mae_4h",
+    "target_mfe_1h",
+    "target_mfe_4h",
 }
 
 
@@ -53,7 +58,7 @@ def main() -> None:
 
     bundle_manifest: dict[str, dict] = {}
 
-    for target in TARGETS:
+    for target, config in TARGET_CONFIG.items():
         feature_cols = [
             col
             for col in df.columns
@@ -62,7 +67,8 @@ def main() -> None:
         predictor_path = output_dir / target
         predictor = TabularPredictor(
             label=target,
-            eval_metric="root_mean_squared_error",
+            problem_type=config["problem_type"],
+            eval_metric=config["eval_metric"],
             path=str(predictor_path),
         )
         predictor.fit(
@@ -72,7 +78,7 @@ def main() -> None:
             num_bag_folds=5,
             num_stack_levels=1,
             dynamic_stacking="auto",
-            excluded_model_types=["KNN", "FASTAI", "RF"],
+            excluded_model_types=["KNN", "FASTAI"],
             ag_args_ensemble={"fold_fitting_strategy": "sequential_local"},
         )
 
