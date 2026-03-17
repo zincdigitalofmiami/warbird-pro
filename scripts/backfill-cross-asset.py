@@ -46,6 +46,7 @@ def main() -> None:
                 dataset="GLBX.MDP3",
                 schema="ohlcv-1h",
                 symbols=[db_symbol],
+                stype_in="continuous",
                 start=start,
                 end=end,
             ).to_df()
