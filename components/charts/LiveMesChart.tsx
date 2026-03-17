@@ -670,7 +670,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         }
       }
 
-      // Subscribe to Supabase Realtime for mes_15m updates
+      // Subscribe to Supabase Realtime for mes_15m updates (completed bars)
       const channel = supabase
         .channel("mes_15m_realtime")
         .on(
@@ -701,11 +701,95 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
           }
         });
 
+      // ── Forming-bar: subscribe to mes_1m for intra-bar updates ──────────
+      // Aggregates incoming 1m ticks into the current forming 15m candle
+      // so the chart stays current between 15m bar closes.
+      let currentFormingBar: { ts: number; open: number; high: number; low: number; close: number; volume: number } | null = null;
+
+      const channel1m = supabase
+        .channel("mes_1m_forming")
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "mes_1m",
+          },
+          (payload) => {
+            if (cancelled || !seriesRef.current) return;
+            const row = payload.new as {
+              ts: string;
+              open: number;
+              high: number;
+              low: number;
+              close: number;
+              volume: number;
+            };
+            if (!row?.ts) return;
+
+            const tickTime = Math.floor(new Date(row.ts).getTime() / 1000);
+            // Floor to 15m bucket
+            const barTime = Math.floor(tickTime / BAR_INTERVAL_SEC) * BAR_INTERVAL_SEC;
+
+            // If this 15m bar already exists as a completed bar, skip
+            // (the mes_15m channel already handles completed bars)
+            const existsAsCompleted = realPointsRef.current.some(
+              (p) => p.time === barTime,
+            );
+            if (existsAsCompleted) return;
+
+            const open = Number(row.open);
+            const high = Number(row.high);
+            const low = Number(row.low);
+            const close = Number(row.close);
+            const vol = Number(row.volume);
+
+            if (currentFormingBar && currentFormingBar.ts === barTime) {
+              // Update existing forming bar with new 1m tick
+              currentFormingBar.high = Math.max(currentFormingBar.high, high);
+              currentFormingBar.low = Math.min(currentFormingBar.low, low);
+              currentFormingBar.close = close;
+              currentFormingBar.volume += vol;
+            } else {
+              // New 15m bucket — start a fresh forming bar
+              currentFormingBar = { ts: barTime, open, high, low, close, volume: vol };
+            }
+
+            const fb = currentFormingBar;
+
+            // Map forming bar to gap-free time and push to chart
+            let gfTime = timeMapRef.current.realToGf.get(barTime);
+            if (gfTime == null && pointsRef.current.length > 0) {
+              // This is a brand-new forming bar — assign next gap-free slot
+              const lastGfTime = pointsRef.current[pointsRef.current.length - 1].time;
+              gfTime = lastGfTime + BAR_INTERVAL_SEC;
+              timeMapRef.current.realToGf.set(barTime, gfTime);
+              timeMapRef.current.gfToReal.set(gfTime, barTime);
+            }
+
+            if (gfTime != null) {
+              seriesRef.current!.update({
+                time: gfTime as UTCTimestamp,
+                open: fb.open,
+                high: fb.high,
+                low: fb.low,
+                close: fb.close,
+              });
+
+              // Update last price for header display
+              setLastPrice(fb.close);
+              setStatus("live");
+            }
+          },
+        )
+        .subscribe();
+
       startRealtimeFeed();
 
       return () => {
         cancelled = true;
         supabase.removeChannel(channel);
+        supabase.removeChannel(channel1m);
       };
     }, []);
 
