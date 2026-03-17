@@ -33,53 +33,64 @@ def main() -> None:
     sb_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
     supabase = create_client(sb_url, sb_key)
 
-    start = "2024-01-01"
-    end = "2026-03-17"  # exclusive upper bound for Databento
+    start_date = date(2024, 1, 1)
+    end_date = date(2026, 3, 17)  # exclusive upper bound
 
     client = db.Historical(api_key)
 
     for db_symbol in CORRELATION_SYMBOLS:
         symbol_code = SYMBOL_TO_CODE[db_symbol]
         print(f"Fetching {symbol_code} ({db_symbol})...")
-        try:
-            data = client.timeseries.get_range(
-                dataset="GLBX.MDP3",
-                schema="ohlcv-1h",
-                symbols=[db_symbol],
-                stype_in="continuous",
-                start=start,
-                end=end,
-            ).to_df()
-        except Exception as exc:
-            print(f"  SKIP {symbol_code}: {exc}")
-            continue
+        total_rows = 0
 
-        if data.empty:
-            print(f"  SKIP {symbol_code}: no data returned")
-            continue
+        # Chunk by quarter (90 days) to spread out pulls
+        chunk_start = start_date
+        while chunk_start < end_date:
+            chunk_end = min(chunk_start + timedelta(days=90), end_date)
+            print(f"  {chunk_start} → {chunk_end}...", end=" ", flush=True)
 
-        rows = []
-        for _, bar in data.iterrows():
-            rows.append({
-                "ts": bar.name.isoformat() if hasattr(bar.name, "isoformat") else str(bar["ts_event"]),
-                "symbol_code": symbol_code,
-                "open": float(bar["open"]) / 1e9 if bar["open"] > 1e6 else float(bar["open"]),
-                "high": float(bar["high"]) / 1e9 if bar["high"] > 1e6 else float(bar["high"]),
-                "low": float(bar["low"]) / 1e9 if bar["low"] > 1e6 else float(bar["low"]),
-                "close": float(bar["close"]) / 1e9 if bar["close"] > 1e6 else float(bar["close"]),
-                "volume": int(bar["volume"]),
-            })
+            try:
+                data = client.timeseries.get_range(
+                    dataset="GLBX.MDP3",
+                    schema="ohlcv-1h",
+                    symbols=[db_symbol],
+                    stype_in="continuous",
+                    start=chunk_start.isoformat(),
+                    end=chunk_end.isoformat(),
+                ).to_df()
+            except Exception as exc:
+                print(f"ERROR: {exc}")
+                chunk_start = chunk_end
+                continue
 
-        # Upsert in chunks of 500
-        chunk_size = 500
-        for i in range(0, len(rows), chunk_size):
-            chunk = rows[i:i + chunk_size]
-            res = supabase.table("cross_asset_1h").upsert(chunk, on_conflict="ts,symbol_code").execute()
-            if hasattr(res, "error") and res.error:
-                print(f"  ERROR upserting {symbol_code}: {res.error}")
-                break
+            if data.empty:
+                print("no data")
+                chunk_start = chunk_end
+                continue
 
-        print(f"  {symbol_code}: {len(rows)} bars upserted")
+            rows = []
+            for _, bar in data.iterrows():
+                rows.append({
+                    "ts": bar.name.isoformat() if hasattr(bar.name, "isoformat") else str(bar["ts_event"]),
+                    "symbol_code": symbol_code,
+                    "open": float(bar["open"]) / 1e9 if bar["open"] > 1e6 else float(bar["open"]),
+                    "high": float(bar["high"]) / 1e9 if bar["high"] > 1e6 else float(bar["high"]),
+                    "low": float(bar["low"]) / 1e9 if bar["low"] > 1e6 else float(bar["low"]),
+                    "close": float(bar["close"]) / 1e9 if bar["close"] > 1e6 else float(bar["close"]),
+                    "volume": int(bar["volume"]),
+                })
+
+            # Upsert in chunks of 500
+            for i in range(0, len(rows), 500):
+                supabase.table("cross_asset_1h").upsert(
+                    rows[i:i + 500], on_conflict="ts,symbol_code"
+                ).execute()
+
+            print(f"{len(rows)} bars")
+            total_rows += len(rows)
+            chunk_start = chunk_end
+
+        print(f"  {symbol_code} total: {total_rows} bars upserted")
 
 if __name__ == "__main__":
     main()
