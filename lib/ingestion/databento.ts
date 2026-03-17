@@ -99,7 +99,18 @@ export async function fetchOhlcv(params: {
       availableEnd = null;
     }
     if (!availableEnd || availableEnd === queryEnd) break;
+
+    // If available_end is before our start, data isn't ready yet — return empty
+    if (new Date(availableEnd).getTime() <= new Date(params.start).getTime()) {
+      return [];
+    }
     queryEnd = availableEnd;
+  }
+
+  // If we exhausted retries on a 422 (data not yet available), return empty
+  // instead of throwing — the next cron run will pick it up
+  if (lastStatus === 422) {
+    return [];
   }
 
   throw new Error(`Databento API error ${lastStatus}: ${lastError.slice(0, 500)}`);

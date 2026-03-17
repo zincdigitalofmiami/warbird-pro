@@ -96,10 +96,10 @@ export async function GET(request: Request) {
       }
     }
 
-    // Databento historical API has a short delay; 5 min buffer
-    const gapEnd = new Date(now.getTime() - 5 * 60 * 1000);
+    // Databento historical API has a short delay; 2 min buffer
+    const gapEnd = new Date(now.getTime() - 2 * 60 * 1000);
 
-    if (gapEnd.getTime() - gapStart.getTime() < 60_000) {
+    if (gapEnd.getTime() <= gapStart.getTime() + 60_000) {
       return NextResponse.json({
         success: true,
         gaps_filled: 0,
