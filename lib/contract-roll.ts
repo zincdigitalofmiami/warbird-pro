@@ -53,3 +53,37 @@ export function activeMesContract(now?: Date): string {
   }
   return active;
 }
+
+/**
+ * Split a date range into segments, each with the correct contract symbol.
+ * Handles roll boundaries so historical backfills use the right contract
+ * at every point in time — matching TradingView's volume roll.
+ */
+export function getContractSegments(
+  start: Date,
+  end: Date,
+): Array<{ start: Date; end: Date; symbol: string }> {
+  const segments: Array<{ start: Date; end: Date; symbol: string }> = [];
+  let cursor = new Date(start);
+
+  while (cursor < end) {
+    const symbol = activeMesContract(cursor);
+
+    // Walk forward day-by-day to find when the contract changes
+    let segEnd = new Date(end);
+    const check = new Date(cursor);
+    while (check < end) {
+      check.setUTCDate(check.getUTCDate() + 1);
+      if (check >= end) break;
+      if (activeMesContract(check) !== symbol) {
+        segEnd = new Date(check);
+        break;
+      }
+    }
+
+    segments.push({ start: new Date(cursor), end: segEnd, symbol });
+    cursor = segEnd;
+  }
+
+  return segments;
+}
