@@ -1,6 +1,6 @@
 # WARBIRD PRO — CANONICAL SPECIFICATION
 
-**Version:** 1.0 · **Date:** 2026-03-15 · **Author:** Kirk Musick, MS, MBA · **Status:** ACTIVE
+**Version:** 1.0 · **Date:** 2026-03-16 · **Author:** Kirk Musick, MS, MBA · **Status:** ACTIVE
 
 This is the single source of truth for Warbird Pro. All other planning docs, AGENTS.md references, and prior specs defer to this document where they conflict.
 
@@ -44,11 +44,22 @@ scripts/warbird/
   garch-engine.py             # GJR-GARCH(1,1) volatility estimation
   daily-layer.ts              # 200d MA bias + continuous features
   structure-4h.ts             # 4H swing structure detection
-  trigger-15m.ts              # 15M entry confirmation logic
   conviction-matrix.ts        # Multi-layer conviction scoring
 ```
 
 Existing `scripts/` files (live-feed.py, backfill.py, mes_aggregation.py) stay where they are — they're data pipeline, not Warbird engine.
+
+### MES Bar Authority Map
+
+Warbird v1 uses a single authority per MES timeframe:
+
+- `mes_1m` — direct from Databento
+- `mes_1h` — direct from Databento
+- `mes_1d` — direct from Databento for macro bias only
+- `mes_15m` — derived from stored `mes_1m`
+- `mes_4h` — derived from stored `mes_1h`
+
+This is intentional. Do not create duplicate live writer paths for the same timeframe. Reconciliation is allowed. A second primary writer is not.
 
 ### Persisted Output Shape — Normalized + API Projection
 
@@ -63,10 +74,9 @@ DB Tables (normalized, each layer writes independently):
   warbird_daily_bias    → daily 200d MA bias + features
   warbird_structure_4h  → 4H trend/swing state
   warbird_forecasts_1h  → core forecaster predictions (price, MAE, MFE)
-  warbird_triggers_15m  → 15M GO/NO-GO decisions
   warbird_conviction    → combined conviction assessment
   warbird_setups        → active setup geometry (entry, SL, TP1, TP2)
-  warbird_setup_events  → outcome lifecycle (TRIGGERED, TP1_HIT, TP2_HIT, RUNNER_STARTED, RUNNER_EXITED, STOPPED, EXPIRED, PULLBACK_REVERSAL)
+  warbird_setup_events  → outcome lifecycle (TRIGGERED, TP1_HIT, TP2_HIT, STOPPED, EXPIRED)
   warbird_risk          → GARCH zones, risk context snapshot
 
 API Projection (composed at read time):
@@ -80,7 +90,7 @@ The existing `warbird_setups` and `forecasts` tables are rebuilt in place via mi
 
 Migration order:
 1. Drop old `warbird_setups` and `forecasts` tables (and associated RLS/Realtime)
-2. Create new normalized tables (warbird_daily_bias, warbird_structure_4h, warbird_forecasts_1h, warbird_triggers_15m, warbird_conviction, warbird_setups, warbird_setup_events, warbird_risk)
+2. Create new normalized tables (warbird_daily_bias, warbird_structure_4h, warbird_forecasts_1h, warbird_conviction, warbird_setups, warbird_setup_events, warbird_risk)
 3. Re-enable RLS on all new tables
 4. Re-enable Realtime on warbird_forecasts_1h, warbird_conviction, warbird_setups, warbird_setup_events
 
@@ -88,11 +98,11 @@ Migration order:
 
 ---
 
-## 3. THE 4-LAYER CONVICTION ARCHITECTURE
+## 3. THE 3-LAYER CONVICTION ARCHITECTURE
 
 **Layer 1 — DAILY: 200-Day MA Shadow (Rule-Based)**
 - Price vs 200d MA → bias LONG or SHORT
-- Counter-trend: allowed but penalized (reduced size, T1 only, no runners)
+- Counter-trend: allowed but penalized (reduced size, TP1 only)
 - Features to model: distance_pct, slope, sessions_on_side, daily_ret, daily_range_vs_avg
 
 **Layer 2 — 4H: Trend & Structure (Rule-Based)**
@@ -103,54 +113,26 @@ Migration order:
 
 **Layer 3 — 1H: Core Forecaster + Fib Geometry (ONE ML Model + Rules)**
 - THIS IS WHERE THE FIBS LIVE. THIS IS WHERE TRADES ARE IDENTIFIED.
-- ML Model (AutoGluon): predicts price levels + MAE/MFE bands, ~150-170 features
+- ML Model (AutoGluon): predicts 5 fib-relative targets per setup
 - Fib Geometry (Rule-Based): measured moves on 1H candles, retracements, extensions
 - Entry / SL / TP1 / TP2 computation, 20-40+ point trade targets
-- Model + fibs on SAME canvas — direct comparison possible
-
-**Layer 4 — 15M: Entry Trigger Confirmation (Rule-Based in v1)**
-- Candle close confirmation at fib level
-- Volume expansion on trigger bar
-- Which fib line was used for the drive up/down
-- Cross-asset correlation confirmation at trigger moment
-- Volatility state at trigger (GARCH regime, VIX level)
-- Stoch RSI check
-- Uses 1H model output as context (not a separate ML model in v1)
-- GO / NO-GO decision
-
-**CRITICAL DESIGN DECISION:** The 15M trigger involves so many factors (volume, specific fib line, correlations, volatility) that much of this complexity is pushed INTO the 1H training model as features. The model learns which fib lines produce the best setups, which volume conditions matter, which correlation states confirm — rather than hardcoding these as rule-based filters. The 15M layer remains rule-based for the final GO/NO-GO, but the model has already scored the setup quality using trigger-context features.
-
-**THE "TELL" MECHANISM — How the Model Distills Complexity for the Trigger:**
-
-15M is too noisy for ML. 1H is where the model lives. But the model's 6 prediction outputs (price, MAE, MFE at 1h and 4h horizons) ARE the distilled tells — they encode 150+ features worth of context into actionable numbers. The 15M trigger and runner logic consume these tells, not raw features:
-
-- **Trigger quality tell:** `mfe_1h / mae_1h` ratio. High ratio = model sees good risk/reward. This single number encodes all the volume, fib, correlation, and volatility context the model trained on. The 15M trigger checks this ratio + candle close confirmation + volume expansion. Three things, not twenty.
-
-- **Runner tell:** `mfe_4h` vs TP2 distance. If the model's 4h MFE exceeds the distance to TP2, the model is saying "there's enough favorable movement for a runner." After TP1 hits, runner decision checks: model's 4h MFE still shows room + volume still expanding post-TP1. Two things, not twenty.
-
-- **No-trade tell:** `mae_1h` exceeds stop distance, or MFE/MAE ratio below threshold. Model is saying "the heat is too high relative to the reward." Skip.
-
-The chart renders none of this processing. The model runs hourly, writes 6 numbers to the DB. Trigger logic reads them. Chart shows the result.
+- GO/NO-GO determined by fib geometry availability on 1H candles
 
 **Conviction Matrix (Rule-Based)**
-- All 4 layers agree → MAXIMUM conviction (full position, runners OK)
-- Daily+4H+1H agree, 15M weak → WAIT or reduce size
-- Daily+4H agree, 1H identifies → READY — watch for 15M entry
-- 4H+1H+15M agree, Daily neutral → MODERATE (reduced size, T1, quick mgmt)
-- 4H+1H+15M agree, Daily against → LOW / COUNTER-TREND (T1 only, NO runners)
+- Daily+4H+1H all agree → MAXIMUM conviction (full position)
+- Daily+4H agree, 1H weak → HIGH/MODERATE (reduced size)
+- 4H+1H agree, Daily neutral → MODERATE (reduced size, TP1 focus)
+- 4H+1H agree, Daily against → LOW / COUNTER-TREND (TP1 only)
 - Daily against + other disagreement → NO TRADE
 
 ---
 
-## 4. TRADE TARGETS: TP1, TP2, AND RUNNERS
+## 4. TRADE TARGETS: TP1 AND TP2
 
 - **TP1** — 1.236 fib extension. First profit target. Partial exit.
-- **TP2** — 1.618 fib extension. Second target. Larger partial exit.
-- **Runner** — Position held past TP2 with pullback checks allowing continuation.
+- **TP2** — 1.618 fib extension. Second target. Full exit.
 
-Runner eligibility requires: full conviction (all layers agree, with-trend), volume expansion after TP1, pullback checks pass (micro-pullback with volume drop → spike = continuation).
-
-Counter-trend trades: TP1 only, no runners, reduced size. Always.
+No runner logic in v1. Counter-trend trades: TP1 only, reduced size.
 
 ---
 
@@ -158,25 +140,24 @@ Counter-trend trades: TP1 only, no runners, reduced size. Always.
 
 The 1H Core Forecaster is the ONLY ML model in Warbird v1.
 
-**NOT in v1:** 15M ML model (v2), setup outcome scorer (v3), Monte Carlo (v2), pinball/quantile regression (v2/v3).
+**NOT in v1:** 15M ML trigger model (v2), runner logic (v2), setup outcome scorer (v3), Monte Carlo (v2), pinball/quantile regression (v2/v3).
 
 ---
 
 ## 6. CANONICAL DATASET — 1H CORE FORECASTER
 
-**Rows:** One per 1H MES candle (~11,688; grows with time)
+**Rows:** One per 1H fib setup (only bars where `buildFibGeometry()` returns non-null)
 **Training window:** 2 full years back to January 1, 2024
-**Expected columns:** ~150-170 features + 6 targets + 1 sample_weight
+**Expected columns:** ~150-170 features + 5 targets + 1 sample_weight
 **Builder:** `build-warbird-dataset.ts` (all new, Supabase-native)
 
-### 6 Target Labels
+### 5 Fib-Relative Target Labels
 
-- `target_price_1h` — Price level 1 hour forward
-- `target_price_4h` — Price level 4 hours forward
-- `target_mae_1h` — Max adverse excursion (drawdown) in 1h
-- `target_mae_4h` — Max adverse excursion (drawdown) in 4h
-- `target_mfe_1h` — Max favorable excursion (runup) in 1h
-- `target_mfe_4h` — Max favorable excursion (runup) in 4h
+- `reached_tp1` — Binary: did price reach TP1 within 100 bars?
+- `reached_tp2` — Binary: did price reach TP2 within 100 bars?
+- `setup_stopped` — Binary: did price hit stop loss within 100 bars?
+- `max_favorable_excursion` — Regression: max points in favorable direction within 100 bars
+- `max_adverse_excursion` — Regression: max points in adverse direction within 100 bars
 
 ### Feature Groups
 
@@ -218,7 +199,8 @@ For every normalized/transformed feature, also carry the raw continuous value. Z
 ```python
 predictor = TabularPredictor(
     label=target_col,
-    eval_metric='root_mean_squared_error',
+    problem_type=problem_type,          # 'binary' or 'regression' per target
+    eval_metric=eval_metric,            # 'roc_auc' or 'root_mean_squared_error'
     path=output_dir,
 )
 predictor.fit(
@@ -227,10 +209,10 @@ predictor.fit(
     num_bag_folds=5,                    # LOCKED
     num_stack_levels=1,                 # Not 2
     dynamic_stacking='auto',
-    excluded_model_types=['KNN', 'FASTAI', 'RF'],
+    excluded_model_types=['KNN', 'FASTAI'],
     ag_args_ensemble={'fold_fitting_strategy': 'sequential_local'},
 )
-# Active models: GBM, CAT, XGB, XT, NN_TORCH
+# Active models: GBM, CAT, XGB, XT, RF, NN_TORCH
 ```
 
 ---
@@ -256,10 +238,8 @@ Training data spans full 2 years (Jan 1, 2024 → present). Model sees both regi
 
 Volume is NOT a generic feature. Specific roles:
 
-- **Trigger detection (rule-based):** expansion on trigger candle confirms breakout is real
-- **Trigger context (model feature):** volume state at trigger moment enters the model — the model learns which volume conditions produce winning setups vs. fakeouts
 - **Core forecaster:** vol_ratio, volume profile, abnormal volume as regime indicator
-- **Runner decisions (CRITICAL):** expansion after TP1 → hold for TP2; exhaustion at TP1 → take profit; micro-pullback volume drop then spike → continuation → TP2 likely
+- **Model feature:** volume state at fib setup moment enters the model — the model learns which volume conditions produce winning setups vs. fakeouts
 
 ---
 
@@ -281,10 +261,9 @@ Raw companions for every normalization. No hardcoded ceilings. No clipping. Tree
 |-----------|------|-----|-------|
 | Daily | 200d MA directional shadow | No | No |
 | 4H | Trend/structure confirmation | No (v1) | No (too wide) |
-| 1H | Core forecaster + fib geometry | YES | YES |
-| 15M | Entry trigger confirmation | No (v1), rule-based | Uses 1H levels |
+| 1H | Core forecaster + fib geometry + GO/NO-GO | YES | YES |
 
-The fib engine operates on 1H candles to correlate with the 1H training/model/engine. The 15M provides entry triggers using signals and confirmations from the 1H framework. Start with 1H model; figure out 15M trigger point from there.
+The fib engine operates on 1H candles only. GO/NO-GO is determined by fib geometry availability on 1H. Daily bars are macro bias only and are not fib anchors in v1.
 
 ---
 
@@ -299,8 +278,8 @@ Versioned schema consumed by API → Dashboard → (future) Pine Script:
 - **Daily layer:** bias (BULL/BEAR/NEUTRAL), distance_pct, slope
 - **4H structure:** bias_4h, agrees_with_daily
 - **1H directional:** bias_1h, price_target_1h/4h, mae/mfe_band_1h/4h, confidence
-- **Conviction:** level (MAXIMUM/HIGH/MODERATE/LOW/NO_TRADE), counter_trend, runner_eligible
-- **Setup:** direction, fibLevel, entry, SL, TP1, TP2, volume_confirmation
+- **Conviction:** level (MAXIMUM/HIGH/MODERATE/LOW/NO_TRADE), counter_trend
+- **Setup:** direction, fibLevel, entry, SL, TP1, TP2
 - **Risk:** garch_vol, gpr_level, trump_effect, vix_level, regime, days_into_regime
 - **GARCH zones:** 1σ and 2σ boundaries
 - **Feedback:** win_rate_last20, streak, avg_r, setup_frequency_7d
@@ -310,10 +289,11 @@ Versioned schema consumed by API → Dashboard → (future) Pine Script:
 ## 15. WHAT EXISTS AND IS VALID
 
 - Fib geometry on chart (FibLinesPrimitive, confluence scoring, 10 levels)
-- MES data pipeline (sidecar, mes_1m/15m/1h/4h/1d flowing)
-- Supabase schema (9 migrations, all tables)
+- MES schema and writer paths for `mes_1m`, `mes_15m`, `mes_1h`, `mes_4h`, `mes_1d`
+- Supabase schema (10 migrations, including the Warbird v1 cutover)
 - Auth flow, protected routes, admin dashboard structure
-- 20 cron routes defined (skeleton implementations for most)
+- Canonical Warbird routes (`/api/warbird/signal`, `/api/warbird/history`)
+- Cron route surface defined (with some routes still under audit or incomplete)
 - Raw FRED integration (~90-95 cols, P1 done)
 - Chart rendering (LiveMesChart.tsx, gap-free mapping, correct colors/fibs)
 
@@ -322,49 +302,19 @@ Versioned schema consumed by API → Dashboard → (future) Pine Script:
 ## 16. WHAT IS STALE / TO BE REPLACED
 
 - `setup-engine.ts` (Touch → Hook → Go) — old BHG pattern matcher, not real methodology
-- `detect-setups` cron — running wrong logic, producing wrong data
-- `setup_phase` enum (TOUCHED/HOOKED/GO_FIRED) — doesn't map to conviction system
-- `warbird_setups` table (old schema) — rebuild in place with new layered schema via migration
-- `forecasts` table (old schema) — rebuild in place, replaced by warbird_forecasts_1h
-- AGENTS.md references to stack_levels=2, 12 models, Inngest — stale
-- `train-warbird.py` — exists with stale AG config, needs sync to this spec
-- `predict-warbird.py` — exists but doesn't produce WarbirdSignal contract
+- Older pre-cutover docs and plan references that still describe Touch/Hook/Go or retired `/api/setups` and `/api/forecasts` surfaces
+- Any duplicate MES writer path that acts like a second primary authority instead of reconciliation
 
 ---
 
 ## 17. WHAT NEEDS TO BE BUILT
 
-### PRIORITY (Fix Now)
-0a. **Chart fix:** Resolve `Cannot update oldest data` Lightweight Charts error — remove future whitespace from candlestick series, use hidden companion series for future-space rendering. Chart must be stable before engine work.
-0b. **Regime anchors on chart:** Add January 20, 2025 regime anchor visualization to the chart.
-
-### Immediate (Dataset + Engine Foundation)
-1. Create `scripts/warbird/` directory with all new engine scripts
-2. Migration: rebuild `warbird_setups` and `forecasts` in place → new layered tables (warbird_daily_bias, warbird_structure_4h, warbird_forecasts_1h, warbird_triggers_15m, warbird_conviction, warbird_setups, warbird_setup_events, warbird_risk)
-3. 1H Fib Engine (`scripts/warbird/fib-engine.ts`) — measured moves, retracements, extensions, confluence on 1H
-4. Dataset builder (`scripts/warbird/build-warbird-dataset.ts`) — all feature groups from Supabase data
-5. Daily layer (`scripts/warbird/daily-layer.ts`) — 200d MA computation, bias, continuous features
-6. 4H structure layer (`scripts/warbird/structure-4h.ts`) — swing detection, trend confirmation
-7. API projection route (`/api/warbird/signal`) — assembles WarbirdSignal v1.0 from normalized tables
-
-### Training Pipeline
-8. AutoGluon training (`scripts/warbird/train-warbird.py`) — canonical config, 5 folds, stack=1, one model
-9. GARCH engine (`scripts/warbird/garch-engine.py`) — GJR-GARCH(1,1), regime-anchored, dual output
-
-### Inference + Integration
-10. Inference pipeline (`scripts/warbird/predict-warbird.py`) — hourly WarbirdSignal v1.0 production
-11. Conviction matrix (`scripts/warbird/conviction-matrix.ts`) — rule-based scoring combining all 4 layers
-12. 15M trigger logic (`scripts/warbird/trigger-15m.ts`) — rule-based entry confirmation with 1H context
-13. Dashboard cards — WarbirdPredictionCard, chart primitive updates
-
-### Data Pipelines (Pending)
-14. P2: Derived FRED (velocity, percentile, momentum)
-15. P3: Cross-asset futures (aligned 1H, ratios, correlations)
-16. P4: Calendar events (FOMC/CPI/NFP flags, proximity)
-17. P5: News signals (layer counts, sentiment)
-18. Surprise z-scores (HIGHEST ROI, requires backfill)
-19. Trade feedback features (rolling win rates, R-multiples)
-20. Geopolitical risk ingestion (GPR, TrumpEffect)
+### Operational Priorities
+1. Keep docs and control surfaces aligned to canonical Warbird v1.
+2. Restore and verify hosted MES continuity for the authority map above.
+3. Fill missing support data required for trigger/model validation.
+4. Dry-test deterministic engine layers against real historical data.
+5. Train only after data continuity and upstream integrity are proven.
 
 ---
 
@@ -405,10 +355,10 @@ Versioned schema consumed by API → Dashboard → (future) Pine Script:
 ## 19. WARBIRD ROADMAP
 
 ### v1 (Current Scope)
-ONE ML model (1H), rule-based layers (Daily/4H/15M/conviction), GARCH, full feature pipeline, regime-anchored features, WarbirdSignal v1.0.
+ONE ML model (1H), rule-based layers (Daily/4H/conviction), GARCH, full feature pipeline, regime-anchored features, WarbirdSignal v1.0. 5 fib-relative targets. No runners.
 
 ### v2 (After v1 Stable)
-15M ML model, Monte Carlo on validated GARCH, pinball loss, fold upgrade (5→8 A/B), Pine Script integration.
+15M ML trigger model, runner logic, Monte Carlo on validated GARCH, pinball loss, fold upgrade (5→8 A/B), Pine Script integration.
 
 ### v3 (After Setup Count Grows)
 Setup outcome scorer P(T1)/P(T2)/P(Runner|T1), survival model, FinBERT sentiment, hyperparameter optimization.

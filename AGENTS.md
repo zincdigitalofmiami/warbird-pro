@@ -7,6 +7,8 @@ Read this ENTIRE file before any work. No exceptions.
 Full implementation plan with all 8 phases, architecture decisions, and naming overhaul:
 `/Users/zincdigital/.claude/plans/gentle-giggling-mccarthy.md`
 
+When the plan conflicts with `WARBIRD_CANONICAL.md`, the canonical spec wins.
+
 ## Stack
 
 - Next.js (App Router) on Vercel
@@ -52,12 +54,26 @@ Full implementation plan with all 8 phases, architecture decisions, and naming o
 - All cron routes validate `CRON_SECRET` header.
 - All cron routes log to `job_log` table.
 - All cron routes: `export const maxDuration = 60`
+- If a route is paused or under audit, remove it from `vercel.json`. Do not leave dead schedules live.
+
+### Production Boundary
+- Local machines are for training, heavy calculations, and research processing only.
+- Production ingestion, cron jobs, data pulls, reconciliation, and chart-serving must not depend on local machines.
+- Market-data completeness is a hard gate. If continuity is not provable, fib/model/setup logic must not be treated as safe.
 
 ### Realtime — Sub-Second MES Data
 - Python sidecar (`scripts/live-feed.py`) is the primary data path.
 - Supabase Realtime pushes DB changes to browser via WebSocket.
-- Vercel Cron (`/api/cron/mes-catchup`) is catch-up/gap-recovery ONLY, not primary.
+- `mes-catchup` is a reconciliation route only and must not be treated as a second primary writer.
 - 1-minute MAXIMUM acceptable latency. This is intraday trading.
+
+### MES Timeframe Authority
+- `mes_1m` is canonical direct-source data from Databento.
+- `mes_1h` is canonical direct-source data from Databento.
+- `mes_1d` may be direct-source data from Databento for macro bias only.
+- `mes_15m` is derived from stored `mes_1m`.
+- `mes_4h` is derived from stored `mes_1h`.
+- 1H is the only fib-anchor timeframe.
 
 ### Build & Deploy
 - ALWAYS run `npm run build` and confirm success before every `git push`.
@@ -78,14 +94,15 @@ warbird-pro/
   app/
     api/
       cron/                 # 20 Vercel Cron job routes
-        mes-catchup/        # MES gap fill (every 5 min)
+        mes-catchup/        # MES reconciliation route (currently unscheduled while audited)
         cross-asset/        # Non-MES futures (hourly)
         fred/[category]/    # 10 FRED series (daily, staggered)
-        detect-setups/      # Warbird setup engine (every 15 min, weekdays)
+        detect-setups/      # Warbird setup engine (every 5 min, weekdays 12-21 UTC)
         score-trades/       # Trade scoring (every 15 min, weekdays)
         measured-moves/     # Daily measured moves (6pm weekdays)
         econ-calendar/      # Economic calendar (daily)
         news/               # News signals (daily)
+        google-news/        # Google News RSS scraper (daily, weekdays)
         gpr/                # Geopolitical risk (daily)
         trump-effect/       # Federal Register + EPU (daily)
         forecast/           # ML inference (hourly, weekdays)
@@ -93,9 +110,10 @@ warbird-pro/
         mes15m/             # Chart initial snapshot API
       admin/
         status/             # System health check
-      setups/               # Active setup candidates API
+      warbird/
+        signal/             # Canonical WarbirdSignal v1 projection API
+        history/            # Historical Warbird signal API
       pivots/mes/           # Pivot levels API
-      forecasts/            # ML forecast API
     auth/                   # Supabase Auth (login, signup, forgot-password)
     protected/              # Authenticated pages (dashboard, admin)
   components/
@@ -111,7 +129,7 @@ warbird-pro/
     charts/
       FibLinesPrimitive.ts        # 10 fib levels, canvas renderer
       ForecastTargetsPrimitive.ts # ML target zone overlay
-      SetupMarkersPrimitive.ts    # Setup markers (Touch/Hook/Go)
+      SetupMarkersPrimitive.ts    # Warbird setup markers
       PivotLinesPrimitive.ts      # Pivot levels (currently unused)
       blendTargets.ts             # Target blending logic
       ensureFutureWhitespace.ts   # Future whitespace bar management
@@ -141,17 +159,27 @@ warbird-pro/
     predict-warbird.py      # ML inference
     build-dataset.py        # Feature dataset builder
     backfill.py             # Historical data backfill
+    warbird/
+      build-warbird-dataset.ts # Canonical dataset builder
+      train-warbird.py         # Canonical AutoGluon training
+      predict-warbird.py       # Canonical Warbird inference writer
+      fib-engine.ts            # 1H fib geometry
+      daily-layer.ts           # Daily bias layer
+      structure-4h.ts          # 4H structure layer
+      conviction-matrix.ts     # Conviction scoring
+      garch-engine.py          # GARCH risk context
   supabase/
-    migrations/             # 9 SQL migration files
+    migrations/             # 10 SQL migration files
       001_enums.sql         # 9 enums
       002_symbols.sql       # symbols, roles, mappings
       003_mes_data.sql      # mes_1m through mes_1d
       004_cross_asset.sql   # cross_asset_1h, cross_asset_1d, options
       005_econ.sql          # series_catalog + 10 econ domain tables
       006_news.sql          # news, calendar, GPR, trump_effect
-      007_trading.sql       # warbird_setups, trade_scores, vol_states, etc.
+      007_trading.sql       # pre-cutover trading tables
       008_rls.sql           # Row Level Security on all tables
-      009_realtime.sql      # Realtime on mes_1m, mes_15m, warbird_setups, forecasts
+      009_realtime.sql      # Realtime on live market/trading tables pre-cutover
+      010_warbird_v1_cutover.sql # canonical Warbird v1 layered schema
     seed.sql                # 60 symbols, 31 FRED series, sources
 ```
 
