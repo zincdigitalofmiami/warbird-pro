@@ -28,8 +28,8 @@ Canonical Warbird v1 cutover is the active architecture. Older phase-plan langua
 - 10 SQL migrations in repo, including the canonical Warbird v1 cutover
 - MES 15m chart rendering with gap-free time mapping
 - Canonical Warbird routes exist at `/api/warbird/signal` and `/api/warbird/history`
-- Python sidecar and backfill writers exist, but production data continuity still needs verification
-- `mes-catchup` is a reconciliation route, not a second primary writer
+- `mes-catchup` Vercel Cron (every 5 min) is the primary MES data path — no sidecar dependency
+- Python backfill scripts exist for historical data research
 
 ### Next Up (in order)
 1. Keep docs aligned to canonical Warbird v1 and the current MES authority map

@@ -7,9 +7,9 @@ import { activeMesContract } from "@/lib/contract-roll";
 
 export const maxDuration = 60;
 
-// Runs every 5 minutes via Vercel Cron.
-// Fills gaps in mes_1m from Databento Historical API.
-// This is insurance for sidecar downtime — NOT the primary data path.
+// Primary MES data path. Runs every 5 minutes via Vercel Cron.
+// Fetches ohlcv-1m + ohlcv-1h from Databento Historical API → Supabase.
+// Uses explicit contract symbols (e.g. MESM6) to match TradingView roll timing.
 
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -31,32 +31,33 @@ export async function GET(request: Request) {
   const supabase = createAdminClient();
 
   try {
-    // Find the latest 1m bar we have
-    const { data: latest, error: latestErr } = await supabase
-      .from("mes_1m")
-      .select("ts")
-      .order("ts", { ascending: false })
-      .limit(1)
-      .single();
-
-    if (latestErr && latestErr.code !== "PGRST116") {
-      throw new Error(`Failed to query mes_1m: ${latestErr.message}`);
-    }
-
     const now = new Date();
-    // ?days=7 for initial backfill, otherwise 30 min gap fill
     const daysParam = parseInt(reqUrl.searchParams.get("days") || "0", 10);
 
     let gapStart: Date;
-    if (latest?.ts) {
-      gapStart = new Date(latest.ts);
-    } else if (daysParam > 0) {
-      // Initial backfill: go back N days (max 14)
+    if (daysParam > 0) {
+      // Forced backfill: go back N days (max 14), overwriting existing data
       const days = Math.min(daysParam, 14);
       gapStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
     } else {
-      // Default: 7 days when table is empty
-      gapStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      // Normal cron: find the latest 1m bar and fill from there
+      const { data: latest, error: latestErr } = await supabase
+        .from("mes_1m")
+        .select("ts")
+        .order("ts", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (latestErr && latestErr.code !== "PGRST116") {
+        throw new Error(`Failed to query mes_1m: ${latestErr.message}`);
+      }
+
+      if (latest?.ts) {
+        gapStart = new Date(latest.ts);
+      } else {
+        // Empty table: default 7 days
+        gapStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      }
     }
 
     // Databento historical API has a short delay; 5 min buffer is plenty

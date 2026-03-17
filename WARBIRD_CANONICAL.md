@@ -22,8 +22,8 @@ It is NOT a simple candlestick pattern matcher. The old Touch → Hook → Go st
 | Database | Supabase (Postgres, Auth, Realtime, RLS) — NO Prisma, NO ORM |
 | UI | Tailwind v4, shadcn/ui (56 components) |
 | Chart | Lightweight Charts v5.1.0 (candles), Recharts (dashboard) |
-| Live Data | Python sidecar → Databento Live API → Supabase |
-| Scheduling | Vercel Cron Jobs (20 of 100 used) |
+| Live Data | mes-catchup Vercel Cron (5 min) → Databento Historical API → Supabase |
+| Scheduling | Vercel Cron Jobs (21 of 100 used) |
 | ML Training | AutoGluon TabularPredictor on Apple M4 Pro |
 | Volatility | GJR-GARCH(1,1) with Student-t innovations |
 | Repo | github.com/zincdigitalofmiami/warbird-pro |
@@ -47,7 +47,7 @@ scripts/warbird/
   conviction-matrix.ts        # Multi-layer conviction scoring
 ```
 
-Existing `scripts/` files (live-feed.py, backfill.py, mes_aggregation.py) stay where they are — they're data pipeline, not Warbird engine.
+Existing `scripts/` files (backfill.py, mes_aggregation.py) stay for local research. `live-feed.py` is deprecated — replaced by `mes-catchup` Vercel Cron.
 
 ### MES Bar Authority Map
 

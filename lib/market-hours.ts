@@ -74,7 +74,6 @@ export function isMarketOpen(): boolean {
 
 /**
  * Returns the next market open time as a Date.
- * Useful for scheduling sleep in the sidecar.
  */
 export function getNextMarketOpen(): Date {
   const now = new Date();

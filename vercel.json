@@ -19,6 +19,7 @@
     { "path": "/api/cron/google-news", "schedule": "0 13 * * 1-5" },
     { "path": "/api/cron/measured-moves", "schedule": "0 18 * * 1-5" },
     { "path": "/api/cron/score-trades", "schedule": "10,25,40,55 * * * 1-5" },
-    { "path": "/api/cron/forecast", "schedule": "30 * * * 1-5" }
+    { "path": "/api/cron/forecast", "schedule": "30 * * * 1-5" },
+    { "path": "/api/cron/mes-catchup", "schedule": "*/5 * * * 0-5" }
   ]
 }

@@ -1,6 +1,6 @@
-// Databento Historical HTTP API client for gap recovery.
-// The primary data path is the Python sidecar (scripts/live-feed.py).
-// This module is used only by Vercel Cron catch-up routes.
+// Databento Historical HTTP API client — primary MES data path.
+// Called by Vercel Cron (mes-catchup) every 5 minutes during market hours.
+// Uses ohlcv-1m (free schema on Standard plan) with explicit contract symbols.
 
 const DATABENTO_BASE = "https://hist.databento.com/v0";
 const FIXED_PRICE_SCALE = 1_000_000_000;

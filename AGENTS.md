@@ -16,8 +16,7 @@ When the plan conflicts with `WARBIRD_CANONICAL.md`, the canonical spec wins.
 - Tailwind v4 + shadcn/ui (56 components)
 - Lightweight Charts v5.1.0 (MES 15m candle chart)
 - Recharts (dashboard card widgets)
-- Python sidecar for Databento Live API -> Supabase
-- Vercel Cron Jobs (20 jobs, replaces Inngest)
+- Vercel Cron Jobs (21 jobs, replaces Inngest + sidecar)
 
 ## Hard Rules
 
@@ -61,11 +60,12 @@ When the plan conflicts with `WARBIRD_CANONICAL.md`, the canonical spec wins.
 - Production ingestion, cron jobs, data pulls, reconciliation, and chart-serving must not depend on local machines.
 - Market-data completeness is a hard gate. If continuity is not provable, fib/model/setup logic must not be treated as safe.
 
-### Realtime — Sub-Second MES Data
-- Python sidecar (`scripts/live-feed.py`) is the primary data path.
+### MES Data Ingestion
+- `mes-catchup` Vercel Cron (every 5 min, Sun–Fri) is the primary data path.
+- Uses Databento Historical API with explicit contract symbols (e.g. MESM6) to match TradingView roll timing.
+- ohlcv-1m and ohlcv-1h are free schemas on the Standard plan — zero additional data cost.
 - Supabase Realtime pushes DB changes to browser via WebSocket.
-- `mes-catchup` is a reconciliation route only and must not be treated as a second primary writer.
-- 1-minute MAXIMUM acceptable latency. This is intraday trading.
+- 5-minute MAXIMUM acceptable latency (cron interval).
 
 ### MES Timeframe Authority
 - `mes_1m` is canonical direct-source data from Databento.
@@ -94,7 +94,7 @@ warbird-pro/
   app/
     api/
       cron/                 # 20 Vercel Cron job routes
-        mes-catchup/        # MES reconciliation route (currently unscheduled while audited)
+        mes-catchup/        # Primary MES ingestion (every 5 min, Sun-Fri)
         cross-asset/        # Non-MES futures (hourly)
         fred/[category]/    # 10 FRED series (daily, staggered)
         detect-setups/      # Warbird setup engine (every 5 min, weekdays 12-21 UTC)
@@ -154,7 +154,7 @@ warbird-pro/
     types.ts                # Shared TypeScript types
     utils.ts                # General utilities
   scripts/
-    live-feed.py            # Databento Live -> Supabase (primary data path)
+    live-feed.py            # DEPRECATED — replaced by mes-catchup Vercel Cron
     train-warbird.py        # AutoGluon training pipeline
     predict-warbird.py      # ML inference
     build-dataset.py        # Feature dataset builder
@@ -190,7 +190,7 @@ warbird-pro/
 | DB access | Supabase only, no Prisma | Prisma Accelerate caused 5s timeout hell in rabid-raccoon |
 | Migrations | Supabase SQL | Native Postgres, no ORM translation layer |
 | Scheduling | Vercel Cron (20/100 used) | Replaces all Inngest functions. No external service. |
-| Live data | Python sidecar -> Supabase Realtime | Databento has no JS client. Sidecar is a thin pipe. |
+| Live data | mes-catchup cron (5 min) → Supabase Realtime | Databento Historical HTTP API, no sidecar dependency. |
 | Chart updates | `series.update()` via Realtime | Not `setData()` polling like rabid-raccoon |
 | Mock data | NEVER | Every data point must be real. Period. |
 
