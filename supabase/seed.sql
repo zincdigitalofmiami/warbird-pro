@@ -203,5 +203,29 @@ insert into series_catalog (series_id, name, category, frequency, is_active) val
 
   -- Indexes
   ('USEPUINDXD', 'Economic Policy Uncertainty (daily)', 'indexes', 'daily', true),
-  ('BAMLH0A0HYM2', 'High Yield OAS Spread', 'indexes', 'daily', true)
+  ('BAMLH0A0HYM2', 'High Yield OAS Spread', 'indexes', 'daily', true),
+
+  -- Volatility (additional)
+  ('VXNCLS', 'Nasdaq-100 Volatility Index (VXN)', 'vol', 'daily', true),
+  ('RVXCLS', 'Russell 2000 Volatility Index (RVX)', 'vol', 'daily', true),
+
+  -- Credit spreads
+  ('BAMLC0A0CM', 'ICE BofA IG Corporate OAS', 'indexes', 'daily', true),
+  ('BAMLHYH0A0HYM2EY', 'ICE BofA HY Option-Adjusted Spread', 'indexes', 'daily', true),
+  ('BAA10Y', 'Baa Corporate Bond Spread', 'yields', 'daily', true),
+
+  -- Financial conditions
+  ('NFCI', 'Chicago Fed National Financial Conditions Index', 'indexes', 'weekly', true),
+  ('STLFSI4', 'St. Louis Fed Financial Stress Index', 'indexes', 'weekly', true),
+  ('ANFCI', 'Adjusted NFCI', 'indexes', 'weekly', true),
+
+  -- Consumer sentiment
+  ('UMCSENT', 'University of Michigan Consumer Sentiment', 'indexes', 'monthly', true),
+
+  -- Recession indicators
+  ('RECPROUSM156N', 'Smoothed US Recession Probabilities', 'indexes', 'monthly', true),
+  ('SAHMCURRENT', 'Sahm Rule Recession Indicator', 'indexes', 'monthly', true),
+
+  -- Macro business cycle
+  ('EMVMACROBUS', 'Equity Market Macro Business Cycle Uncertainty', 'indexes', 'daily', true)
 on conflict (series_id) do nothing;
