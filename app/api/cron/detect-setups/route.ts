@@ -5,7 +5,6 @@ import type { CandleData } from "@/lib/types";
 import { buildDailyBiasLayer } from "@/scripts/warbird/daily-layer";
 import { buildStructure4H } from "@/scripts/warbird/structure-4h";
 import { buildFibGeometry } from "@/scripts/warbird/fib-engine";
-import { evaluateTrigger15m } from "@/scripts/warbird/trigger-15m";
 import { evaluateConviction } from "@/scripts/warbird/conviction-matrix";
 import { REGIME_LABEL, WARBIRD_DEFAULT_SYMBOL, getDaysIntoRegime } from "@/lib/warbird/constants";
 import type { WarbirdForecastRow } from "@/lib/warbird/types";
@@ -54,7 +53,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const [dailyBarsRes, fourHourBarsRes, oneHourBarsRes, fifteenBarsRes, forecastRes] =
+    const [dailyBarsRes, fourHourBarsRes, oneHourBarsRes, forecastRes] =
       await Promise.all([
         supabase
           .from("mes_1d")
@@ -72,11 +71,6 @@ export async function GET(request: Request) {
           .order("ts", { ascending: false })
           .limit(160),
         supabase
-          .from("mes_15m")
-          .select("ts, open, high, low, close, volume")
-          .order("ts", { ascending: false })
-          .limit(160),
-        supabase
           .from("warbird_forecasts_1h")
           .select("*")
           .eq("symbol_code", WARBIRD_DEFAULT_SYMBOL)
@@ -89,15 +83,13 @@ export async function GET(request: Request) {
     if (dailyBarsRes.error) throw new Error(`mes_1d query failed: ${dailyBarsRes.error.message}`);
     if (fourHourBarsRes.error) throw new Error(`mes_4h query failed: ${fourHourBarsRes.error.message}`);
     if (oneHourBarsRes.error) throw new Error(`mes_1h query failed: ${oneHourBarsRes.error.message}`);
-    if (fifteenBarsRes.error) throw new Error(`mes_15m query failed: ${fifteenBarsRes.error.message}`);
     if (forecastRes.error) throw new Error(`warbird_forecasts_1h query failed: ${forecastRes.error.message}`);
 
     const dailyBars = toCandles(dailyBarsRes.data);
     const fourHourBars = toCandles(fourHourBarsRes.data);
     const oneHourBars = toCandles(oneHourBarsRes.data);
-    const fifteenBars = toCandles(fifteenBarsRes.data);
 
-    if (dailyBars.length < 20 || fourHourBars.length < 20 || oneHourBars.length < 55 || fifteenBars.length < 20) {
+    if (dailyBars.length < 20 || fourHourBars.length < 20 || oneHourBars.length < 55) {
       return NextResponse.json({ skipped: true, reason: "insufficient_data" });
     }
 
@@ -128,43 +120,26 @@ export async function GET(request: Request) {
       return NextResponse.json({ skipped: true, reason: "no_fib_geometry" });
     }
 
-    const correlationScore =
-      typeof forecast.feature_snapshot?.correlation_score === "number"
-        ? Number(forecast.feature_snapshot.correlation_score)
-        : null;
+    const convictionTs = new Date().toISOString();
+    const triggerDecision = geometry ? "GO" : "NO_GO" as const;
 
-    const triggerPayload = evaluateTrigger15m({
-      candles: fifteenBars,
-      forecast,
-      geometry,
-      correlationScore,
+    const convictionResult = evaluateConviction({
+      dailyBias: daily.bias,
+      bias4h: structure.bias_4h,
+      bias1h: forecast.bias_1h,
+      triggerDecision,
     });
 
-    const { data: trigger, error: triggerError } = await supabase
-      .from("warbird_triggers_15m")
-      .upsert(triggerPayload, { onConflict: "symbol_code,ts,forecast_id" })
-      .select("*")
-      .single();
-
-    if (triggerError) {
-      throw new Error(`warbird_triggers_15m upsert failed: ${triggerError.message}`);
-    }
-
     const convictionPayload = {
-      ts: trigger.ts,
+      ts: convictionTs,
       forecast_id: forecast.id,
-      trigger_id: trigger.id,
+      trigger_id: null,
       symbol_code: WARBIRD_DEFAULT_SYMBOL,
-      ...evaluateConviction({
-        dailyBias: daily.bias,
-        bias4h: structure.bias_4h,
-        bias1h: forecast.bias_1h,
-        triggerDecision: trigger.decision,
-      }),
+      ...convictionResult,
       daily_bias: daily.bias,
       bias_4h: structure.bias_4h,
       bias_1h: forecast.bias_1h,
-      trigger_decision: trigger.decision,
+      trigger_decision: triggerDecision,
     };
 
     const { data: conviction, error: convictionError } = await supabase
@@ -178,39 +153,38 @@ export async function GET(request: Request) {
     }
 
     let setupId: number | null = null;
-    if (trigger.decision === "GO" && conviction.level !== "NO_TRADE") {
+    if (triggerDecision === "GO" && conviction.level !== "NO_TRADE") {
       const setupKey = [
         forecast.id,
-        trigger.ts,
-        trigger.direction,
-        Number(trigger.fib_ratio ?? 0).toFixed(3),
+        convictionTs.slice(0, 13),
+        geometry.direction,
+        Number(geometry.fibRatio ?? 0).toFixed(3),
       ].join(":");
 
       const setupPayload = {
         setup_key: setupKey,
-        ts: trigger.ts,
+        ts: convictionTs,
         symbol_code: WARBIRD_DEFAULT_SYMBOL,
         forecast_id: forecast.id,
-        trigger_id: trigger.id,
+        trigger_id: null,
         conviction_id: conviction.id,
-        direction: trigger.direction,
+        direction: geometry.direction,
         status: "ACTIVE",
         conviction_level: conviction.level,
-        counter_trend: conviction.counter_trend,
-        runner_eligible: conviction.runner_eligible,
-        fib_level: trigger.fib_level,
-        fib_ratio: trigger.fib_ratio,
-        entry_price: trigger.entry_price,
-        stop_loss: trigger.stop_loss,
-        tp1: trigger.tp1,
-        tp2: trigger.tp2,
-        volume_confirmation: trigger.volume_confirmation,
-        volume_ratio: trigger.volume_ratio,
-        trigger_quality_ratio: trigger.trigger_quality_ratio,
-        runner_headroom: trigger.runner_headroom,
+        counter_trend: convictionResult.counterTrend,
+        runner_eligible: false,
+        fib_level: geometry.fibLevel,
+        fib_ratio: geometry.fibRatio,
+        entry_price: geometry.entry,
+        stop_loss: geometry.stopLoss,
+        tp1: geometry.tp1,
+        tp2: geometry.tp2,
+        volume_confirmation: null,
+        volume_ratio: null,
+        trigger_quality_ratio: null,
+        runner_headroom: null,
         current_event: "TRIGGERED",
-        trigger_bar_ts: trigger.ts,
-        expires_at: new Date(new Date(trigger.ts).getTime() + 48 * 60 * 60 * 1000).toISOString(),
+        trigger_bar_ts: convictionTs,
         notes: geometry.measuredMove
           ? `Measured move quality ${geometry.quality}`
           : "Canonical fib setup",
@@ -247,7 +221,6 @@ export async function GET(request: Request) {
             note: setup.notes,
             metadata: {
               conviction_level: setup.conviction_level,
-              runner_eligible: setup.runner_eligible,
               regime_label: REGIME_LABEL,
               days_into_regime: getDaysIntoRegime(setup.ts),
             },
@@ -277,7 +250,7 @@ export async function GET(request: Request) {
     await supabase.from("job_log").insert({
       job_name: "detect-setups",
       status: "SUCCESS",
-      rows_affected: setupId ? 5 : 4,
+      rows_affected: setupId ? 4 : 3,
       duration_ms: Date.now() - startTime,
     });
 
@@ -286,7 +259,7 @@ export async function GET(request: Request) {
       daily_bias: daily.bias,
       bias_4h: structure.bias_4h,
       bias_1h: forecast.bias_1h,
-      trigger: trigger.decision,
+      trigger: triggerDecision,
       conviction: conviction.level,
       setup_id: setupId,
       duration_ms: Date.now() - startTime,
