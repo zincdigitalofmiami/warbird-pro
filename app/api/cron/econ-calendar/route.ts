@@ -1,12 +1,78 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isMarketOpen } from "@/lib/market-hours";
 
 export const maxDuration = 60;
 
-// Runs daily at 15:00 UTC. Populates econ_calendar with upcoming events.
-// Uses FRED release calendar as primary source.
+type TeEvent = {
+  ts: string;
+  event_name: string;
+  importance: number;
+  actual: number | null;
+  forecast: number | null;
+  previous: number | null;
+};
 
-const FRED_RELEASES_URL = "https://api.stlouisfed.org/fred/releases/dates";
+function parseTeApiResponse(json: unknown[]): TeEvent[] {
+  return json.map((item) => {
+    const rec = item as Record<string, unknown>;
+    const actual = rec.Actual !== "" ? parseFloat(rec.Actual as string) : null;
+    const forecast = rec.Forecast !== "" ? parseFloat(rec.Forecast as string) : null;
+    return {
+      ts: String(rec.Date),
+      event_name: String(rec.Event).slice(0, 500),
+      importance: rec.Importance === "High" ? 3 : rec.Importance === "Medium" ? 2 : 1,
+      actual: Number.isFinite(actual) ? actual : null,
+      forecast: Number.isFinite(forecast) ? forecast : null,
+      previous: rec.Previous !== "" ? parseFloat(rec.Previous as string) || null : null,
+    };
+  });
+}
+
+async function fetchTeCalendar(): Promise<TeEvent[]> {
+  const apiKey = process.env.TRADINGECONOMICS_API_KEY;
+
+  if (apiKey) {
+    const url = `https://api.tradingeconomics.com/calendar?c=${apiKey}&country=united states`;
+    const resp = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(30_000) });
+    if (!resp.ok) throw new Error(`TE API error: ${resp.status}`);
+    const json = await resp.json();
+    return parseTeApiResponse(json);
+  }
+
+  // Fallback to FRED releases if no TE key
+  const fredKey = process.env.FRED_API_KEY;
+  if (!fredKey) throw new Error("No TRADINGECONOMICS_API_KEY or FRED_API_KEY set");
+
+  const now = new Date();
+  const future = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  const params = new URLSearchParams({
+    api_key: fredKey,
+    file_type: "json",
+    realtime_start: now.toISOString().split("T")[0],
+    realtime_end: future.toISOString().split("T")[0],
+    include_release_dates_with_no_data: "true",
+  });
+
+  const resp = await fetch(
+    `https://api.stlouisfed.org/fred/releases/dates?${params}`,
+    { signal: AbortSignal.timeout(30_000) },
+  );
+  if (!resp.ok) throw new Error(`FRED releases API error: ${resp.status}`);
+  const data = await resp.json();
+  const releases = data.release_dates || [];
+
+  return releases
+    .filter((r: Record<string, unknown>) => r.release_name && r.date)
+    .map((r: Record<string, unknown>) => ({
+      ts: `${r.date}T00:00:00Z`,
+      event_name: String(r.release_name).slice(0, 500),
+      importance: 1,
+      actual: null,
+      forecast: null,
+      previous: null,
+    }));
+}
 
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
@@ -19,54 +85,35 @@ export async function GET(request: Request) {
 
   const startTime = Date.now();
   const supabase = createAdminClient();
+  const url = new URL(request.url);
+  const force = url.searchParams.get("force") === "1";
+
+  if (!force && !isMarketOpen()) {
+    return NextResponse.json({ skipped: true, reason: "market_closed" });
+  }
 
   try {
-    const apiKey = process.env.FRED_API_KEY;
-    if (!apiKey) throw new Error("FRED_API_KEY is not set");
-
-    // Fetch upcoming releases for next 7 days
-    const now = new Date();
-    const future = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-
-    const params = new URLSearchParams({
-      api_key: apiKey,
-      file_type: "json",
-      realtime_start: now.toISOString().split("T")[0],
-      realtime_end: future.toISOString().split("T")[0],
-      include_release_dates_with_no_data: "true",
-    });
-
-    const response = await fetch(`${FRED_RELEASES_URL}?${params}`, {
-      signal: AbortSignal.timeout(30_000),
-    });
-
-    if (!response.ok) {
-      throw new Error(`FRED releases API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const releases = data.release_dates || [];
-
-    const rows = releases
-      .filter((r: any) => r.release_name && r.date)
-      .map((r: any) => ({
-        ts: `${r.date}T00:00:00Z`,
-        event_name: r.release_name.slice(0, 500),
-        importance: 1,
-      }));
+    const events = await fetchTeCalendar();
 
     let rowsWritten = 0;
-    for (const row of rows) {
-      // Dedup by event_name + ts
+    for (const event of events) {
+      // Dedup by event_name + ts (no unique constraint on table)
       const { data: existing } = await supabase
         .from("econ_calendar")
         .select("id")
-        .eq("ts", row.ts)
-        .eq("event_name", row.event_name)
+        .eq("ts", event.ts)
+        .eq("event_name", event.event_name)
         .limit(1);
 
       if (!existing || existing.length === 0) {
-        const { error } = await supabase.from("econ_calendar").insert(row);
+        const { error } = await supabase.from("econ_calendar").insert({
+          ts: event.ts,
+          event_name: event.event_name,
+          importance: event.importance,
+          actual: event.actual,
+          forecast: event.forecast,
+          previous: event.previous,
+        });
         if (error) throw new Error(`econ_calendar insert: ${error.message}`);
         rowsWritten++;
       }
@@ -74,28 +121,28 @@ export async function GET(request: Request) {
 
     await supabase.from("job_log").insert({
       job_name: "econ-calendar",
-      status: "OK",
-      rows_written: rowsWritten,
+      status: "SUCCESS",
+      rows_affected: rowsWritten,
       duration_ms: Date.now() - startTime,
     });
 
     return NextResponse.json({
       success: true,
-      releases_found: releases.length,
+      events: events.length,
       rows_written: rowsWritten,
       duration_ms: Date.now() - startTime,
     });
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "Internal error";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Internal error";
     try {
       await supabase.from("job_log").insert({
         job_name: "econ-calendar",
-        status: "ERROR",
+        status: "FAILED",
         error_message: message,
         duration_ms: Date.now() - startTime,
       });
     } catch {
-      // ignore
+      // ignore logging failure
     }
     return NextResponse.json({ error: message }, { status: 500 });
   }
