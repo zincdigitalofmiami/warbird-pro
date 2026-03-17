@@ -15,7 +15,6 @@ export interface ConvictionResult {
   level: WarbirdConvictionLevel;
   counterTrend: boolean;
   allLayersAgree: boolean;
-  runnerEligible: boolean;
 }
 
 export function evaluateConviction(input: ConvictionInput): ConvictionResult {
@@ -32,7 +31,6 @@ export function evaluateConviction(input: ConvictionInput): ConvictionResult {
       level: "MAXIMUM",
       counterTrend: false,
       allLayersAgree: true,
-      runnerEligible: true,
     };
   }
 
@@ -45,7 +43,6 @@ export function evaluateConviction(input: ConvictionInput): ConvictionResult {
       level: triggerAligned ? "HIGH" : "MODERATE",
       counterTrend: false,
       allLayersAgree: false,
-      runnerEligible: triggerAligned,
     };
   }
 
@@ -59,7 +56,6 @@ export function evaluateConviction(input: ConvictionInput): ConvictionResult {
       level: "MODERATE",
       counterTrend: false,
       allLayersAgree: false,
-      runnerEligible: false,
     };
   }
 
@@ -74,7 +70,6 @@ export function evaluateConviction(input: ConvictionInput): ConvictionResult {
       level: "LOW",
       counterTrend: true,
       allLayersAgree: false,
-      runnerEligible: false,
     };
   }
 
@@ -82,6 +77,5 @@ export function evaluateConviction(input: ConvictionInput): ConvictionResult {
     level: "NO_TRADE",
     counterTrend: false,
     allLayersAgree: false,
-    runnerEligible: false,
   };
 }
