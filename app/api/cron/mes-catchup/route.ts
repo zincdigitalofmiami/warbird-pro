@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isMarketOpen, isWeekendBar } from "@/lib/market-hours";
 import { fetchOhlcv, type OhlcvBar } from "@/lib/ingestion/databento";
 import { aggregateMesTimeframes } from "@/lib/mes-aggregation";
+import { activeMesContract } from "@/lib/contract-roll";
 
 export const maxDuration = 60;
 
@@ -71,10 +72,12 @@ export async function GET(request: Request) {
       });
     }
 
+    const mesSymbol = activeMesContract();
+
     const bars1m = await fetchOhlcv({
       dataset: "GLBX.MDP3",
-      symbol: "MES.v.0",
-      stypeIn: "continuous",
+      symbol: mesSymbol,
+      stypeIn: "raw_symbol",
       start: gapStart.toISOString(),
       end: gapEnd.toISOString(),
       schema: "ohlcv-1m",
@@ -82,8 +85,8 @@ export async function GET(request: Request) {
 
     const bars1h = await fetchOhlcv({
       dataset: "GLBX.MDP3",
-      symbol: "MES.v.0",
-      stypeIn: "continuous",
+      symbol: mesSymbol,
+      stypeIn: "raw_symbol",
       start: gapStart.toISOString(),
       end: gapEnd.toISOString(),
       schema: "ohlcv-1h",

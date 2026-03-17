@@ -6,7 +6,7 @@ Runs as a background process. Receives OHLCV-1m, upserts to mes_1m + mes_15m.
 Usage: python scripts/live-feed.py
 """
 import math, os, signal, sys, time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import databento as db
 from supabase import create_client
 from mes_aggregation import floor_interval, mes_session_day_start
@@ -15,9 +15,40 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 DATABENTO_KEY = os.environ["DATABENTO_API_KEY"]
 DATASET = "GLBX.MDP3"
-SYMBOL = "MES.v.0"
 SCHEMA = "ohlcv-1m"
 PRICE_SCALE = 1_000_000_000
+
+
+def active_mes_contract(today: date | None = None) -> str:
+    """Return the front-month MES symbol based on CME roll schedule.
+    Rolls 8 days before 3rd Friday of quarterly month (when volume moves)."""
+    if today is None:
+        today = date.today()
+    quarters = [(3, "H"), (6, "M"), (9, "U"), (12, "Z")]
+
+    def third_friday(y: int, m: int) -> date:
+        d = date(y, m, 1)
+        ff = d + timedelta(days=(4 - d.weekday()) % 7)
+        return ff + timedelta(days=14)
+
+    schedule: list[tuple[date, str]] = []
+    for y in range(today.year - 1, today.year + 2):
+        for qi, (mo, code) in enumerate(quarters):
+            roll = third_friday(y, mo) - timedelta(days=8)
+            ni = (qi + 1) % 4
+            ny = y + 1 if ni == 0 else y
+            schedule.append((roll, f"MES{quarters[ni][1]}{ny % 10}"))
+    schedule.sort()
+    active = schedule[0][1]
+    for roll_date, sym in schedule:
+        if roll_date <= today:
+            active = sym
+        else:
+            break
+    return active
+
+
+SYMBOL = active_mes_contract()
 running = True
 
 def stop(sig, frame):
@@ -50,8 +81,8 @@ def main():
     last_flush = time.time()
 
     client = db.Live(key=DATABENTO_KEY)
-    client.subscribe(dataset=DATASET, schema=SCHEMA, stype_in="continuous", symbols=[SYMBOL])
-    print("Connected. Streaming...")
+    client.subscribe(dataset=DATASET, schema=SCHEMA, stype_in="raw_symbol", symbols=[SYMBOL])
+    print(f"Connected. Streaming {SYMBOL}...")
 
     for record in client:
         if not running: break
