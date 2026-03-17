@@ -29,7 +29,7 @@ def main() -> None:
 
     start_date = date(2024, 1, 1)
     end_date = date(2026, 3, 17)
-    symbol = "MES.c.0"
+    symbol = "MES.v.0"
     symbol_code = "MES"
 
     # Check cost first
