@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
 Backfill GPR (Geopolitical Risk) data from Caldara-Iacoviello XLS.
-Writes two series to geopolitical_risk_1d: gpr_acts and gpr_threats.
+Writes to geopolitical_risk_1d(ts, gpr_daily, gpr_threats, gpr_acts).
 """
 from __future__ import annotations
 
+import datetime
 import os
 import sys
 from pathlib import Path
 
-import openpyxl
 from supabase import create_client
 
 def main() -> None:
@@ -22,8 +22,6 @@ def main() -> None:
     sb_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
     supabase = create_client(sb_url, sb_key)
 
-    # openpyxl handles both .xls (via xlrd fallback) and .xlsx
-    # If .xls format, use xlrd:
     try:
         import xlrd
         book = xlrd.open_workbook(str(xls_path))
@@ -34,6 +32,7 @@ def main() -> None:
             for r in range(1, sheet.nrows)
         ]
     except ImportError:
+        import openpyxl
         wb = openpyxl.load_workbook(str(xls_path))
         ws = wb.active
         headers = [cell.value for cell in ws[1]]
@@ -42,43 +41,58 @@ def main() -> None:
             for row in ws.iter_rows(min_row=2)
         ]
 
-    # Map column names (may vary by version): date, GPRACT, GPRTHREAT
-    date_col = next((h for h in headers if h and "date" in str(h).lower()), None)
+    # Find columns: DAY (YYYYMMDD string), GPRD, GPRD_ACT, GPRD_THREAT
+    day_col = next((h for h in headers if h and str(h).upper() == "DAY"), None)
+    date_col = next((h for h in headers if h and str(h).lower() == "date"), None)
+    gprd_col = next((h for h in headers if h and str(h).upper() == "GPRD"), None)
     acts_col = next((h for h in headers if h and "ACT" in str(h).upper()), None)
     threat_col = next((h for h in headers if h and "THREAT" in str(h).upper()), None)
 
-    if not date_col:
-        print(f"ERROR: can't find date column. Headers: {headers}")
+    if not gprd_col:
+        print(f"ERROR: can't find GPRD column. Headers: {headers}")
         sys.exit(1)
 
-    rows_acts = []
-    rows_threats = []
+    rows = []
     for raw in rows_raw:
-        date_val = raw.get(date_col)
-        if not date_val:
+        # Parse date from DAY column (YYYYMMDD) or date column (Excel serial)
+        ts = None
+        if day_col and raw.get(day_col):
+            day_str = str(raw[day_col]).strip()
+            if len(day_str) == 8 and day_str.isdigit():
+                ts = f"{day_str[:4]}-{day_str[4:6]}-{day_str[6:8]}T00:00:00Z"
+        if not ts and date_col and raw.get(date_col):
+            date_val = raw[date_col]
+            if isinstance(date_val, (int, float)):
+                d = datetime.date(1899, 12, 30) + datetime.timedelta(days=int(date_val))
+                ts = d.isoformat() + "T00:00:00Z"
+            else:
+                ts = str(date_val)[:10] + "T00:00:00Z"
+
+        if not ts:
             continue
-        # date may be a float (Excel serial) or string
-        if isinstance(date_val, float):
-            import datetime
-            date_str = (datetime.date(1899, 12, 30) + datetime.timedelta(days=int(date_val))).isoformat()
-        else:
-            date_str = str(date_val)[:10]
 
-        ts = date_str + "T00:00:00Z"
+        gprd = raw.get(gprd_col)
+        if gprd is None:
+            continue
 
+        row = {
+            "ts": ts,
+            "gpr_daily": float(gprd),
+        }
         if acts_col and raw.get(acts_col) is not None:
-            rows_acts.append({"ts": ts, "series_id": "gpr_acts", "value": float(raw[acts_col])})
+            row["gpr_acts"] = float(raw[acts_col])
         if threat_col and raw.get(threat_col) is not None:
-            rows_threats.append({"ts": ts, "series_id": "gpr_threats", "value": float(raw[threat_col])})
+            row["gpr_threats"] = float(raw[threat_col])
 
-    all_rows = rows_acts + rows_threats
-    print(f"Upserting {len(all_rows)} GPR rows...")
+        rows.append(row)
 
-    for i in range(0, len(all_rows), 500):
-        chunk = all_rows[i:i + 500]
-        supabase.table("geopolitical_risk_1d").upsert(chunk, on_conflict="ts,series_id").execute()
+    print(f"Upserting {len(rows)} GPR rows...")
 
-    print(f"Done. {len(rows_acts)} gpr_acts, {len(rows_threats)} gpr_threats.")
+    for i in range(0, len(rows), 500):
+        chunk = rows[i:i + 500]
+        supabase.table("geopolitical_risk_1d").upsert(chunk, on_conflict="ts").execute()
+
+    print(f"Done. {len(rows)} rows upserted.")
 
 if __name__ == "__main__":
     main()
