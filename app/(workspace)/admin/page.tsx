@@ -19,7 +19,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Separator } from "@/components/ui/separator";
 
 // --- Types ---
 
@@ -124,7 +123,7 @@ function coverageStatusColor(staleness: string): string {
     const hrs = parseInt(staleness);
     if (hrs < 4) return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
   }
-  return "bg-red-500/20 text-red-400 border-red-500/30";
+  return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
 }
 
 function statusColor(status: string): string {
