@@ -51,13 +51,22 @@ export function composeWarbirdSignal(params: {
       mae_band_4h: forecast.target_mae_4h,
       mfe_band_1h: forecast.target_mfe_1h,
       mfe_band_4h: forecast.target_mfe_4h,
+      prob_hit_sl_first:
+        forecast.prob_hit_sl_first ?? numberFromFeatureSnapshot(forecast, "prob_hit_sl_first"),
+      prob_hit_pt1_first:
+        forecast.prob_hit_pt1_first ?? numberFromFeatureSnapshot(forecast, "prob_hit_pt1_first"),
+      prob_hit_pt2_after_pt1:
+        forecast.prob_hit_pt2_after_pt1 ?? numberFromFeatureSnapshot(forecast, "prob_hit_pt2_after_pt1"),
+      expected_max_extension:
+        forecast.expected_max_extension ?? numberFromFeatureSnapshot(forecast, "expected_max_extension"),
+      setup_score:
+        forecast.setup_score ?? numberFromFeatureSnapshot(forecast, "setup_score"),
       confidence: forecast.confidence ?? null,
     },
     conviction: {
       level: conviction?.level ?? "NO_TRADE",
       counter_trend: conviction?.counter_trend ?? false,
       all_layers_agree: conviction?.all_layers_agree ?? false,
-      runner_eligible: conviction?.runner_eligible ?? false,
     },
     setup: setup
       ? {
@@ -72,7 +81,6 @@ export function composeWarbirdSignal(params: {
           tp2: setup.tp2,
           volume_confirmation: setup.volume_confirmation,
           trigger_quality_ratio: setup.trigger_quality_ratio,
-          runner_headroom: setup.runner_headroom,
         }
       : undefined,
     risk: {
@@ -188,7 +196,7 @@ export function warbirdSetupToCandidate(
     sourceFamily: "MEASURED_MOVE",
     triggerType: "MEASURED_MOVE_RETRACE",
     direction: isBullish ? "BULLISH" : "BEARISH",
-    phase: setup.status === "ACTIVE" || setup.status === "RUNNER_ACTIVE" || setup.status === "TP1_HIT" || setup.status === "TP2_HIT"
+    phase: setup.status === "ACTIVE" || setup.status === "TP1_HIT" || setup.status === "TP2_HIT"
       ? "TRIGGERED"
       : "EXPIRED",
     thesis: setup.notes ?? "",
@@ -219,10 +227,7 @@ export function buildSetupEventSummary(events: WarbirdSetupEventRow[]) {
     triggered: events.filter((event) => event.event_type === "TRIGGERED").length,
     tp1Hit: events.filter((event) => event.event_type === "TP1_HIT").length,
     tp2Hit: events.filter((event) => event.event_type === "TP2_HIT").length,
-    runnerStarted: events.filter((event) => event.event_type === "RUNNER_STARTED").length,
-    runnerExited: events.filter((event) => event.event_type === "RUNNER_EXITED").length,
     stopped: events.filter((event) => event.event_type === "STOPPED").length,
     expired: events.filter((event) => event.event_type === "EXPIRED").length,
-    pullbackReversal: events.filter((event) => event.event_type === "PULLBACK_REVERSAL").length,
   };
 }

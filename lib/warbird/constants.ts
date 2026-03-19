@@ -5,8 +5,6 @@ export const WARBIRD_SIGNAL_VERSION = "warbird-v1.0";
 
 export const WARBIRD_TRIGGER_MIN_RATIO = 1.2;
 export const WARBIRD_GO_RATIO = 1.5;
-export const WARBIRD_RUNNER_HEADROOM_MULTIPLE = 1;
-export const WARBIRD_RUNNER_VOLUME_RATIO = 1.05;
 
 export const WARBIRD_DEFAULT_SYMBOL = "MES";
 

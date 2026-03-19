@@ -208,6 +208,10 @@ function computeTargets(
   reached_tp1: number;
   reached_tp2: number;
   setup_stopped: number;
+  hit_sl_first: number;
+  hit_pt1_first: number;
+  hit_pt2_after_pt1: number;
+  max_extension_reached: number;
   max_favorable_excursion: number;
   max_adverse_excursion: number;
 } {
@@ -216,6 +220,11 @@ function computeTargets(
   let setupStopped = 0;
   let maxFav = 0;
   let maxAdv = 0;
+  let firstOutcome: "SL" | "PT1" | "PT2" | null = null;
+  const tp1Distance = Math.abs(tp1 - entry);
+  const tp2Distance = Math.abs(tp2 - entry);
+  const extension2Distance =
+    tp2Distance > 0 ? tp2Distance * (2 / 1.618) : tp1Distance * (2 / 1.236);
 
   for (let i = startIndex + 1; i < bars.length && i < startIndex + 100; i++) {
     const bar = bars[i];
@@ -223,30 +232,79 @@ function computeTargets(
     const low = Number(bar.low);
 
     if (direction === "LONG") {
+      const stopHit = low <= stopLoss;
+      const tp1Hit = high >= tp1;
+      const tp2Hit = high >= tp2;
       const fav = high - entry;
       const adv = entry - low;
       maxFav = Math.max(maxFav, fav);
       maxAdv = Math.max(maxAdv, adv);
 
-      if (low <= stopLoss) { setupStopped = 1; break; }
-      if (high >= tp2) { reachedTp2 = 1; reachedTp1 = 1; break; }
-      if (high >= tp1) { reachedTp1 = 1; }
+      if (firstOutcome == null) {
+        if (stopHit && !tp1Hit && !tp2Hit) firstOutcome = "SL";
+        else if ((tp1Hit || tp2Hit) && !stopHit) firstOutcome = tp2Hit ? "PT2" : "PT1";
+        else if (stopHit && (tp1Hit || tp2Hit)) firstOutcome = "SL";
+      }
+
+      if (stopHit) {
+        setupStopped = 1;
+        break;
+      }
+      if (tp2Hit) {
+        reachedTp2 = 1;
+        reachedTp1 = 1;
+        break;
+      }
+      if (tp1Hit) {
+        reachedTp1 = 1;
+      }
     } else {
+      const stopHit = high >= stopLoss;
+      const tp1Hit = low <= tp1;
+      const tp2Hit = low <= tp2;
       const fav = entry - low;
       const adv = high - entry;
       maxFav = Math.max(maxFav, fav);
       maxAdv = Math.max(maxAdv, adv);
 
-      if (high >= stopLoss) { setupStopped = 1; break; }
-      if (low <= tp2) { reachedTp2 = 1; reachedTp1 = 1; break; }
-      if (low <= tp1) { reachedTp1 = 1; }
+      if (firstOutcome == null) {
+        if (stopHit && !tp1Hit && !tp2Hit) firstOutcome = "SL";
+        else if ((tp1Hit || tp2Hit) && !stopHit) firstOutcome = tp2Hit ? "PT2" : "PT1";
+        else if (stopHit && (tp1Hit || tp2Hit)) firstOutcome = "SL";
+      }
+
+      if (stopHit) {
+        setupStopped = 1;
+        break;
+      }
+      if (tp2Hit) {
+        reachedTp2 = 1;
+        reachedTp1 = 1;
+        break;
+      }
+      if (tp1Hit) {
+        reachedTp1 = 1;
+      }
     }
   }
+
+  const maxExtensionReached =
+    maxFav >= extension2Distance
+      ? 2.0
+      : maxFav >= tp2Distance
+        ? 1.618
+        : maxFav >= tp1Distance
+          ? 1.236
+          : 1.0;
 
   return {
     reached_tp1: reachedTp1,
     reached_tp2: reachedTp2,
     setup_stopped: setupStopped,
+    hit_sl_first: firstOutcome === "SL" ? 1 : 0,
+    hit_pt1_first: firstOutcome === "PT1" || firstOutcome === "PT2" ? 1 : 0,
+    hit_pt2_after_pt1: reachedTp2,
+    max_extension_reached: maxExtensionReached,
     max_favorable_excursion: maxFav,
     max_adverse_excursion: maxAdv,
   };
@@ -282,9 +340,9 @@ function csvEscape(value: unknown): string {
 }
 
 async function buildDataset(outputPath: string) {
-  const [mes1hRows, mes1dRows, crossAssetRows, calendarRows, newsRows, gprRows, trumpRows, setups] =
+  const [mes15mRows, mes1dRows, crossAssetRows, calendarRows, newsRows, gprRows, trumpRows, setups] =
     await Promise.all([
-      fetchAll<OhlcvRow>("mes_1h"),
+      fetchAll<OhlcvRow>("mes_15m"),
       fetchAll<OhlcvRow>("mes_1d"),
       fetchAll<OhlcvRow>("cross_asset_1h"),
       fetchAll<CalendarRow>("econ_calendar"),
@@ -304,19 +362,29 @@ async function buildDataset(outputPath: string) {
     }
   }
 
-  const ordered1h = [...mes1hRows]
+  const ordered15m = [...mes15mRows]
     .filter((row) => new Date(row.ts) >= new Date("2024-01-01T00:00:00Z"))
     .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
   const ordered1d = [...mes1dRows].sort(
     (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
   );
 
-  const closes = ordered1h.map((row) => Number(row.close));
-  const highs = ordered1h.map((row) => Number(row.high));
-  const lows = ordered1h.map((row) => Number(row.low));
-  const opens = ordered1h.map((row) => Number(row.open));
-  const volumes = ordered1h.map((row) => Number(row.volume));
+  const closes = ordered15m.map((row) => Number(row.close));
+  const highs = ordered15m.map((row) => Number(row.high));
+  const lows = ordered15m.map((row) => Number(row.low));
+  const opens = ordered15m.map((row) => Number(row.open));
+  const volumes = ordered15m.map((row) => Number(row.volume));
   const ranges = highs.map((high, index) => high - lows[index]);
+  const trueRanges = ranges.map((range, index) =>
+    Math.max(
+      range,
+      index > 0 ? Math.abs(highs[index] - closes[index - 1]) : range,
+      index > 0 ? Math.abs(lows[index] - closes[index - 1]) : range,
+    ),
+  );
+  const BARS_PER_HOUR = 4;
+  const BARS_PER_4H = 16;
+  const BARS_PER_DAY = 96;
   const bodyRatios = ranges.map((range, index) =>
     range === 0 ? null : Math.abs(closes[index] - opens[index]) / range,
   );
@@ -324,14 +392,14 @@ async function buildDataset(outputPath: string) {
   const ema50 = ema(closes, 50);
   const ema200 = ema(closes, 200);
   const rsi14 = rsi(closes, 14);
-  const returns1h = percentageChange(closes, 1);
-  const returns4h = percentageChange(closes, 4);
-  const returns1d = percentageChange(closes, 24);
+  const returns1h = percentageChange(closes, BARS_PER_HOUR);
+  const returns4h = percentageChange(closes, BARS_PER_4H);
+  const returns1d = percentageChange(closes, BARS_PER_DAY);
   const rollingStd20 = rollingStd(closes, 20);
   const rollingStd50 = rollingStd(closes, 50);
   const volumeMean5 = rollingMean(volumes, 5);
   const volumeMean20 = rollingMean(volumes, 20);
-  const rangeMean20 = rollingMean(ranges, 20);
+  const atr1h = rollingMean(trueRanges, BARS_PER_HOUR);
 
   const dailyFeatures = ordered1d.map((_, index) =>
     buildDailyBiasLayer(
@@ -347,7 +415,7 @@ async function buildDataset(outputPath: string) {
     ),
   );
 
-  const sampleWeight = ordered1h.map((row) => {
+  const sampleWeight = ordered15m.map((row) => {
     const totalSpan = Date.now() - new Date("2024-01-01T00:00:00Z").getTime();
     const age = Date.now() - new Date(row.ts).getTime();
     const progress = 1 - age / totalSpan;
@@ -367,14 +435,14 @@ async function buildDataset(outputPath: string) {
 
   const crossSymbols = [...new Set(crossAssetRows.map((row) => row.symbol_code).filter(Boolean))] as string[];
 
-  // Pre-compute MES 1H closes for correlation
-  const mesCloses = ordered1h.map((r) => Number(r.close));
+  // Pre-compute MES 15m closes for correlation
+  const mesCloses = ordered15m.map((r) => Number(r.close));
 
   // Pre-compute rolling correlations for all cross-asset symbols
   const corrMap = new Map<string, { c20: (number | null)[]; c60: (number | null)[] }>();
   for (const symbol of crossSymbols) {
     const symbolBars = crossBySymbol.get(symbol) ?? [];
-    const symbolCloses = ordered1h.map((bar) => {
+    const symbolCloses = ordered15m.map((bar) => {
       const tsMs = new Date(bar.ts).getTime();
       const match = [...symbolBars]
         .filter((sb) => new Date(sb.ts).getTime() <= tsMs)
@@ -387,24 +455,6 @@ async function buildDataset(outputPath: string) {
       c20: rollingCorrelation(mesCloses, filled, 20),
       c60: rollingCorrelation(mesCloses, filled, 60),
     });
-  }
-
-  // ATR computation
-  const atr1h: Array<number | null> = Array(ordered1h.length).fill(null);
-  for (let i = 1; i < ordered1h.length; i++) {
-    if (i >= 14) {
-      const trSlice = [];
-      for (let j = i - 13; j <= i; j++) {
-        trSlice.push(
-          Math.max(
-            ranges[j],
-            j > 0 ? Math.abs(highs[j] - closes[j - 1]) : ranges[j],
-            j > 0 ? Math.abs(lows[j] - closes[j - 1]) : ranges[j],
-          ),
-        );
-      }
-      atr1h[i] = trSlice.reduce((s, v) => s + v, 0) / 14;
-    }
   }
 
   // Build header
@@ -460,6 +510,14 @@ async function buildDataset(outputPath: string) {
     "measured_move_present",
     "measured_move_quality",
     "direction",
+    "entry_price",
+    "stop_loss",
+    "tp1_price",
+    "tp2_price",
+    "stop_distance",
+    "tp1_distance",
+    "tp2_distance",
+    "geometry_status",
   ];
 
   for (const seriesId of [...fredBySeries.keys()].sort()) {
@@ -479,6 +537,10 @@ async function buildDataset(outputPath: string) {
     "reached_tp1",
     "reached_tp2",
     "setup_stopped",
+    "hit_sl_first",
+    "hit_pt1_first",
+    "hit_pt2_after_pt1",
+    "max_extension_reached",
     "max_favorable_excursion",
     "max_adverse_excursion",
     "sample_weight",
@@ -498,8 +560,8 @@ async function buildDataset(outputPath: string) {
   const MIN_LOOKBACK = 55;
   let setupCount = 0;
 
-  for (let index = MIN_LOOKBACK; index < ordered1h.length; index++) {
-    const row = ordered1h[index];
+  for (let index = MIN_LOOKBACK; index < ordered15m.length; index++) {
+    const row = ordered15m[index];
     const tsMs = new Date(row.ts).getTime();
     const tsDate = new Date(row.ts);
     const dailyIndex = ordered1d.findLastIndex((daily) => new Date(daily.ts).getTime() <= tsMs);
@@ -507,16 +569,16 @@ async function buildDataset(outputPath: string) {
     const currentBias = (dailyFeature?.bias ?? "NEUTRAL") as WarbirdBias;
 
     // Build fib geometry — skip bars where no setup fires
-    const candles = ordered1h.slice(0, index + 1).map(toCandle);
+    const candles = ordered15m.slice(0, index + 1).map(toCandle);
     const geometry = buildFibGeometry(candles, currentBias);
     if (!geometry) continue;
 
     // Need enough future bars for target computation
-    if (index + 10 >= ordered1h.length) continue;
+    if (index + 10 >= ordered15m.length) continue;
 
     // Forward-scan targets
     const targets = computeTargets(
-      ordered1h,
+      ordered15m,
       index,
       geometry.entry,
       geometry.stopLoss,
@@ -626,6 +688,14 @@ async function buildDataset(outputPath: string) {
       measured_move_present: geometry.measuredMove ? 1 : 0,
       measured_move_quality: geometry.measuredMove ? geometry.quality : null,
       direction: geometry.direction,
+      entry_price: geometry.entry,
+      stop_loss: geometry.stopLoss,
+      tp1_price: geometry.tp1,
+      tp2_price: geometry.tp2,
+      stop_distance: Math.abs(geometry.entry - geometry.stopLoss),
+      tp1_distance: Math.abs(geometry.tp1 - geometry.entry),
+      tp2_distance: Math.abs(geometry.tp2 - geometry.entry),
+      geometry_status: "current",
       ...targets,
       sample_weight: sampleWeight[index],
     };
@@ -689,7 +759,7 @@ async function buildDataset(outputPath: string) {
     setupCount++;
 
     if (setupCount % 100 === 0) {
-      console.log(`  ${setupCount} setup rows emitted (at bar ${index}/${ordered1h.length})`);
+      console.log(`  ${setupCount} setup rows emitted (at bar ${index}/${ordered15m.length})`);
     }
   }
 

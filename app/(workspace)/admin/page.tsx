@@ -40,6 +40,9 @@ interface JobLogEntry {
   created_at: string;
 }
 
+type TargetResult = "HIT" | "MISS" | "OPEN";
+type OutcomeResult = "WIN" | "LOSS" | "EXPIRED" | "OPEN";
+
 interface SetupEntry {
   id: number;
   ts: string;
@@ -50,6 +53,13 @@ interface SetupEntry {
   stop_loss: number | null;
   tp1: number | null;
   tp2: number | null;
+  tp1_hit_at: string | null;
+  tp2_hit_at: string | null;
+  last_event_type: string | null;
+  last_event_ts: string | null;
+  pt1_result: TargetResult;
+  pt2_result: TargetResult;
+  outcome_result: OutcomeResult;
   conviction_level: string | null;
   fib_level: number | null;
   fib_ratio: number | null;
@@ -86,6 +96,8 @@ interface MeasuredMoveEntry {
   retracement_price: number | null;
   fib_level: number | null;
   status: string;
+  target_result: TargetResult;
+  outcome_result: OutcomeResult;
 }
 
 interface AdminData {
@@ -118,12 +130,9 @@ function coverageStatusColor(staleness: string): string {
 function statusColor(status: string): string {
   switch (status) {
     case "ACTIVE": return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
-    case "RUNNER_ACTIVE": return "bg-cyan-500/20 text-cyan-400 border-cyan-500/30";
     case "TP1_HIT": return "bg-blue-500/20 text-blue-400 border-blue-500/30";
     case "TP2_HIT": return "bg-purple-500/20 text-purple-400 border-purple-500/30";
-    case "RUNNER_EXITED": return "bg-amber-500/20 text-amber-300 border-amber-500/30";
     case "STOPPED": return "bg-red-500/20 text-red-400 border-red-500/30";
-    case "PULLBACK_REVERSAL": return "bg-orange-500/20 text-orange-300 border-orange-500/30";
     case "EXPIRED": return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
     default: return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
   }
@@ -139,6 +148,19 @@ function jobStatusColor(status: string): string {
 function directionColor(dir: string): string {
   if (dir === "LONG" || dir === "BULLISH") return "text-cyan-400";
   return "text-red-400";
+}
+
+function targetBadgeColor(state: TargetResult): string {
+  if (state === "HIT") return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+  if (state === "MISS") return "bg-red-500/20 text-red-400 border-red-500/30";
+  return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
+}
+
+function outcomeBadgeColor(state: OutcomeResult): string {
+  if (state === "WIN") return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+  if (state === "LOSS") return "bg-red-500/20 text-red-400 border-red-500/30";
+  if (state === "EXPIRED") return "bg-amber-500/20 text-amber-300 border-amber-500/30";
+  return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
 }
 
 function formatTs(ts: string | null): string {
@@ -307,7 +329,7 @@ export default function AdminPage() {
                 Active Setups ({data.activeSetups.length})
               </CardTitle>
               <CardDescription className="text-white/30 text-xs">
-                ACTIVE, RUNNER_ACTIVE, TP1_HIT
+                ACTIVE
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -323,40 +345,83 @@ export default function AdminPage() {
                         <TableHead className="text-white/30 text-[10px]">Dir</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Entry</TableHead>
                         <TableHead className="text-white/30 text-[10px]">SL</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">TP1</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">TP2</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">TP1 Px</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">PT1</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">TP2 Px</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">PT2</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Outcome</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Last Event</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Conviction</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.activeSetups.map((s) => (
-                        <TableRow key={s.id} className="border-white/5">
-                          <TableCell className="text-white/50 text-xs font-mono">{formatTs(s.ts)}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={`text-[10px] ${statusColor(s.status)}`}>
-                              {s.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className={`text-xs font-medium ${directionColor(s.direction)}`}>
-                            {s.direction}
-                          </TableCell>
-                          <TableCell className="text-white/60 text-xs tabular-nums">
-                            {s.entry_price?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-red-400/60 text-xs tabular-nums">
-                            {s.stop_loss?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-emerald-400/60 text-xs tabular-nums">
-                            {s.tp1?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-emerald-400/60 text-xs tabular-nums">
-                            {s.tp2?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-white/40 text-xs tabular-nums">
-                            {s.conviction_level ?? "—"}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {data.activeSetups.map((s) => {
+                        return (
+                          <TableRow key={s.id} className="border-white/5">
+                            <TableCell className="text-white/50 text-xs font-mono">{formatTs(s.ts)}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={`text-[10px] ${statusColor(s.status)}`}>
+                                {s.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className={`text-xs font-medium ${directionColor(s.direction)}`}>
+                              {s.direction}
+                            </TableCell>
+                            <TableCell className="text-white/60 text-xs tabular-nums">
+                              {s.entry_price?.toFixed(2) ?? "—"}
+                            </TableCell>
+                            <TableCell className="text-red-400/60 text-xs tabular-nums">
+                              {s.stop_loss?.toFixed(2) ?? "—"}
+                            </TableCell>
+                            <TableCell className="text-emerald-400/60 text-xs tabular-nums">
+                              {s.tp1?.toFixed(2) ?? "—"}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${targetBadgeColor(s.pt1_result)}`}
+                              >
+                                {s.pt1_result}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-emerald-400/60 text-xs tabular-nums">
+                              {s.tp2?.toFixed(2) ?? "—"}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${targetBadgeColor(s.pt2_result)}`}
+                              >
+                                {s.pt2_result}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${outcomeBadgeColor(s.outcome_result)}`}
+                              >
+                                {s.outcome_result}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col gap-1">
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] bg-zinc-500/20 text-zinc-300 border-zinc-500/30 w-fit"
+                                >
+                                  {s.last_event_type ?? "—"}
+                                </Badge>
+                                <span className="text-white/30 text-[10px] font-mono">
+                                  {formatTs(s.last_event_ts)}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-white/40 text-xs tabular-nums">
+                              {s.conviction_level ?? "—"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
@@ -384,36 +449,83 @@ export default function AdminPage() {
                         <TableHead className="text-white/30 text-[10px]">Dir</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Entry</TableHead>
                         <TableHead className="text-white/30 text-[10px]">SL</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">TP1</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">TP1 Px</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">PT1</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">TP2 Px</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">PT2</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Outcome</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Last Event</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Fib</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.recentSetups.map((s) => (
-                        <TableRow key={s.id} className="border-white/5">
-                          <TableCell className="text-white/50 text-xs font-mono">{formatTs(s.ts)}</TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={`text-[10px] ${statusColor(s.status)}`}>
-                              {s.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className={`text-xs font-medium ${directionColor(s.direction)}`}>
-                            {s.direction}
-                          </TableCell>
-                          <TableCell className="text-white/60 text-xs tabular-nums">
-                            {s.entry_price?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-red-400/60 text-xs tabular-nums">
-                            {s.stop_loss?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-emerald-400/60 text-xs tabular-nums">
-                            {s.tp1?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-white/30 text-xs">
-                            {s.fib_ratio != null ? s.fib_ratio.toFixed(3) : "—"}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {data.recentSetups.map((s) => {
+                        return (
+                          <TableRow key={s.id} className="border-white/5">
+                            <TableCell className="text-white/50 text-xs font-mono">{formatTs(s.ts)}</TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className={`text-[10px] ${statusColor(s.status)}`}>
+                                {s.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className={`text-xs font-medium ${directionColor(s.direction)}`}>
+                              {s.direction}
+                            </TableCell>
+                            <TableCell className="text-white/60 text-xs tabular-nums">
+                              {s.entry_price?.toFixed(2) ?? "—"}
+                            </TableCell>
+                            <TableCell className="text-red-400/60 text-xs tabular-nums">
+                              {s.stop_loss?.toFixed(2) ?? "—"}
+                            </TableCell>
+                            <TableCell className="text-emerald-400/60 text-xs tabular-nums">
+                              {s.tp1?.toFixed(2) ?? "—"}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${targetBadgeColor(s.pt1_result)}`}
+                              >
+                                {s.pt1_result}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-emerald-400/60 text-xs tabular-nums">
+                              {s.tp2?.toFixed(2) ?? "—"}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${targetBadgeColor(s.pt2_result)}`}
+                              >
+                                {s.pt2_result}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${outcomeBadgeColor(s.outcome_result)}`}
+                              >
+                                {s.outcome_result}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col gap-1">
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] bg-zinc-500/20 text-zinc-300 border-zinc-500/30 w-fit"
+                                >
+                                  {s.last_event_type ?? "—"}
+                                </Badge>
+                                <span className="text-white/30 text-[10px] font-mono">
+                                  {formatTs(s.last_event_ts)}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-white/30 text-xs">
+                              {s.fib_ratio != null ? s.fib_ratio.toFixed(3) : "—"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
@@ -442,35 +554,62 @@ export default function AdminPage() {
                         <TableHead className="text-white/30 text-[10px]">Target</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Retrace</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Fib</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Target Hit</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Outcome</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.measuredMoves.map((m) => (
-                        <TableRow key={m.id} className="border-white/5">
-                          <TableCell className="text-white/50 text-xs font-mono">{formatTs(m.ts)}</TableCell>
-                          <TableCell className={`text-xs font-medium ${directionColor(m.direction)}`}>
-                            {m.direction}
-                          </TableCell>
-                          <TableCell className="text-white/60 text-xs tabular-nums">
-                            {m.anchor_price?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-emerald-400/60 text-xs tabular-nums">
-                            {m.target_price?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-white/40 text-xs tabular-nums">
-                            {m.retracement_price?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-white/40 text-xs tabular-nums">
-                            {m.fib_level?.toFixed(3) ?? "—"}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className={`text-[10px] ${m.status === "ACTIVE" ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"}`}>
-                              {m.status}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {data.measuredMoves.map((m) => {
+                        return (
+                          <TableRow key={m.id} className="border-white/5">
+                            <TableCell className="text-white/50 text-xs font-mono">{formatTs(m.ts)}</TableCell>
+                            <TableCell className={`text-xs font-medium ${directionColor(m.direction)}`}>
+                              {m.direction}
+                            </TableCell>
+                            <TableCell className="text-white/60 text-xs tabular-nums">
+                              {m.anchor_price?.toFixed(2) ?? "—"}
+                            </TableCell>
+                            <TableCell className="text-emerald-400/60 text-xs tabular-nums">
+                              {m.target_price?.toFixed(2) ?? "—"}
+                            </TableCell>
+                            <TableCell className="text-white/40 text-xs tabular-nums">
+                              {m.retracement_price?.toFixed(2) ?? "—"}
+                            </TableCell>
+                            <TableCell className="text-white/40 text-xs tabular-nums">
+                              {m.fib_level?.toFixed(3) ?? "—"}
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${targetBadgeColor(m.target_result)}`}
+                              >
+                                {m.target_result}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${outcomeBadgeColor(m.outcome_result)}`}
+                              >
+                                {m.outcome_result}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] ${
+                                  m.status === "ACTIVE"
+                                    ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                                    : "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
+                                }`}
+                              >
+                                {m.status}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>

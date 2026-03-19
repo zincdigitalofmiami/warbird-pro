@@ -46,7 +46,7 @@ This is the intended steady-state authority map. Do not create multiple live wri
 
 - Canonical cutover is in place: legacy `forecasts` is gone and Warbird v1 writes to normalized `warbird_*` tables.
 - Active API surface is `app/api/warbird/signal` and `app/api/warbird/history`.
-- `mes-catchup` exists as a reconciliation route, but it is not the primary data path and is currently unscheduled while its behavior is being audited.
+- `mes-catchup` Vercel Cron (every 5 min, Sun-Fri) is the primary MES data path — no sidecar dependency.
 - The repo still contains some stale legacy scaffolding and documentation from the pre-cutover build plan.
 
 ## Immediate Priorities
@@ -62,8 +62,8 @@ This is the intended steady-state authority map. Do not create multiple live wri
 - App runtime: Next.js App Router on Vercel
 - Database: Supabase Postgres + Auth + Realtime + RLS
 - Live market data: Databento
-- Live feed sidecar: [scripts/live-feed.py](/Volumes/Satechi%20Hub/warbird-pro/scripts/live-feed.py)
-- Historical backfill: [scripts/backfill.py](/Volumes/Satechi%20Hub/warbird-pro/scripts/backfill.py)
+- MES ingestion: `mes-catchup` Vercel Cron (every 5 min) via Databento Historical API
+- Historical backfill: [scripts/backfill.py](/Volumes/Satechi%20Hub/warbird-pro/scripts/backfill.py) (local research only)
 - Canonical Warbird engine: [scripts/warbird](/Volumes/Satechi%20Hub/warbird-pro/scripts/warbird)
 
 ## Local Development
@@ -82,4 +82,18 @@ SUPABASE_SERVICE_ROLE_KEY
 DATABENTO_API_KEY
 FRED_API_KEY
 CRON_SECRET
+WARBIRD_FORECAST_WRITER_URL
+WARBIRD_FORECAST_WRITER_TOKEN
+```
+
+Optional tuning:
+
+```text
+WARBIRD_MAX_FORECAST_AGE_MS
+WARBIRD_FORECAST_WRITER_TIMEOUT_MS
+WARBIRD_MIN_PROB_HIT_PT1_FIRST
+WARBIRD_MIN_PROB_HIT_PT2_AFTER_PT1
+WARBIRD_MAX_PROB_HIT_SL_FIRST
+WARBIRD_MIN_SETUP_SCORE
+CROSS_ASSET_SHARD_COUNT
 ```

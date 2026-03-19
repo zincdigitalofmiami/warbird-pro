@@ -11,20 +11,14 @@ export type WarbirdSetupStatus =
   | "ACTIVE"
   | "TP1_HIT"
   | "TP2_HIT"
-  | "RUNNER_ACTIVE"
-  | "RUNNER_EXITED"
   | "STOPPED"
-  | "EXPIRED"
-  | "PULLBACK_REVERSAL";
+  | "EXPIRED";
 export type WarbirdSetupEventType =
   | "TRIGGERED"
   | "TP1_HIT"
   | "TP2_HIT"
-  | "RUNNER_STARTED"
-  | "RUNNER_EXITED"
   | "STOPPED"
-  | "EXPIRED"
-  | "PULLBACK_REVERSAL";
+  | "EXPIRED";
 
 export interface WarbirdDailyBiasRow {
   ts: string;
@@ -62,9 +56,13 @@ export interface WarbirdForecastRow {
   target_mae_4h: number;
   target_mfe_1h: number;
   target_mfe_4h: number;
+  prob_hit_sl_first: number | null;
+  prob_hit_pt1_first: number | null;
+  prob_hit_pt2_after_pt1: number | null;
+  expected_max_extension: number | null;
+  setup_score: number | null;
   confidence: number | null;
   mfe_mae_ratio_1h: number | null;
-  runner_headroom_4h: number | null;
   current_price: number | null;
   model_version: string | null;
   feature_snapshot: Record<string, unknown> | null;
@@ -90,7 +88,6 @@ export interface WarbirdTriggerRow {
   stoch_rsi: number | null;
   correlation_score: number | null;
   trigger_quality_ratio: number | null;
-  runner_headroom: number | null;
   no_trade_reason: string | null;
 }
 
@@ -103,7 +100,6 @@ export interface WarbirdConvictionRow {
   level: WarbirdConvictionLevel;
   counter_trend: boolean;
   all_layers_agree: boolean;
-  runner_eligible: boolean;
   daily_bias: WarbirdBias;
   bias_4h: WarbirdBias;
   bias_1h: WarbirdBias;
@@ -143,7 +139,6 @@ export interface WarbirdSetupRow {
   status: WarbirdSetupStatus;
   conviction_level: WarbirdConvictionLevel;
   counter_trend: boolean;
-  runner_eligible: boolean;
   fib_level: number | null;
   fib_ratio: number | null;
   entry_price: number;
@@ -153,13 +148,10 @@ export interface WarbirdSetupRow {
   volume_confirmation: boolean;
   volume_ratio: number | null;
   trigger_quality_ratio: number | null;
-  runner_headroom: number | null;
   current_event: WarbirdSetupEventType;
   trigger_bar_ts: string;
   tp1_hit_at: string | null;
   tp2_hit_at: string | null;
-  runner_started_at: string | null;
-  runner_exited_at: string | null;
   stopped_at: string | null;
   expires_at: string | null;
   notes: string | null;
@@ -200,13 +192,17 @@ export interface WarbirdSignal {
     mae_band_4h: number | null;
     mfe_band_1h: number | null;
     mfe_band_4h: number | null;
+    prob_hit_sl_first: number | null;
+    prob_hit_pt1_first: number | null;
+    prob_hit_pt2_after_pt1: number | null;
+    expected_max_extension: number | null;
+    setup_score: number | null;
     confidence: number | null;
   };
   conviction: {
     level: WarbirdConvictionLevel;
     counter_trend: boolean;
     all_layers_agree: boolean;
-    runner_eligible: boolean;
   };
   setup?: {
     id: number;
@@ -220,7 +216,6 @@ export interface WarbirdSignal {
     tp2: number | null;
     volume_confirmation: boolean;
     trigger_quality_ratio: number | null;
-    runner_headroom: number | null;
   };
   risk: {
     garch_vol_forecast: number | null;

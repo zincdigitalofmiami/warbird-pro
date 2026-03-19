@@ -8,14 +8,14 @@
  *   2. TTM Squeeze detection (Bollinger inside Keltner = volatility expansion imminent)
  *   3. 1m microstructure (rejection wicks, volume spikes, engulfing, momentum)
  *
- * The 1H fib engine identifies WHERE (the zone).
+ * The 15m fib engine identifies WHERE (the zone).
  * This engine identifies WHEN (the trigger) and HOW GOOD (the quality).
  *
  * Kirk: "Price touched .618 is not a trigger. A trigger is price hit .618,
  * the 15m printed a rejection wick with 2x volume, momentum shifted, and
  * this exact pattern wins 71% of the time at this hour."
  *
- * Input:  1-minute candles (last 30-60 bars), 1H zone info, direction
+ * Input:  1-minute candles (last 30-60 bars), 15m zone info, direction
  * Output: trigger decision, precise entry, tight stop, quality score,
  *         all indicator values as features for model training
  */
@@ -66,9 +66,9 @@ const TRIGGER_WAIT_THRESHOLD = 0.30;
 export interface TriggerInputs {
   /** 1-minute candles — the microstructure data */
   candles1m: CandleData[];
-  /** Forecast from the model (bias, MAE/MFE) */
+  /** Forecast from the model (bias + risk context) */
   forecast: WarbirdForecastRow;
-  /** 1H fib geometry (zone, direction, levels) */
+  /** 15m fib geometry (zone, direction, levels) */
   geometry: WarbirdFibGeometry;
   /** Cross-asset correlation score (optional) */
   correlationScore?: number | null;
@@ -474,9 +474,7 @@ export function evaluateTrigger(
 
   // ── MAE/MFE risk check ───────────────────────────────────────────────
   const stopDistance = Math.abs(preciseEntry - preciseStop);
-  const tp2Distance = Math.abs(geometry.tp2 - preciseEntry);
   const maeBlocksTrade = stopDistance > 0 && forecast.target_mae_1h > stopDistance * 1.5;
-  const runnerHeadroom = forecast.target_mfe_4h - tp2Distance;
 
   // ── Decision ─────────────────────────────────────────────────────────
   let decision: WarbirdTriggerDecision = "WAIT";
@@ -549,7 +547,6 @@ export function evaluateTrigger(
     stoch_rsi: rsiRaw(closes),
     correlation_score: correlationScore ?? null,
     trigger_quality_ratio: Math.round(triggerScore * 1000) / 1000,
-    runner_headroom: Math.round(runnerHeadroom * 100) / 100,
     no_trade_reason: noTradeReason,
   };
 
@@ -596,7 +593,6 @@ function buildNoGoResult(
     stoch_rsi: null,
     correlation_score: null,
     trigger_quality_ratio: 0,
-    runner_headroom: null,
     no_trade_reason: reason,
   };
 

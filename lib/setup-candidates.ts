@@ -107,7 +107,6 @@ export function fromWarbirdSetup(row: {
   fib_ratio: number | null
   conviction_level: string | null
   counter_trend?: boolean | null
-  runner_eligible?: boolean | null
   notes?: string | null
   created_at: string
 }): SetupCandidate {
@@ -127,7 +126,7 @@ export function fromWarbirdSetup(row: {
     entryZoneHigh: row.entry_price,
     invalidationLevel: row.stop_loss,
     impulseContext: row.counter_trend ? 'REVERSAL' : 'CONTINUATION',
-    liquidityContext: row.runner_eligible ? 'EXPANSION' : 'UNSPECIFIED',
+    liquidityContext: 'UNSPECIFIED',
     structureContext: 'MEASURED_MOVE',
     fibLevel: row.fib_level ?? row.entry_price ?? 0,
     fibRatio: row.fib_ratio ?? 0.5,
@@ -146,12 +145,9 @@ function mapStatus(status: string): SetupLifecyclePhase {
     case 'ACTIVE':
     case 'TP1_HIT':
     case 'TP2_HIT':
-    case 'RUNNER_ACTIVE':
       return 'TRIGGERED'
-    case 'RUNNER_EXITED':
     case 'STOPPED':
     case 'EXPIRED':
-    case 'PULLBACK_REVERSAL':
       return 'EXPIRED'
     default:
       return 'AWAITING_CONTACT'

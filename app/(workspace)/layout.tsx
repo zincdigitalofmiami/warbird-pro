@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { Suspense } from "react";
 
-export default function ProtectedLayout({
+export default function WorkspaceLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -15,7 +15,7 @@ export default function ProtectedLayout({
       <nav className="w-full flex justify-center border-b border-white/5 h-14">
         <div className="w-full flex justify-between items-center px-6 text-sm">
           <div className="flex items-center gap-6">
-            <Link href="/protected" className="flex items-center">
+            <Link href="/dashboard" className="flex items-center">
               <Image
                 src="/warbird-logo.svg"
                 alt="Warbird Pro"
@@ -25,10 +25,10 @@ export default function ProtectedLayout({
                 className="h-8 w-auto"
               />
             </Link>
-            <Link href="/protected" className="text-white/40 hover:text-white/70 transition-colors text-xs uppercase tracking-wider font-medium">
+            <Link href="/dashboard" className="text-white/40 hover:text-white/70 transition-colors text-xs uppercase tracking-wider font-medium">
               Dashboard
             </Link>
-            <Link href="/protected/admin" className="text-white/40 hover:text-white/70 transition-colors text-xs uppercase tracking-wider font-medium">
+            <Link href="/admin" className="text-white/40 hover:text-white/70 transition-colors text-xs uppercase tracking-wider font-medium">
               Admin
             </Link>
           </div>

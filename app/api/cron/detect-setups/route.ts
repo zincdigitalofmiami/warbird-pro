@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isMarketOpen } from "@/lib/market-hours";
+import { isMarketOpen, isWeekendBar } from "@/lib/market-hours";
 import type { CandleData } from "@/lib/types";
 import { buildDailyBiasLayer } from "@/scripts/warbird/daily-layer";
 import { buildStructure4H } from "@/scripts/warbird/structure-4h";
@@ -35,6 +35,161 @@ function toCandles(rows: OhlcvRow[] | null | undefined): CandleData[] {
     }));
 }
 
+type JobLogPayload = {
+  job_name: string;
+  status: "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
+  rows_affected?: number;
+  duration_ms: number;
+  error_message?: string;
+};
+
+type ForecastGateMetrics = {
+  probHitSlFirst: number | null;
+  probHitPt1First: number | null;
+  probHitPt2AfterPt1: number | null;
+  setupScore: number | null;
+};
+
+type ForecastGateThresholds = {
+  maxProbHitSlFirst: number;
+  minProbHitPt1First: number;
+  minProbHitPt2AfterPt1: number;
+  minSetupScore: number;
+};
+
+type ForecastGateDecision = {
+  allow: boolean;
+  reasons: string[];
+  metrics: ForecastGateMetrics;
+  thresholds: ForecastGateThresholds;
+};
+
+const DEFAULT_FORECAST_GATE_THRESHOLDS: ForecastGateThresholds = {
+  maxProbHitSlFirst: 0.45,
+  minProbHitPt1First: 0.5,
+  minProbHitPt2AfterPt1: 0.35,
+  minSetupScore: 55,
+};
+
+async function writeJobLog(
+  supabase: ReturnType<typeof createAdminClient>,
+  payload: JobLogPayload,
+) {
+  const { error } = await supabase.from("job_log").insert(payload);
+  if (error) {
+    throw new Error(`job_log insert failed: ${error.message}`);
+  }
+}
+
+function hasNonWeekendContinuity(candles: CandleData[], intervalSec: number): boolean {
+  if (candles.length < 2) return true;
+
+  for (let i = 1; i < candles.length; i += 1) {
+    const prev = candles[i - 1].time;
+    const current = candles[i].time;
+    const delta = current - prev;
+
+    if (delta === intervalSec) continue;
+    if (delta < intervalSec) return false;
+
+    for (let missing = prev + intervalSec; missing < current; missing += intervalSec) {
+      if (!isWeekendBar(missing)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+function readEnvNumber(name: string): number | null {
+  const raw = process.env[name];
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed;
+}
+
+function parseSnapshotMetric(snapshot: Record<string, unknown> | null | undefined, key: string): number | null {
+  const value = snapshot?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function resolveForecastMetrics(forecast: WarbirdForecastRow): ForecastGateMetrics {
+  const snapshot =
+    forecast.feature_snapshot && typeof forecast.feature_snapshot === "object"
+      ? (forecast.feature_snapshot as Record<string, unknown>)
+      : null;
+
+  return {
+    probHitSlFirst: forecast.prob_hit_sl_first ?? parseSnapshotMetric(snapshot, "prob_hit_sl_first"),
+    probHitPt1First: forecast.prob_hit_pt1_first ?? parseSnapshotMetric(snapshot, "prob_hit_pt1_first"),
+    probHitPt2AfterPt1:
+      forecast.prob_hit_pt2_after_pt1 ?? parseSnapshotMetric(snapshot, "prob_hit_pt2_after_pt1"),
+    setupScore: forecast.setup_score ?? parseSnapshotMetric(snapshot, "setup_score"),
+  };
+}
+
+function resolveForecastGateThresholds(): ForecastGateThresholds {
+  return {
+    maxProbHitSlFirst:
+      readEnvNumber("WARBIRD_MAX_PROB_HIT_SL_FIRST") ??
+      DEFAULT_FORECAST_GATE_THRESHOLDS.maxProbHitSlFirst,
+    minProbHitPt1First:
+      readEnvNumber("WARBIRD_MIN_PROB_HIT_PT1_FIRST") ??
+      DEFAULT_FORECAST_GATE_THRESHOLDS.minProbHitPt1First,
+    minProbHitPt2AfterPt1:
+      readEnvNumber("WARBIRD_MIN_PROB_HIT_PT2_AFTER_PT1") ??
+      DEFAULT_FORECAST_GATE_THRESHOLDS.minProbHitPt2AfterPt1,
+    minSetupScore:
+      readEnvNumber("WARBIRD_MIN_SETUP_SCORE") ??
+      DEFAULT_FORECAST_GATE_THRESHOLDS.minSetupScore,
+  };
+}
+
+function evaluateForecastGate(forecast: WarbirdForecastRow): ForecastGateDecision {
+  const metrics = resolveForecastMetrics(forecast);
+  const thresholds = resolveForecastGateThresholds();
+  const reasons: string[] = [];
+
+  if (metrics.probHitSlFirst == null) {
+    reasons.push("missing_prob_hit_sl_first");
+  } else if (metrics.probHitSlFirst > thresholds.maxProbHitSlFirst) {
+    reasons.push(
+      `prob_hit_sl_first>${thresholds.maxProbHitSlFirst.toFixed(2)} (${metrics.probHitSlFirst.toFixed(3)})`,
+    );
+  }
+
+  if (metrics.probHitPt1First == null) {
+    reasons.push("missing_prob_hit_pt1_first");
+  } else if (metrics.probHitPt1First < thresholds.minProbHitPt1First) {
+    reasons.push(
+      `prob_hit_pt1_first<${thresholds.minProbHitPt1First.toFixed(2)} (${metrics.probHitPt1First.toFixed(3)})`,
+    );
+  }
+
+  if (metrics.probHitPt2AfterPt1 == null) {
+    reasons.push("missing_prob_hit_pt2_after_pt1");
+  } else if (metrics.probHitPt2AfterPt1 < thresholds.minProbHitPt2AfterPt1) {
+    reasons.push(
+      `prob_hit_pt2_after_pt1<${thresholds.minProbHitPt2AfterPt1.toFixed(2)} (${metrics.probHitPt2AfterPt1.toFixed(3)})`,
+    );
+  }
+
+  if (metrics.setupScore == null) {
+    reasons.push("missing_setup_score");
+  } else if (metrics.setupScore < thresholds.minSetupScore) {
+    reasons.push(`setup_score<${thresholds.minSetupScore} (${metrics.setupScore.toFixed(2)})`);
+  }
+
+  return {
+    allow: reasons.length === 0,
+    reasons,
+    metrics,
+    thresholds,
+  };
+}
+
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
@@ -50,15 +205,26 @@ export async function GET(request: Request) {
   const force = url.searchParams.get("force") === "1";
 
   if (!force && !isMarketOpen()) {
+    try {
+      await writeJobLog(supabase, {
+        job_name: "detect-setups",
+        status: "SKIPPED",
+        rows_affected: 0,
+        duration_ms: Date.now() - startTime,
+        error_message: "market_closed",
+      });
+    } catch {
+      // Ignore logging failure to preserve skip response.
+    }
     return NextResponse.json({ skipped: true, reason: "market_closed" });
   }
 
   try {
     // Fetch all timeframes in parallel:
-    // - 1D/4H/1H for macro layers (bias, structure, zone)
-    // - 15m for trigger-level fib geometry (intraday precision)
+    // - 1D/4H for macro context layers
+    // - 15m for strict setup geometry authority
     // - 1m for microstructure + indicator computation
-    const [dailyBarsRes, fourHourBarsRes, oneHourBarsRes, fifteenMinBarsRes, oneMinBarsRes, forecastRes] =
+    const [dailyBarsRes, fourHourBarsRes, fifteenMinBarsRes, oneMinBarsRes, forecastRes] =
       await Promise.all([
         supabase
           .from("mes_1d")
@@ -70,12 +236,7 @@ export async function GET(request: Request) {
           .select("ts, open, high, low, close, volume")
           .order("ts", { ascending: false })
           .limit(120),
-        supabase
-          .from("mes_1h")
-          .select("ts, open, high, low, close, volume")
-          .order("ts", { ascending: false })
-          .limit(160),
-        // 15-minute bars for trigger-level fib (last 120 = 30 hours of intraday structure)
+        // 15-minute bars are strict geometry authority
         supabase
           .from("mes_15m")
           .select("ts, open, high, low, close, volume")
@@ -99,19 +260,44 @@ export async function GET(request: Request) {
 
     if (dailyBarsRes.error) throw new Error(`mes_1d query failed: ${dailyBarsRes.error.message}`);
     if (fourHourBarsRes.error) throw new Error(`mes_4h query failed: ${fourHourBarsRes.error.message}`);
-    if (oneHourBarsRes.error) throw new Error(`mes_1h query failed: ${oneHourBarsRes.error.message}`);
     if (fifteenMinBarsRes.error) throw new Error(`mes_15m query failed: ${fifteenMinBarsRes.error.message}`);
     if (oneMinBarsRes.error) throw new Error(`mes_1m query failed: ${oneMinBarsRes.error.message}`);
     if (forecastRes.error) throw new Error(`warbird_forecasts_1h query failed: ${forecastRes.error.message}`);
 
     const dailyBars = toCandles(dailyBarsRes.data);
     const fourHourBars = toCandles(fourHourBarsRes.data);
-    const oneHourBars = toCandles(oneHourBarsRes.data);
     const fifteenMinBars = toCandles(fifteenMinBarsRes.data);
     const oneMinBars = toCandles(oneMinBarsRes.data);
 
-    if (dailyBars.length < 20 || fourHourBars.length < 20 || oneHourBars.length < 55) {
+    if (dailyBars.length < 20 || fourHourBars.length < 20 || fifteenMinBars.length < 55) {
+      await writeJobLog(supabase, {
+        job_name: "detect-setups",
+        status: "SKIPPED",
+        rows_affected: 0,
+        duration_ms: Date.now() - startTime,
+        error_message: "insufficient_data",
+      });
       return NextResponse.json({ skipped: true, reason: "insufficient_data" });
+    }
+
+    const has15mContinuity = hasNonWeekendContinuity(fifteenMinBars, 15 * 60);
+    const has1mContinuity = hasNonWeekendContinuity(oneMinBars, 60);
+    if (!has15mContinuity || !has1mContinuity) {
+      await writeJobLog(supabase, {
+        job_name: "detect-setups",
+        status: "SKIPPED",
+        rows_affected: 0,
+        duration_ms: Date.now() - startTime,
+        error_message: `continuity_gap (mes_15m=${has15mContinuity}, mes_1m=${has1mContinuity})`,
+      });
+      return NextResponse.json({
+        skipped: true,
+        reason: "continuity_gap",
+        continuity: {
+          mes_15m: has15mContinuity,
+          mes_1m: has1mContinuity,
+        },
+      });
     }
 
     // ── Layer 1: Daily bias (200d MA) ──────────────────────────────────
@@ -129,7 +315,7 @@ export async function GET(request: Request) {
     // ── Layer 3: 1H forecast (model output) ────────────────────────────
     const forecast = (forecastRes.data as WarbirdForecastRow | null) ?? null;
     if (!forecast) {
-      await supabase.from("job_log").insert({
+      await writeJobLog(supabase, {
         job_name: "detect-setups",
         status: "SKIPPED",
         rows_affected: 2,
@@ -139,21 +325,38 @@ export async function GET(request: Request) {
       return NextResponse.json({ skipped: true, reason: "no_forecast" });
     }
 
-    // ── Layer 4: 1H fib geometry (macro zone identification) ────────────
-    const geometry1h = buildFibGeometry(oneHourBars, forecast.bias_1h);
-    if (!geometry1h) {
-      return NextResponse.json({ skipped: true, reason: "no_fib_geometry" });
+    const forecastAgeMs = Date.now() - new Date(forecast.ts).getTime();
+    const maxForecastAgeMs = 90 * 60 * 1000;
+    if (forecastAgeMs > maxForecastAgeMs) {
+      await writeJobLog(supabase, {
+        job_name: "detect-setups",
+        status: "SKIPPED",
+        rows_affected: 2,
+        duration_ms: Date.now() - startTime,
+        error_message: `stale_forecast age_ms=${forecastAgeMs}`,
+      });
+      return NextResponse.json({
+        skipped: true,
+        reason: "stale_forecast",
+        forecast_ts: forecast.ts,
+        forecast_age_ms: forecastAgeMs,
+      });
     }
 
-    // ── Layer 4b: 15m fib geometry (trigger-level precision) ──────────
-    // This is the intraday fib — tighter anchor, tighter levels, catches
-    // the 20-60pt moves that the 1H misses. Same function, different data.
-    const geometry15m = fifteenMinBars.length >= 55
-      ? buildFibGeometry(fifteenMinBars, forecast.bias_1h)
-      : null;
+    const forecastGate = evaluateForecastGate(forecast);
 
-    // Use 15m fib for trigger precision when available, 1H as fallback
-    const triggerGeometry = geometry15m ?? geometry1h;
+    // ── Layer 4: 15m fib geometry (strict setup authority) ──────────────
+    const triggerGeometry = buildFibGeometry(fifteenMinBars, forecast.bias_1h);
+    if (!triggerGeometry) {
+      await writeJobLog(supabase, {
+        job_name: "detect-setups",
+        status: "SKIPPED",
+        rows_affected: 3,
+        duration_ms: Date.now() - startTime,
+        error_message: "no_fib_geometry",
+      });
+      return NextResponse.json({ skipped: true, reason: "no_fib_geometry" });
+    }
 
     // ── Layer 5: Conviction (bias alignment) ───────────────────────────
     const convictionResult = evaluateConviction({
@@ -173,16 +376,15 @@ export async function GET(request: Request) {
 
     // ── Persist trigger ────────────────────────────────────────────────
     const { data: triggerRow, error: triggerError } = await supabase
-      .from("warbird_triggers")
-      .upsert(triggerResult, { onConflict: "forecast_id" })
+      .from("warbird_triggers_15m")
+      .upsert(triggerResult, { onConflict: "symbol_code,ts,forecast_id" })
       .select("*")
       .single();
 
-    // If triggers table doesn't exist yet, continue without it
-    const triggerId = triggerRow?.id ?? null;
-    if (triggerError && !triggerError.message.includes("does not exist")) {
-      console.error(`warbird_triggers upsert: ${triggerError.message}`);
+    if (triggerError) {
+      throw new Error(`warbird_triggers_15m upsert failed: ${triggerError.message}`);
     }
+    const triggerId = triggerRow.id;
 
     // ── Persist conviction ─────────────────────────────────────────────
     const convictionTs = new Date().toISOString();
@@ -208,9 +410,23 @@ export async function GET(request: Request) {
       throw new Error(`warbird_conviction upsert failed: ${convictionError.message}`);
     }
 
-    // ── Create setup only if trigger says GO and conviction allows ─────
+    // ── Create setup only if trigger says GO, conviction allows, and
+    // promoted forecast probabilities pass execution gates.
     let setupId: number | null = null;
-    if (triggerResult.decision === "GO" && conviction.level !== "NO_TRADE") {
+    const triggerEligible = triggerResult.decision === "GO" && conviction.level !== "NO_TRADE";
+
+    if (triggerEligible && !forecastGate.allow) {
+      const gateReason = `forecast_gate_failed: ${forecastGate.reasons.join("; ")}`;
+      const { error: triggerUpdateError } = await supabase
+        .from("warbird_triggers_15m")
+        .update({ no_trade_reason: gateReason })
+        .eq("id", triggerId);
+      if (triggerUpdateError) {
+        throw new Error(`warbird_triggers_15m gate update failed: ${triggerUpdateError.message}`);
+      }
+    }
+
+    if (triggerEligible && forecastGate.allow) {
       const setupKey = [
         forecast.id,
         convictionTs.slice(0, 13),
@@ -230,7 +446,6 @@ export async function GET(request: Request) {
         status: "ACTIVE",
         conviction_level: conviction.level,
         counter_trend: convictionResult.counterTrend,
-        runner_eligible: false,
         fib_level: triggerGeometry.fibLevel,
         fib_ratio: triggerGeometry.fibRatio,
         // Use PRECISE levels from 1m trigger, not coarse 1H levels
@@ -242,7 +457,6 @@ export async function GET(request: Request) {
         volume_confirmation: triggerFeatures.volumeConfirmed,
         volume_ratio: triggerFeatures.volumeRatio,
         trigger_quality_ratio: triggerFeatures.triggerScore,
-        runner_headroom: triggerResult.runner_headroom,
         current_event: "TRIGGERED",
         trigger_bar_ts: triggerResult.ts,
         notes: buildSetupNotes(triggerGeometry, triggerFeatures),
@@ -282,10 +496,7 @@ export async function GET(request: Request) {
               regime_label: REGIME_LABEL,
               days_into_regime: getDaysIntoRegime(setup.ts),
               actual_retrace_ratio: triggerGeometry.actualRetraceRatio,
-              fib_source: geometry15m ? "15m" : "1h",
-              macro_fib_entry: geometry1h.entry,
-              macro_fib_tp1: geometry1h.tp1,
-              macro_fib_tp2: geometry1h.tp2,
+              fib_source: "15m",
               trigger_score: triggerFeatures.triggerScore,
               rejection_detected: triggerFeatures.rejectionDetected,
               rejection_wick_ratio: triggerFeatures.rejectionWickRatio,
@@ -304,9 +515,10 @@ export async function GET(request: Request) {
         }
       }
 
-      if (triggerGeometry.measuredMove) {
+      if (triggerGeometry.measuredMove && setupId != null) {
         await supabase.from("measured_moves").upsert(
           {
+            setup_id: setupId,
             ts: new Date(triggerGeometry.measuredMove.pointC.time * 1000).toISOString(),
             symbol_code: WARBIRD_DEFAULT_SYMBOL,
             direction: triggerGeometry.measuredMove.direction === "BULLISH" ? "LONG" : "SHORT",
@@ -316,16 +528,22 @@ export async function GET(request: Request) {
             fib_level: triggerGeometry.measuredMove.retracementRatio,
             status: "ACTIVE",
           },
-          { onConflict: "ts" },
+          { onConflict: "setup_id" },
         );
       }
     }
 
-    await supabase.from("job_log").insert({
+    const outcomeRows = setupId ? 5 : 3;
+    const partialReason = triggerEligible && !forecastGate.allow
+      ? `forecast_gate_failed: ${forecastGate.reasons.join("; ")}`
+      : undefined;
+
+    await writeJobLog(supabase, {
       job_name: "detect-setups",
-      status: "SUCCESS",
-      rows_affected: setupId ? 5 : 3,
+      status: partialReason ? "PARTIAL" : "SUCCESS",
+      rows_affected: outcomeRows,
       duration_ms: Date.now() - startTime,
+      error_message: partialReason,
     });
 
     return NextResponse.json({
@@ -345,7 +563,13 @@ export async function GET(request: Request) {
         hour_utc: triggerFeatures.hourUtc,
       },
       conviction: conviction.level,
-      fib_source: geometry15m ? "15m" : "1h",
+      forecast_gate: {
+        allow: forecastGate.allow,
+        reasons: forecastGate.reasons,
+        metrics: forecastGate.metrics,
+        thresholds: forecastGate.thresholds,
+      },
+      fib_source: "15m",
       precise_entry: triggerFeatures.preciseEntry,
       precise_stop: triggerFeatures.preciseStop,
       trigger_fib: {
@@ -354,19 +578,13 @@ export async function GET(request: Request) {
         tp1: triggerGeometry.tp1,
         tp2: triggerGeometry.tp2,
       },
-      macro_fib: {
-        entry: geometry1h.entry,
-        stop: geometry1h.stopLoss,
-        tp1: geometry1h.tp1,
-        tp2: geometry1h.tp2,
-      },
       setup_id: setupId,
       duration_ms: Date.now() - startTime,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal error";
     try {
-      await supabase.from("job_log").insert({
+      await writeJobLog(supabase, {
         job_name: "detect-setups",
         status: "FAILED",
         error_message: message,

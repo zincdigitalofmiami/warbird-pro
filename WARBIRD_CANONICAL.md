@@ -1,6 +1,6 @@
 # WARBIRD PRO — CANONICAL SPECIFICATION
 
-**Version:** 1.0 · **Date:** 2026-03-16 · **Author:** Kirk Musick, MS, MBA · **Status:** ACTIVE
+**Version:** 1.1 · **Date:** 2026-03-18 · **Author:** Kirk Musick, MS, MBA · **Status:** ACTIVE
 
 This is the single source of truth for Warbird Pro. All other planning docs, AGENTS.md references, and prior specs defer to this document where they conflict.
 
@@ -8,7 +8,7 @@ This is the single source of truth for Warbird Pro. All other planning docs, AGE
 
 ## 1. WHAT WARBIRD IS
 
-Warbird is an ML-powered S&P 500 Micro E-mini (MES) futures intelligence platform. It combines a multi-timeframe conviction system with a machine learning core forecaster to produce trade signals with probabilistic targets and risk-calibrated stops.
+Warbird is an ML-powered S&P 500 Micro E-mini (MES) futures intelligence platform. It uses a 15m-primary geometry and probability engine to produce trade signals with probabilistic targets and risk-calibrated stops.
 
 It is NOT a simple candlestick pattern matcher. The old Touch → Hook → Go state machine (ported from BHG/rabid-raccoon) is legacy scaffolding and does not represent the real methodology.
 
@@ -22,7 +22,7 @@ It is NOT a simple candlestick pattern matcher. The old Touch → Hook → Go st
 | Database | Supabase (Postgres, Auth, Realtime, RLS) — NO Prisma, NO ORM |
 | UI | Tailwind v4, shadcn/ui (56 components) |
 | Chart | Lightweight Charts v5.1.0 (candles), Recharts (dashboard) |
-| Live Data | mes-catchup Vercel Cron (5 min) → Databento Historical API → Supabase |
+| Live Data | mes_1s continuity layer + mes-catchup Vercel Cron (5 min) → Databento → Supabase |
 | Scheduling | Vercel Cron Jobs (21 of 100 used) |
 | ML Training | AutoGluon TabularPredictor on Apple M4 Pro |
 | Volatility | GJR-GARCH(1,1) with Student-t innovations |
@@ -40,24 +40,25 @@ scripts/warbird/
   build-warbird-dataset.ts    # Canonical dataset builder (Supabase-native)
   train-warbird.py            # AutoGluon training (canonical AG config)
   predict-warbird.py          # Hourly inference → WarbirdSignal v1.0
-  fib-engine.ts               # 1H fib geometry (measured moves, retracements, extensions)
+  fib-engine.ts               # 15m-primary fib geometry (measured moves, retracements, extensions)
   garch-engine.py             # GJR-GARCH(1,1) volatility estimation
   daily-layer.ts              # 200d MA bias + continuous features
   structure-4h.ts             # 4H swing structure detection
   conviction-matrix.ts        # Multi-layer conviction scoring
 ```
 
-Existing `scripts/` files (backfill.py, mes_aggregation.py) stay for local research. `live-feed.py` is deprecated — replaced by `mes-catchup` Vercel Cron.
+Existing `scripts/` files (backfill.py, mes_aggregation.py) stay for local research. `live-feed.py` is deprecated and must not be used as a production writer.
 
 ### MES Bar Authority Map
 
 Warbird v1 uses a single authority per MES timeframe:
 
-- `mes_1m` — direct from Databento
-- `mes_1h` — direct from Databento
-- `mes_1d` — direct from Databento for macro bias only
-- `mes_15m` — derived from stored `mes_1m`
-- `mes_4h` — derived from stored `mes_1h`
+- `mes_1s` — canonical continuity ingestion layer
+- `mes_1m` — trigger-resolution layer (derived from `mes_1s` when available)
+- `mes_15m` — primary setup/model/chart layer (derived from stored `mes_1m`)
+- `mes_1h` — optional context layer only
+- `mes_4h` — optional context layer only
+- `mes_1d` — optional macro context layer only
 
 This is intentional. Do not create duplicate live writer paths for the same timeframe. Reconciliation is allowed. A second primary writer is not.
 
@@ -73,7 +74,7 @@ Engine output is persisted as **normalized Supabase tables** with a clean **API 
 DB Tables (normalized, each layer writes independently):
   warbird_daily_bias    → daily 200d MA bias + features
   warbird_structure_4h  → 4H trend/swing state
-  warbird_forecasts_1h  → core forecaster predictions (price, MAE, MFE)
+  warbird_forecasts_1h  → canonical model outputs (15m-primary logic; table name retained for compatibility)
   warbird_conviction    → combined conviction assessment
   warbird_setups        → active setup geometry (entry, SL, TP1, TP2)
   warbird_setup_events  → outcome lifecycle (TRIGGERED, TP1_HIT, TP2_HIT, STOPPED, EXPIRED)
@@ -98,31 +99,31 @@ Migration order:
 
 ---
 
-## 3. THE 3-LAYER CONVICTION ARCHITECTURE
+## 3. THE 3-LAYER DECISION ARCHITECTURE
 
-**Layer 1 — DAILY: 200-Day MA Shadow (Rule-Based)**
+**Layer 1 — DAILY: Context Layer (Rule-Based)**
 - Price vs 200d MA → bias LONG or SHORT
 - Counter-trend: allowed but penalized (reduced size, TP1 only)
 - Features to model: distance_pct, slope, sessions_on_side, daily_ret, daily_range_vs_avg
 
-**Layer 2 — 4H: Trend & Structure (Rule-Based)**
+**Layer 2 — 4H: Context Layer (Rule-Based)**
 - HH/HL or LH/LL swing structure
 - Confirms or denies daily direction
-- Does NOT generate trade geometry (4H fibs = 80-150pt, too wide for day trades)
-- Answers: "Which way is the current swing moving?"
+- Does NOT generate primary trade geometry
+- Answers: "Is context aligned or conflicting?"
 
-**Layer 3 — 1H: Core Forecaster + Fib Geometry (ONE ML Model + Rules)**
+**Layer 3 — 15M: Core Geometry + Probability Model (ONE ML Model + Rules)**
 - THIS IS WHERE THE FIBS LIVE. THIS IS WHERE TRADES ARE IDENTIFIED.
-- ML Model (AutoGluon): predicts 5 fib-relative targets per setup
-- Fib Geometry (Rule-Based): measured moves on 1H candles, retracements, extensions
+- ML Model (AutoGluon): scores path probabilities per 15m setup
+- Fib Geometry (Rule-Based): measured moves on 15m candles, retracements, extensions
 - Entry / SL / TP1 / TP2 computation, 20-40+ point trade targets
-- GO/NO-GO determined by fib geometry availability on 1H candles
+- GO/NO-GO determined by 15m geometry + trigger-state confirmation
 
 **Conviction Matrix (Rule-Based)**
-- Daily+4H+1H all agree → MAXIMUM conviction (full position)
-- Daily+4H agree, 1H weak → HIGH/MODERATE (reduced size)
-- 4H+1H agree, Daily neutral → MODERATE (reduced size, TP1 focus)
-- 4H+1H agree, Daily against → LOW / COUNTER-TREND (TP1 only)
+- Daily+4H+15m all agree → MAXIMUM conviction (full position)
+- Daily+4H agree, 15m weak → HIGH/MODERATE (reduced size)
+- 4H+15m agree, Daily neutral → MODERATE (reduced size, TP1 focus)
+- 4H+15m agree, Daily against → LOW / COUNTER-TREND (TP1 only)
 - Daily against + other disagreement → NO TRADE
 
 ---
@@ -136,17 +137,17 @@ No runner logic in v1. Counter-trend trades: TP1 only, reduced size.
 
 ---
 
-## 5. ONE ML MODEL IN v1
+## 5. ONE ML MODEL IN v1 (15M PRIMARY)
 
-The 1H Core Forecaster is the ONLY ML model in Warbird v1.
+The 15m primary geometry scorer is the ONLY ML model in Warbird v1.
 
-**NOT in v1:** 15M ML trigger model (v2), runner logic (v2), setup outcome scorer (v3), Monte Carlo (v2), pinball/quantile regression (v2/v3).
+**NOT in v1:** secondary model stacks, runner logic (v2), setup outcome scorer (v3), Monte Carlo (v2), pinball/quantile regression (v2/v3).
 
 ---
 
-## 6. CANONICAL DATASET — 1H CORE FORECASTER
+## 6. CANONICAL DATASET — 15M PRIMARY MODEL
 
-**Rows:** One per 1H fib setup (only bars where `buildFibGeometry()` returns non-null)
+**Rows:** One per 15m fib setup (only bars where `buildFibGeometry()` returns non-null)
 **Training window:** 2 full years back to January 1, 2024
 **Expected columns:** ~150-170 features + 5 targets + 1 sample_weight
 **Builder:** `build-warbird-dataset.ts` (all new, Supabase-native)
@@ -259,11 +260,14 @@ Raw companions for every normalization. No hardcoded ceilings. No clipping. Tree
 
 | Timeframe | Role | ML? | Fibs? |
 |-----------|------|-----|-------|
+| 1s | Continuity ingestion | No | No |
+| 1m | Trigger-resolution + microstructure | No (v1) | Support only |
+| 15m | Core geometry + primary model + GO/NO-GO | YES | YES |
 | Daily | 200d MA directional shadow | No | No |
 | 4H | Trend/structure confirmation | No (v1) | No (too wide) |
-| 1H | Core forecaster + fib geometry + GO/NO-GO | YES | YES |
+| 1H | Optional context only | No (v1) | No (v1) |
 
-The fib engine operates on 1H candles only. GO/NO-GO is determined by fib geometry availability on 1H. Daily bars are macro bias only and are not fib anchors in v1.
+The fib engine operates on 15m candles for canonical decisioning. 1H may be used as context only and is not the primary fib anchor in v1.
 
 ---
 
@@ -277,7 +281,7 @@ Versioned schema consumed by API → Dashboard → (future) Pine Script:
 - **Metadata:** version, generatedAt, symbol
 - **Daily layer:** bias (BULL/BEAR/NEUTRAL), distance_pct, slope
 - **4H structure:** bias_4h, agrees_with_daily
-- **1H directional:** bias_1h, price_target_1h/4h, mae/mfe_band_1h/4h, confidence
+- **15m directional:** setup_score, path probabilities, expected extension (stored in `warbird_forecasts_1h` for compatibility)
 - **Conviction:** level (MAXIMUM/HIGH/MODERATE/LOW/NO_TRADE), counter_trend
 - **Setup:** direction, fibLevel, entry, SL, TP1, TP2
 - **Risk:** garch_vol, gpr_level, trump_effect, vix_level, regime, days_into_regime
@@ -290,6 +294,7 @@ Versioned schema consumed by API → Dashboard → (future) Pine Script:
 
 - Fib geometry on chart (FibLinesPrimitive, confluence scoring, 10 levels)
 - MES schema and writer paths for `mes_1m`, `mes_15m`, `mes_1h`, `mes_4h`, `mes_1d`
+- Canonical continuity direction: `mes_1s` feeding `1s -> 1m -> 15m`
 - Supabase schema (10 migrations, including the Warbird v1 cutover)
 - Auth flow, protected routes, admin dashboard structure
 - Canonical Warbird routes (`/api/warbird/signal`, `/api/warbird/history`)
@@ -311,7 +316,7 @@ Versioned schema consumed by API → Dashboard → (future) Pine Script:
 
 ### Operational Priorities
 1. Keep docs and control surfaces aligned to canonical Warbird v1.
-2. Restore and verify hosted MES continuity for the authority map above.
+2. Restore and verify hosted MES continuity for `1s -> 1m -> 15m`.
 3. Fill missing support data required for trigger/model validation.
 4. Dry-test deterministic engine layers against real historical data.
 5. Train only after data continuity and upstream integrity are proven.
@@ -327,6 +332,8 @@ Versioned schema consumed by API → Dashboard → (future) Pine Script:
 
 ### Architecture
 - ONE ML model in v1. Period.
+- 15m is the primary decision/model/chart timeframe.
+- No continuous local-machine runtime for price ingestion or chart serving.
 - Risk signals are FEATURES, not FILTERS.
 - Raw companion for every normalized feature.
 - No hardcoded ceilings or clipping.
@@ -355,10 +362,10 @@ Versioned schema consumed by API → Dashboard → (future) Pine Script:
 ## 19. WARBIRD ROADMAP
 
 ### v1 (Current Scope)
-ONE ML model (1H), rule-based layers (Daily/4H/conviction), GARCH, full feature pipeline, regime-anchored features, WarbirdSignal v1.0. 5 fib-relative targets. No runners.
+ONE ML model (15m primary), context layers (Daily/4H), GARCH, full feature pipeline, regime-anchored features, WarbirdSignal v1.0. 5 fib-relative targets. No runners.
 
 ### v2 (After v1 Stable)
-15M ML trigger model, runner logic, Monte Carlo on validated GARCH, pinball loss, fold upgrade (5→8 A/B), Pine Script integration.
+Runner logic, Monte Carlo on validated GARCH, pinball loss, fold upgrade (5→8 A/B), Pine Script integration.
 
 ### v3 (After Setup Count Grows)
 Setup outcome scorer P(T1)/P(T2)/P(Runner|T1), survival model, FinBERT sentiment, hyperparameter optimization.

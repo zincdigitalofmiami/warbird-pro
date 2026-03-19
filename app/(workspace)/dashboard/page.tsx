@@ -26,7 +26,7 @@ async function AuthGate() {
   );
 }
 
-export default function ProtectedPage() {
+export default function DashboardPage() {
   return (
     <div className="flex-1 w-full flex flex-col" style={{ background: "#131722" }}>
       <Suspense

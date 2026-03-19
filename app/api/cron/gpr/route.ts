@@ -11,6 +11,36 @@ export const maxDuration = 60;
 const GPR_URL =
   "https://www.matteoiacoviello.com/gpr_files/data_gpr_daily_recent.xls";
 
+type JobLogStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
+
+type XlsxRow = Record<string, string | number | null | undefined>;
+
+function toNumber(value: string | number | null | undefined): number {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return Number.parseFloat(value);
+  return Number.NaN;
+}
+
+async function writeJobLog(
+  supabase: ReturnType<typeof createAdminClient>,
+  params: {
+    job_name: string;
+    status: JobLogStatus;
+    rows_affected: number;
+    duration_ms: number;
+    error_message?: string | null;
+  },
+) {
+  const { error } = await supabase.from("job_log").insert({
+    ...params,
+    error_message: params.error_message ?? null,
+  });
+
+  if (error) {
+    throw new Error(`job_log insert failed: ${error.message}`);
+  }
+}
+
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
@@ -35,7 +65,7 @@ export async function GET(request: Request) {
     const buffer = await response.arrayBuffer();
     const workbook = XLSX.read(new Uint8Array(buffer), { type: "array" });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const jsonData: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet);
+    const jsonData = XLSX.utils.sheet_to_json<XlsxRow>(sheet);
 
     const rows: {
       ts: string;
@@ -46,7 +76,7 @@ export async function GET(request: Request) {
 
     for (const row of jsonData) {
       // Find the date column — could be "DAY", "day", "date", or a number (Excel serial date)
-      let dateVal = row["DAY"] ?? row["day"] ?? row["date"] ?? row["Date"];
+      const dateVal = row["DAY"] ?? row["day"] ?? row["date"] ?? row["Date"];
       if (dateVal === undefined) continue;
 
       let ts: string;
@@ -66,11 +96,11 @@ export async function GET(request: Request) {
       }
 
       // GPR columns: GPRD or gpr_daily, GPR_T or gpr_threats, GPR_A or gpr_acts
-      const gprDaily = parseFloat(row["GPRD"] ?? row["gpr_daily"] ?? row["GPR"] ?? "");
+      const gprDaily = toNumber(row["GPRD"] ?? row["gpr_daily"] ?? row["GPR"]);
       if (isNaN(gprDaily)) continue;
 
-      const gprThreats = parseFloat(row["GPR_T"] ?? row["gpr_threats"] ?? "");
-      const gprActs = parseFloat(row["GPR_A"] ?? row["gpr_acts"] ?? "");
+      const gprThreats = toNumber(row["GPR_T"] ?? row["gpr_threats"]);
+      const gprActs = toNumber(row["GPR_A"] ?? row["gpr_acts"]);
 
       rows.push({
         ts,
@@ -92,31 +122,35 @@ export async function GET(request: Request) {
       if (error) throw new Error(`GPR upsert failed: ${error.message}`);
     }
 
-    await supabase.from("job_log").insert({
+    const durationMs = Date.now() - startTime;
+    await writeJobLog(supabase, {
       job_name: "gpr",
-      status: "OK",
-      rows_written: recentRows.length,
-      duration_ms: Date.now() - startTime,
+      status: recentRows.length > 0 ? "SUCCESS" : "SKIPPED",
+      rows_affected: recentRows.length,
+      duration_ms: durationMs,
+      error_message: recentRows.length > 0 ? null : "no_recent_rows",
     });
 
     return NextResponse.json({
       success: true,
       rows_total: rows.length,
-      rows_written: recentRows.length,
-      duration_ms: Date.now() - startTime,
+      rows_affected: recentRows.length,
+      duration_ms: durationMs,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Internal error";
+    let finalMessage = message;
     try {
-      await supabase.from("job_log").insert({
+      await writeJobLog(supabase, {
         job_name: "gpr",
-        status: "ERROR",
-        error_message: message,
+        status: "FAILED",
+        rows_affected: 0,
         duration_ms: Date.now() - startTime,
+        error_message: message,
       });
-    } catch {
-      // ignore
+    } catch (logError) {
+      finalMessage = `${message}; ${logError instanceof Error ? logError.message : String(logError)}`;
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: finalMessage }, { status: 500 });
   }
 }

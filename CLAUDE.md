@@ -2,24 +2,24 @@ Read and follow AGENTS.md at the repository root.
 
 ## Quick Reference
 
-- **Plan:** `/Users/zincdigital/.claude/plans/gentle-giggling-mccarthy.md`
+- **Plan:** `/Volumes/Satechi Hub/warbird-pro/docs/plans/2026-03-17-warbird-simplification-handoff.md`
 - **Canonical spec:** `/Volumes/Satechi Hub/warbird-pro/WARBIRD_CANONICAL.md`
 - **Live:** warbird-pro.vercel.app
 - **Repo:** github.com/zincdigitalofmiami/warbird-pro
 - **DB:** Supabase (check env vars, NOT Prisma)
 
-## Current Status (2026-03-16)
+## Current Status (2026-03-18)
 
 Canonical Warbird v1 cutover is the active architecture. Older phase-plan language is not authoritative where it conflicts.
 
 ### Locked Rules
-- 1H is the only fib-anchor timeframe.
+- 15m is the primary model/chart/setup timeframe.
 - MES authority map:
-  - `mes_1m` direct from source
-  - `mes_1h` direct from source
-  - `mes_1d` direct from source for macro bias only
-  - `mes_15m` derived from stored `mes_1m`
-  - `mes_4h` derived from stored `mes_1h`
+  - `mes_1s` is the canonical continuity ingestion layer
+  - `mes_1m` is trigger-resolution data (derived from `mes_1s` when available)
+  - `mes_15m` is the primary setup/model/chart layer (derived from `mes_1m`)
+  - `mes_1h` and `mes_4h` are context layers only (not primary decision authority)
+  - `mes_1d` is optional macro context
 - Local machines are for training/calculations/research only.
 - Production ingestion, crons, reconciliation, and chart-serving must not depend on local machines.
 
@@ -28,7 +28,8 @@ Canonical Warbird v1 cutover is the active architecture. Older phase-plan langua
 - 10 SQL migrations in repo, including the canonical Warbird v1 cutover
 - MES 15m chart rendering with gap-free time mapping
 - Canonical Warbird routes exist at `/api/warbird/signal` and `/api/warbird/history`
-- `mes-catchup` Vercel Cron (every 5 min) is the primary MES data path — no sidecar dependency
+- `mes-catchup` Vercel Cron (every 5 min) is the production MES feed path — no sidecar dependency
+- `mes_1s` + `1s -> 1m -> 15m` continuity is canonical direction
 - Python backfill scripts exist for historical data research
 
 ### Next Up (in order)

@@ -1,6 +1,6 @@
 {
   "crons": [
-    { "path": "/api/cron/cross-asset", "schedule": "15 * * * *" },
+    { "path": "/api/cron/cross-asset", "schedule": "*/15 * * * *" },
     { "path": "/api/cron/fred/rates", "schedule": "0 5 * * *" },
     { "path": "/api/cron/fred/yields", "schedule": "0 6 * * *" },
     { "path": "/api/cron/fred/vol", "schedule": "0 7 * * *" },

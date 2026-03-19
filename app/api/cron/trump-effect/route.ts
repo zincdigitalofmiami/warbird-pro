@@ -10,6 +10,39 @@ export const maxDuration = 60;
 
 const FR_API = "https://www.federalregister.gov/api/v1/documents.json";
 
+type JobLogStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
+
+type FrDocument = {
+  title?: string;
+  abstract?: string;
+  publication_date?: string;
+  html_url?: string;
+};
+
+type FrApiResponse = {
+  results?: FrDocument[];
+};
+
+async function writeJobLog(
+  supabase: ReturnType<typeof createAdminClient>,
+  params: {
+    job_name: string;
+    status: JobLogStatus;
+    rows_affected: number;
+    duration_ms: number;
+    error_message?: string | null;
+  },
+) {
+  const { error } = await supabase.from("job_log").insert({
+    ...params,
+    error_message: params.error_message ?? null,
+  });
+
+  if (error) {
+    throw new Error(`job_log insert failed: ${error.message}`);
+  }
+}
+
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
@@ -43,26 +76,26 @@ export async function GET(request: Request) {
     if (!eoRes.ok) throw new Error(`FR API (EO) error: ${eoRes.status}`);
     if (!memoRes.ok) throw new Error(`FR API (memo) error: ${memoRes.status}`);
 
-    const eoData = await eoRes.json();
-    const memoData = await memoRes.json();
+    const eoData = (await eoRes.json()) as FrApiResponse;
+    const memoData = (await memoRes.json()) as FrApiResponse;
 
     const allDocs = [
-      ...(eoData.results || []).map((d: any) => ({ ...d, event_type: "executive_order" })),
-      ...(memoData.results || []).map((d: any) => ({ ...d, event_type: "memorandum" })),
+      ...(eoData.results || []).map((d) => ({ ...d, event_type: "executive_order" as const })),
+      ...(memoData.results || []).map((d) => ({ ...d, event_type: "memorandum" as const })),
     ];
 
     const rows = allDocs
-      .filter((d: any) => d.title && d.publication_date)
-      .map((d: any) => ({
+      .filter((d) => d.title && d.publication_date)
+      .map((d) => ({
         ts: `${d.publication_date}T00:00:00Z`,
         event_type: d.event_type,
-        title: d.title.slice(0, 500),
+        title: d.title!.slice(0, 500),
         summary: d.abstract?.slice(0, 1000) || null,
         source: "federal_register",
         source_url: d.html_url || null,
       }));
 
-    let rowsWritten = 0;
+    let rowsAffected = 0;
     if (rows.length > 0) {
       // Use insert (not upsert) since trump_effect_1d uses auto-increment ID.
       // Check for duplicates by title + ts to avoid re-inserting.
@@ -77,36 +110,40 @@ export async function GET(request: Request) {
         if (!existing || existing.length === 0) {
           const { error } = await supabase.from("trump_effect_1d").insert(row);
           if (error) throw new Error(`trump_effect insert: ${error.message}`);
-          rowsWritten++;
+          rowsAffected++;
         }
       }
     }
 
-    await supabase.from("job_log").insert({
+    const durationMs = Date.now() - startTime;
+    await writeJobLog(supabase, {
       job_name: "trump-effect",
-      status: "OK",
-      rows_written: rowsWritten,
-      duration_ms: Date.now() - startTime,
+      status: rowsAffected > 0 ? "SUCCESS" : "SKIPPED",
+      rows_affected: rowsAffected,
+      duration_ms: durationMs,
+      error_message: rowsAffected > 0 ? null : "no_new_documents",
     });
 
     return NextResponse.json({
       success: true,
       docs_found: allDocs.length,
-      rows_written: rowsWritten,
-      duration_ms: Date.now() - startTime,
+      rows_affected: rowsAffected,
+      duration_ms: durationMs,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Internal error";
+    let finalMessage = message;
     try {
-      await supabase.from("job_log").insert({
+      await writeJobLog(supabase, {
         job_name: "trump-effect",
-        status: "ERROR",
+        status: "FAILED",
+        rows_affected: 0,
         error_message: message,
         duration_ms: Date.now() - startTime,
       });
-    } catch {
-      // ignore
+    } catch (logError) {
+      finalMessage = `${message}; ${logError instanceof Error ? logError.message : String(logError)}`;
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: finalMessage }, { status: 500 });
   }
 }

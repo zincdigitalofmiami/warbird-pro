@@ -3,6 +3,28 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export const maxDuration = 60;
 
+type JobLogStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
+
+async function writeJobLog(
+  supabase: ReturnType<typeof createAdminClient>,
+  params: {
+    job_name: string;
+    status: JobLogStatus;
+    rows_affected: number;
+    duration_ms: number;
+    error_message?: string | null;
+  },
+) {
+  const { error } = await supabase.from("job_log").insert({
+    ...params,
+    error_message: params.error_message ?? null,
+  });
+
+  if (error) {
+    throw new Error(`job_log insert failed: ${error.message}`);
+  }
+}
+
 const SEGMENTS = {
   fed_policy: [
     `"Federal Reserve" interest rate decision`,
@@ -110,7 +132,24 @@ export async function GET(request: Request) {
       await Promise.all(segments.map(fetchSegmentArticles))
     ).flat();
 
-    let rowsWritten = 0;
+    if (allArticles.length === 0) {
+      const durationMs = Date.now() - startTime;
+      await writeJobLog(supabase, {
+        job_name: "google-news",
+        status: "SKIPPED",
+        rows_affected: 0,
+        duration_ms: durationMs,
+        error_message: "no_articles",
+      });
+      return NextResponse.json({
+        skipped: true,
+        reason: "no_articles",
+        duration_ms: durationMs,
+      });
+    }
+
+    let rowsAffected = 0;
+    const errors: string[] = [];
     for (const article of allArticles) {
       // Insert into econ_news_1d (matches schema: ts, headline, source, sentiment)
       const { error } = await supabase.from("econ_news_1d").insert({
@@ -119,7 +158,11 @@ export async function GET(request: Request) {
         source: article.source,
         sentiment: article.sentiment,
       });
-      if (!error) rowsWritten++;
+      if (error) {
+        errors.push(`econ_news_1d insert failed: ${error.message}`);
+      } else {
+        rowsAffected++;
+      }
     }
 
     // Aggregate sentiment by segment into news_signals
@@ -135,29 +178,43 @@ export async function GET(request: Request) {
     for (const [segment, stats] of sentimentBySegment.entries()) {
       const direction = stats.bullish > stats.bearish ? "LONG" : stats.bearish > stats.bullish ? "SHORT" : null;
       const confidence = stats.total > 0 ? Math.abs(stats.bullish - stats.bearish) / stats.total : null;
-      await supabase.from("news_signals").insert({
+      const { error } = await supabase.from("news_signals").insert({
         ts: new Date().toISOString(),
         signal_type: segment,
         direction,
         confidence,
         source_headline: `${stats.total} articles scraped`,
       });
+      if (error) {
+        errors.push(`news_signals insert failed (${segment}): ${error.message}`);
+      } else {
+        rowsAffected++;
+      }
     }
 
-    await supabase.from("job_log").insert({
+    const durationMs = Date.now() - startTime;
+    await writeJobLog(supabase, {
       job_name: "google-news",
-      status: "SUCCESS",
-      rows_affected: rowsWritten,
-      duration_ms: Date.now() - startTime,
+      status: errors.length > 0 ? "PARTIAL" : "SUCCESS",
+      rows_affected: rowsAffected,
+      duration_ms: durationMs,
+      error_message: errors.length > 0 ? errors.join(" | ") : null,
     });
 
-    return NextResponse.json({ success: true, articles: allArticles.length, rows_written: rowsWritten, duration_ms: Date.now() - startTime });
+    return NextResponse.json({
+      success: true,
+      articles: allArticles.length,
+      rows_affected: rowsAffected,
+      errors: errors.length > 0 ? errors : undefined,
+      duration_ms: durationMs,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal error";
     try {
-      await supabase.from("job_log").insert({
+      await writeJobLog(supabase, {
         job_name: "google-news",
         status: "FAILED",
+        rows_affected: 0,
         error_message: message,
         duration_ms: Date.now() - startTime,
       });

@@ -4,13 +4,11 @@ import { useEffect, useState } from "react";
 
 interface SetupCounts {
   active: number;
-  runners: number;
   counterTrend: number;
   tp1Hit: number;
   tp2Hit: number;
   stopped: number;
   expired: number;
-  pullbackReversal: number;
 }
 
 export default function ActiveSetupsCard() {
@@ -21,26 +19,19 @@ export default function ActiveSetupsCard() {
     async function fetchData() {
       try {
         const historyRes = await fetch("/api/warbird/history?days=7&limit=100");
-        const signalRes = await fetch("/api/warbird/signal");
         const history = await historyRes.json();
-        const signal = await signalRes.json();
         const active = (history.setups ?? []).filter((s: { status: string }) =>
-          ["ACTIVE", "RUNNER_ACTIVE", "TP1_HIT"].includes(s.status),
+          ["ACTIVE", "TP1_HIT"].includes(s.status),
         );
         const recent = history.events ?? [];
-        const currentSignalSetup = signal.setup;
 
         setCounts({
           active: active.filter((s: { status: string }) => s.status === "ACTIVE").length,
-          runners: active.filter((s: { status: string }) => s.status === "RUNNER_ACTIVE").length,
           counterTrend: active.filter((s: { counter_trend: boolean }) => s.counter_trend).length,
           tp1Hit: recent.filter((e: { event_type: string }) => e.event_type === "TP1_HIT").length,
           tp2Hit: recent.filter((e: { event_type: string }) => e.event_type === "TP2_HIT").length,
           stopped: recent.filter((e: { event_type: string }) => e.event_type === "STOPPED").length,
           expired: recent.filter((e: { event_type: string }) => e.event_type === "EXPIRED").length,
-          pullbackReversal:
-            recent.filter((e: { event_type: string }) => e.event_type === "PULLBACK_REVERSAL").length +
-            (currentSignalSetup?.status === "PULLBACK_REVERSAL" ? 1 : 0),
         });
       } catch {
         // silent
@@ -73,7 +64,6 @@ export default function ActiveSetupsCard() {
           <div className="flex justify-between items-center">
             <div className="flex gap-4">
               <PhaseTag label="Active" count={counts.active} color="#4CAF50" />
-              <PhaseTag label="Runner" count={counts.runners} color="#26C6DA" />
               <PhaseTag label="Counter" count={counts.counterTrend} color="#ffb464" />
             </div>
           </div>
@@ -82,7 +72,6 @@ export default function ActiveSetupsCard() {
             <span>TP2 <span className="text-white/50">{counts.tp2Hit}</span></span>
             <span>Stopped <span className="text-white/50">{counts.stopped}</span></span>
             <span>Expired <span className="text-white/50">{counts.expired}</span></span>
-            <span>Reversal <span className="text-white/50">{counts.pullbackReversal}</span></span>
           </div>
         </div>
       )}

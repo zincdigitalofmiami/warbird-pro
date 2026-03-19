@@ -4,6 +4,28 @@ import { isMarketOpen } from "@/lib/market-hours";
 
 export const maxDuration = 60;
 
+type JobLogStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
+
+async function writeJobLog(
+  supabase: ReturnType<typeof createAdminClient>,
+  params: {
+    job_name: string;
+    status: JobLogStatus;
+    rows_affected: number;
+    duration_ms: number;
+    error_message?: string | null;
+  },
+) {
+  const { error } = await supabase.from("job_log").insert({
+    ...params,
+    error_message: params.error_message ?? null,
+  });
+
+  if (error) {
+    throw new Error(`job_log insert failed: ${error.message}`);
+  }
+}
+
 type TeEvent = {
   ts: string;
   event_name: string;
@@ -89,13 +111,24 @@ export async function GET(request: Request) {
   const force = url.searchParams.get("force") === "1";
 
   if (!force && !isMarketOpen()) {
+    try {
+      await writeJobLog(supabase, {
+        job_name: "econ-calendar",
+        status: "SKIPPED",
+        rows_affected: 0,
+        duration_ms: Date.now() - startTime,
+        error_message: "market_closed",
+      });
+    } catch {
+      // Ignore logging failure to preserve skip response.
+    }
     return NextResponse.json({ skipped: true, reason: "market_closed" });
   }
 
   try {
     const events = await fetchTeCalendar();
 
-    let rowsWritten = 0;
+    let rowsAffected = 0;
     for (const event of events) {
       // Dedup by event_name + ts (no unique constraint on table)
       const { data: existing } = await supabase
@@ -115,29 +148,31 @@ export async function GET(request: Request) {
           previous: event.previous,
         });
         if (error) throw new Error(`econ_calendar insert: ${error.message}`);
-        rowsWritten++;
+        rowsAffected++;
       }
     }
 
-    await supabase.from("job_log").insert({
+    const durationMs = Date.now() - startTime;
+    await writeJobLog(supabase, {
       job_name: "econ-calendar",
       status: "SUCCESS",
-      rows_affected: rowsWritten,
-      duration_ms: Date.now() - startTime,
+      rows_affected: rowsAffected,
+      duration_ms: durationMs,
     });
 
     return NextResponse.json({
       success: true,
       events: events.length,
-      rows_written: rowsWritten,
-      duration_ms: Date.now() - startTime,
+      rows_affected: rowsAffected,
+      duration_ms: durationMs,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Internal error";
     try {
-      await supabase.from("job_log").insert({
+      await writeJobLog(supabase, {
         job_name: "econ-calendar",
         status: "FAILED",
+        rows_affected: 0,
         error_message: message,
         duration_ms: Date.now() - startTime,
       });

@@ -4,8 +4,8 @@ Read this ENTIRE file before any work. No exceptions.
 
 ## Plan
 
-Full implementation plan with all 8 phases, architecture decisions, and naming overhaul:
-`/Users/zincdigital/.claude/plans/gentle-giggling-mccarthy.md`
+Plan of record for the current architecture direction:
+`/Volumes/Satechi Hub/warbird-pro/docs/plans/2026-03-17-warbird-simplification-handoff.md`
 
 When the plan conflicts with `WARBIRD_CANONICAL.md`, the canonical spec wins.
 
@@ -58,22 +58,23 @@ When the plan conflicts with `WARBIRD_CANONICAL.md`, the canonical spec wins.
 ### Production Boundary
 - Local machines are for training, heavy calculations, and research processing only.
 - Production ingestion, cron jobs, data pulls, reconciliation, and chart-serving must not depend on local machines.
+- No continuous local runtime for live market data or chart serving.
 - Market-data completeness is a hard gate. If continuity is not provable, fib/model/setup logic must not be treated as safe.
 
 ### MES Data Ingestion
-- `mes-catchup` Vercel Cron (every 5 min, Sun–Fri) is the primary data path.
+- `mes_1s` is the canonical continuity ingestion layer.
+- `mes-catchup` Vercel Cron (every 5 min, Sun–Fri) is the production feed path.
 - Uses Databento Historical API with explicit contract symbols (e.g. MESM6) to match TradingView roll timing.
 - ohlcv-1m and ohlcv-1h are free schemas on the Standard plan — zero additional data cost.
 - Supabase Realtime pushes DB changes to browser via WebSocket.
 - 5-minute MAXIMUM acceptable latency (cron interval).
 
 ### MES Timeframe Authority
-- `mes_1m` is canonical direct-source data from Databento.
-- `mes_1h` is canonical direct-source data from Databento.
-- `mes_1d` may be direct-source data from Databento for macro bias only.
-- `mes_15m` is derived from stored `mes_1m`.
-- `mes_4h` is derived from stored `mes_1h`.
-- 1H is the only fib-anchor timeframe.
+- `mes_1s` is canonical continuity data for ingestion integrity.
+- `mes_1m` is trigger-resolution data (derived from `mes_1s` when available).
+- `mes_15m` is the primary setup/model/chart timeframe (derived from stored `mes_1m`).
+- `mes_1h` and `mes_4h` are optional context layers only.
+- `mes_1d` may be direct-source data from Databento for macro context only.
 
 ### Build & Deploy
 - ALWAYS run `npm run build` and confirm success before every `git push`.
@@ -93,7 +94,7 @@ When the plan conflicts with `WARBIRD_CANONICAL.md`, the canonical spec wins.
 warbird-pro/
   app/
     api/
-      cron/                 # 20 Vercel Cron job routes
+      cron/                 # 21 Vercel Cron job routes
         mes-catchup/        # Primary MES ingestion (every 5 min, Sun-Fri)
         cross-asset/        # Non-MES futures (hourly)
         fred/[category]/    # 10 FRED series (daily, staggered)
@@ -163,7 +164,7 @@ warbird-pro/
       build-warbird-dataset.ts # Canonical dataset builder
       train-warbird.py         # Canonical AutoGluon training
       predict-warbird.py       # Canonical Warbird inference writer
-      fib-engine.ts            # 1H fib geometry
+      fib-engine.ts            # 15m-primary fib geometry
       daily-layer.ts           # Daily bias layer
       structure-4h.ts          # 4H structure layer
       conviction-matrix.ts     # Conviction scoring
@@ -189,8 +190,8 @@ warbird-pro/
 |-------|----------|-----|
 | DB access | Supabase only, no Prisma | Prisma Accelerate caused 5s timeout hell in rabid-raccoon |
 | Migrations | Supabase SQL | Native Postgres, no ORM translation layer |
-| Scheduling | Vercel Cron (20/100 used) | Replaces all Inngest functions. No external service. |
-| Live data | mes-catchup cron (5 min) → Supabase Realtime | Databento Historical HTTP API, no sidecar dependency. |
+| Scheduling | Vercel Cron (21/100 used) | Replaces all Inngest functions. No external service. |
+| Live data | mes_1s continuity + mes-catchup cron (5 min) → Supabase Realtime | No sidecar dependency. No continuous local-machine feed runtime. |
 | Chart updates | `series.update()` via Realtime | Not `setData()` polling like rabid-raccoon |
 | Mock data | NEVER | Every data point must be real. Period. |
 

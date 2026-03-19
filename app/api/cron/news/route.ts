@@ -3,6 +3,28 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export const maxDuration = 60;
 
+type JobLogStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
+
+async function writeJobLog(
+  supabase: ReturnType<typeof createAdminClient>,
+  params: {
+    job_name: string;
+    status: JobLogStatus;
+    rows_affected: number;
+    duration_ms: number;
+    error_message?: string | null;
+  },
+) {
+  const { error } = await supabase.from("job_log").insert({
+    ...params,
+    error_message: params.error_message ?? null,
+  });
+
+  if (error) {
+    throw new Error(`job_log insert failed: ${error.message}`);
+  }
+}
+
 // Runs daily at 16:00 UTC. Generates news signals from macro report surprises.
 // Reads macro_reports_1d for surprise values and creates directional signals.
 
@@ -32,11 +54,20 @@ export async function GET(request: Request) {
     if (repErr) throw new Error(`macro_reports query: ${repErr.message}`);
 
     if (!reports || reports.length === 0) {
+      const durationMs = Date.now() - startTime;
+      await writeJobLog(supabase, {
+        job_name: "news",
+        status: "SKIPPED",
+        rows_affected: 0,
+        duration_ms: durationMs,
+        error_message: "no_recent_reports",
+      });
+
       return NextResponse.json({
         success: true,
         signals_created: 0,
         reason: "no_recent_reports",
-        duration_ms: Date.now() - startTime,
+        duration_ms: durationMs,
       });
     }
 
@@ -71,31 +102,35 @@ export async function GET(request: Request) {
       }
     }
 
-    await supabase.from("job_log").insert({
+    const durationMs = Date.now() - startTime;
+    await writeJobLog(supabase, {
       job_name: "news",
-      status: "OK",
-      rows_written: signalsCreated,
-      duration_ms: Date.now() - startTime,
+      status: signalsCreated > 0 ? "SUCCESS" : "SKIPPED",
+      rows_affected: signalsCreated,
+      duration_ms: durationMs,
+      error_message: signalsCreated > 0 ? null : "no_new_signals",
     });
 
     return NextResponse.json({
       success: true,
       reports_processed: reports.length,
       signals_created: signalsCreated,
-      duration_ms: Date.now() - startTime,
+      duration_ms: durationMs,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Internal error";
+    let finalMessage = message;
     try {
-      await supabase.from("job_log").insert({
+      await writeJobLog(supabase, {
         job_name: "news",
-        status: "ERROR",
+        status: "FAILED",
+        rows_affected: 0,
         error_message: message,
         duration_ms: Date.now() - startTime,
       });
-    } catch {
-      // ignore
+    } catch (logError) {
+      finalMessage = `${message}; ${logError instanceof Error ? logError.message : String(logError)}`;
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: finalMessage }, { status: 500 });
   }
 }

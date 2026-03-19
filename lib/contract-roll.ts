@@ -1,8 +1,16 @@
 /**
  * CME equity index futures auto-roll.
- * Rolls 8 days before 3rd Friday of quarterly month (when volume moves).
- * Uses explicit contract symbols (e.g. MESM6) instead of Databento continuous
- * contracts, which lag TradingView's roll timing.
+ * Rolls 8 calendar days before 3rd Friday of quarterly month to match
+ * TradingView's MES1! continuous contract volume-crossover timing.
+ *
+ * TradingView docs: "The main condition for contracts switching in continuous
+ * futures charts is the excess of the daily volume of the next contract over
+ * the daily volume of the current futures contract." They convert this to a
+ * fixed per-symbol calendar rule. For CME equity index futures, volume
+ * historically crosses over on the Thursday before roll week — 8 calendar
+ * days before the 3rd Friday (the old CME "second Thursday" convention).
+ *
+ * Source: https://www.tradingview.com/support/solutions/43000691027
  */
 
 const QUARTERS = [

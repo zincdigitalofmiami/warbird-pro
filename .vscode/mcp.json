@@ -1,21 +1,3 @@
 {
-  "servers": {
-    "memory": {
-      "type": "sse",
-      "url": "http://localhost:3100/sse"
-    },
-    "sequentialthinking": {
-      "type": "stdio",
-      "command": "${workspaceFolder}/node_modules/.bin/mcp-server-sequential-thinking"
-    },
-    "shadcn": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "shadcn@latest", "mcp"]
-    },
-    "supabase": {
-      "type": "http",
-      "url": "https://mcp.supabase.com/mcp?project_ref=qhwgrzqjcdtdqppvhhme"
-    }
-  }
+	"servers": {}
 }

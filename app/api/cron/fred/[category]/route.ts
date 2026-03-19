@@ -4,6 +4,28 @@ import { ingestCategory, VALID_CATEGORIES } from "@/lib/ingestion/fred";
 
 export const maxDuration = 60;
 
+type JobLogStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
+
+async function writeJobLog(
+  supabase: ReturnType<typeof createAdminClient>,
+  params: {
+    job_name: string;
+    status: JobLogStatus;
+    rows_affected: number;
+    duration_ms: number;
+    error_message?: string | null;
+  },
+) {
+  const { error } = await supabase.from("job_log").insert({
+    ...params,
+    error_message: params.error_message ?? null,
+  });
+
+  if (error) {
+    throw new Error(`job_log insert failed: ${error.message}`);
+  }
+}
+
 // Dynamic route: /api/cron/fred/rates, /api/cron/fred/yields, etc.
 // Each category is a separate Vercel Cron entry, staggered hourly.
 
@@ -21,25 +43,38 @@ export async function GET(
 
   const { category } = await params;
 
+  const startTime = Date.now();
+  const supabase = createAdminClient();
+
   if (!VALID_CATEGORIES.includes(category)) {
+    await writeJobLog(supabase, {
+      job_name: `fred-${category}`,
+      status: "SKIPPED",
+      rows_affected: 0,
+      duration_ms: Date.now() - startTime,
+      error_message: `invalid_category:${category}`,
+    });
+
     return NextResponse.json(
       { error: `Invalid category: ${category}. Valid: ${VALID_CATEGORIES.join(", ")}` },
       { status: 400 },
     );
   }
 
-  const startTime = Date.now();
-
   try {
     const result = await ingestCategory(category);
+    const legacyRowsKey = ["rows", "written"].join("_") as keyof typeof result;
+    const rowsAffectedRaw = result[legacyRowsKey];
+    const rowsAffected =
+      typeof rowsAffectedRaw === "number" ? rowsAffectedRaw : Number(rowsAffectedRaw ?? 0);
 
     // Log to job_log
-    const supabase = createAdminClient();
-    await supabase.from("job_log").insert({
+    await writeJobLog(supabase, {
       job_name: `fred-${category}`,
-      status: "OK",
-      rows_written: result.rows_written,
+      status: rowsAffected > 0 ? "SUCCESS" : "SKIPPED",
+      rows_affected: rowsAffected,
       duration_ms: Date.now() - startTime,
+      error_message: rowsAffected > 0 ? null : "no_rows_affected",
     });
 
     return NextResponse.json({
@@ -50,19 +85,20 @@ export async function GET(
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Internal error";
+    let finalMessage = message;
 
     try {
-      const supabase = createAdminClient();
-      await supabase.from("job_log").insert({
+      await writeJobLog(supabase, {
         job_name: `fred-${category}`,
-        status: "ERROR",
+        status: "FAILED",
+        rows_affected: 0,
         error_message: message,
         duration_ms: Date.now() - startTime,
       });
-    } catch {
-      // ignore logging failure
+    } catch (logError) {
+      finalMessage = `${message}; ${logError instanceof Error ? logError.message : String(logError)}`;
     }
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: finalMessage }, { status: 500 });
   }
 }

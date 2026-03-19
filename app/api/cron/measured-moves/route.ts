@@ -9,6 +9,24 @@ export const maxDuration = 60;
 // Runs daily at 18:00 UTC on weekdays.
 // Scans 1h candles for AB=CD measured move patterns.
 
+type JobLogPayload = {
+  job_name: string;
+  status: "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
+  rows_affected?: number;
+  duration_ms: number;
+  error_message?: string;
+};
+
+async function writeJobLog(
+  supabase: ReturnType<typeof createAdminClient>,
+  payload: JobLogPayload,
+) {
+  const { error } = await supabase.from("job_log").insert(payload);
+  if (error) {
+    throw new Error(`job_log insert failed: ${error.message}`);
+  }
+}
+
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
@@ -31,6 +49,13 @@ export async function GET(request: Request) {
 
     if (error) throw new Error(`mes_1h query failed: ${error.message}`);
     if (!bars || bars.length < 20) {
+      await writeJobLog(supabase, {
+        job_name: "measured-moves",
+        status: "SKIPPED",
+        rows_affected: 0,
+        duration_ms: Date.now() - startTime,
+        error_message: `insufficient_data bars=${bars?.length ?? 0}`,
+      });
       return NextResponse.json({
         skipped: true,
         reason: "insufficient_data",
@@ -72,10 +97,10 @@ export async function GET(request: Request) {
       if (!insertError) rowsWritten++;
     }
 
-    await supabase.from("job_log").insert({
+    await writeJobLog(supabase, {
       job_name: "measured-moves",
-      status: "OK",
-      rows_written: rowsWritten,
+      status: "SUCCESS",
+      rows_affected: rowsWritten,
       duration_ms: Date.now() - startTime,
     });
 
@@ -90,9 +115,9 @@ export async function GET(request: Request) {
   } catch (e) {
     const message = e instanceof Error ? e.message : "Internal error";
     try {
-      await supabase.from("job_log").insert({
+      await writeJobLog(supabase, {
         job_name: "measured-moves",
-        status: "ERROR",
+        status: "FAILED",
         error_message: message,
         duration_ms: Date.now() - startTime,
       });
