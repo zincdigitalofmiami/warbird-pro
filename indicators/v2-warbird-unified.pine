@@ -224,7 +224,18 @@ if needsAnchor and (barstate.isconfirmed or na(fibAnchorHigh))
     lastBreakBar := na  // F1 fix: reset break tracking when anchor changes
 fibRange = fibAnchorHigh - fibAnchorLow
 fibMidpoint = fibAnchorLow + fibRange * 0.5
-fibBull = fibRange > 0 ? close >= fibMidpoint : true
+// W3/W7 fix: hysteresis band prevents rapid direction flips in chop
+// Direction only flips when price crosses midpoint ± 2% of range
+float hystBand = fibRange * 0.02
+var bool fibBull = true
+if fibRange > 0
+    if close >= fibMidpoint + hystBand
+        fibBull := true
+    else if close <= fibMidpoint - hystBand
+        fibBull := false
+    // else: inside dead zone, keep previous direction
+else
+    fibBull := true
 fibBase = fibBull ? fibAnchorLow : fibAnchorHigh
 fibDir = fibBull ? 1.0 : -1.0
 fibPrice(float ratio) =>
