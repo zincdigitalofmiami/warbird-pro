@@ -1,0 +1,462 @@
+// This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Kirk / ZINC Digital
+// STATUS: v1 reference — primary indicator with intermarket engine
+// KNOWN BUGS: fib repaints sometimes, missing 0 and 1 levels
+// PHASE 2: Merge with v0 RR levels + dashboard fib engine as canonical spec
+//@version=6
+indicator("AutoFib Structure + Intermarket Alerts", shorttitle="🦝 AF Struct+IM", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=50)
+//=====================
+// FIBONACCI ENGINE SETTINGS
+//=====================
+groupAFEngine = "Fibonacci Engine Settings"
+fibConfluenceTolPct = input.float(0.10, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupAFEngine)
+//=====================
+// WHICH FIB LEVELS TO USE AS "STRUCTURE"
+//=====================
+groupStruct = "Structure from AutoFib (ratios)"
+pivotRatio     = input.float(0.50, "Pivot Ratio", step=0.001, group=groupStruct)
+zoneLoRatio    = input.float(0.618, "Decision Zone Low Ratio", step=0.001, group=groupStruct)
+zoneHiRatio    = input.float(0.786, "Decision Zone High Ratio", step=0.001, group=groupStruct)
+target1Ratio   = input.float(1.236, "Target 1 Ratio", step=0.001, group=groupStruct)
+target2Ratio   = input.float(1.618, "Target 2 Ratio", step=0.001, group=groupStruct)
+dnMagnet1Ratio = input.float(0.382, "Down Magnet 1 Ratio", step=0.001, group=groupStruct)
+dnMagnet2Ratio = input.float(0.236, "Down Magnet 2 Ratio", step=0.001, group=groupStruct)
+//=====================
+// STRUCTURE LOGIC
+//=====================
+groupLogic = "Structure Logic"
+retestBars   = input.int(6, "Acceptance Retest Window (bars)", minval=1, group=groupLogic)
+rejectWick   = input.bool(true, "Rejection = wick into zone then close back out", group=groupLogic)
+oneShotEvent = input.bool(true, "One-shot event markers/alerts", group=groupLogic)
+//=====================
+// INTERMARKET CONFIRMATION
+//=====================
+groupIM = "Intermarket Inputs"
+useIntermarket = input.bool(true, "Use Intermarket Confirmation", group=groupIM)
+tfIM           = input.timeframe("60", "Intermarket Timeframe", group=groupIM)
+maLen          = input.int(20, "Confirm EMA Length", minval=5, group=groupIM)
+slopeBars      = input.int(1, "Slope Bars", minval=1, maxval=10, group=groupIM)
+neutralBandPct = input.float(0.05, "Neutral Band Around EMA (%)", minval=0.0, step=0.01, group=groupIM)
+symNQ   = input.symbol("CME_MINI:NQ1!", "NQ (risk appetite)", group=groupIM)
+symBANK = input.symbol("NASDAQ:BANK", "BANK (financials)", group=groupIM)
+symVIX  = input.symbol("CBOE:VIX", "VIX (volatility)", group=groupIM)
+symDXY  = input.symbol("TVC:DXY", "DXY (USD)", group=groupIM)
+sym10Y  = input.symbol("TVC:US10Y", "US10Y (yield)", group=groupIM)
+vixMaxRiskOn  = input.float(20.40, "VIX Max (risk-on filter)", step=0.1, group=groupIM)
+use10YConfirm = input.bool(false, "Include 10Y in confirmation", group=groupIM)
+groupIMModel = "Intermarket Model (v2)"
+imModel           = input.string("Score + Hysteresis", "Decision Model", options=["Binary Gates", "Score + Hysteresis"], group=groupIMModel)
+requireAnchors    = input.bool(true, "Require NQ + BANK alignment", group=groupIMModel)
+scoreThresholdPct = input.float(0.67, "Score Threshold %", minval=0.50, maxval=1.00, step=0.01, group=groupIMModel)
+confirmBars       = input.int(2, "Bars Required To Flip", minval=1, maxval=10, group=groupIMModel)
+cooldownBars      = input.int(3, "Flip Cooldown (bars)", minval=0, maxval=50, group=groupIMModel)
+neutralizeBars    = input.int(0, "Neutralize After Inactive Bars (0=off)", minval=0, maxval=200, group=groupIMModel)
+wNQ   = input.int(2, "Weight: NQ", minval=0, maxval=10, group=groupIMModel)
+wBANK = input.int(2, "Weight: BANK", minval=0, maxval=10, group=groupIMModel)
+wVIX  = input.int(2, "Weight: VIX", minval=0, maxval=10, group=groupIMModel)
+wDXY  = input.int(1, "Weight: DXY", minval=0, maxval=10, group=groupIMModel)
+w10Y  = input.int(1, "Weight: US10Y", minval=0, maxval=10, group=groupIMModel)
+groupNews = "News Proxy (Automatic Reaction)"
+useNewsProxy = input.bool(true, "Use Macro News Proxy", group=groupNews, tooltip="Pine cannot read TradingView news text directly. This uses post-event cross-asset shock reaction as a proxy.")
+tfNews = input.timeframe("5", "Proxy Timeframe", group=groupNews)
+proxyLookbackBars = input.int(3, "Proxy Lookback Bars", minval=1, maxval=30, group=groupNews)
+nqShockPct = input.float(0.25, "NQ Shock Threshold (%)", minval=0.01, step=0.01, group=groupNews)
+dxyShockPct = input.float(0.10, "DXY Shock Threshold (%)", minval=0.01, step=0.01, group=groupNews)
+vixShockPct = input.float(4.00, "VIX Shock Threshold (%)", minval=0.10, step=0.10, group=groupNews)
+y10ShockAbs = input.float(0.03, "US10Y Shock Threshold (abs)", minval=0.001, step=0.001, group=groupNews, tooltip="0.03 is roughly 3 bps.")
+minProxyScore = input.int(3, "Minimum Proxy Score (1-4)", minval=1, maxval=4, group=groupNews)
+proxyHoldBars = input.int(12, "Proxy Posture Hold (bars)", minval=1, maxval=200, group=groupNews)
+//=====================
+// VISUALS
+//=====================
+groupViz = "Visuals"
+showPivotZone   = input.bool(true, "Plot Pivot + Decision Zone", group=groupViz)
+showTargets     = input.bool(false, "Plot Targets (1.236 / 1.618)", group=groupViz)
+showDownMagnets = input.bool(false, "Plot Down Magnets (0.382 / 0.236)", group=groupViz)
+targetLookbackBars = input.int(55, "Target Line Lookback Bars", minval=5, maxval=500, group=groupViz)
+showZoneFill    = input.bool(false, "Fill Decision Zone", group=groupViz)
+showBg          = input.bool(false, "Background Regime Tint", group=groupViz)
+showMarkers     = input.bool(false, "Plot Signal Markers", group=groupViz)
+groupStyle = "Line Style"
+pivotColor = input.color(color.new(color.white, 0), "Pivot Color", group=groupStyle)
+zoneColor = input.color(color.new(color.orange, 0), "Zone Color", group=groupStyle)
+target1Color = input.color(color.new(color.aqua, 0), "Target 1 Color", group=groupStyle)
+target2Color = input.color(color.new(color.blue, 0), "Target 2 Color", group=groupStyle)
+downMagnetColor = input.color(color.new(color.teal, 0), "Down Magnet Color", group=groupStyle)
+pivotWidth = input.int(2, "Pivot Width", minval=1, maxval=5, group=groupStyle)
+zoneWidth = input.int(2, "Zone Width", minval=1, maxval=5, group=groupStyle)
+targetWidth = input.int(1, "Target Width", minval=1, maxval=5, group=groupStyle)
+downMagnetWidth = input.int(1, "Down Magnet Width", minval=1, maxval=5, group=groupStyle)
+zoneFillOpacity = input.int(88, "Zone Fill Opacity", minval=0, maxval=100, group=groupStyle)
+extendLevelsRight = input.bool(false, "Extend Levels Right", group=groupStyle)
+useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window", group=groupStyle)
+//=====================
+// AUTO FIB ENGINE (RR confluence anchor, same methodology as main RR indicator)
+//=====================
+fib8_high = ta.highest(high, 8)
+fib8_low = ta.lowest(low, 8)
+fib13_high = ta.highest(high, 13)
+fib13_low = ta.lowest(low, 13)
+fib21_high = ta.highest(high, 21)
+fib21_low = ta.lowest(low, 21)
+fib34_high = ta.highest(high, 34)
+fib34_low = ta.lowest(low, 34)
+fib55_high = ta.highest(high, 55)
+fib55_low = ta.lowest(low, 55)
+fibHigh1 = fib8_high
+fibLow1 = fib8_low
+fibHigh2 = fib13_high
+fibLow2 = fib13_low
+fibHigh3 = fib21_high
+fibLow3 = fib21_low
+fibHigh4 = fib34_high
+fibLow4 = fib34_low
+fibHigh5 = fib55_high
+fibLow5 = fib55_low
+fibScore(float h, float l) =>
+    float rng = h - l
+    if rng <= 0
+        0
+    else
+        float tol = rng * fibConfluenceTolPct * 0.01
+        int score = 0
+        for ratio = 0 to 2
+            float targetRatio = ratio == 0 ? 0.382 : ratio == 1 ? 0.5 : 0.618
+            float levelSelf = l + rng * targetRatio
+            for r = 0 to 2
+                float cmpRatio = r == 0 ? 0.382 : r == 1 ? 0.5 : 0.618
+                float cmpLvl1 = fibLow1 + (fibHigh1 - fibLow1) * cmpRatio
+                float cmpLvl2 = fibLow2 + (fibHigh2 - fibLow2) * cmpRatio
+                float cmpLvl3 = fibLow3 + (fibHigh3 - fibLow3) * cmpRatio
+                float cmpLvl4 = fibLow4 + (fibHigh4 - fibLow4) * cmpRatio
+                float cmpLvl5 = fibLow5 + (fibHigh5 - fibLow5) * cmpRatio
+                if math.abs(levelSelf - cmpLvl1) <= tol
+                    score += 1
+                if math.abs(levelSelf - cmpLvl2) <= tol
+                    score += 1
+                if math.abs(levelSelf - cmpLvl3) <= tol
+                    score += 1
+                if math.abs(levelSelf - cmpLvl4) <= tol
+                    score += 1
+                if math.abs(levelSelf - cmpLvl5) <= tol
+                    score += 1
+        score
+score1 = fibScore(fibHigh1, fibLow1)
+score2 = fibScore(fibHigh2, fibLow2)
+score3 = fibScore(fibHigh3, fibLow3)
+score4 = fibScore(fibHigh4, fibLow4)
+score5 = fibScore(fibHigh5, fibLow5)
+bestScore = math.max(score1, score2, score3, score4, score5)
+fibAnchorHighCandidate = (
+ bestScore == score5 ? fibHigh5 :
+ bestScore == score4 ? fibHigh4 :
+ bestScore == score3 ? fibHigh3 :
+ bestScore == score2 ? fibHigh2 : fibHigh1
+ )
+fibAnchorLowCandidate = (
+ bestScore == score5 ? fibLow5 :
+ bestScore == score4 ? fibLow4 :
+ bestScore == score3 ? fibLow3 :
+ bestScore == score2 ? fibLow2 : fibLow1
+ )
+activeFibPeriodCandidate = (
+ bestScore == score5 ? 55 :
+ bestScore == score4 ? 34 :
+ bestScore == score3 ? 21 :
+ bestScore == score2 ? 13 : 8
+ )
+activeHighOffsetCandidate = (
+ activeFibPeriodCandidate == 55 ? ta.highestbars(high, 55) :
+ activeFibPeriodCandidate == 34 ? ta.highestbars(high, 34) :
+ activeFibPeriodCandidate == 21 ? ta.highestbars(high, 21) :
+ activeFibPeriodCandidate == 13 ? ta.highestbars(high, 13) : ta.highestbars(high, 8)
+ )
+activeLowOffsetCandidate = (
+ activeFibPeriodCandidate == 55 ? ta.lowestbars(low, 55) :
+ activeFibPeriodCandidate == 34 ? ta.lowestbars(low, 34) :
+ activeFibPeriodCandidate == 21 ? ta.lowestbars(low, 21) :
+ activeFibPeriodCandidate == 13 ? ta.lowestbars(low, 13) : ta.lowestbars(low, 8)
+ )
+candidateHighBar = bar_index - math.abs(activeHighOffsetCandidate)
+candidateLowBar = bar_index - math.abs(activeLowOffsetCandidate)
+var float fibAnchorHigh = na
+var float fibAnchorLow = na
+var int activeFibPeriod = 55
+var int anchorHighBar = na
+var int anchorLowBar = na
+bool structBreak = not na(fibAnchorHigh) and not na(fibAnchorLow) and
+ barstate.isconfirmed and
+                   (close > fibAnchorHigh or close < fibAnchorLow)
+bool needsAnchor = na(fibAnchorHigh) or na(fibAnchorLow) or structBreak
+if needsAnchor and (barstate.isconfirmed or na(fibAnchorHigh))
+    fibAnchorHigh := fibAnchorHighCandidate
+    fibAnchorLow := fibAnchorLowCandidate
+    activeFibPeriod := activeFibPeriodCandidate
+    anchorHighBar := candidateHighBar
+    anchorLowBar := candidateLowBar
+fibRange = fibAnchorHigh - fibAnchorLow
+fibMidpoint = fibAnchorLow + fibRange * 0.5
+fibBull = fibRange > 0 ? close >= fibMidpoint : true
+fibBase = fibBull ? fibAnchorLow : fibAnchorHigh
+fibDir = fibBull ? 1.0 : -1.0
+fibPrice(float ratio) =>
+    fibRange <= 0 ? na : (fibBase + fibDir * fibRange * ratio)
+pPivot  = fibPrice(pivotRatio)
+pZoneLo = fibPrice(zoneLoRatio)
+pZoneHi = fibPrice(zoneHiRatio)
+pT1     = fibPrice(target1Ratio)
+pT2     = fibPrice(target2Ratio)
+pDn1    = fibPrice(dnMagnet1Ratio)
+pDn2    = fibPrice(dnMagnet2Ratio)
+zoneUpper = math.max(pZoneLo, pZoneHi)
+zoneLower = math.min(pZoneLo, pZoneHi)
+//=====================
+// INTERMARKET SERIES + REGIMES
+//=====================
+imClose(string symbol) =>
+    request.security(symbol, tfIM, close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+trendFlags(float px, float ma, int slopeBars_, float neutralPct_) =>
+    float distPct = ma != 0 ? math.abs(px - ma) / ma * 100.0 : 0.0
+    bool near = distPct <= neutralPct_
+    bool up = not near and px > ma and px >= nz(px[slopeBars_], px)
+    bool down = not near and px < ma and px <= nz(px[slopeBars_], px)
+    [up, down]
+nq = imClose(symNQ)
+bk = imClose(symBANK)
+vx = imClose(symVIX)
+dx = imClose(symDXY)
+y10 = imClose(sym10Y)
+nqMA = ta.ema(nq, maLen)
+bkMA = ta.ema(bk, maLen)
+vxMA = ta.ema(vx, maLen)
+dxMA = ta.ema(dx, maLen)
+y10MA = ta.ema(y10, maLen)
+[nqUp, nqDown] = trendFlags(nq, nqMA, slopeBars, neutralBandPct)
+[bkUp, bkDown] = trendFlags(bk, bkMA, slopeBars, neutralBandPct)
+[vxUp, vxDown] = trendFlags(vx, vxMA, slopeBars, neutralBandPct)
+[dxUp, dxDown] = trendFlags(dx, dxMA, slopeBars, neutralBandPct)
+[y10Up, y10Down] = trendFlags(y10, y10MA, slopeBars, neutralBandPct)
+nqBull = nqUp
+nqBear = nqDown
+bkBull = bkUp
+bkBear = bkDown
+vxRiskOn = vxDown and vx < vixMaxRiskOn
+vxRiskOff = vxUp
+dxRiskOn = dxDown
+dxRiskOff = dxUp
+y10RiskOn = y10Down
+y10RiskOff = y10Up
+use10YOK_on = (not use10YConfirm) or y10RiskOn
+use10YOK_off = (not use10YConfirm) or y10RiskOff
+riskOnBinary = nqBull and bkBull and vxRiskOn and dxRiskOn and use10YOK_on
+riskOffBinary = nqBear and bkBear and vxRiskOff and dxRiskOff and use10YOK_off
+int activeW10Y = use10YConfirm ? w10Y : 0
+int totalWeight = wNQ + wBANK + wVIX + wDXY + activeW10Y
+int scoreNeeded = int(math.max(1.0, math.ceil(totalWeight * scoreThresholdPct)))
+int scoreOn = (
+    (nqBull ? wNQ : 0) +
+    (bkBull ? wBANK : 0) +
+    (vxRiskOn ? wVIX : 0) +
+    (dxRiskOn ? wDXY : 0) +
+    ((use10YConfirm and y10RiskOn) ? w10Y : 0)
+)
+int scoreOff = (
+    (nqBear ? wNQ : 0) +
+    (bkBear ? wBANK : 0) +
+    (vxRiskOff ? wVIX : 0) +
+    (dxRiskOff ? wDXY : 0) +
+    ((use10YConfirm and y10RiskOff) ? w10Y : 0)
+)
+scoreOnRaw = scoreOn >= scoreNeeded
+scoreOffRaw = scoreOff >= scoreNeeded
+anchorsOn = nqBull and bkBull
+anchorsOff = nqBear and bkBear
+scoreOnCandidate = scoreOnRaw and (not requireAnchors or anchorsOn)
+scoreOffCandidate = scoreOffRaw and (not requireAnchors or anchorsOff)
+candidateOn = imModel == "Binary Gates" ? riskOnBinary : scoreOnCandidate
+candidateOff = imModel == "Binary Gates" ? riskOffBinary : scoreOffCandidate
+onExclusive = candidateOn and not candidateOff
+offExclusive = candidateOff and not candidateOn
+var int regime = 0
+var int onStreak = 0
+var int offStreak = 0
+var int inactiveStreak = 0
+var int lastFlipBar = na
+onStreak := onExclusive ? onStreak + 1 : 0
+offStreak := offExclusive ? offStreak + 1 : 0
+inactiveStreak := (not candidateOn and not candidateOff) ? inactiveStreak + 1 : 0
+if useIntermarket
+    bool canFlip = na(lastFlipBar) or (bar_index - lastFlipBar >= cooldownBars)
+    if regime == 0
+        if onStreak >= confirmBars
+            regime := 1
+            lastFlipBar := bar_index
+        else if offStreak >= confirmBars
+            regime := -1
+            lastFlipBar := bar_index
+    else if regime == 1
+        if offStreak >= confirmBars and canFlip
+            regime := -1
+            lastFlipBar := bar_index
+    else if regime == -1
+        if onStreak >= confirmBars and canFlip
+            regime := 1
+            lastFlipBar := bar_index
+    if neutralizeBars > 0 and inactiveStreak >= neutralizeBars
+        regime := 0
+else
+    regime := 0
+riskOnBase = (not useIntermarket) or regime == 1
+riskOffBase = (not useIntermarket) or regime == -1
+proxyClose(string symbol) =>
+    request.security(symbol, tfNews, close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+nqNews = proxyClose(symNQ)
+dxNews = proxyClose(symDXY)
+vxNews = proxyClose(symVIX)
+y10News = proxyClose(sym10Y)
+nqRef = nz(nqNews[proxyLookbackBars], nqNews)
+dxRef = nz(dxNews[proxyLookbackBars], dxNews)
+vxRef = nz(vxNews[proxyLookbackBars], vxNews)
+y10Ref = nz(y10News[proxyLookbackBars], y10News)
+nqNewsPct = nqRef != 0 ? (nqNews / nqRef - 1.0) * 100.0 : 0.0
+dxNewsPct = dxRef != 0 ? (dxNews / dxRef - 1.0) * 100.0 : 0.0
+vxNewsPct = vxRef != 0 ? (vxNews / vxRef - 1.0) * 100.0 : 0.0
+y10NewsDelta = y10News - y10Ref
+hawkishProxyScore = (
+    (nqNewsPct <= -nqShockPct ? 1 : 0) +
+    (dxNewsPct >= dxyShockPct ? 1 : 0) +
+    (vxNewsPct >= vixShockPct ? 1 : 0) +
+    (y10NewsDelta >= y10ShockAbs ? 1 : 0)
+)
+dovishProxyScore = (
+    (nqNewsPct >= nqShockPct ? 1 : 0) +
+    (dxNewsPct <= -dxyShockPct ? 1 : 0) +
+    (vxNewsPct <= -vixShockPct ? 1 : 0) +
+    (y10NewsDelta <= -y10ShockAbs ? 1 : 0)
+)
+hawkishProxySignal = useNewsProxy and hawkishProxyScore >= minProxyScore and hawkishProxyScore > dovishProxyScore
+dovishProxySignal = useNewsProxy and dovishProxyScore >= minProxyScore and dovishProxyScore > hawkishProxyScore
+var int newsPosture = 0
+var int newsPostureBar = na
+if useNewsProxy
+    if hawkishProxySignal
+        newsPosture := -1
+        newsPostureBar := bar_index
+    else if dovishProxySignal
+        newsPosture := 1
+        newsPostureBar := bar_index
+    if not na(newsPostureBar) and bar_index - newsPostureBar > proxyHoldBars
+        newsPosture := 0
+else
+    newsPosture := 0
+    newsPostureBar := na
+riskOn = newsPosture == 1 ? true : newsPosture == -1 ? false : riskOnBase
+riskOff = newsPosture == -1 ? true : newsPosture == 1 ? false : riskOffBase
+//=====================
+// STRUCTURE CONDITIONS (direction-aware)
+//=====================
+dir = fibBull ? 1 : -1
+zoneReady = not na(zoneUpper) and not na(zoneLower) and not na(pPivot)
+breakInDir = zoneReady ? (dir == 1 ? (close > zoneUpper and close[1] <= zoneUpper) : (close < zoneLower and close[1] >= zoneLower)) : false
+barsSinceBreak = ta.barssince(breakInDir)
+acceptInDir = (
+ zoneReady and
+ barsSinceBreak > 0 and barsSinceBreak <= retestBars and
+    (dir == 1 ? (low <= zoneUpper and close > zoneUpper) : (high >= zoneLower and close < zoneLower))
+)
+rejectAtZone = (
+ zoneReady and
+    (rejectWick ?
+        (dir == 1 ? (high >= zoneLower and close < zoneLower) : (low <= zoneUpper and close > zoneUpper)) :
+        (dir == 1 ? (close < zoneLower) : (close > zoneUpper)))
+)
+breakAgainst = zoneReady ? (dir == 1 ? (close < pPivot and close[1] >= pPivot) : (close > pPivot and close[1] <= pPivot)) : false
+tagT1 = not na(pT1) and (dir == 1 ? high >= pT1 : low <= pT1)
+tagT2 = not na(pT2) and (dir == 1 ? high >= pT2 : low <= pT2)
+regimeAligned = dir == 1 ? riskOn : riskOff
+regimeOpposed = dir == 1 ? riskOff : riskOn
+acceptConfirmed = acceptInDir and regimeAligned
+rejectConfirmed = rejectAtZone and regimeOpposed
+breakAgainstConfirmed = breakAgainst and regimeOpposed
+conflictBreak = breakInDir and (dir == 1 ? (vxRiskOff or dxRiskOff) : (vxRiskOn or dxRiskOn))
+acceptEvent = oneShotEvent ? (acceptConfirmed and not acceptConfirmed[1]) : acceptConfirmed
+rejectEvent = oneShotEvent ? (rejectConfirmed and not rejectConfirmed[1]) : rejectConfirmed
+breakAgainstEvent = oneShotEvent ? (breakAgainstConfirmed and not breakAgainstConfirmed[1]) : breakAgainstConfirmed
+conflictEvent = oneShotEvent ? (conflictBreak and not conflictBreak[1]) : conflictBreak
+tagT1Event = oneShotEvent ? (tagT1 and not tagT1[1]) : tagT1
+tagT2Event = oneShotEvent ? (tagT2 and not tagT2[1]) : tagT2
+proxyImportance = math.max(hawkishProxyScore, dovishProxyScore)
+hawkishNewsEvent = useNewsProxy and newsPosture == -1 and newsPosture[1] != -1
+dovishNewsEvent = useNewsProxy and newsPosture == 1 and newsPosture[1] != 1
+//=====================
+// PLOTS
+//=====================
+plot(na, "Pivot", color=pivotColor, linewidth=pivotWidth)
+plot(na, "Zone Low", color=zoneColor, linewidth=zoneWidth)
+plot(na, "Zone High", color=zoneColor, linewidth=zoneWidth)
+plot(na, "Target 1 (1.236)", color=target1Color, linewidth=targetWidth)
+plot(na, "Target 2 (1.618)", color=target2Color, linewidth=targetWidth)
+plot(na, "Down Magnet 1", color=downMagnetColor, linewidth=downMagnetWidth)
+plot(na, "Down Magnet 2", color=downMagnetColor, linewidth=downMagnetWidth)
+var line pivotLine = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line zoneLowLine = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line zoneHighLine = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line t1Line = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line t2Line = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line dn1Line = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line dn2Line = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var box zoneBox = box.new(bar_index, close, bar_index, close, bgcolor=color(na), border_color=color(na))
+fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
+anchorLeftBar = int(math.max(0, na(anchorHighBar) or na(anchorLowBar) ? fallbackLeftBar : math.min(anchorHighBar, anchorLowBar)))
+drawLeftBar = useConfluenceAnchorSpan ? anchorLeftBar : fallbackLeftBar
+drawAnchoredLine(line id, bool visible, float price, color col, int width_, int leftBar) =>
+    if visible and not na(price)
+        line.set_xy1(id, leftBar, price)
+        line.set_xy2(id, bar_index, price)
+        line.set_color(id, col)
+        line.set_width(id, width_)
+        line.set_style(id, line.style_solid)
+        line.set_extend(id, extendLevelsRight ? extend.right : extend.none)
+    else
+        line.set_color(id, color(na))
+drawAnchoredLine(pivotLine, showPivotZone, pPivot, pivotColor, pivotWidth, drawLeftBar)
+drawAnchoredLine(zoneLowLine, showPivotZone, zoneLower, zoneColor, zoneWidth, drawLeftBar)
+drawAnchoredLine(zoneHighLine, showPivotZone, zoneUpper, zoneColor, zoneWidth, drawLeftBar)
+drawAnchoredLine(t1Line, showTargets, pT1, target1Color, targetWidth, drawLeftBar)
+drawAnchoredLine(t2Line, showTargets, pT2, target2Color, targetWidth, drawLeftBar)
+drawAnchoredLine(dn1Line, showDownMagnets, pDn1, downMagnetColor, downMagnetWidth, drawLeftBar)
+drawAnchoredLine(dn2Line, showDownMagnets, pDn2, downMagnetColor, downMagnetWidth, drawLeftBar)
+if showZoneFill and showPivotZone and not na(zoneUpper) and not na(zoneLower)
+    box.set_left(zoneBox, drawLeftBar)
+    box.set_right(zoneBox, bar_index)
+    box.set_top(zoneBox, zoneUpper)
+    box.set_bottom(zoneBox, zoneLower)
+    box.set_bgcolor(zoneBox, color.new(zoneColor, zoneFillOpacity))
+    box.set_border_color(zoneBox, color.new(zoneColor, 100))
+else
+    box.set_bgcolor(zoneBox, color(na))
+    box.set_border_color(zoneBox, color(na))
+bgcolor(showBg and useIntermarket ? (riskOn ? color.new(color.green, 92) : riskOff ? color.new(color.red, 92) : color.new(color.gray, 94)) : na)
+plotshape(showMarkers and acceptEvent and dir == 1, title="Accept Bull + RiskOn", style=shape.triangleup, location=location.belowbar, size=size.tiny, color=color.new(color.lime, 0), text="AC+")
+plotshape(showMarkers and acceptEvent and dir == -1, title="Accept Bear + RiskOff", style=shape.triangledown, location=location.abovebar, size=size.tiny, color=color.new(color.red, 0), text="AC-")
+plotshape(showMarkers and rejectEvent and dir == 1, title="Reject Bull Zone + RiskOff", style=shape.triangledown, location=location.abovebar, size=size.tiny, color=color.new(color.red, 0), text="RJ")
+plotshape(showMarkers and rejectEvent and dir == -1, title="Reject Bear Zone + RiskOn", style=shape.triangleup, location=location.belowbar, size=size.tiny, color=color.new(color.lime, 0), text="RJ")
+plotshape(showMarkers and breakAgainstEvent, title="Pivot Break Against Direction", style=shape.xcross, location=location.abovebar, size=size.tiny, color=color.new(color.yellow, 0), text="PB")
+plotshape(showMarkers and conflictEvent, title="Conflict Break", style=shape.circle, location=location.abovebar, size=size.tiny, color=color.new(color.yellow, 0), text="!")
+plotshape(showMarkers and hawkishNewsEvent, title="Hawkish Proxy Event", style=shape.diamond, location=location.abovebar, size=size.tiny, color=color.new(color.red, 0), text="NEWS-")
+plotshape(showMarkers and dovishNewsEvent, title="Dovish Proxy Event", style=shape.diamond, location=location.belowbar, size=size.tiny, color=color.new(color.lime, 0), text="NEWS+")
+//=====================
+// ALERTS
+//=====================
+riskOnFlip = useIntermarket and regime == 1 and regime[1] != 1
+riskOffFlip = useIntermarket and regime == -1 and regime[1] != -1
+alertcondition(acceptEvent, "ACCEPT (AutoFib) + Regime Aligned", "Accepted through AutoFib zone with regime aligned confirmation. Close={{close}}")
+alertcondition(rejectEvent, "REJECT (AutoFib) + Regime Opposed", "Rejected at AutoFib zone while intermarket regime opposed direction. Close={{close}}")
+alertcondition(breakAgainstEvent, "PIVOT BREAK (against) + Regime Opposed", "Broke pivot against AutoFib direction with intermarket opposition. Close={{close}}")
+alertcondition(tagT1Event, "TARGET HIT: 1.236", "AutoFib 1.236 target tagged. Price={{close}}")
+alertcondition(tagT2Event, "TARGET HIT: 1.618", "AutoFib 1.618 target tagged. Price={{close}}")
+alertcondition(conflictEvent, "CONFLICT: Break vs VIX/DXY", "Caution: Break in AutoFib direction while VIX/DXY disagree. Close={{close}}")
+alertcondition(hawkishNewsEvent, "NEWS PROXY: Hawkish Shock", "Macro reaction proxy flipped HAWKISH (risk-off posture). Close={{close}}")
+alertcondition(dovishNewsEvent, "NEWS PROXY: Dovish Shock", "Macro reaction proxy flipped DOVISH (risk-on posture). Close={{close}}")
+alertcondition(riskOnFlip, "Flip to RISK-ON", "Intermarket flipped to RISK-ON.")
+alertcondition(riskOffFlip, "Flip to RISK-OFF", "Intermarket flipped to RISK-OFF.")
