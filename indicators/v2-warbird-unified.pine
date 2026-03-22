@@ -87,29 +87,14 @@ y10ShockAbs = input.float(0.03, "US10Y Shock Threshold (abs)", minval=0.001, ste
 minProxyScore = input.int(3, "Minimum Proxy Score (1-4)", minval=1, maxval=4, group=groupNews)
 proxyHoldBars = input.int(12, "Proxy Posture Hold (bars)", minval=1, maxval=200, group=groupNews)
 //=====================
-// VISUALS
+// VISUALS (colors/widths locked to spec — see constants above)
 //=====================
 groupViz = "Visuals"
-showPivotZone   = input.bool(true, "Plot Pivot + Decision Zone", group=groupViz)
-showTargets     = input.bool(false, "Plot Targets (1.236 / 1.618)", group=groupViz)
-showDownMagnets = input.bool(false, "Plot Down Magnets (0.382 / 0.236)", group=groupViz)
 targetLookbackBars = input.int(55, "Target Line Lookback Bars", minval=5, maxval=500, group=groupViz)
-showZoneFill    = input.bool(false, "Fill Decision Zone", group=groupViz)
+extendLevelsRight = input.bool(false, "Extend Levels Right", group=groupViz)
+useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window", group=groupViz)
 showBg          = input.bool(false, "Background Regime Tint", group=groupViz)
 showMarkers     = input.bool(false, "Plot Signal Markers", group=groupViz)
-groupStyle = "Line Style"
-pivotColor = input.color(color.new(color.white, 0), "Pivot Color", group=groupStyle)
-zoneColor = input.color(color.new(color.orange, 0), "Zone Color", group=groupStyle)
-target1Color = input.color(color.new(color.aqua, 0), "Target 1 Color", group=groupStyle)
-target2Color = input.color(color.new(color.blue, 0), "Target 2 Color", group=groupStyle)
-downMagnetColor = input.color(color.new(color.teal, 0), "Down Magnet Color", group=groupStyle)
-pivotWidth = input.int(2, "Pivot Width", minval=1, maxval=5, group=groupStyle)
-zoneWidth = input.int(2, "Zone Width", minval=1, maxval=5, group=groupStyle)
-targetWidth = input.int(1, "Target Width", minval=1, maxval=5, group=groupStyle)
-downMagnetWidth = input.int(1, "Down Magnet Width", minval=1, maxval=5, group=groupStyle)
-zoneFillOpacity = input.int(88, "Zone Fill Opacity", minval=0, maxval=100, group=groupStyle)
-extendLevelsRight = input.bool(false, "Extend Levels Right", group=groupStyle)
-useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window", group=groupStyle)
 //=====================
 // AUTO FIB ENGINE (RR confluence anchor, same methodology as main RR indicator)
 //=====================
@@ -434,26 +419,26 @@ proxyImportance = math.max(hawkishProxyScore, dovishProxyScore)
 hawkishNewsEvent = useNewsProxy and newsPosture == -1 and newsPosture[1] != -1
 dovishNewsEvent = useNewsProxy and newsPosture == 1 and newsPosture[1] != 1
 //=====================
-// PLOTS
+// DRAW ALL 10 FIB LEVELS
 //=====================
-plot(na, "Pivot", color=pivotColor, linewidth=pivotWidth)
-plot(na, "Zone Low", color=zoneColor, linewidth=zoneWidth)
-plot(na, "Zone High", color=zoneColor, linewidth=zoneWidth)
-plot(na, "Target 1 (1.236)", color=target1Color, linewidth=targetWidth)
-plot(na, "Target 2 (1.618)", color=target2Color, linewidth=targetWidth)
-plot(na, "Down Magnet 1", color=downMagnetColor, linewidth=downMagnetWidth)
-plot(na, "Down Magnet 2", color=downMagnetColor, linewidth=downMagnetWidth)
-var line pivotLine = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
-var line zoneLowLine = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
-var line zoneHighLine = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
-var line t1Line = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
-var line t2Line = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
-var line dn1Line = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
-var line dn2Line = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+
+var line lineZero  = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line line236   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line line382   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line linePivot = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line line618   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line line786   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineOne   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineT1    = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineT2    = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineT3    = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+
 var box zoneBox = box.new(bar_index, close, bar_index, close, bgcolor=color(na), border_color=color(na))
+
 fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
 anchorLeftBar = int(math.max(0, na(anchorHighBar) or na(anchorLowBar) ? fallbackLeftBar : math.min(anchorHighBar, anchorLowBar)))
 drawLeftBar = useConfluenceAnchorSpan ? anchorLeftBar : fallbackLeftBar
+
 drawAnchoredLine(line id, bool visible, float price, color col, int width_, int leftBar) =>
     if visible and not na(price)
         line.set_xy1(id, leftBar, price)
@@ -464,20 +449,26 @@ drawAnchoredLine(line id, bool visible, float price, color col, int width_, int 
         line.set_extend(id, extendLevelsRight ? extend.right : extend.none)
     else
         line.set_color(id, color(na))
-drawAnchoredLine(pivotLine, showPivotZone, pPivot, pivotColor, pivotWidth, drawLeftBar)
-drawAnchoredLine(zoneLowLine, showPivotZone, zoneLower, zoneColor, zoneWidth, drawLeftBar)
-drawAnchoredLine(zoneHighLine, showPivotZone, zoneUpper, zoneColor, zoneWidth, drawLeftBar)
-drawAnchoredLine(t1Line, showTargets, pT1, target1Color, targetWidth, drawLeftBar)
-drawAnchoredLine(t2Line, showTargets, pT2, target2Color, targetWidth, drawLeftBar)
-drawAnchoredLine(dn1Line, showDownMagnets, pDn1, downMagnetColor, downMagnetWidth, drawLeftBar)
-drawAnchoredLine(dn2Line, showDownMagnets, pDn2, downMagnetColor, downMagnetWidth, drawLeftBar)
-if showZoneFill and showPivotZone and not na(zoneUpper) and not na(zoneLower)
+
+drawAnchoredLine(lineZero,  true, pZero,  COLOR_ANCHOR,      WIDTH_ANCHOR,      drawLeftBar)
+drawAnchoredLine(line236,   true, p236,   COLOR_RETRACEMENT, WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(line382,   true, p382,   COLOR_RETRACEMENT, WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(linePivot, true, pPivot, COLOR_PIVOT,       WIDTH_PIVOT,       drawLeftBar)
+drawAnchoredLine(line618,   true, p618,   COLOR_RETRACEMENT, WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(line786,   true, p786,   COLOR_RETRACEMENT, WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(lineOne,   true, pOne,   COLOR_ANCHOR,      WIDTH_ANCHOR,      drawLeftBar)
+drawAnchoredLine(lineT1,    true, pT1,    COLOR_TARGET,      WIDTH_TARGET,      drawLeftBar)
+drawAnchoredLine(lineT2,    true, pT2,    COLOR_TARGET,      WIDTH_TARGET,      drawLeftBar)
+drawAnchoredLine(lineT3,    true, pT3,    COLOR_TARGET,      WIDTH_TARGET,      drawLeftBar)
+
+// Zone fill between .382 and .618 (FibLinesPrimitive.ts:267-271, PIVOT_FILL_OPACITY = 0.08)
+if not na(zoneFillUpper) and not na(zoneFillLower)
     box.set_left(zoneBox, drawLeftBar)
     box.set_right(zoneBox, bar_index)
-    box.set_top(zoneBox, zoneUpper)
-    box.set_bottom(zoneBox, zoneLower)
-    box.set_bgcolor(zoneBox, color.new(zoneColor, zoneFillOpacity))
-    box.set_border_color(zoneBox, color.new(zoneColor, 100))
+    box.set_top(zoneBox, zoneFillUpper)
+    box.set_bottom(zoneBox, zoneFillLower)
+    box.set_bgcolor(zoneBox, color.new(COLOR_PIVOT, 92))  // ~0.08 opacity = 92 transparency
+    box.set_border_color(zoneBox, color.new(COLOR_PIVOT, 100))
 else
     box.set_bgcolor(zoneBox, color(na))
     box.set_border_color(zoneBox, color(na))
