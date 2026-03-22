@@ -31,6 +31,20 @@ Follow the active architecture plan only.
 - Local machines are for training/calculations/research only.
 - Production ingestion, crons, and chart-serving must not depend on local machines.
 
+## Pine Script Verification Pipeline
+
+Before committing ANY change to `indicators/*.pine`, run ALL of these in order:
+
+```bash
+./scripts/guards/pine-lint.sh          # Static analysis (errors block commit)
+./scripts/guards/check-contamination.sh # Cross-project leak detection
+npm run build                           # TypeScript build gate
+```
+
+For major refactors, also run `trading-indicators:pine:validate` agent.
+
+**Available MCP:** `pinescript-server` — Pine v6 reference (475 functions, 466 variables). Available after session restart.
+
 ## Absolute Rules
 
 1. NEVER mock data. Real or nothing.
@@ -38,4 +52,5 @@ Follow the active architecture plan only.
 3. NEVER use Prisma or any ORM.
 4. `series.update()` for live ticks, `setData()` only on initial load.
 5. `npm run build` must pass before every push.
-6. One task at a time. Complete fully.
+6. `pine-lint.sh` must pass (0 errors) before every Pine commit.
+7. One task at a time. Complete fully.
