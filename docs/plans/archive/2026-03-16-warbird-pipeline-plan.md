@@ -1,5 +1,8 @@
 # Warbird v1 Pipeline Implementation Plan
 
+> ARCHIVED REFERENCE ONLY. Do not update this file.  
+> Active architecture/update doc: `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Build the complete Warbird v1 data pipeline — from backfill through training — using 1H-only fibs, TP1/TP2-only targets, and 5 fib-relative binary labels.

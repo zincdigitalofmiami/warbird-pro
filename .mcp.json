@@ -1,17 +1,1 @@
-{
-  "mcpServers": {
-    "sequentialthinking": {
-      "type": "stdio",
-      "command": "./node_modules/.bin/mcp-server-sequential-thinking"
-    },
-    "shadcn": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "shadcn@latest", "mcp"]
-    },
-    "supabase": {
-      "type": "http",
-      "url": "https://mcp.supabase.com/mcp?project_ref=qhwgrzqjcdtdqppvhhme"
-    }
-  }
-}
+{"mcpServers":{"sequentialthinking":{"type":"stdio","command":"./node_modules/.bin/mcp-server-sequential-thinking","args":[]}}}

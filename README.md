@@ -4,17 +4,17 @@ Canonical Warbird v1 MES trading platform on Next.js, Supabase, Databento, and L
 
 **Live:** [warbird-pro.vercel.app](https://warbird-pro.vercel.app)  
 **Repo:** [github.com/zincdigitalofmiami/warbird-pro](https://github.com/zincdigitalofmiami/warbird-pro)  
-**Canonical spec:** [WARBIRD_CANONICAL.md](/Volumes/Satechi%20Hub/warbird-pro/WARBIRD_CANONICAL.md)
+**Active plan:** `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
 
 ## Source Of Truth
 
 Use these in order:
 
-1. [WARBIRD_CANONICAL.md](/Volumes/Satechi%20Hub/warbird-pro/WARBIRD_CANONICAL.md)
-2. Live Supabase migrations in [supabase/migrations](/Volumes/Satechi%20Hub/warbird-pro/supabase/migrations)
-3. Active Warbird routes and libs in `app/api/warbird/*` and `lib/warbird/*`
+1. `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+2. Live Supabase migrations in `supabase/migrations`
+3. Active implementation code
 
-Older build-plan language is not authoritative where it conflicts.
+Older plans, audits, checkpoints, and archived specs are not authoritative.
 
 ## Current Architecture
 

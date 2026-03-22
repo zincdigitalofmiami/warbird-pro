@@ -1,4 +1,8 @@
 # Warbird v1 Pipeline Design
+
+> ARCHIVED REFERENCE ONLY. Do not update this file.  
+> Active architecture/update doc: `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+
 **Date:** 2026-03-16
 **Author:** Kirk Musick
 **Status:** Approved — ready for implementation planning

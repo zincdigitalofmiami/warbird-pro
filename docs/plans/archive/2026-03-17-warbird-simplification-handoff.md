@@ -1,4 +1,8 @@
 # Warbird Simplification Handoff
+
+> ARCHIVED REFERENCE ONLY. Do not update this file.  
+> Active architecture/update doc: `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+
 **Date:** 2026-03-17
 **Status:** Canonical plan of record (15m-primary, sidecar out)
 

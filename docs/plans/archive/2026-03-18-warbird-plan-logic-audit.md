@@ -1,4 +1,8 @@
 # Warbird Plan Logic Audit (Deep)
+
+> ARCHIVED REFERENCE ONLY. Do not update this file.  
+> Active architecture/update doc: `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+
 **Date:** 2026-03-18  
 **Scope:** Canonical plan logic + current implementation compatibility  
 **Method:** Two-pass reasoning (fit check, then adversarial risk check)
@@ -7,7 +11,7 @@
 
 ## 1) Audit Inputs
 
-- Canonical simplification handoff: `docs/plans/2026-03-17-warbird-simplification-handoff.md`
+- Canonical simplification handoff: `docs/plans/archive/2026-03-17-warbird-simplification-handoff.md`
 - Canonical spec: `WARBIRD_CANONICAL.md`
 - Runtime wiring: `app/api/cron/*`, `app/api/warbird/*`, `components/charts/*`
 - Schema/migrations: `supabase/migrations/*`
@@ -22,8 +26,8 @@
 1. **`mes_1s` continuity layer is required in plan, but absent in schema and ingestion**
    - Plan requirement: `1s -> 1m -> 15m` continuity
    - Evidence:
-     - `docs/plans/2026-03-17-warbird-simplification-handoff.md:95-105`
-     - `docs/plans/2026-03-17-warbird-simplification-handoff.md:199-201`
+     - `docs/plans/archive/2026-03-17-warbird-simplification-handoff.md:95-105`
+     - `docs/plans/archive/2026-03-17-warbird-simplification-handoff.md:199-201`
      - `supabase/migrations/20260315000003_mes_data.sql:1-65` (no `mes_1s`)
      - `app/api/cron/mes-catchup/route.ts:11-20` (only `1m/15m/1h/4h/1d`)
      - `lib/ingestion/databento.ts:1-4, 47-51` (default schema `ohlcv-1m`)
@@ -32,8 +36,8 @@
 2. **15m-primary logic is declared, but setup engine remains 1H-primary fallback**
    - Plan requirement: 15m is primary geometry/model timeframe
    - Evidence:
-     - `docs/plans/2026-03-17-warbird-simplification-handoff.md:97-104`
-     - `docs/plans/2026-03-17-warbird-simplification-handoff.md:112-131`
+     - `docs/plans/archive/2026-03-17-warbird-simplification-handoff.md:97-104`
+     - `docs/plans/archive/2026-03-17-warbird-simplification-handoff.md:112-131`
      - `app/api/cron/detect-setups/route.ts:129-156` (1H forecast + 1H geometry, 15m optional fallback)
      - `scripts/warbird/fib-engine.ts:2-5` ("Canonical 1H Fib Geometry")
      - `scripts/warbird/trigger-15m.ts:11-20, 71-72` (1H geometry as trigger anchor)
@@ -42,8 +46,8 @@
 3. **Model-score columns required by plan are not first-class in forecast schema/API**
    - Plan requirement: add score columns and use them as primary live outputs
    - Evidence:
-     - `docs/plans/2026-03-17-warbird-simplification-handoff.md:118-125`
-     - `docs/plans/2026-03-17-warbird-simplification-handoff.md:247-249`
+     - `docs/plans/archive/2026-03-17-warbird-simplification-handoff.md:118-125`
+     - `docs/plans/archive/2026-03-17-warbird-simplification-handoff.md:247-249`
      - `supabase/migrations/20260316000010_warbird_v1_cutover.sql:97-116` (no explicit prob/score columns)
      - `scripts/warbird/predict-warbird.py:183-217` (probabilities only in `feature_snapshot`, not dedicated columns)
      - `lib/warbird/projection.ts:46-55` (API projects target/MAE/MFE/confidence, not path probabilities/setup_score)
@@ -60,7 +64,7 @@
 5. **Runner logic still exists in live scoring path, conflicting with simplified direction**
    - Plan/canonical direction: sidecar out, simplification, no runner in v1
    - Evidence:
-     - `docs/plans/2026-03-17-warbird-simplification-handoff.md:128-131, 282-284`
+     - `docs/plans/archive/2026-03-17-warbird-simplification-handoff.md:128-131, 282-284`
      - `WARBIRD_CANONICAL.md:136, 144`
      - `app/api/cron/score-trades/route.ts:131-157, 174-238` (RUNNER_* and PULLBACK_REVERSAL branches active)
      - `supabase/migrations/20260316000010_warbird_v1_cutover.sql:48-68` (runner-centric statuses/events present)
@@ -69,7 +73,7 @@
 6. **Training dataset builder is 1H-centric and synthetic-forward-labeled, not 15m-primary lifecycle-grounded**
    - Plan requirement: 15m-primary geometry scoring with robust labels
    - Evidence:
-     - `docs/plans/2026-03-17-warbird-simplification-handoff.md:97-104, 167-173`
+     - `docs/plans/archive/2026-03-17-warbird-simplification-handoff.md:97-104, 167-173`
      - `scripts/warbird/build-warbird-dataset.ts:343-347, 365-393` (base series = `mes_1h`)
      - `scripts/warbird/build-warbird-dataset.ts:579-596` (geometry/targets from 1H bars)
      - `scripts/warbird/build-warbird-dataset.ts:587-596` (forward-scan target construction)
@@ -86,7 +90,7 @@
 
 8. **Trigger-state-machine requirements from live capture are not represented in schema/events**
    - Requirement:
-     - `docs/plans/2026-03-17-warbird-simplification-handoff.md:343-357`
+     - `docs/plans/archive/2026-03-17-warbird-simplification-handoff.md:343-357`
    - Current enum:
      - `supabase/migrations/20260316000010_warbird_v1_cutover.sql:59-68`
    - Risk: cannot store/validate required `SweepDetected / Acceptance / Imbalance / Displacement` flow.
@@ -146,7 +150,7 @@ These are plan-level weaknesses independent of current code quality.
 
 Use this resolution order:
 1. `WARBIRD_CANONICAL.md`
-2. `docs/plans/2026-03-17-warbird-simplification-handoff.md`
+2. `docs/plans/archive/2026-03-17-warbird-simplification-handoff.md`
 3. legacy large plan (`gentle-giggling-mccarthy.md`) only where not conflicting
 
 Operationally:
