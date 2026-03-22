@@ -650,6 +650,79 @@ else
 bgcolor(showBg and useIntermarket ? (riskOn ? color.new(color.green, 92) : riskOff ? color.new(color.red, 92) : color.new(color.gray, 94)) : na)
 // Chart markers removed — entry/exit markers will come when AG model is live
 // Signal conditions (acceptEvent, rejectEvent, etc.) still computed for alerts + sidebar
+
+//=====================
+// SIDEBAR STATS BAR (LuxAlgo-inspired: modern, minimal, polished)
+//=====================
+groupStats = "Stats Bar Style"
+showStatsBar    = input.bool(true, "Show Stats Bar", group=groupStats)
+statsPosition   = input.string("Bottom Right", "Position", options=["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group=groupStats)
+statsBgColor    = input.color(color.new(#0d1117, 15), "Background", group=groupStats)
+statsTextColor  = input.color(color.new(#c9d1d9, 0), "Text Color", group=groupStats)
+statsLabelColor = input.color(color.new(#8b949e, 0), "Label Color", group=groupStats)
+statsTextSize   = input.string("small", "Text Size", options=["tiny", "small", "normal"], group=groupStats)
+
+statsPos = switch statsPosition
+    "Top Left"     => position.top_left
+    "Top Right"    => position.top_right
+    "Bottom Left"  => position.bottom_left
+    => position.bottom_right
+
+statsTxtSize = switch statsTextSize
+    "tiny"   => size.tiny
+    "normal" => size.normal
+    => size.small
+
+var table statsBar = table.new(statsPos, 2, 8, bgcolor=statsBgColor, border_color=color.new(#30363d, 50), border_width=1)
+
+if barstate.islast and showStatsBar
+    // Row 0: Regime
+    regimeStr = regimeTrending ? "TRENDING" : regimeRanging ? "RANGING" : "TRANSITION"
+    regimeClr = regimeTrending ? color.new(#58a6ff, 0) : regimeRanging ? color.new(#f0883e, 0) : statsLabelColor
+    table.cell(statsBar, 0, 0, "Regime", text_color=statsLabelColor, text_size=statsTxtSize, text_halign=text.align_left)
+    table.cell(statsBar, 1, 0, regimeStr + " (" + str.tostring(adxVal, "#.0") + ")", text_color=regimeClr, text_size=statsTxtSize, text_halign=text.align_right)
+
+    // Row 1: Intermarket
+    imStr = regime == 1 ? "RISK-ON" : regime == -1 ? "RISK-OFF" : "NEUTRAL"
+    imClr = regime == 1 ? color.new(#3fb950, 0) : regime == -1 ? color.new(#f85149, 0) : statsLabelColor
+    table.cell(statsBar, 0, 1, "Intermarket", text_color=statsLabelColor, text_size=statsTxtSize, text_halign=text.align_left)
+    table.cell(statsBar, 1, 1, imStr, text_color=imClr, text_size=statsTxtSize, text_halign=text.align_right)
+
+    // Row 2: VIX level + percentile
+    vixClr = vixDaily > 25 ? color.new(#f85149, 0) : vixDaily < 18 ? color.new(#3fb950, 0) : statsTextColor
+    table.cell(statsBar, 0, 2, "VIX", text_color=statsLabelColor, text_size=statsTxtSize, text_halign=text.align_left)
+    table.cell(statsBar, 1, 2, str.tostring(vixDaily, "#.1") + " (P" + str.tostring(vixPctRank, "#") + ")", text_color=vixClr, text_size=statsTxtSize, text_halign=text.align_right)
+
+    // Row 3: Volume delta %
+    volStr = not na(fibTouchVolDelta) ? str.tostring(fibTouchVolDelta, "#.0") + "% bull" : str.tostring(volDeltaPct, "#.0") + "%"
+    volClr = volDeltaPct > 60 ? color.new(#3fb950, 0) : volDeltaPct < 40 ? color.new(#f85149, 0) : statsTextColor
+    table.cell(statsBar, 0, 3, "Vol Delta", text_color=statsLabelColor, text_size=statsTxtSize, text_halign=text.align_left)
+    table.cell(statsBar, 1, 3, volStr, text_color=volClr, text_size=statsTxtSize, text_halign=text.align_right)
+
+    // Row 4: HTF confluence
+    confStr = str.tostring(htfConfTotal) + " hits"
+    confClr = htfConfTotal >= 3 ? color.new(#3fb950, 0) : htfConfTotal >= 1 ? color.new(#58a6ff, 0) : statsLabelColor
+    table.cell(statsBar, 0, 4, "HTF Conf", text_color=statsLabelColor, text_size=statsTxtSize, text_halign=text.align_left)
+    table.cell(statsBar, 1, 4, confStr, text_color=confClr, text_size=statsTxtSize, text_halign=text.align_right)
+
+    // Row 5: Efficiency Ratio
+    erStr = str.tostring(er10, "#.00") + " / " + str.tostring(er20, "#.00")
+    erClr = er10 > 0.6 ? color.new(#58a6ff, 0) : er10 < 0.3 ? color.new(#f0883e, 0) : statsTextColor
+    table.cell(statsBar, 0, 5, "ER 10/20", text_color=statsLabelColor, text_size=statsTxtSize, text_halign=text.align_left)
+    table.cell(statsBar, 1, 5, erStr, text_color=erClr, text_size=statsTxtSize, text_halign=text.align_right)
+
+    // Row 6: News proxy
+    newsStr = newsPosture == 1 ? "DOVISH" : newsPosture == -1 ? "HAWKISH" : "NONE"
+    newsClr = newsPosture == 1 ? color.new(#3fb950, 0) : newsPosture == -1 ? color.new(#f85149, 0) : statsLabelColor
+    table.cell(statsBar, 0, 6, "News", text_color=statsLabelColor, text_size=statsTxtSize, text_halign=text.align_left)
+    table.cell(statsBar, 1, 6, newsStr, text_color=newsClr, text_size=statsTxtSize, text_halign=text.align_right)
+
+    // Row 7: Direction
+    dirStr = fibBull ? "BULLISH" : "BEARISH"
+    dirClr = fibBull ? color.new(#3fb950, 0) : color.new(#f85149, 0)
+    table.cell(statsBar, 0, 7, "Direction", text_color=statsLabelColor, text_size=statsTxtSize, text_halign=text.align_left)
+    table.cell(statsBar, 1, 7, dirStr + " (" + str.tostring(activeFibPeriod) + ")", text_color=dirClr, text_size=statsTxtSize, text_halign=text.align_right)
+
 //=====================
 // ALERTS
 //=====================
