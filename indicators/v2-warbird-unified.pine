@@ -730,212 +730,14 @@ bgcolor(showBg and useIntermarket ? (riskOn ? color.new(color.green, 92) : riskO
 // Chart markers removed — entry/exit markers will come when AG model is live
 // Signal conditions (acceptEvent, rejectEvent, etc.) still computed for alerts + sidebar
 
-//=====================
-// WARBIRD SENTIMENT PANEL
-// Chart-native overlay: box/label/line primitives, no table.new
-// Best with right margin enabled, recommended future-bar offset: 14-18
-// Renders on barstate.islast only
-//=====================
-groupPanel = "Sentiment Panel"
-showPanel       = input.bool(true, "Show Sentiment Panel", group=groupPanel)
-panelHOffset    = input.int(14, "Horizontal Offset (bars)", minval=1, maxval=50, group=groupPanel)
-panelBigStat    = input.string("TP1 Probability", "Big Stat Display", options=["TP1 Probability", "Win Rate", "TP2 Probability", "Pulse Score"], group=groupPanel)
-panelBullColor  = input.color(#085DEF, "Bull Color", group=groupPanel)
-panelBearColor  = input.color(#F10707, "Bear Color", group=groupPanel)
-panelNeutColor  = input.color(#787B86, "Neutral Color", group=groupPanel)
-showMiniCols    = input.bool(true, "Show Mini Columns", group=groupPanel)
-compactMode     = input.bool(false, "Compact Mode", group=groupPanel)
+// Sentiment panel removed — signal quality only (Phase 2.5)
+// Panel will return in Phase 5 with real AG model output
 
-// --- SCORE DERIVATIONS (all 0-100, computed every bar) ---
-
-// PLACEHOLDER: replaced by AG model output — tp1_probability
-float rawConfScore = math.min(float(htfConfTotal) / 9.0 * 40.0, 40.0)
-float rawRegimeBonus = regimeAligned ? 25.0 : regimeOpposed ? -15.0 : 0.0
-float rawDirBonus = er10 * 20.0
-float rawBaseProb = 35.0
-float tp1Prob = math.max(0.0, math.min(100.0, rawBaseProb + rawConfScore + rawRegimeBonus + rawDirBonus))
-
-// PLACEHOLDER: replaced by AG model output — tp2_probability
-float tp2Prob = tp1Prob * 0.6
-
-// PLACEHOLDER: replaced by AG training results — win_rate
-float winRate = na  // no fabricated metrics — shows "—" in panel
-
-// trend_strength: normalize ADX to 0-100
+// --- SCORE DERIVATIONS (kept for AG feature export) ---
+// PLACEHOLDER: replaced by AG model output
 float trendStr = math.min(adxVal / 60.0 * 100.0, 100.0)
-
-// correlation_strength: normalize intermarket score to 0-100
 float maxIMScore = float(totalWeight)
 float corrStr = maxIMScore > 0 ? math.max(float(scoreOn), float(scoreOff)) / maxIMScore * 100.0 : 0.0
-
-// PLACEHOLDER: replaced by AG model output — reversal_risk
-float revRisk = math.max(0.0, math.min(100.0, 100.0 - tp1Prob))
-
-// pulse_score: weighted composite (winRate contributes 0 when na)
-float pulseScore = 0.30 * tp1Prob + 0.22 * nz(winRate) + 0.18 * trendStr + 0.15 * corrStr + 0.15 * (100.0 - revRisk)
-if enableDebugLogs and barstate.isconfirmed and (tagT1Event or tagT2Event or tagT3Event or breakAgainstEvent)
-    log.info("WBDBG_PROB bar={0} t1={1} t2={2} t3={3} breakAgainst={4} tp1Prob={5} tp2Prob={6} revRisk={7} pulse={8} htfConf={9}", bar_index, tagT1Event, tagT2Event, tagT3Event, breakAgainstEvent, tp1Prob, tp2Prob, revRisk, pulseScore, htfConfTotal)
-
-// --- RENDER OBJECT ARRAYS ---
-var box[]   panelBoxes  = array.new_box()
-var label[] panelLabels = array.new_label()
-var line[]  panelLines  = array.new_line()
-
-// --- HELPERS (global scope) ---
-clearPanel() =>
-    while array.size(panelBoxes) > 0
-        box.delete(array.pop(panelBoxes))
-    while array.size(panelLabels) > 0
-        label.delete(array.pop(panelLabels))
-    while array.size(panelLines) > 0
-        line.delete(array.pop(panelLines))
-
-scoreColor(float val) =>
-    na(val) ? panelNeutColor : val >= 60 ? panelBullColor : val <= 40 ? panelBearColor : panelNeutColor
-
-fmtScore(float val) =>
-    na(val) ? "—" : str.tostring(val, "#")
-
-// --- PANEL GEOMETRY (range-based spacing for tightness) ---
-int panelW = compactMode ? 14 : 18
-int rangeLookback = 140
-float rangeHigh = ta.highest(high, rangeLookback)
-float rangeLow  = ta.lowest(low, rangeLookback)
-float panelSpan = math.max(rangeHigh - rangeLow, syminfo.mintick * 200)
-
-float rowGap  = panelSpan * (compactMode ? 0.028 : 0.035)
-float barH    = panelSpan * (compactMode ? 0.014 : 0.018)
-float miniH   = panelSpan * (compactMode ? 0.032 : 0.040)
-float bigGap  = panelSpan * 0.055
-
-// --- RENDER PANEL ---
-if barstate.islast and showPanel
-    clearPanel()
-
-    int x0 = bar_index + panelHOffset
-    float topY = rangeHigh - panelSpan * 0.12
-    float curY = topY
-
-    // Alpha targets
-    color textPrimary = color.new(chart.fg_color, 5)
-    color textMuted   = color.new(chart.fg_color, 45)
-    color textCaption = color.new(chart.fg_color, 60)
-    color trackCol    = color.new(chart.fg_color, 87)
-    color hairlineCol = color.new(chart.fg_color, 84)
-
-    int xMid   = x0 + panelW / 2
-    int xRight = x0 + panelW
-    int xTrackL = x0 + 4
-    int xTrackR = x0 + panelW - 2
-    int trackW  = xTrackR - xTrackL
-
-    // === HEADER: symbol + timeframe ===
-    array.push(panelLabels, label.new(xMid, curY, syminfo.tickerid + " · " + timeframe.period, xloc=xloc.bar_index, style=label.style_none, textcolor=textCaption, size=size.tiny))
-    curY -= rowGap
-
-    // === BIG STAT ===
-    float bigVal = switch panelBigStat
-        "Win Rate"         => winRate
-        "TP2 Probability"  => tp2Prob
-        "Pulse Score"      => pulseScore
-        => tp1Prob
-    string bigTitle = switch panelBigStat
-        "Win Rate"         => "WIN RATE"
-        "TP2 Probability"  => "TP2 PROB"
-        "Pulse Score"      => "PULSE"
-        => "TP1 PROB"
-    color bigCol = color.new(scoreColor(bigVal), 3)
-    array.push(panelLabels, label.new(xMid, curY, fmtScore(bigVal) + "%", xloc=xloc.bar_index, style=label.style_none, textcolor=bigCol, size=size.huge))
-    curY -= bigGap * 0.7
-
-    // === CAPTION ===
-    array.push(panelLabels, label.new(xMid, curY, bigTitle, xloc=xloc.bar_index, style=label.style_none, textcolor=textMuted, size=size.small))
-    curY -= rowGap * 0.8
-
-    // === SUBSTATS ===
-    string wrStr = na(winRate) ? "—" : str.tostring(winRate, "#")
-    string subLine = "WR " + wrStr + "  ·  TP2 " + fmtScore(tp2Prob) + "  ·  Risk " + fmtScore(revRisk)
-    array.push(panelLabels, label.new(xMid, curY, subLine, xloc=xloc.bar_index, style=label.style_none, textcolor=color.new(chart.fg_color, 38), size=size.small))
-    curY -= rowGap * 1.3
-
-    // === PULSE BAR ===
-    float pulseTop = curY + barH
-    float pulseBot = curY - barH
-    array.push(panelBoxes, box.new(x0, pulseTop, xRight, pulseBot, bgcolor=trackCol, border_color=color(na), xloc=xloc.bar_index))
-    int pulseFillW = int(math.round(float(panelW) * pulseScore / 100.0))
-    if pulseFillW > 0
-        array.push(panelBoxes, box.new(x0, pulseTop, x0 + pulseFillW, pulseBot, bgcolor=color.new(scoreColor(pulseScore), 15), border_color=color(na), xloc=xloc.bar_index))
-    int notchX = x0 + int(math.round(float(panelW) * pulseScore / 100.0))
-    array.push(panelLines, line.new(notchX, pulseTop + barH * 0.3, notchX, pulseBot - barH * 0.3, xloc=xloc.bar_index, color=textPrimary, width=2))
-    curY -= rowGap * 1.1
-
-    // === MINI COLUMNS ===
-    if showMiniCols
-        float miniTop = curY
-        float miniBot = curY - miniH
-        int colSpace = int(math.round(float(panelW) / 4.0))
-        float[] mVals = array.from(nz(winRate), tp1Prob, trendStr, corrStr)
-        string[] mNames = array.from("WR", "P1", "TR", "CR")
-        for i = 0 to 3
-            int cx = x0 + i * colSpace + int(colSpace / 2)
-            float mv = array.get(mVals, i)
-            float fillFrac = mv / 100.0
-            // track
-            array.push(panelBoxes, box.new(cx - 1, miniTop, cx + 1, miniBot, bgcolor=trackCol, border_color=color(na), xloc=xloc.bar_index))
-            // fill (bottom-up)
-            if fillFrac > 0
-                array.push(panelBoxes, box.new(cx - 1, miniBot + miniH * fillFrac, cx + 1, miniBot, bgcolor=color.new(scoreColor(mv), 15), border_color=color(na), xloc=xloc.bar_index))
-            // label
-            array.push(panelLabels, label.new(cx, miniBot - rowGap * 0.3, array.get(mNames, i), xloc=xloc.bar_index, style=label.style_none, textcolor=textCaption, size=size.tiny))
-        curY := miniBot - rowGap * 0.8
-
-    // === HAIRLINE SEPARATOR ===
-    array.push(panelLines, line.new(x0 + 1, curY, xRight - 1, curY, xloc=xloc.bar_index, color=hairlineCol, width=1, style=line.style_dotted))
-    curY -= rowGap * 0.6
-
-    // === ROW: Win Rate ===
-    array.push(panelLabels, label.new(x0, curY, "WR", xloc=xloc.bar_index, style=label.style_none, textcolor=textMuted, size=size.small, textalign=text.align_left))
-    array.push(panelBoxes, box.new(xTrackL, curY + barH, xTrackR, curY - barH, bgcolor=trackCol, border_color=color(na), xloc=xloc.bar_index))
-    int wrFill = int(math.round(float(trackW) * nz(winRate) / 100.0))
-    if wrFill > 0
-        array.push(panelBoxes, box.new(xTrackL, curY + barH, xTrackL + wrFill, curY - barH, bgcolor=color.new(scoreColor(winRate), 15), border_color=color(na), xloc=xloc.bar_index))
-    array.push(panelLabels, label.new(xRight, curY, fmtScore(winRate), xloc=xloc.bar_index, style=label.style_none, textcolor=textPrimary, size=size.small, textalign=text.align_right))
-    curY -= rowGap
-
-    // === ROW: TP1 / TP2 (stacked micro-bars) ===
-    // TP1
-    array.push(panelLabels, label.new(x0, curY, "P1", xloc=xloc.bar_index, style=label.style_none, textcolor=textMuted, size=size.small, textalign=text.align_left))
-    array.push(panelBoxes, box.new(xTrackL, curY + barH * 0.6, xTrackR, curY - barH * 0.6, bgcolor=trackCol, border_color=color(na), xloc=xloc.bar_index))
-    int p1Fill = int(math.round(float(trackW) * tp1Prob / 100.0))
-    if p1Fill > 0
-        array.push(panelBoxes, box.new(xTrackL, curY + barH * 0.6, xTrackL + p1Fill, curY - barH * 0.6, bgcolor=color.new(panelBullColor, 12), border_color=color(na), xloc=xloc.bar_index))
-    curY -= rowGap * 0.55
-    // TP2
-    array.push(panelLabels, label.new(x0, curY, "P2", xloc=xloc.bar_index, style=label.style_none, textcolor=textMuted, size=size.small, textalign=text.align_left))
-    array.push(panelBoxes, box.new(xTrackL, curY + barH * 0.6, xTrackR, curY - barH * 0.6, bgcolor=trackCol, border_color=color(na), xloc=xloc.bar_index))
-    int p2Fill = int(math.round(float(trackW) * tp2Prob / 100.0))
-    if p2Fill > 0
-        array.push(panelBoxes, box.new(xTrackL, curY + barH * 0.6, xTrackL + p2Fill, curY - barH * 0.6, bgcolor=color.new(panelBullColor, 28), border_color=color(na), xloc=xloc.bar_index))
-    // Right side combined
-    array.push(panelLabels, label.new(xRight, curY + rowGap * 0.25, fmtScore(tp1Prob) + " / " + fmtScore(tp2Prob), xloc=xloc.bar_index, style=label.style_none, textcolor=textPrimary, size=size.small, textalign=text.align_right))
-    curY -= rowGap
-
-    // === ROW: Trend Strength ===
-    array.push(panelLabels, label.new(x0, curY, "TR", xloc=xloc.bar_index, style=label.style_none, textcolor=textMuted, size=size.small, textalign=text.align_left))
-    array.push(panelBoxes, box.new(xTrackL, curY + barH, xTrackR, curY - barH, bgcolor=trackCol, border_color=color(na), xloc=xloc.bar_index))
-    int trFill = int(math.round(float(trackW) * trendStr / 100.0))
-    if trFill > 0
-        array.push(panelBoxes, box.new(xTrackL, curY + barH, xTrackL + trFill, curY - barH, bgcolor=color.new(scoreColor(trendStr), 15), border_color=color(na), xloc=xloc.bar_index))
-    array.push(panelLabels, label.new(xRight, curY, fmtScore(trendStr), xloc=xloc.bar_index, style=label.style_none, textcolor=textPrimary, size=size.small, textalign=text.align_right))
-    curY -= rowGap
-
-    // === ROW: Correlation Strength ===
-    array.push(panelLabels, label.new(x0, curY, "CR", xloc=xloc.bar_index, style=label.style_none, textcolor=textMuted, size=size.small, textalign=text.align_left))
-    array.push(panelBoxes, box.new(xTrackL, curY + barH, xTrackR, curY - barH, bgcolor=trackCol, border_color=color(na), xloc=xloc.bar_index))
-    int crFill = int(math.round(float(trackW) * corrStr / 100.0))
-    if crFill > 0
-        array.push(panelBoxes, box.new(xTrackL, curY + barH, xTrackL + crFill, curY - barH, bgcolor=color.new(scoreColor(corrStr), 15), border_color=color(na), xloc=xloc.bar_index))
-    array.push(panelLabels, label.new(xRight, curY, fmtScore(corrStr), xloc=xloc.bar_index, style=label.style_none, textcolor=textPrimary, size=size.small, textalign=text.align_right))
 
 //=====================
 // AG FEATURE EXPORT (hidden plots — display=display.none)
@@ -980,13 +782,9 @@ plot(nz(confluenceQuality), "confluence_quality", display=display.none) // AG fe
 plot(float(tradeState), "trade_state",    display=display.none)  // AG feature: trade_state (0-6)
 plot(tradeState == TRADE_ACTIVE and not na(entryBar) ? float(bar_index - entryBar) : 0.0, "bars_in_trade", display=display.none)  // AG feature: bars_in_trade
 
-// Panel score features (PLACEHOLDER derivations — replaced by AG)
-plot(tp1Prob,    "tp1_probability",      display=display.none)  // AG feature: tp1_probability
-plot(tp2Prob,    "tp2_probability",      display=display.none)  // AG feature: tp2_probability
+// Score features (kept from panel — still useful for AG)
 plot(trendStr,   "trend_strength",       display=display.none)  // AG feature: trend_strength
 plot(corrStr,    "correlation_strength", display=display.none)  // AG feature: correlation_strength
-plot(revRisk,    "reversal_risk",        display=display.none)  // AG feature: reversal_risk
-plot(pulseScore, "pulse_score",          display=display.none)  // AG feature: pulse_score
 
 //=====================
 // ALERTS
