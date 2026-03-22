@@ -10,7 +10,7 @@ Local PostgreSQL is **not** a strict mirror of cloud Supabase.
 - **Local (`warbird_training`)** stores training-working datasets and model-build artifacts.
 - Sync is **bidirectional by purpose**, not mirror-by-default.
 
-## Complete Cloud Table Inventory — 49 Tables
+## Complete Cloud Table Inventory — 47 Tables
 
 Verified against `supabase/migrations/` (files 002-012).
 
@@ -94,13 +94,13 @@ Verified against `supabase/migrations/` (files 002-012).
 
 **Econ (11):** `series_catalog`, `econ_rates_1d`, `econ_yields_1d`, `econ_fx_1d`, `econ_vol_1d`, `econ_inflation_1d`, `econ_labor_1d`, `econ_activity_1d`, `econ_money_1d`, `econ_commodities_1d`, `econ_indexes_1d`
 
-**News/Events (5):** `econ_calendar`, `econ_news_1d`, `news_signals`, `geopolitical_risk_1d`, `trump_effect_1d`
+**News/Events (6):** `econ_calendar`, `econ_news_1d`, `news_signals`, `geopolitical_risk_1d`, `trump_effect_1d`, `macro_reports_1d`
 
 **Warbird v2 — training labels + features (9):** `warbird_daily_bias`, `warbird_structure_4h`, `warbird_forecasts_1h`, `warbird_triggers_15m`, `warbird_conviction`, `warbird_setups`, `warbird_setup_events`, `warbird_risk`, `measured_moves`
 
 **Symbols (3):** `symbols`, `symbol_roles`, `symbol_role_members`
 
-**Ops (2):** `job_log`, `macro_reports_1d`
+**Ops (1):** `job_log`
 
 ### Local → Cloud (training outputs) — needs migration 013
 
@@ -118,7 +118,7 @@ Verified against `supabase/migrations/` (files 002-012).
 - `model_packets`
 - `training_runs`
 
-### DROP (4 zombie tables)
+### DROP (5 zombie tables)
 - `trade_scores`
 - `vol_states`
 - `sources`

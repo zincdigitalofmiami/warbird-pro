@@ -40,10 +40,15 @@
 
 | | **Supabase Cloud** | **Local PostgreSQL** |
 |---|---|---|
-| **Role** | Frontend/ops/publish | Training/research/inference |
-| **Tables** | warbird_forecasts, warbird_setups, warbird_risk, mes_15m, mes_1d, cross_asset_1h, econ_*, news_signals, geopolitical_risk_1d, trump_effect_1d | All cloud tables synced down + training_features, training_snapshots, model_runs, inference_results, shap_results, shap_indicator_settings, features_catalog |
-| **Writes from** | Supabase crons (pg_cron + Edge Functions), local inference publish | sync-down from cloud, feature builder, AG training |
-| **Who reads** | Dashboard (Vercel Next.js), API routes | AG training, SHAP pipeline, feature engineering |
+| **Role** | Dashboard command center + ops + ingestion | Training/research/inference |
+| **Ingestion tables** | mes_15m, mes_1d, cross_asset_1h, econ_*, news_signals, geopolitical_risk_1d, trump_effect_1d | Synced DOWN from cloud |
+| **Ops tables** | warbird_forecasts, warbird_setups, warbird_risk | Written by local inference, read by dashboard |
+| **Model ops tables (synced UP from local)** | shap_results, training_reports, model_packets, shap_indicator_settings, model_metrics | Local is source of truth — synced UP after training/promotion |
+| **Local-only tables** | — | training_features, training_snapshots, feature_matrix, training_labels, features_catalog |
+| **Writes from** | Supabase crons (pg_cron + Edge Functions), local inference publish (sync-up) | sync-down from cloud, feature builder, AG training |
+| **Who reads** | Dashboard (Vercel Next.js) — displays EVERYTHING: SHAP, reports, win rates, probabilities, model metrics, predictions, calibration curves, promoted packet values | AG training, SHAP pipeline, feature engineering |
+
+**Dashboard is the command center.** Cloud holds whatever the dashboard needs to display. Don't filter what gets synced up — if the trader needs to see it, it lives on cloud.
 
 ### Decision: Two-Tier Architecture (Supabase + Local Mac)
 
