@@ -1,1 +1,14 @@
-{"mcpServers":{"sequentialthinking":{"type":"stdio","command":"./node_modules/.bin/mcp-server-sequential-thinking","args":[]}}}
+{
+  "mcpServers": {
+    "sequentialthinking": {
+      "type": "stdio",
+      "command": "./node_modules/.bin/mcp-server-sequential-thinking",
+      "args": []
+    },
+    "pinescript-server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["pinescript-mcp-server"]
+    }
+  }
+}
