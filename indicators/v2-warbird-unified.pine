@@ -110,7 +110,6 @@ targetLookbackBars = input.int(55, "Target Line Lookback Bars", minval=5, maxval
 extendLevelsRight = input.bool(false, "Extend Levels Right", group=groupViz)
 useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window", group=groupViz)
 showBg          = input.bool(false, "Background Regime Tint", group=groupViz)
-showMarkers     = input.bool(false, "Plot Signal Markers", group=groupViz)
 //=====================
 // REGIME DETECTION (from session-checkpoint research: ADX/ER/VIX-vol)
 // These are computed values for sidebar + AG features, NOT chart markers
@@ -649,14 +648,8 @@ else
     box.set_bgcolor(zoneBox, color(na))
     box.set_border_color(zoneBox, color(na))
 bgcolor(showBg and useIntermarket ? (riskOn ? color.new(color.green, 92) : riskOff ? color.new(color.red, 92) : color.new(color.gray, 94)) : na)
-plotshape(showMarkers and acceptEvent and dir == 1, title="Accept Bull + RiskOn", style=shape.triangleup, location=location.belowbar, size=size.tiny, color=color.new(color.lime, 0), text="AC+")
-plotshape(showMarkers and acceptEvent and dir == -1, title="Accept Bear + RiskOff", style=shape.triangledown, location=location.abovebar, size=size.tiny, color=color.new(color.red, 0), text="AC-")
-plotshape(showMarkers and rejectEvent and dir == 1, title="Reject Bull Zone + RiskOff", style=shape.triangledown, location=location.abovebar, size=size.tiny, color=color.new(color.red, 0), text="RJ")
-plotshape(showMarkers and rejectEvent and dir == -1, title="Reject Bear Zone + RiskOn", style=shape.triangleup, location=location.belowbar, size=size.tiny, color=color.new(color.lime, 0), text="RJ")
-plotshape(showMarkers and breakAgainstEvent, title="Pivot Break Against Direction", style=shape.xcross, location=location.abovebar, size=size.tiny, color=color.new(color.yellow, 0), text="PB")
-plotshape(showMarkers and conflictEvent, title="Conflict Break", style=shape.circle, location=location.abovebar, size=size.tiny, color=color.new(color.yellow, 0), text="!")
-plotshape(showMarkers and hawkishNewsEvent, title="Hawkish Proxy Event", style=shape.diamond, location=location.abovebar, size=size.tiny, color=color.new(color.red, 0), text="NEWS-")
-plotshape(showMarkers and dovishNewsEvent, title="Dovish Proxy Event", style=shape.diamond, location=location.belowbar, size=size.tiny, color=color.new(color.lime, 0), text="NEWS+")
+// Chart markers removed — entry/exit markers will come when AG model is live
+// Signal conditions (acceptEvent, rejectEvent, etc.) still computed for alerts + sidebar
 //=====================
 // ALERTS
 //=====================
