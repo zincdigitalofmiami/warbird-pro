@@ -133,39 +133,54 @@ fibHigh4 = fib34_high
 fibLow4 = fib34_low
 fibHigh5 = fib55_high
 fibLow5 = fib55_low
-fibScore(float h, float l) =>
+//=====================
+// CONFLUENCE SCORING (from lib/fibonacci.ts:146-173)
+// Score = confluence_count × range
+// This prevents short-period narrow anchors from winning
+//=====================
+
+// Confluence ratios used for voting (lib/fibonacci.ts:30)
+CONF_RATIOS_0 = 0.382
+CONF_RATIOS_1 = 0.5
+CONF_RATIOS_2 = 0.618
+
+fibConfluenceScore(float h, float l) =>
     float rng = h - l
     if rng <= 0
-        0
+        0.0
     else
         float tol = rng * fibConfluenceTolPct * 0.01
-        int score = 0
-        for ratio = 0 to 2
-            float targetRatio = ratio == 0 ? 0.382 : ratio == 1 ? 0.5 : 0.618
-            float levelSelf = l + rng * targetRatio
-            for r = 0 to 2
-                float cmpRatio = r == 0 ? 0.382 : r == 1 ? 0.5 : 0.618
+        int confCount = 0
+        // For each of 3 confluence ratios on this anchor...
+        for selfR = 0 to 2
+            float selfRatio = selfR == 0 ? CONF_RATIOS_0 : selfR == 1 ? CONF_RATIOS_1 : CONF_RATIOS_2
+            float selfLevel = l + rng * selfRatio
+            // ...compare against 3 confluence ratios on each OTHER anchor
+            for cmpR = 0 to 2
+                float cmpRatio = cmpR == 0 ? CONF_RATIOS_0 : cmpR == 1 ? CONF_RATIOS_1 : CONF_RATIOS_2
+                // Check all 5 period anchors
                 float cmpLvl1 = fibLow1 + (fibHigh1 - fibLow1) * cmpRatio
                 float cmpLvl2 = fibLow2 + (fibHigh2 - fibLow2) * cmpRatio
                 float cmpLvl3 = fibLow3 + (fibHigh3 - fibLow3) * cmpRatio
                 float cmpLvl4 = fibLow4 + (fibHigh4 - fibLow4) * cmpRatio
                 float cmpLvl5 = fibLow5 + (fibHigh5 - fibLow5) * cmpRatio
-                if math.abs(levelSelf - cmpLvl1) <= tol
-                    score += 1
-                if math.abs(levelSelf - cmpLvl2) <= tol
-                    score += 1
-                if math.abs(levelSelf - cmpLvl3) <= tol
-                    score += 1
-                if math.abs(levelSelf - cmpLvl4) <= tol
-                    score += 1
-                if math.abs(levelSelf - cmpLvl5) <= tol
-                    score += 1
-        score
-score1 = fibScore(fibHigh1, fibLow1)
-score2 = fibScore(fibHigh2, fibLow2)
-score3 = fibScore(fibHigh3, fibLow3)
-score4 = fibScore(fibHigh4, fibLow4)
-score5 = fibScore(fibHigh5, fibLow5)
+                if math.abs(selfLevel - cmpLvl1) <= tol
+                    confCount += 1
+                if math.abs(selfLevel - cmpLvl2) <= tol
+                    confCount += 1
+                if math.abs(selfLevel - cmpLvl3) <= tol
+                    confCount += 1
+                if math.abs(selfLevel - cmpLvl4) <= tol
+                    confCount += 1
+                if math.abs(selfLevel - cmpLvl5) <= tol
+                    confCount += 1
+        // KEY DIFFERENCE: weight by range (lib/fibonacci.ts:168)
+        float(confCount) * rng
+score1 = fibConfluenceScore(fibHigh1, fibLow1)
+score2 = fibConfluenceScore(fibHigh2, fibLow2)
+score3 = fibConfluenceScore(fibHigh3, fibLow3)
+score4 = fibConfluenceScore(fibHigh4, fibLow4)
+score5 = fibConfluenceScore(fibHigh5, fibLow5)
 bestScore = math.max(score1, score2, score3, score4, score5)
 fibAnchorHighCandidate = (
  bestScore == score5 ? fibHigh5 :
