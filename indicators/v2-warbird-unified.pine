@@ -395,26 +395,28 @@ riskOff = newsPosture == -1 ? true : newsPosture == 1 ? false : riskOffBase
 //=====================
 dir = fibBull ? 1 : -1
 zoneReady = not na(zoneUpper) and not na(zoneLower) and not na(pPivot)
-breakInDir = zoneReady ? (dir == 1 ? (close > zoneUpper and close[1] <= zoneUpper) : (close < zoneLower and close[1] >= zoneLower)) : false
+// W2 fix: gate all structure conditions on barstate.isconfirmed to prevent intra-bar flicker
+breakInDir = zoneReady and barstate.isconfirmed ? (dir == 1 ? (close > zoneUpper and close[1] <= zoneUpper) : (close < zoneLower and close[1] >= zoneLower)) : false
 // F1 fix: track break bar manually instead of ta.barssince (which persists across anchor changes)
 if breakInDir
     lastBreakBar := bar_index
 barsSinceBreak = na(lastBreakBar) ? int(na) : bar_index - lastBreakBar
 acceptInDir = (
- zoneReady and
+ zoneReady and barstate.isconfirmed and
  not na(barsSinceBreak) and barsSinceBreak > 0 and barsSinceBreak <= retestBars and
     (dir == 1 ? (low <= zoneUpper and close > zoneUpper) : (high >= zoneLower and close < zoneLower))
 )
 rejectAtZone = (
- zoneReady and
+ zoneReady and barstate.isconfirmed and
     (rejectWick ?
         (dir == 1 ? (high >= zoneLower and close < zoneLower) : (low <= zoneUpper and close > zoneUpper)) :
         (dir == 1 ? (close < zoneLower) : (close > zoneUpper)))
 )
-breakAgainst = zoneReady ? (dir == 1 ? (close < pPivot and close[1] >= pPivot) : (close > pPivot and close[1] <= pPivot)) : false
-tagT1 = not na(pT1) and (dir == 1 ? high >= pT1 : low <= pT1)
-tagT2 = not na(pT2) and (dir == 1 ? high >= pT2 : low <= pT2)
-tagT3 = not na(pT3) and (dir == 1 ? high >= pT3 : low <= pT3)
+breakAgainst = zoneReady and barstate.isconfirmed ? (dir == 1 ? (close < pPivot and close[1] >= pPivot) : (close > pPivot and close[1] <= pPivot)) : false
+// W10 fix: gate target tags on isconfirmed to prevent premature alert firing
+tagT1 = barstate.isconfirmed and not na(pT1) and (dir == 1 ? high >= pT1 : low <= pT1)
+tagT2 = barstate.isconfirmed and not na(pT2) and (dir == 1 ? high >= pT2 : low <= pT2)
+tagT3 = barstate.isconfirmed and not na(pT3) and (dir == 1 ? high >= pT3 : low <= pT3)
 regimeAligned = dir == 1 ? riskOn : riskOff
 regimeOpposed = dir == 1 ? riskOff : riskOn
 acceptConfirmed = acceptInDir and regimeAligned
