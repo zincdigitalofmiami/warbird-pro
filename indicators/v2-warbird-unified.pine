@@ -303,17 +303,28 @@ activeFibPeriodCandidate = (
  bestScore == score3 ? 21 :
  bestScore == score2 ? 13 : 8
  )
+// Pre-compute all highestbars/lowestbars unconditionally to avoid ternary warnings
+hbars8  = ta.highestbars(high, 8)
+hbars13 = ta.highestbars(high, 13)
+hbars21 = ta.highestbars(high, 21)
+hbars34 = ta.highestbars(high, 34)
+hbars55 = ta.highestbars(high, 55)
+lbars8  = ta.lowestbars(low, 8)
+lbars13 = ta.lowestbars(low, 13)
+lbars21 = ta.lowestbars(low, 21)
+lbars34 = ta.lowestbars(low, 34)
+lbars55 = ta.lowestbars(low, 55)
 activeHighOffsetCandidate = (
- activeFibPeriodCandidate == 55 ? ta.highestbars(high, 55) :
- activeFibPeriodCandidate == 34 ? ta.highestbars(high, 34) :
- activeFibPeriodCandidate == 21 ? ta.highestbars(high, 21) :
- activeFibPeriodCandidate == 13 ? ta.highestbars(high, 13) : ta.highestbars(high, 8)
+ activeFibPeriodCandidate == 55 ? hbars55 :
+ activeFibPeriodCandidate == 34 ? hbars34 :
+ activeFibPeriodCandidate == 21 ? hbars21 :
+ activeFibPeriodCandidate == 13 ? hbars13 : hbars8
  )
 activeLowOffsetCandidate = (
- activeFibPeriodCandidate == 55 ? ta.lowestbars(low, 55) :
- activeFibPeriodCandidate == 34 ? ta.lowestbars(low, 34) :
- activeFibPeriodCandidate == 21 ? ta.lowestbars(low, 21) :
- activeFibPeriodCandidate == 13 ? ta.lowestbars(low, 13) : ta.lowestbars(low, 8)
+ activeFibPeriodCandidate == 55 ? lbars55 :
+ activeFibPeriodCandidate == 34 ? lbars34 :
+ activeFibPeriodCandidate == 21 ? lbars21 :
+ activeFibPeriodCandidate == 13 ? lbars13 : lbars8
  )
 candidateHighBar = bar_index - math.abs(activeHighOffsetCandidate)
 candidateLowBar = bar_index - math.abs(activeLowOffsetCandidate)
