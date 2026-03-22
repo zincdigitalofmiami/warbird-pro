@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+import sys
+print("=" * 60)
+print("DEPRECATED: This script is superseded by scripts/warbird/train-warbird.py")
+print("and will be replaced by scripts/ag/train-fib-model.py in Phase 4.")
+print("Do NOT use for new work.")
+print("=" * 60)
+sys.exit(1)
+
 """
 Warbird Model Training Pipeline — AutoGluon Regression
 

@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+import sys
+print("=" * 60)
+print("DEPRECATED: This script is superseded by scripts/warbird/build-warbird-dataset.ts")
+print("and will be replaced by scripts/ag/build-fib-dataset.py in Phase 4.")
+print("Do NOT use for new work.")
+print("=" * 60)
+sys.exit(1)
+
 """
 Build unified MES training dataset from Supabase.
 
