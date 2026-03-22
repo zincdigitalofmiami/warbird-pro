@@ -214,12 +214,14 @@ bool structBreak = not na(fibAnchorHigh) and not na(fibAnchorLow) and
  barstate.isconfirmed and
                    (close > fibAnchorHigh or close < fibAnchorLow)
 bool needsAnchor = na(fibAnchorHigh) or na(fibAnchorLow) or structBreak
+var int lastBreakBar = na  // tracks bar_index of most recent breakInDir, reset on anchor change
 if needsAnchor and (barstate.isconfirmed or na(fibAnchorHigh))
     fibAnchorHigh := fibAnchorHighCandidate
     fibAnchorLow := fibAnchorLowCandidate
     activeFibPeriod := activeFibPeriodCandidate
     anchorHighBar := candidateHighBar
     anchorLowBar := candidateLowBar
+    lastBreakBar := na  // F1 fix: reset break tracking when anchor changes
 fibRange = fibAnchorHigh - fibAnchorLow
 fibMidpoint = fibAnchorLow + fibRange * 0.5
 fibBull = fibRange > 0 ? close >= fibMidpoint : true
@@ -394,10 +396,13 @@ riskOff = newsPosture == -1 ? true : newsPosture == 1 ? false : riskOffBase
 dir = fibBull ? 1 : -1
 zoneReady = not na(zoneUpper) and not na(zoneLower) and not na(pPivot)
 breakInDir = zoneReady ? (dir == 1 ? (close > zoneUpper and close[1] <= zoneUpper) : (close < zoneLower and close[1] >= zoneLower)) : false
-barsSinceBreak = ta.barssince(breakInDir)
+// F1 fix: track break bar manually instead of ta.barssince (which persists across anchor changes)
+if breakInDir
+    lastBreakBar := bar_index
+barsSinceBreak = na(lastBreakBar) ? int(na) : bar_index - lastBreakBar
 acceptInDir = (
  zoneReady and
- barsSinceBreak > 0 and barsSinceBreak <= retestBars and
+ not na(barsSinceBreak) and barsSinceBreak > 0 and barsSinceBreak <= retestBars and
     (dir == 1 ? (low <= zoneUpper and close > zoneUpper) : (high >= zoneLower and close < zoneLower))
 )
 rejectAtZone = (
