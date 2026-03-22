@@ -182,11 +182,11 @@ htf1dP500 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_PIVOT)
 htf1dP618 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_618)
 
 // Check if a 15m fib level aligns with any HTF fib level
-htfConfluenceCheck(float level15m) =>
-    if na(level15m) or na(fibRange) or fibRange <= 0
+htfConfluenceCheck(float level15m, float currentFibRange) =>
+    if na(level15m) or na(currentFibRange) or currentFibRange <= 0
         0
     else
-        float tol = fibRange * htfConfTolPct * 0.01
+        float tol = currentFibRange * htfConfTolPct * 0.01
         int hits = 0
         // Check against 1H levels
         if not na(htf1hP382) and math.abs(level15m - htf1hP382) <= tol
@@ -384,9 +384,9 @@ zoneFillUpper = math.max(p382, p618)
 zoneFillLower = math.min(p382, p618)
 
 // --- HTF CONFLUENCE SCORES (computed after 15m fib prices exist) ---
-htfConfPivot = htfConfluenceCheck(pPivot)    // AG feature: htf_conf_pivot
-htfConf382   = htfConfluenceCheck(p382)      // AG feature: htf_conf_382
-htfConf618   = htfConfluenceCheck(p618)      // AG feature: htf_conf_618
+htfConfPivot = htfConfluenceCheck(pPivot, fibRange)    // AG feature: htf_conf_pivot
+htfConf382   = htfConfluenceCheck(p382, fibRange)      // AG feature: htf_conf_382
+htfConf618   = htfConfluenceCheck(p618, fibRange)      // AG feature: htf_conf_618
 htfConfTotal = htfConfPivot + htfConf382 + htfConf618  // AG feature: htf_conf_total (0-27 scale)
 
 //=====================
@@ -689,27 +689,27 @@ float rawConfScore = math.min(float(htfConfTotal) / 9.0 * 40.0, 40.0)  // 0-40 f
 float rawRegimeBonus = regimeAligned ? 25.0 : regimeOpposed ? -15.0 : 0.0
 float rawDirBonus = er10 * 20.0  // 0-20 from efficiency ratio
 float rawBaseProb = 35.0  // base rate
-tp1Prob = math.max(0.0, math.min(100.0, rawBaseProb + rawConfScore + rawRegimeBonus + rawDirBonus))
+float tp1Prob = math.max(0.0, math.min(100.0, rawBaseProb + rawConfScore + rawRegimeBonus + rawDirBonus))
 
 // PLACEHOLDER: replaced by AG model output — tp2_probability
-tp2Prob = tp1Prob * 0.6
+float tp2Prob = tp1Prob * 0.6
 
 // PLACEHOLDER: replaced by AG training results — win_rate
-winRate = 0.0  // no fabricated metrics
+float winRate = 0.0  // no fabricated metrics
 
 // trend_strength: normalize ADX to 0-100 (ADX naturally 0-100 but rarely exceeds 60)
-trendStr = math.min(adxVal / 60.0 * 100.0, 100.0)
+float trendStr = math.min(adxVal / 60.0 * 100.0, 100.0)
 
 // correlation_strength: normalize intermarket score to 0-100
 float maxIMScore = float(totalWeight)
-corrStr = maxIMScore > 0 ? math.max(float(scoreOn), float(scoreOff)) / maxIMScore * 100.0 : 0.0
+float corrStr = maxIMScore > 0 ? math.max(float(scoreOn), float(scoreOff)) / maxIMScore * 100.0 : 0.0
 
 // PLACEHOLDER: replaced by AG model output — reversal_risk
 // Inverse of setup quality: high when regime opposed + low confluence + low ER
-revRisk = math.max(0.0, math.min(100.0, 100.0 - tp1Prob))
+float revRisk = math.max(0.0, math.min(100.0, 100.0 - tp1Prob))
 
 // pulse_score: weighted composite
-pulseScore = 0.30 * tp1Prob + 0.22 * winRate + 0.18 * trendStr + 0.15 * corrStr + 0.15 * (100.0 - revRisk)
+float pulseScore = 0.30 * tp1Prob + 0.22 * winRate + 0.18 * trendStr + 0.15 * corrStr + 0.15 * (100.0 - revRisk)
 
 // --- RENDER OBJECT ARRAYS ---
 var box[]   panelBoxes  = array.new_box()
