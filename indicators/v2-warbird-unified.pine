@@ -224,13 +224,33 @@ htfConfluenceCheck(float level15m, float currentFibRange) =>
 // Reference: indicators/v0-rabid-raccoon-zigzag.pine lines 120-136
 //=====================
 
-// ZigZag pivot detection with ATR-based deviation threshold
-var fibSettings = zigzag.Settings.new(fibDeviation, fibDepth, color(na), false, false, false, false, "Absolute", true)
-var zigzag.ZigZag fibZZ = zigzag.newInstance(fibSettings)
-var zigzag.Pivot lastPvt = na
+// ZigZag pivot detection wrapped in function (required — zigzag.ZigZag type
+// is only valid inside function scope, not at global scope in Pine v6)
+// Pattern from v0-rabid-raccoon-zigzag.pine lines 123-136
+fibZzUpdate() =>
+    var fibSettings = zigzag.Settings.new(fibDeviation, fibDepth, color(na), false, false, false, false, "Absolute", true)
+    var zigzag.ZigZag fibZZ = zigzag.newInstance(fibSettings)
+    var zigzag.Pivot lastPvt = na
+    fibSettings.devThreshold := ta.atr(10) / close * 100 * fibDeviation
+    bool newPivot = false
+    float pivotHighPrice = na
+    float pivotLowPrice = na
+    int pivotHighBar = na
+    int pivotLowBar = na
+    if fibZZ.update()
+        lastPvt := fibZZ.lastPivot()
+        if not na(lastPvt)
+            newPivot := true
+            float startP = lastPvt.start.price
+            float endP = lastPvt.end.price
+            pivotHighPrice := math.max(startP, endP)
+            pivotLowPrice  := math.min(startP, endP)
+            // ZigZag Pivot uses .time not .barIndex — record current bar_index as anchor reference
+            pivotHighBar := bar_index
+            pivotLowBar  := bar_index
+    [newPivot, pivotHighPrice, pivotLowPrice, pivotHighBar, pivotLowBar]
 
-// Update ATR-based deviation on every bar (outside barstate.islast)
-fibSettings.devThreshold := ta.atr(10) / close * 100 * fibDeviation
+[zzNewPivot, zzHighPrice, zzLowPrice, zzHighBar, zzLowBar] = fibZzUpdate()
 
 // Persistent anchor state
 var float fibAnchorHigh = na
@@ -239,17 +259,13 @@ var int anchorHighBar = na
 var int anchorLowBar = na
 var int lastBreakBar = na
 
-// Update ZigZag — only triggers when a NEW confirmed pivot forms
-if fibZZ.update()
-    lastPvt := fibZZ.lastPivot()
-    if not na(lastPvt)
-        float startP = lastPvt.start.price
-        float endP = lastPvt.end.price
-        fibAnchorHigh := math.max(startP, endP)
-        fibAnchorLow  := math.min(startP, endP)
-        anchorHighBar := startP > endP ? lastPvt.start.barIndex : lastPvt.end.barIndex
-        anchorLowBar  := startP > endP ? lastPvt.end.barIndex : lastPvt.start.barIndex
-        lastBreakBar  := na  // reset break tracking on new anchor
+// Update anchor only when ZigZag confirms a NEW structural pivot
+if zzNewPivot
+    fibAnchorHigh := zzHighPrice
+    fibAnchorLow  := zzLowPrice
+    anchorHighBar := zzHighBar
+    anchorLowBar  := zzLowBar
+    lastBreakBar  := na  // reset break tracking on new anchor
 
 // Confluence quality metric (AG feature, NOT anchor selector)
 // Uses the ZigZag anchor range to assess multi-period agreement
