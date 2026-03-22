@@ -380,6 +380,36 @@ htfConf618   = htfConfluenceCheck(p618)      // AG feature: htf_conf_618
 htfConfTotal = htfConfPivot + htfConf382 + htfConf618  // AG feature: htf_conf_total (0-27 scale)
 
 //=====================
+// VOLUME DELTA AT FIB TOUCHES
+// When price touches a fib level, measure bullish vs bearish volume
+// Uses close-location-value (CLV) approach: (close-low)/(high-low) weights volume
+//=====================
+groupVolDelta = "Volume Delta"
+volDeltaLookback = input.int(5, "Volume Delta Lookback (bars)", minval=1, maxval=20, group=groupVolDelta, tooltip="How many bars around a fib touch to measure volume split")
+volDeltaTolPts = input.float(2.0, "Fib Touch Tolerance (points)", minval=0.25, maxval=10.0, step=0.25, group=groupVolDelta, tooltip="How close price must get to a fib level to count as a touch")
+
+// Close Location Value: (close-low)/(high-low) — 1.0 = closed at high (bullish), 0.0 = closed at low (bearish)
+barRange = high - low
+clv = barRange > 0 ? (close - low) / barRange : 0.5  // AG feature: clv
+
+// Signed volume: CLV-weighted volume (positive = bullish bias, negative = bearish bias)
+signedVol = volume * (2.0 * clv - 1.0)  // AG feature: signed_vol_proxy
+
+// Check if current price is touching any fib level
+fibTouchCheck(float level) =>
+    not na(level) and math.abs(close - level) <= volDeltaTolPts
+
+isTouchingFib = fibTouchCheck(p236) or fibTouchCheck(p382) or fibTouchCheck(pPivot) or fibTouchCheck(p618) or fibTouchCheck(p786)
+
+// Rolling volume delta around fib touches (bullish % over lookback window)
+bullVol = math.sum(volume * math.max(clv, 0), volDeltaLookback)
+totalVol = math.sum(volume, volDeltaLookback)
+volDeltaPct = totalVol > 0 ? bullVol / totalVol * 100.0 : 50.0  // AG feature: vol_delta_pct (50 = neutral)
+
+// Only meaningful when near a fib level
+fibTouchVolDelta = isTouchingFib ? volDeltaPct : na  // AG feature: fib_touch_vol_delta
+
+//=====================
 // INTERMARKET SERIES + REGIMES
 //=====================
 imClose(string symbol) =>
