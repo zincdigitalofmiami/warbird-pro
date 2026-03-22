@@ -409,6 +409,7 @@ rejectAtZone = (
 breakAgainst = zoneReady ? (dir == 1 ? (close < pPivot and close[1] >= pPivot) : (close > pPivot and close[1] <= pPivot)) : false
 tagT1 = not na(pT1) and (dir == 1 ? high >= pT1 : low <= pT1)
 tagT2 = not na(pT2) and (dir == 1 ? high >= pT2 : low <= pT2)
+tagT3 = not na(pT3) and (dir == 1 ? high >= pT3 : low <= pT3)
 regimeAligned = dir == 1 ? riskOn : riskOff
 regimeOpposed = dir == 1 ? riskOff : riskOn
 acceptConfirmed = acceptInDir and regimeAligned
@@ -421,6 +422,7 @@ breakAgainstEvent = oneShotEvent ? (breakAgainstConfirmed and not breakAgainstCo
 conflictEvent = oneShotEvent ? (conflictBreak and not conflictBreak[1]) : conflictBreak
 tagT1Event = oneShotEvent ? (tagT1 and not tagT1[1]) : tagT1
 tagT2Event = oneShotEvent ? (tagT2 and not tagT2[1]) : tagT2
+tagT3Event = oneShotEvent ? (tagT3 and not tagT3[1]) : tagT3
 proxyImportance = math.max(hawkishProxyScore, dovishProxyScore)
 hawkishNewsEvent = useNewsProxy and newsPosture == -1 and newsPosture[1] != -1
 dovishNewsEvent = useNewsProxy and newsPosture == 1 and newsPosture[1] != 1
@@ -495,8 +497,9 @@ riskOffFlip = useIntermarket and regime == -1 and regime[1] != -1
 alertcondition(acceptEvent, "ACCEPT (AutoFib) + Regime Aligned", "Accepted through AutoFib zone with regime aligned confirmation. Close={{close}}")
 alertcondition(rejectEvent, "REJECT (AutoFib) + Regime Opposed", "Rejected at AutoFib zone while intermarket regime opposed direction. Close={{close}}")
 alertcondition(breakAgainstEvent, "PIVOT BREAK (against) + Regime Opposed", "Broke pivot against AutoFib direction with intermarket opposition. Close={{close}}")
-alertcondition(tagT1Event, "TARGET HIT: 1.236", "AutoFib 1.236 target tagged. Price={{close}}")
-alertcondition(tagT2Event, "TARGET HIT: 1.618", "AutoFib 1.618 target tagged. Price={{close}}")
+alertcondition(tagT1Event, "TARGET HIT: 1.236", "Warbird TARGET 1 (1.236) tagged. Price={{close}}")
+alertcondition(tagT2Event, "TARGET HIT: 1.618", "Warbird TARGET 2 (1.618) tagged. Price={{close}}")
+alertcondition(tagT3Event, "TARGET HIT: 2.0",   "Warbird TARGET 3 (2.0) tagged. Price={{close}}")
 alertcondition(conflictEvent, "CONFLICT: Break vs VIX/DXY", "Caution: Break in AutoFib direction while VIX/DXY disagree. Close={{close}}")
 alertcondition(hawkishNewsEvent, "NEWS PROXY: Hawkish Shock", "Macro reaction proxy flipped HAWKISH (risk-off posture). Close={{close}}")
 alertcondition(dovishNewsEvent, "NEWS PROXY: Dovish Shock", "Macro reaction proxy flipped DOVISH (risk-on posture). Close={{close}}")
