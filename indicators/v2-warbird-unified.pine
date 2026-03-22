@@ -539,6 +539,139 @@ hawkishNewsEvent = useNewsProxy and newsPosture == -1 and newsPosture[1] != -1
 dovishNewsEvent = useNewsProxy and newsPosture == 1 and newsPosture[1] != 1
 if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or conflictEvent or hawkishNewsEvent or dovishNewsEvent)
     log.info("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} conflict={5} hawkishNews={6} dovishNews={7} aligned={8} opposed={9}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, conflictEvent, hawkishNewsEvent, dovishNewsEvent, regimeAligned, regimeOpposed)
+
+//=====================
+// TRADE STATE MACHINE (SL / ENTRY / TP1 / TP2)
+// Tracks setup lifecycle from detection through outcome
+// All transitions gated on barstate.isconfirmed
+//=====================
+var int TRADE_NONE    = 0
+var int TRADE_SETUP   = 1  // Setup detected, awaiting entry confirmation
+var int TRADE_ACTIVE  = 2  // In trade, monitoring TP/SL
+var int TRADE_HIT_TP1 = 3  // TP1 reached
+var int TRADE_HIT_TP2 = 4  // TP2 reached
+var int TRADE_STOPPED = 5  // SL hit
+var int TRADE_EXPIRED = 6  // Setup expired without entry
+
+var int   tradeState = TRADE_NONE
+var float entryPrice = na
+var float slPrice    = na
+var float tp1Price   = na
+var float tp2Price   = na
+var int   setupBar   = na
+var int   entryBar   = na
+
+// Compute trade levels from fib structure
+// SL = -0.236 extension, ENTRY = decision zone edge, TP1 = 1.236, TP2 = 1.618
+float slLevel    = fibBull ? fibPrice(-0.236) : fibPrice(1.236)
+float entryLevel = fibBull ? p618 : p382  // .618 for longs (pullback entry), .382 for shorts
+float tp1Level   = fibBull ? fibPrice(FIB_T1) : fibPrice(-0.236)
+float tp2Level   = fibBull ? fibPrice(FIB_T2) : fibPrice(-0.618)
+
+if barstate.isconfirmed
+    // NONE → SETUP: price enters decision zone
+    if tradeState == TRADE_NONE and zoneReady
+        if fibBull and close <= entryLevel and close >= zoneLower
+            tradeState := TRADE_SETUP
+            setupBar := bar_index
+        if not fibBull and close >= entryLevel and close <= zoneUpper
+            tradeState := TRADE_SETUP
+            setupBar := bar_index
+
+    // SETUP → ACTIVE: regime aligns, confirm entry
+    if tradeState == TRADE_SETUP and regimeAligned
+        entryPrice := close
+        slPrice := slLevel
+        tp1Price := tp1Level
+        tp2Price := tp2Level
+        tradeState := TRADE_ACTIVE
+        entryBar := bar_index
+
+    // ACTIVE → TP1 / TP2 / STOPPED
+    if tradeState == TRADE_ACTIVE
+        if fibBull
+            if low <= slPrice
+                tradeState := TRADE_STOPPED
+            else if high >= tp2Price
+                tradeState := TRADE_HIT_TP2
+            else if high >= tp1Price
+                tradeState := TRADE_HIT_TP1
+        else
+            if high >= slPrice
+                tradeState := TRADE_STOPPED
+            else if low <= tp2Price
+                tradeState := TRADE_HIT_TP2
+            else if low <= tp1Price
+                tradeState := TRADE_HIT_TP1
+
+    // SETUP expiry: no entry within 12 bars
+    if tradeState == TRADE_SETUP and not na(setupBar) and bar_index - setupBar > 12
+        tradeState := TRADE_EXPIRED
+
+    // Reset after outcome
+    if tradeState >= TRADE_HIT_TP1
+        tradeState := TRADE_NONE
+        entryPrice := na
+        slPrice    := na
+        tp1Price   := na
+        tp2Price   := na
+        setupBar   := na
+        entryBar   := na
+
+// --- Trade level lines (visible only during SETUP or ACTIVE) ---
+var line slLine         = line.new(na, na, na, na, color=color(na))
+var line entryLine      = line.new(na, na, na, na, color=color(na))
+var line tp1Line_trade  = line.new(na, na, na, na, color=color(na))
+var line tp2Line_trade  = line.new(na, na, na, na, color=color(na))
+var label slLabel       = label.new(na, na, "", style=label.style_none)
+var label entryLabel    = label.new(na, na, "", style=label.style_none)
+var label tp1Lbl_trade  = label.new(na, na, "", style=label.style_none)
+var label tp2Lbl_trade  = label.new(na, na, "", style=label.style_none)
+
+if tradeState == TRADE_SETUP or tradeState == TRADE_ACTIVE
+    int leftBar = nz(setupBar, bar_index - 10)
+    // SL (red)
+    line.set_xy1(slLine, leftBar, nz(slPrice, slLevel))
+    line.set_xy2(slLine, bar_index, nz(slPrice, slLevel))
+    line.set_color(slLine, color.red)
+    line.set_width(slLine, 2)
+    label.set_xy(slLabel, bar_index, nz(slPrice, slLevel))
+    label.set_text(slLabel, "SL")
+    label.set_textcolor(slLabel, color.red)
+    // ENTRY (orange)
+    line.set_xy1(entryLine, leftBar, nz(entryPrice, entryLevel))
+    line.set_xy2(entryLine, bar_index, nz(entryPrice, entryLevel))
+    line.set_color(entryLine, #FF9800)
+    line.set_width(entryLine, 2)
+    label.set_xy(entryLabel, bar_index, nz(entryPrice, entryLevel))
+    label.set_text(entryLabel, "ENTRY")
+    label.set_textcolor(entryLabel, #FF9800)
+    // TP1 (green)
+    line.set_xy1(tp1Line_trade, leftBar, nz(tp1Price, tp1Level))
+    line.set_xy2(tp1Line_trade, bar_index, nz(tp1Price, tp1Level))
+    line.set_color(tp1Line_trade, #00C853)
+    line.set_width(tp1Line_trade, 2)
+    label.set_xy(tp1Lbl_trade, bar_index, nz(tp1Price, tp1Level))
+    label.set_text(tp1Lbl_trade, "TP1")
+    label.set_textcolor(tp1Lbl_trade, #00C853)
+    // TP2 (lighter green)
+    line.set_xy1(tp2Line_trade, leftBar, nz(tp2Price, tp2Level))
+    line.set_xy2(tp2Line_trade, bar_index, nz(tp2Price, tp2Level))
+    line.set_color(tp2Line_trade, #69F0AE)
+    line.set_width(tp2Line_trade, 2)
+    label.set_xy(tp2Lbl_trade, bar_index, nz(tp2Price, tp2Level))
+    label.set_text(tp2Lbl_trade, "TP2")
+    label.set_textcolor(tp2Lbl_trade, #69F0AE)
+else
+    line.set_color(slLine, color(na))
+    line.set_color(entryLine, color(na))
+    line.set_color(tp1Line_trade, color(na))
+    line.set_color(tp2Line_trade, color(na))
+    label.set_textcolor(slLabel, color(na))
+    label.set_textcolor(entryLabel, color(na))
+    label.set_textcolor(tp1Lbl_trade, color(na))
+    label.set_textcolor(tp2Lbl_trade, color(na))
+
 //=====================
 // DRAW ALL 10 FIB LEVELS
 //=====================
@@ -842,6 +975,10 @@ plot(float(newsPosture),"news_posture",   display=display.none)  // AG feature: 
 plot(fibRange,          "fib_range",      display=display.none)  // AG feature: fib_range
 plot(float(dir),        "fib_direction",  display=display.none)  // AG feature: fib_direction (-1/1)
 plot(nz(confluenceQuality), "confluence_quality", display=display.none) // AG feature: confluence_quality
+
+// Trade state features
+plot(float(tradeState), "trade_state",    display=display.none)  // AG feature: trade_state (0-6)
+plot(tradeState == TRADE_ACTIVE and not na(entryBar) ? float(bar_index - entryBar) : 0.0, "bars_in_trade", display=display.none)  // AG feature: bars_in_trade
 
 // Panel score features (PLACEHOLDER derivations — replaced by AG)
 plot(tp1Prob,    "tp1_probability",      display=display.none)  // AG feature: tp1_probability
