@@ -724,6 +724,45 @@ if barstate.islast and showStatsBar
     table.cell(statsBar, 1, 7, dirStr + " (" + str.tostring(activeFibPeriod) + ")", text_color=dirClr, text_size=statsTxtSize, text_halign=text.align_right)
 
 //=====================
+// AG FEATURE EXPORT (hidden plots — display=display.none)
+// These expose computed values for chart data export without cluttering the chart.
+// Each plot is tagged with its feature matrix column name from the research.
+//=====================
+
+// Regime features
+plot(adxVal,    "adx_14",          display=display.none)  // AG feature: adx_14
+plot(diSpread,  "di_spread_14",    display=display.none)  // AG feature: di_spread_14
+plot(adxSlope,  "adx_slope_14",    display=display.none)  // AG feature: adx_slope_14
+plot(er10,      "er_10",           display=display.none)  // AG feature: er_10
+plot(er20,      "er_20",           display=display.none)  // AG feature: er_20
+plot(vixPctRank,"vix_pct_252d",    display=display.none)  // AG feature: vix_pct_252d
+plot(atrPct,    "atr_pct_20",      display=display.none)  // AG feature: atr_pct_20
+plot(vixDaily,  "vix_close",       display=display.none)  // AG feature: vix_close
+
+// Volume/microstructure features
+plot(clv,            "clv",              display=display.none)  // AG feature: clv
+plot(signedVol,      "signed_vol_proxy", display=display.none)  // AG feature: signed_vol_proxy
+plot(volDeltaPct,    "vol_delta_pct",    display=display.none)  // AG feature: vol_delta_pct
+plot(nz(fibTouchVolDelta), "fib_touch_vol_delta", display=display.none)  // AG feature: fib_touch_vol_delta
+
+// HTF confluence features
+plot(float(htfConfPivot), "htf_conf_pivot", display=display.none)  // AG feature: htf_conf_pivot
+plot(float(htfConf382),   "htf_conf_382",   display=display.none)  // AG feature: htf_conf_382
+plot(float(htfConf618),   "htf_conf_618",   display=display.none)  // AG feature: htf_conf_618
+plot(float(htfConfTotal), "htf_conf_total", display=display.none)  // AG feature: htf_conf_total
+
+// Intermarket features
+plot(float(regime),     "im_regime",      display=display.none)  // AG feature: im_regime (-1/0/1)
+plot(float(scoreOn),    "im_score_on",    display=display.none)  // AG feature: im_score_on
+plot(float(scoreOff),   "im_score_off",   display=display.none)  // AG feature: im_score_off
+plot(float(newsPosture),"news_posture",   display=display.none)  // AG feature: news_posture (-1/0/1)
+
+// Fib structure features
+plot(fibRange,          "fib_range",      display=display.none)  // AG feature: fib_range
+plot(float(dir),        "fib_direction",  display=display.none)  // AG feature: fib_direction (-1/1)
+plot(float(activeFibPeriod), "fib_period", display=display.none) // AG feature: fib_period (8/13/21/34/55)
+
+//=====================
 // ALERTS
 //=====================
 riskOnFlip = useIntermarket and regime == 1 and regime[1] != 1
