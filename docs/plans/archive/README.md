@@ -5,6 +5,7 @@ These files are archived reference only.
 - Do not update these documents unless explicitly requested.
 - The only active plan lives at:
   - `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+- Security/dependency remediation status is tracked only in the active plan update log.
 
 Archived here:
 

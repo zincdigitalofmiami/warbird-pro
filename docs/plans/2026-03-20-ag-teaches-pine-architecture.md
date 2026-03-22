@@ -14,12 +14,30 @@
 
 ## Update Log
 
+- 2026-03-22: Added dependency-security remediation checkpoint order (plan updates first, then implementation). Scope includes Next.js and transitive lockfile remediation plus `xlsx` ingestion-surface removal/replacement.
 - 2026-03-20: Converted the active plan into a single-indicator plan.
 - 2026-03-20: Archived older plan docs and removed them from the active path.
 - 2026-03-20: AG model concept — fib continuation probability engine with TP1/TP2 targets (1.236/1.618 extensions), re-entry signals, full macro/economic training context, and Pine config packet output.
 - 2026-03-20: Added "AG Models Pine's Configuration Space" — AG output must be Pine-native (exact input values, thresholds, weights, gates, module decisions).
 - 2026-03-20: Added Forensic Review of current script — 8 high-risk problems to fix before AG training.
 - 2026-03-20: Restructured plan around Canonical Goal / Canonical Outputs / Canonical Standards / Locked v1 Mechanisms. The product goal and chart-output surface are canonical. The v1 build path is now locked.
+
+---
+
+## Security Remediation Checkpoint (2026-03-22)
+
+This checkpoint is execution-ordered and is part of the active plan:
+
+1. Update plan state and remediation intent in docs first.
+2. Patch all open Dependabot vulnerabilities in the repository.
+3. Run verification gates (`npm audit`, `npm run build`) before merge/push.
+
+Locked constraints for this checkpoint:
+
+- Keep scope minimal to vulnerability closure and direct runtime-path disambiguation.
+- No unrelated refactors.
+- Preserve production boundary rules and cron guardrails.
+- Keep dependency changes explicit and auditable in lockfile history.
 
 ---
 
