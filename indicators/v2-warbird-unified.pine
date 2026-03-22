@@ -22,11 +22,14 @@
 // TOTAL:                                                 = 16 of 40 (40%)
 //@version=6
 indicator("Warbird v2 — AutoFib + Intermarket", shorttitle="🦝 WB v2", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100)
+import TradingView/ZigZag/7 as zigzag
 //=====================
 // FIBONACCI ENGINE SETTINGS
 //=====================
-groupAFEngine = "Fibonacci Engine Settings"
-fibConfluenceTolPct = input.float(0.10, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupAFEngine)
+groupFibEngine = "Fibonacci Engine"
+fibDeviation = input.float(3.0, "ZigZag Deviation (ATR multiplier)", minval=0.5, maxval=10.0, step=0.5, group=groupFibEngine, tooltip="Higher = fewer pivots, more stable anchors. Lower = more pivots, more responsive.")
+fibDepth = input.int(10, "ZigZag Depth (min bars between pivots)", minval=2, maxval=50, group=groupFibEngine)
+fibConfluenceTolPct = input.float(0.10, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupFibEngine)
 //=====================
 // CANONICAL FIB LEVELS (from lib/fibonacci.ts + FibLinesPrimitive.ts)
 // DO NOT change these — they match the dashboard exactly
@@ -110,6 +113,8 @@ targetLookbackBars = input.int(55, "Target Line Lookback Bars", minval=5, maxval
 extendLevelsRight = input.bool(false, "Extend Levels Right", group=groupViz)
 useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window", group=groupViz)
 showBg          = input.bool(false, "Background Regime Tint", group=groupViz)
+groupDebug = "Debug Diagnostics"
+enableDebugLogs = input.bool(false, "Enable Debug Logs", group=groupDebug, tooltip="Temporary state tracing for regime/news/probability diagnostics.")
 //=====================
 // REGIME DETECTION (from session-checkpoint research: ADX/ER/VIX-vol)
 // These are computed values for sidebar + AG features, NOT chart markers
@@ -214,137 +219,59 @@ htfConfluenceCheck(float level15m, float currentFibRange) =>
 // NOTE: htfConfluenceCheck() is called AFTER fib prices are computed (below the AUTO FIB ENGINE)
 
 //=====================
-// AUTO FIB ENGINE (RR confluence anchor, same methodology as main RR indicator)
-//=====================
-fib8_high = ta.highest(high, 8)
-fib8_low = ta.lowest(low, 8)
-fib13_high = ta.highest(high, 13)
-fib13_low = ta.lowest(low, 13)
-fib21_high = ta.highest(high, 21)
-fib21_low = ta.lowest(low, 21)
-fib34_high = ta.highest(high, 34)
-fib34_low = ta.lowest(low, 34)
-fib55_high = ta.highest(high, 55)
-fib55_low = ta.lowest(low, 55)
-fibHigh1 = fib8_high
-fibLow1 = fib8_low
-fibHigh2 = fib13_high
-fibLow2 = fib13_low
-fibHigh3 = fib21_high
-fibLow3 = fib21_low
-fibHigh4 = fib34_high
-fibLow4 = fib34_low
-fibHigh5 = fib55_high
-fibLow5 = fib55_low
-//=====================
-// CONFLUENCE SCORING (from lib/fibonacci.ts:146-173)
-// Score = confluence_count × range
-// This prevents short-period narrow anchors from winning
+// AUTO FIB ENGINE — ZigZag confirmed pivots (non-repainting)
+// Replaces rolling-window ta.highest/ta.lowest anchor with structural pivots
+// Reference: indicators/v0-rabid-raccoon-zigzag.pine lines 120-136
 //=====================
 
-// Confluence ratios used for voting (lib/fibonacci.ts:30)
-CONF_RATIOS_0 = 0.382
-CONF_RATIOS_1 = 0.5
-CONF_RATIOS_2 = 0.618
+// ZigZag pivot detection with ATR-based deviation threshold
+var fibSettings = zigzag.Settings.new(fibDeviation, fibDepth, color(na), false, false, false, false, "Absolute", true)
+var zigzag.ZigZag fibZZ = zigzag.newInstance(fibSettings)
+var zigzag.Pivot lastPvt = na
 
-fibConfluenceScore(float h, float l) =>
-    float rng = h - l
-    if rng <= 0
-        0.0
-    else
-        float tol = rng * fibConfluenceTolPct * 0.01
-        int confCount = 0
-        // For each of 3 confluence ratios on this anchor...
-        for selfR = 0 to 2
-            float selfRatio = selfR == 0 ? CONF_RATIOS_0 : selfR == 1 ? CONF_RATIOS_1 : CONF_RATIOS_2
-            float selfLevel = l + rng * selfRatio
-            // ...compare against 3 confluence ratios on each OTHER anchor
-            for cmpR = 0 to 2
-                float cmpRatio = cmpR == 0 ? CONF_RATIOS_0 : cmpR == 1 ? CONF_RATIOS_1 : CONF_RATIOS_2
-                // Check all 5 period anchors
-                float cmpLvl1 = fibLow1 + (fibHigh1 - fibLow1) * cmpRatio
-                float cmpLvl2 = fibLow2 + (fibHigh2 - fibLow2) * cmpRatio
-                float cmpLvl3 = fibLow3 + (fibHigh3 - fibLow3) * cmpRatio
-                float cmpLvl4 = fibLow4 + (fibHigh4 - fibLow4) * cmpRatio
-                float cmpLvl5 = fibLow5 + (fibHigh5 - fibLow5) * cmpRatio
-                if math.abs(selfLevel - cmpLvl1) <= tol
-                    confCount += 1
-                if math.abs(selfLevel - cmpLvl2) <= tol
-                    confCount += 1
-                if math.abs(selfLevel - cmpLvl3) <= tol
-                    confCount += 1
-                if math.abs(selfLevel - cmpLvl4) <= tol
-                    confCount += 1
-                if math.abs(selfLevel - cmpLvl5) <= tol
-                    confCount += 1
-        // KEY DIFFERENCE: weight by range (lib/fibonacci.ts:168)
-        float(confCount) * rng
-score1 = fibConfluenceScore(fibHigh1, fibLow1)
-score2 = fibConfluenceScore(fibHigh2, fibLow2)
-score3 = fibConfluenceScore(fibHigh3, fibLow3)
-score4 = fibConfluenceScore(fibHigh4, fibLow4)
-score5 = fibConfluenceScore(fibHigh5, fibLow5)
-bestScore = math.max(score1, score2, score3, score4, score5)
-fibAnchorHighCandidate = (
- bestScore == score5 ? fibHigh5 :
- bestScore == score4 ? fibHigh4 :
- bestScore == score3 ? fibHigh3 :
- bestScore == score2 ? fibHigh2 : fibHigh1
- )
-fibAnchorLowCandidate = (
- bestScore == score5 ? fibLow5 :
- bestScore == score4 ? fibLow4 :
- bestScore == score3 ? fibLow3 :
- bestScore == score2 ? fibLow2 : fibLow1
- )
-activeFibPeriodCandidate = (
- bestScore == score5 ? 55 :
- bestScore == score4 ? 34 :
- bestScore == score3 ? 21 :
- bestScore == score2 ? 13 : 8
- )
-// Pre-compute all highestbars/lowestbars unconditionally to avoid ternary warnings
-hbars8  = ta.highestbars(high, 8)
-hbars13 = ta.highestbars(high, 13)
-hbars21 = ta.highestbars(high, 21)
-hbars34 = ta.highestbars(high, 34)
-hbars55 = ta.highestbars(high, 55)
-lbars8  = ta.lowestbars(low, 8)
-lbars13 = ta.lowestbars(low, 13)
-lbars21 = ta.lowestbars(low, 21)
-lbars34 = ta.lowestbars(low, 34)
-lbars55 = ta.lowestbars(low, 55)
-activeHighOffsetCandidate = (
- activeFibPeriodCandidate == 55 ? hbars55 :
- activeFibPeriodCandidate == 34 ? hbars34 :
- activeFibPeriodCandidate == 21 ? hbars21 :
- activeFibPeriodCandidate == 13 ? hbars13 : hbars8
- )
-activeLowOffsetCandidate = (
- activeFibPeriodCandidate == 55 ? lbars55 :
- activeFibPeriodCandidate == 34 ? lbars34 :
- activeFibPeriodCandidate == 21 ? lbars21 :
- activeFibPeriodCandidate == 13 ? lbars13 : lbars8
- )
-candidateHighBar = bar_index - math.abs(activeHighOffsetCandidate)
-candidateLowBar = bar_index - math.abs(activeLowOffsetCandidate)
+// Update ATR-based deviation on every bar (outside barstate.islast)
+fibSettings.devThreshold := ta.atr(10) / close * 100 * fibDeviation
+
+// Persistent anchor state
 var float fibAnchorHigh = na
 var float fibAnchorLow = na
-var int activeFibPeriod = 55
 var int anchorHighBar = na
 var int anchorLowBar = na
-bool structBreak = not na(fibAnchorHigh) and not na(fibAnchorLow) and
- barstate.isconfirmed and
-                   (close > fibAnchorHigh or close < fibAnchorLow)
-bool needsAnchor = na(fibAnchorHigh) or na(fibAnchorLow) or structBreak
-var int lastBreakBar = na  // tracks bar_index of most recent breakInDir, reset on anchor change
-if needsAnchor and (barstate.isconfirmed or na(fibAnchorHigh))
-    fibAnchorHigh := fibAnchorHighCandidate
-    fibAnchorLow := fibAnchorLowCandidate
-    activeFibPeriod := activeFibPeriodCandidate
-    anchorHighBar := candidateHighBar
-    anchorLowBar := candidateLowBar
-    lastBreakBar := na  // F1 fix: reset break tracking when anchor changes
+var int lastBreakBar = na
+
+// Update ZigZag — only triggers when a NEW confirmed pivot forms
+if fibZZ.update()
+    lastPvt := fibZZ.lastPivot()
+    if not na(lastPvt)
+        float startP = lastPvt.start.price
+        float endP = lastPvt.end.price
+        fibAnchorHigh := math.max(startP, endP)
+        fibAnchorLow  := math.min(startP, endP)
+        anchorHighBar := startP > endP ? lastPvt.start.barIndex : lastPvt.end.barIndex
+        anchorLowBar  := startP > endP ? lastPvt.end.barIndex : lastPvt.start.barIndex
+        lastBreakBar  := na  // reset break tracking on new anchor
+
+// Confluence quality metric (AG feature, NOT anchor selector)
+// Uses the ZigZag anchor range to assess multi-period agreement
+float confluenceQuality = na
+if not na(fibAnchorHigh) and not na(fibAnchorLow)
+    float anchorRange = fibAnchorHigh - fibAnchorLow
+    if anchorRange > 0
+        float tol = anchorRange * fibConfluenceTolPct * 0.01
+        int confHits = 0
+        // Check if anchor's .382/.5/.618 levels align with rolling-window levels at multiple periods
+        for period in array.from(8, 13, 21, 34, 55)
+            float rollingH = ta.highest(high, period)
+            float rollingL = ta.lowest(low, period)
+            float rollingRange = rollingH - rollingL
+            if rollingRange > 0
+                for ratioIdx = 0 to 2
+                    float ratio = ratioIdx == 0 ? 0.382 : ratioIdx == 1 ? 0.5 : 0.618
+                    float anchorLevel = fibAnchorLow + anchorRange * ratio
+                    float rollingLevel = rollingL + rollingRange * ratio
+                    if math.abs(anchorLevel - rollingLevel) <= tol
+                        confHits += 1
+        confluenceQuality := float(confHits) * anchorRange
 fibRange = fibAnchorHigh - fibAnchorLow
 fibMidpoint = fibAnchorLow + fibRange * 0.5
 // W3/W7 fix: hysteresis band prevents rapid direction flips in chop
@@ -561,6 +488,12 @@ else
     newsPostureBar := na
 riskOn = newsPosture == 1 ? true : newsPosture == -1 ? false : riskOnBase
 riskOff = newsPosture == -1 ? true : newsPosture == 1 ? false : riskOffBase
+if enableDebugLogs and barstate.isconfirmed
+    bool stateFlip = riskOn != riskOn[1] or riskOff != riskOff[1] or regime != regime[1] or newsPosture != newsPosture[1]
+    if stateFlip
+        log.info("WBDBG_STATE bar={0} useIM={1} regime={2} news={3} riskOn={4} riskOff={5} riskOnBase={6} riskOffBase={7} scoreOn={8} scoreOff={9}", bar_index, useIntermarket, regime, newsPosture, riskOn, riskOff, riskOnBase, riskOffBase, scoreOn, scoreOff)
+    if riskOn == riskOff
+        log.info("WBDBG_CONTRADICTION bar={0} regime={1} news={2} riskOn={3} riskOff={4}", bar_index, regime, newsPosture, riskOn, riskOff)
 //=====================
 // STRUCTURE CONDITIONS (direction-aware)
 //=====================
@@ -604,6 +537,8 @@ tagT3Event = oneShotEvent ? (tagT3 and not tagT3[1]) : tagT3
 proxyImportance = math.max(hawkishProxyScore, dovishProxyScore)
 hawkishNewsEvent = useNewsProxy and newsPosture == -1 and newsPosture[1] != -1
 dovishNewsEvent = useNewsProxy and newsPosture == 1 and newsPosture[1] != 1
+if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or conflictEvent or hawkishNewsEvent or dovishNewsEvent)
+    log.info("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} conflict={5} hawkishNews={6} dovishNews={7} aligned={8} opposed={9}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, conflictEvent, hawkishNewsEvent, dovishNewsEvent, regimeAligned, regimeOpposed)
 //=====================
 // DRAW ALL 10 FIB LEVELS
 //=====================
@@ -705,6 +640,8 @@ float revRisk = math.max(0.0, math.min(100.0, 100.0 - tp1Prob))
 
 // pulse_score: weighted composite (winRate contributes 0 when na)
 float pulseScore = 0.30 * tp1Prob + 0.22 * nz(winRate) + 0.18 * trendStr + 0.15 * corrStr + 0.15 * (100.0 - revRisk)
+if enableDebugLogs and barstate.isconfirmed and (tagT1Event or tagT2Event or tagT3Event or breakAgainstEvent)
+    log.info("WBDBG_PROB bar={0} t1={1} t2={2} t3={3} breakAgainst={4} tp1Prob={5} tp2Prob={6} revRisk={7} pulse={8} htfConf={9}", bar_index, tagT1Event, tagT2Event, tagT3Event, breakAgainstEvent, tp1Prob, tp2Prob, revRisk, pulseScore, htfConfTotal)
 
 // --- RENDER OBJECT ARRAYS ---
 var box[]   panelBoxes  = array.new_box()
@@ -904,7 +841,7 @@ plot(float(newsPosture),"news_posture",   display=display.none)  // AG feature: 
 // Fib structure features
 plot(fibRange,          "fib_range",      display=display.none)  // AG feature: fib_range
 plot(float(dir),        "fib_direction",  display=display.none)  // AG feature: fib_direction (-1/1)
-plot(float(activeFibPeriod), "fib_period", display=display.none) // AG feature: fib_period (8/13/21/34/55)
+plot(nz(confluenceQuality), "confluence_quality", display=display.none) // AG feature: confluence_quality
 
 // Panel score features (PLACEHOLDER derivations — replaced by AG)
 plot(tp1Prob,    "tp1_probability",      display=display.none)  // AG feature: tp1_probability
