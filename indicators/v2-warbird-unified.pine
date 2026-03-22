@@ -808,41 +808,50 @@ if barstate.islast and showPanel
     // === ROWS 3-6: Metric bars (Win Rate, Probabilities, Trend, Correlation) ===
     float metricStartY = showMiniCols ? row2Y - rowH * 3.0 : row2Y - rowH * 1.5
 
-    // Helper: draw a single metric bar row
-    drawMetricRow(int barX, float barY, float barH, string lbl, float val, float maxVal, color fillCol) =>
-        // Left label
-        array.push(panelLabels, label.new(barX, barY, lbl, xloc=xloc.bar_index, style=label.style_none, textcolor=dimCol, size=size.small, textalign=text.align_left))
-        // Track
-        int trackLeft = barX + 5
-        int trackRight = barX + panelWidth - 3
-        array.push(panelBoxes, box.new(trackLeft, barY + barH * 0.3, trackRight, barY - barH * 0.3, bgcolor=trackCol, border_color=color(na), xloc=xloc.bar_index))
-        // Fill
-        float pct = maxVal > 0 ? math.min(val / maxVal, 1.0) : 0.0
-        int barFillW = int(math.round(float(trackRight - trackLeft) * pct))
-        if barFillW > 0
-            array.push(panelBoxes, box.new(trackLeft, barY + barH * 0.3, trackLeft + barFillW, barY - barH * 0.3, bgcolor=color.new(fillCol, panelFillOpac), border_color=color(na), xloc=xloc.bar_index))
-        // Right value
-        array.push(panelLabels, label.new(barX + panelWidth, barY, str.tostring(val, "#"), xloc=xloc.bar_index, style=label.style_none, textcolor=textCol, size=size.small, textalign=text.align_right))
-
+    // Inline metric bar renderer (Pine doesn't allow typed-param functions inside if blocks)
     // Row 3: Win Rate
     float r3y = metricStartY
-    drawMetricRow(ax, r3y, rowH, "WR", winRate, 100.0, scoreColor(winRate))
+    array.push(panelLabels, label.new(ax, r3y, "WR", xloc=xloc.bar_index, style=label.style_none, textcolor=dimCol, size=size.small, textalign=text.align_left))
+    array.push(panelBoxes, box.new(ax + 5, r3y + rowH * 0.3, ax + panelWidth - 3, r3y - rowH * 0.3, bgcolor=trackCol, border_color=color(na), xloc=xloc.bar_index))
+    int r3fill = int(math.round(float(panelWidth - 8) * winRate / 100.0))
+    if r3fill > 0
+        array.push(panelBoxes, box.new(ax + 5, r3y + rowH * 0.3, ax + 5 + r3fill, r3y - rowH * 0.3, bgcolor=color.new(scoreColor(winRate), panelFillOpac), border_color=color(na), xloc=xloc.bar_index))
+    array.push(panelLabels, label.new(ax + panelWidth, r3y, str.tostring(winRate, "#"), xloc=xloc.bar_index, style=label.style_none, textcolor=textCol, size=size.small, textalign=text.align_right))
 
-    // Row 4: Probabilities (TP1 + TP2 stacked)
+    // Row 4: TP1 probability
     float r4y = r3y - rowH - gutter * atrUnit
-    // TP1 bar
-    drawMetricRow(ax, r4y, rowH * 0.5, "P1", tp1Prob, 100.0, panelBullColor)
+    array.push(panelLabels, label.new(ax, r4y, "P1", xloc=xloc.bar_index, style=label.style_none, textcolor=dimCol, size=size.small, textalign=text.align_left))
+    array.push(panelBoxes, box.new(ax + 5, r4y + rowH * 0.15, ax + panelWidth - 3, r4y - rowH * 0.15, bgcolor=trackCol, border_color=color(na), xloc=xloc.bar_index))
+    int r4fill = int(math.round(float(panelWidth - 8) * tp1Prob / 100.0))
+    if r4fill > 0
+        array.push(panelBoxes, box.new(ax + 5, r4y + rowH * 0.15, ax + 5 + r4fill, r4y - rowH * 0.15, bgcolor=color.new(panelBullColor, panelFillOpac), border_color=color(na), xloc=xloc.bar_index))
     // TP2 bar (stacked below)
-    float r4by = r4y - rowH * 0.55
-    drawMetricRow(ax, r4by, rowH * 0.5, "P2", tp2Prob, 100.0, color.new(panelBullColor, 30))
+    float r4by = r4y - rowH * 0.45
+    array.push(panelLabels, label.new(ax, r4by, "P2", xloc=xloc.bar_index, style=label.style_none, textcolor=dimCol, size=size.small, textalign=text.align_left))
+    array.push(panelBoxes, box.new(ax + 5, r4by + rowH * 0.15, ax + panelWidth - 3, r4by - rowH * 0.15, bgcolor=trackCol, border_color=color(na), xloc=xloc.bar_index))
+    int r4bfill = int(math.round(float(panelWidth - 8) * tp2Prob / 100.0))
+    if r4bfill > 0
+        array.push(panelBoxes, box.new(ax + 5, r4by + rowH * 0.15, ax + 5 + r4bfill, r4by - rowH * 0.15, bgcolor=color.new(panelBullColor, 30), border_color=color(na), xloc=xloc.bar_index))
+    // Right side combined text
+    array.push(panelLabels, label.new(ax + panelWidth, r4y - rowH * 0.15, str.tostring(tp1Prob, "#") + " / " + str.tostring(tp2Prob, "#"), xloc=xloc.bar_index, style=label.style_none, textcolor=textCol, size=size.small, textalign=text.align_right))
 
     // Row 5: Trend Strength
     float r5y = r4by - rowH - gutter * atrUnit
-    drawMetricRow(ax, r5y, rowH, "TR", trendStr, 100.0, scoreColor(trendStr))
+    array.push(panelLabels, label.new(ax, r5y, "TR", xloc=xloc.bar_index, style=label.style_none, textcolor=dimCol, size=size.small, textalign=text.align_left))
+    array.push(panelBoxes, box.new(ax + 5, r5y + rowH * 0.3, ax + panelWidth - 3, r5y - rowH * 0.3, bgcolor=trackCol, border_color=color(na), xloc=xloc.bar_index))
+    int r5fill = int(math.round(float(panelWidth - 8) * trendStr / 100.0))
+    if r5fill > 0
+        array.push(panelBoxes, box.new(ax + 5, r5y + rowH * 0.3, ax + 5 + r5fill, r5y - rowH * 0.3, bgcolor=color.new(scoreColor(trendStr), panelFillOpac), border_color=color(na), xloc=xloc.bar_index))
+    array.push(panelLabels, label.new(ax + panelWidth, r5y, str.tostring(trendStr, "#"), xloc=xloc.bar_index, style=label.style_none, textcolor=textCol, size=size.small, textalign=text.align_right))
 
     // Row 6: Correlation Strength
     float r6y = r5y - rowH - gutter * atrUnit
-    drawMetricRow(ax, r6y, rowH, "CR", corrStr, 100.0, scoreColor(corrStr))
+    array.push(panelLabels, label.new(ax, r6y, "CR", xloc=xloc.bar_index, style=label.style_none, textcolor=dimCol, size=size.small, textalign=text.align_left))
+    array.push(panelBoxes, box.new(ax + 5, r6y + rowH * 0.3, ax + panelWidth - 3, r6y - rowH * 0.3, bgcolor=trackCol, border_color=color(na), xloc=xloc.bar_index))
+    int r6fill = int(math.round(float(panelWidth - 8) * corrStr / 100.0))
+    if r6fill > 0
+        array.push(panelBoxes, box.new(ax + 5, r6y + rowH * 0.3, ax + 5 + r6fill, r6y - rowH * 0.3, bgcolor=color.new(scoreColor(corrStr), panelFillOpac), border_color=color(na), xloc=xloc.bar_index))
+    array.push(panelLabels, label.new(ax + panelWidth, r6y, str.tostring(corrStr, "#"), xloc=xloc.bar_index, style=label.style_none, textcolor=textCol, size=size.small, textalign=text.align_right))
 
     // Hairline separator between pulse row and metric rows
     float sepY = metricStartY + rowH * 0.6
