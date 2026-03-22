@@ -693,7 +693,7 @@ export default function AdminPage() {
                 <div className="flex flex-col items-center justify-center py-8 gap-2">
                   <span className="text-white/20 text-sm">No forecasts yet</span>
                   <span className="text-white/10 text-xs">
-                    Run predict-warbird.py after training completes
+                    Run scripts/ag/train-fib-model.py (Phase 4 — not yet built)
                   </span>
                 </div>
               ) : (
