@@ -15,11 +15,11 @@
 // Intermarket (60min): NQ, BANK, VIX, DXY, 10Y         = 5 calls
 // News proxy (5min):   NQ, DXY, VIX, 10Y                = 4 calls
 // VIX daily:           close + percentrank               = 2 calls
-// HTF fib (1H):        high, low                         = 2 calls
-// HTF fib (4H):        high, low                         = 2 calls
-// HTF fib (1D):        high, low                         = 2 calls
-// LTF volume (1min):   volume, close                     = 2 calls
-// TOTAL:                                                 = 19 of 40 (48%)
+// HTF fib (1H):        [high, low] tuple                 = 1 call
+// HTF fib (4H):        [high, low] tuple                 = 1 call
+// HTF fib (1D):        [high, low] tuple                 = 1 call
+// LTF volume (1min):   (reserved)                        = 2 calls
+// TOTAL:                                                 = 16 of 40 (40%)
 //@version=6
 indicator("Warbird v2 — AutoFib + Intermarket", shorttitle="🦝 WB v2", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=50)
 //=====================
@@ -146,6 +146,73 @@ vixPctRank = request.security("CBOE:VIX", "D", ta.percentrank(close, 252), gaps=
 // --- ATR percentage (normalized volatility) ---
 atrRaw = ta.atr(20)
 atrPct = close != 0 ? atrRaw / close * 100.0 : 0.0  // AG feature: atr_pct_20
+
+//=====================
+// HTF FIB CONFLUENCE (1H, 4H, Daily)
+// Uses tuple syntax to get high+low in one request.security() call per TF
+// Computes fib levels on each HTF, flags alignment with 15m levels
+//=====================
+groupHTF = "HTF Confluence"
+htfConfTolPct = input.float(0.15, "HTF Confluence Tolerance (%)", minval=0.01, maxval=1.00, step=0.01, group=groupHTF, tooltip="How close HTF and 15m fib levels must be to count as confluent (% of range)")
+
+// Fetch HTF high/low using tuple syntax (2 calls per TF = 6 total)
+[htf1hHigh, htf1hLow] = request.security(syminfo.tickerid, "60", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[htf4hHigh, htf4hLow] = request.security(syminfo.tickerid, "240", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[htf1dHigh, htf1dLow] = request.security(syminfo.tickerid, "D", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// Compute pivot (.5) level on each HTF
+htf1hRange = nz(htf1hHigh - htf1hLow)
+htf4hRange = nz(htf4hHigh - htf4hLow)
+htf1dRange = nz(htf1dHigh - htf1dLow)
+
+// HTF fib level helper — same canonical ratios
+htfFibPrice(float htfHigh, float htfLow, float htfRng, float ratio) =>
+    htfRng <= 0 ? na : htfLow + htfRng * ratio
+
+// Compute key HTF levels (pivot, .382, .618 — the confluence-sensitive levels)
+htf1hP382 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_382)
+htf1hP500 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_PIVOT)
+htf1hP618 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_618)
+
+htf4hP382 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_382)
+htf4hP500 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_PIVOT)
+htf4hP618 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_618)
+
+htf1dP382 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_382)
+htf1dP500 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_PIVOT)
+htf1dP618 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_618)
+
+// Check if a 15m fib level aligns with any HTF fib level
+htfConfluenceCheck(float level15m) =>
+    if na(level15m) or na(fibRange) or fibRange <= 0
+        0
+    else
+        float tol = fibRange * htfConfTolPct * 0.01
+        int hits = 0
+        // Check against 1H levels
+        if not na(htf1hP382) and math.abs(level15m - htf1hP382) <= tol
+            hits += 1
+        if not na(htf1hP500) and math.abs(level15m - htf1hP500) <= tol
+            hits += 1
+        if not na(htf1hP618) and math.abs(level15m - htf1hP618) <= tol
+            hits += 1
+        // Check against 4H levels
+        if not na(htf4hP382) and math.abs(level15m - htf4hP382) <= tol
+            hits += 1
+        if not na(htf4hP500) and math.abs(level15m - htf4hP500) <= tol
+            hits += 1
+        if not na(htf4hP618) and math.abs(level15m - htf4hP618) <= tol
+            hits += 1
+        // Check against Daily levels
+        if not na(htf1dP382) and math.abs(level15m - htf1dP382) <= tol
+            hits += 1
+        if not na(htf1dP500) and math.abs(level15m - htf1dP500) <= tol
+            hits += 1
+        if not na(htf1dP618) and math.abs(level15m - htf1dP618) <= tol
+            hits += 1
+        hits
+
+// NOTE: htfConfluenceCheck() is called AFTER fib prices are computed (below the AUTO FIB ENGINE)
 
 //=====================
 // AUTO FIB ENGINE (RR confluence anchor, same methodology as main RR indicator)
@@ -305,6 +372,13 @@ zoneLower = math.min(p618, p786)
 // Zone fill bounds: .382 to .618 (around pivot, from FibLinesPrimitive.ts:267-271)
 zoneFillUpper = math.max(p382, p618)
 zoneFillLower = math.min(p382, p618)
+
+// --- HTF CONFLUENCE SCORES (computed after 15m fib prices exist) ---
+htfConfPivot = htfConfluenceCheck(pPivot)    // AG feature: htf_conf_pivot
+htfConf382   = htfConfluenceCheck(p382)      // AG feature: htf_conf_382
+htfConf618   = htfConfluenceCheck(p618)      // AG feature: htf_conf_618
+htfConfTotal = htfConfPivot + htfConf382 + htfConf618  // AG feature: htf_conf_total (0-27 scale)
+
 //=====================
 // INTERMARKET SERIES + REGIMES
 //=====================
