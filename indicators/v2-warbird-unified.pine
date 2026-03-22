@@ -4,6 +4,12 @@
 // Canonical spec: lib/fibonacci.ts (dashboard TypeScript engine)
 // Merge: v1 intermarket + v0 full levels + dashboard structural break locking
 // Date: 2026-03-22
+//
+// NO-REPAINT AUDIT:
+// - Structural break: barstate.isconfirmed gated
+// - request.security(): lookahead_off on all calls
+// - Structure conditions: close-based, bar-close semantics
+// - Last verified: 2026-03-22
 //@version=6
 indicator("Warbird v2 — AutoFib + Intermarket", shorttitle="🦝 WB v2", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=50)
 //=====================
