@@ -12,16 +12,35 @@ indicator("Warbird v2 — AutoFib + Intermarket", shorttitle="🦝 WB v2", overl
 groupAFEngine = "Fibonacci Engine Settings"
 fibConfluenceTolPct = input.float(0.10, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupAFEngine)
 //=====================
-// WHICH FIB LEVELS TO USE AS "STRUCTURE"
+// CANONICAL FIB LEVELS (from lib/fibonacci.ts + FibLinesPrimitive.ts)
+// DO NOT change these — they match the dashboard exactly
 //=====================
-groupStruct = "Structure from AutoFib (ratios)"
-pivotRatio     = input.float(0.50, "Pivot Ratio", step=0.001, group=groupStruct)
-zoneLoRatio    = input.float(0.618, "Decision Zone Low Ratio", step=0.001, group=groupStruct)
-zoneHiRatio    = input.float(0.786, "Decision Zone High Ratio", step=0.001, group=groupStruct)
-target1Ratio   = input.float(1.236, "Target 1 Ratio", step=0.001, group=groupStruct)
-target2Ratio   = input.float(1.618, "Target 2 Ratio", step=0.001, group=groupStruct)
-dnMagnet1Ratio = input.float(0.382, "Down Magnet 1 Ratio", step=0.001, group=groupStruct)
-dnMagnet2Ratio = input.float(0.236, "Down Magnet 2 Ratio", step=0.001, group=groupStruct)
+
+// Retracement ratios
+FIB_ZERO  = 0.0
+FIB_236   = 0.236
+FIB_382   = 0.382
+FIB_PIVOT = 0.5
+FIB_618   = 0.618
+FIB_786   = 0.786
+FIB_ONE   = 1.0
+
+// Extension ratios
+FIB_T1    = 1.236
+FIB_T2    = 1.618
+FIB_T3    = 2.0
+
+// Colors (from lib/colors.ts:43-54)
+COLOR_ANCHOR      = #FFFFFF    // white — 0 and 1 levels
+COLOR_RETRACEMENT = #808080    // 50% white — .236, .382, .618, .786
+COLOR_PIVOT       = #FF9800    // orange — .5 level
+COLOR_TARGET      = #4CAF50    // green — TARGET 1, 2, 3
+
+// Widths (from FibLinesPrimitive.ts:49-60)
+WIDTH_ANCHOR      = 1
+WIDTH_RETRACEMENT = 1
+WIDTH_PIVOT       = 2
+WIDTH_TARGET      = 2
 //=====================
 // STRUCTURE LOGIC
 //=====================
@@ -202,15 +221,25 @@ fibBase = fibBull ? fibAnchorLow : fibAnchorHigh
 fibDir = fibBull ? 1.0 : -1.0
 fibPrice(float ratio) =>
     fibRange <= 0 ? na : (fibBase + fibDir * fibRange * ratio)
-pPivot  = fibPrice(pivotRatio)
-pZoneLo = fibPrice(zoneLoRatio)
-pZoneHi = fibPrice(zoneHiRatio)
-pT1     = fibPrice(target1Ratio)
-pT2     = fibPrice(target2Ratio)
-pDn1    = fibPrice(dnMagnet1Ratio)
-pDn2    = fibPrice(dnMagnet2Ratio)
-zoneUpper = math.max(pZoneLo, pZoneHi)
-zoneLower = math.min(pZoneLo, pZoneHi)
+// Compute all 10 canonical level prices
+pZero   = fibPrice(FIB_ZERO)
+p236    = fibPrice(FIB_236)
+p382    = fibPrice(FIB_382)
+pPivot  = fibPrice(FIB_PIVOT)
+p618    = fibPrice(FIB_618)
+p786    = fibPrice(FIB_786)
+pOne    = fibPrice(FIB_ONE)
+pT1     = fibPrice(FIB_T1)
+pT2     = fibPrice(FIB_T2)
+pT3     = fibPrice(FIB_T3)
+
+// Structure logic zone: .618 to .786 (decision zone for accept/reject — same as v1)
+zoneUpper = math.max(p618, p786)
+zoneLower = math.min(p618, p786)
+
+// Zone fill bounds: .382 to .618 (around pivot, from FibLinesPrimitive.ts:267-271)
+zoneFillUpper = math.max(p382, p618)
+zoneFillLower = math.min(p382, p618)
 //=====================
 // INTERMARKET SERIES + REGIMES
 //=====================
