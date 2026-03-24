@@ -14,6 +14,8 @@ from datetime import date, timedelta
 import requests
 from supabase import create_client
 
+from project_env import load_project_env
+
 HIGH_IMPORTANCE_RELEASES = {
     10: ("Employment Situation (NFP)", 3),
     22: ("GDP", 3),
@@ -60,6 +62,7 @@ def upsert_batch(supabase, rows: list[dict], retries: int = 3) -> int:
 
 
 def main() -> None:
+    load_project_env()
     fred_key = os.environ["FRED_API_KEY"]
     sb_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ["SUPABASE_URL"]
     sb_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]

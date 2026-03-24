@@ -13,6 +13,8 @@ from datetime import date
 import requests
 from supabase import create_client
 
+from project_env import load_project_env
+
 # Map FRED series to report_category enum
 # Enum values: fomc, cpi, nfp, claims, ppi, retail_sales, gdp, ism, housing, consumer_confidence
 SERIES_MAP = {
@@ -46,6 +48,7 @@ def fetch_fred_observations(series_id: str, api_key: str, start: str, end: str) 
 
 
 def main() -> None:
+    load_project_env()
     fred_key = os.environ["FRED_API_KEY"]
     sb_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ["SUPABASE_URL"]
     sb_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]

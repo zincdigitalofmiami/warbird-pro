@@ -9,6 +9,8 @@ import time
 import requests
 from supabase import create_client
 
+from project_env import load_project_env
+
 CATEGORY_TABLE = {
     "rates":       "econ_rates_1d",
     "yields":      "econ_yields_1d",
@@ -46,6 +48,7 @@ def fetch_fred_series(series_id: str, api_key: str, start: str = "2020-01-01") -
     return rows
 
 def main() -> None:
+    load_project_env()
     fred_key = os.environ["FRED_API_KEY"]
     sb_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ["SUPABASE_URL"]
     sb_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
