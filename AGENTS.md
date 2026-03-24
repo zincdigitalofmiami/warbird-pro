@@ -10,6 +10,14 @@ There is exactly one active architecture plan and one active update area:
 
 Everything else is archived or reference-only and should not drive current implementation unless explicitly reopened.
 
+## Contract First
+
+- The canonical trade object is the **MES 15m fib setup**.
+- The canonical key is the MES 15m bar-close timestamp in `America/Chicago`.
+- Any remaining `1H` wording in old docs, specs, scripts, or comments is legacy and must not drive new work.
+- Pine is the live production surface.
+- AutoGluon is offline only and may only promote Pine-ready packet outputs.
+
 ## Stack
 
 - Next.js (App Router) on Vercel — backend/API only (frontend is TradingView)
@@ -63,6 +71,32 @@ Everything else is archived or reference-only and should not drive current imple
 - Less complexity, fewer moving parts, better naming.
 - NEVER refactor or "improve" code outside the current task.
 - NEVER add or remove dependencies without asking.
+- Before each phase or checkpoint, reread the active plan section that governs that work.
+- After each locked phase or checkpoint, update the active plan with findings, validations, blockers, and the next blocking item.
+- Update `WARBIRD_MODEL_SPEC.md` when the model contract changes.
+- Update `CLAUDE.md` when current status or live operational truth changes.
+- Update `AGENTS.md` only when repo rules or hard workflow constraints change.
+- Update memory with the current canonical contract, required harness status, and current blocker when a phase locks.
+
+### No Hand-Rolling — Copy Working Code
+
+- When a working implementation exists (library example, reference indicator, proven pattern), **COPY IT EXACTLY**.
+- Adapt the INTERFACE (inputs, outputs, variable names). Do NOT rewrite the INTERNALS.
+- If you can't explain why your version differs line-by-line from the reference, you don't understand it well enough to rewrite it.
+- This applies to: library integrations, API call patterns, algorithm ports, Pine Script engine code — EVERYTHING.
+- Violating this rule produces broken code that looks right but behaves wrong, wastes hours of debugging, and poisons downstream model training with inaccurate signals.
+
+### Required Open-Source Harnesses
+
+- `Pivot Levels [BigBeluga]` is required.
+- `Market Structure Break & OB Probability Toolkit [LuxAlgo]` is required.
+- `Luminance Breakout Engine [LuxAlgo]` is later-phase only.
+- For required or approved harnesses:
+  - confirm the TradingView page shows `OPEN-SOURCE SCRIPT`
+  - retrieve code through the script page's `Source code` entry
+  - copy internals exactly
+  - allow interface-only edits
+  - if exact-copy use is blocked, STOP
 
 ## MES Ingestion — Current State
 

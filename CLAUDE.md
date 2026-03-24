@@ -18,18 +18,37 @@ Read and follow AGENTS.md at the repository root.
 
 ### What Doesn't Work Yet
 - mes_1s ingestion (table exists, nothing writes to it)
-- ML model training (scripts exist, no trained model)
-- Local PostgreSQL training warehouse (decided in Checkpoint 1, not set up)
+- ML model training (target `scripts/ag/*` path not built yet)
+- Python feature computation layer (not built yet)
+- AG training pipeline (not built yet)
+- Local PostgreSQL training warehouse application layer (DB now exists locally, but schema/scripts are not built)
 - DB-side aggregation (all TypeScript, zero Postgres functions)
 - Type generation (manual types, no supabase gen types)
+- Required BigBeluga harness (not built)
+- Required Market Structure Break & OB Probability Toolkit harness (not built)
+- Event-response block in `indicators/v6-warbird-complete.pine` (not built)
+- Cloud publish-up tables for packet / SHAP / report lifecycle (not built)
 
 ### Architecture Direction
 Follow the active architecture plan only.
 
 ### Locked Rules
 - 15m is the primary model/chart/setup timeframe.
+- The canonical trade object is the MES 15m fib setup keyed by MES 15m bar close in `America/Chicago`.
+- Any `1H` wording outside archived docs is legacy and must not drive new work.
 - Local machines are for training/calculations/research only.
 - Production ingestion, crons, and chart-serving must not depend on local machines.
+- BigBeluga and `Market Structure Break & OB Probability Toolkit` are required exact-copy harnesses. No hand-rolled substitutes.
+
+## Documentation Discipline
+
+After each locked phase or checkpoint:
+
+1. Update the active plan with findings, validations, blockers, and the next blocking item.
+2. Update `WARBIRD_MODEL_SPEC.md` if the model contract changed.
+3. Update `AGENTS.md` if hard repo rules changed.
+4. Update `CLAUDE.md` current status if the operational truth changed.
+5. Update memory with the current contract, harness status, and blocker.
 
 ## Pine Script Verification Pipeline
 
@@ -54,3 +73,4 @@ For major refactors, also run `trading-indicators:pine:validate` agent.
 5. `npm run build` must pass before every push.
 6. `pine-lint.sh` must pass (0 errors) before every Pine commit.
 7. One task at a time. Complete fully.
+8. **NEVER hand-roll code when a working implementation exists.** Copy the exact working code. Adapt the interface (inputs/outputs), NOT the internals. If you can't explain why your version differs line-by-line from the reference, you don't understand it well enough to rewrite it. This applies to library integrations, API patterns, algorithm ports — everything.
