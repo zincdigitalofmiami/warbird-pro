@@ -29,7 +29,7 @@ Read and follow AGENTS.md at the repository root.
 
 ### What Doesn't Work Yet
 - mes_1s ingestion (table exists, nothing writes to it)
-- Google News route/poller were removed from Warbird because Google RSS article links are aggregator URLs and Warbird will not ship custom decoding logic for them
+- Google News route/poller are restored as dormant research assets (not scheduled and not part of the active ingestion contract)
 - Live Supabase Vault is still missing `warbird_newsfilter_api_key` and `warbird_finnhub_api_key`, so `public.run_newsfilter_raw_pull()` and `public.run_finnhub_raw_pull()` currently skip before provider fetch
 - ML model training (target `scripts/ag/*` path not built yet)
 - Python feature computation layer (not built yet)
