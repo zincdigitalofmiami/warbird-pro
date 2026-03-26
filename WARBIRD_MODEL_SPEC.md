@@ -1,6 +1,6 @@
 # WARBIRD MODEL SPEC — v3
 
-**Date:** 2026-03-23
+**Date:** 2026-03-26
 **Status:** Reference-Only, aligned to the active plan
 **Governing source:** `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
 
@@ -12,16 +12,28 @@ This document is a subordinate reference for the model contract. It must not ove
 
 1. The canonical trade object is the **MES 15m fib setup**.
 2. The canonical key is the MES 15m **bar-close timestamp** in `America/Chicago`.
-3. Pine is the live production surface.
-4. AutoGluon is offline only. It trains, calibrates, and emits a Pine-ready packet.
-5. The model does **not** invent raw entries from scratch. The Pine fib engine creates the candidate setup first.
-6. News is not a separate setup engine. It is part of the event-response block that can suppress, delay, confirm, or reclassify a valid 15m fib setup.
+3. Pine is the canonical live signal surface.
+4. The Next.js dashboard is the mirrored operator surface using the same MES 15m fib contract; it is not a separate decision engine.
+5. AutoGluon is offline only. It trains, calibrates, and emits a Pine-ready packet.
+6. The model does **not** invent raw entries from scratch. The Pine fib engine creates the candidate setup first.
+7. The model output is MES 15m setup-outcome state: TP1 probability, TP2 probability, reversal risk, and bounded stop-family selection. It is **not** a predicted-price forecast surface.
+8. News is not a separate setup engine. It is part of the event-response block that can suppress, delay, confirm, or reclassify a valid 15m fib setup.
+9. `news_signals` is a derived `BULLISH` / `BEARISH` market-impact surface. It is not a `LONG` / `SHORT` trade-direction table.
+10. News may influence the model only when paired with contemporaneous price action, session timing, volatility state, and cross-asset reaction.
+11. AG and offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close, not repaint-prone live chart reads.
+12. The fib engine must preserve lookback/confluence intelligence; a simple zigzag-only anchor path is insufficient for Warbird.
+13. Pivot distance and pivot-state are critical trigger/reversal inputs, but not the sole final decision maker.
+14. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
+15. Overlapping MA / volume / trend features across base logic and admitted harnesses must be de-duplicated by feature family.
+16. The minimal Pine export surface for training capture is fib lines/state, pivot state/distance, and admitted indicator/harness outputs from the canonical indicator surface.
 
 ---
 
 ## 2. What The Model Is
 
 The model evaluates the quality of a **candidate 15m fib setup** that Pine has already identified.
+
+It does **not** forecast a future MES price level or produce a standalone `1H` price prediction.
 
 For each candidate setup, the model estimates:
 
@@ -51,12 +63,24 @@ The setup engine must expose, at minimum:
 - direction
 - fib level touched
 - setup archetype
-- target eligibility
 - stop-family candidate
 - confidence score
-- regime bucket
-- session bucket
 - event-response state
+- EMA context (distance + direction)
+- entry trigger state for long/short plus TP hit events
+
+Target viability remains a required internal gate in Pine trigger logic, but it is not a required exported `ml_*` field.
+
+The live indicator trigger predicate may only fire when the shared setup archetype is direction-aligned:
+
+- `1` = accept continuation
+- `2` = zone rejection
+- `3` = pivot continuation
+- `5` = reentry after TP1
+
+Setup archetype `4` is reversal context only. It must not authorize a same-direction continuation entry.
+
+The candidate setup must come from a snapshot-stable fib state that would have existed at that bar close. Historical anchors may not be retro-rewritten for training.
 
 ---
 
@@ -106,7 +130,7 @@ These are local-research features used by AG for discovery:
 - full FRED context from Supabase extracts
 - GPR / geopolitical risk
 - Trump Effect / policy uncertainty
-- news signal aggregates
+- bullish/bearish news event and sentiment aggregates
 - any other macro or event context without an exact Pine analogue
 
 Tier 2 can influence the research conclusion, but it cannot enter the live Pine path unless Phase 4 proves an exact Pine analogue.
@@ -126,7 +150,8 @@ It must score or gate at least these families:
 5. VIX shock / fade state
 6. lower-timeframe volume shock / expansion state
 7. scheduled macro proximity / release window state
-8. pivot interaction state
+8. breaking-news / narrative shock state paired with MES price reaction
+9. pivot interaction state
 
 The purpose of the event-response block is to:
 
@@ -134,6 +159,8 @@ The purpose of the event-response block is to:
 - delay entries
 - confirm high-quality setups
 - detect shock-failure or de-escalation reversals
+- tie macro/news catalysts to observed MES reaction instead of treating text as a separate trade engine
+- use pivot-state and pivot-distance as serious exhaustion / reversal context without turning pivots into the only decision surface
 
 It must not become a separate trade engine detached from the fib contract.
 
@@ -141,14 +168,11 @@ It must not become a separate trade engine detached from the fib contract.
 
 ## 7. Required Third-Party Harnesses
 
-Two standalone exact-copy harnesses are required:
+Three standalone exact-copy harnesses are required:
 
 1. `Pivot Levels [BigBeluga]`
 2. `Market Structure Break & OB Probability Toolkit [LuxAlgo]`
-
-One later-phase harness remains optional:
-
-1. `Luminance Breakout Engine [LuxAlgo]`
+3. `Luminance Breakout Engine [LuxAlgo]`
 
 Rules:
 
@@ -165,7 +189,15 @@ Rules:
 
 ## 8. Hidden Export Contract
 
-The active indicator and the paired strategy must expose stable machine-readable outputs for local training capture.
+The active `v6` indicator must expose stable machine-readable outputs for local training capture.
+
+TradingView enforces a hard maximum of `64` plot counts per script, and hidden `display.none` plots still count toward that limit.
+
+Any live Pine export surface that exceeds `64` plot counts is invalid even if local parity passes.
+
+Legacy hidden fields `ml_fib_regime`, the `.786` / `1.0` fib-level export families, and session-activity booleans (`ml_session_*_active`) are retired from the canonical packet. Hidden plots are unconditional `display.none`; there is no `showMLData` gating path in the canonical contract.
+
+The inventory below is the desired Warbird export family set. The actual live Pine subset must be prioritized to stay within the `64` plot-count cap.
 
 Minimum required hidden fields:
 
@@ -173,25 +205,59 @@ Minimum required hidden fields:
 - `ml_direction_code`
 - `ml_setup_archetype_code`
 - `ml_fib_level_touched`
-- `ml_target_eligible_20pt`
 - `ml_stop_family_code`
-- `ml_regime_bucket_code`
-- `ml_session_bucket_code`
 - `ml_event_mode_code`
 - `ml_event_shock_score`
 - `ml_event_reversal_score`
-- `ml_event_volume_shock`
-- `ml_event_macro_window_code`
 - `ml_event_nq_state`
 - `ml_event_dxy_state`
 - `ml_event_zn_state`
 - `ml_event_vix_state`
 - `ml_event_pivot_interaction_code`
+- `ml_ema21_dir`
+- `ml_ema50_dir`
+- `ml_ema200_dir`
+- `ml_ema21_dist_pct`
+- `ml_ema50_dist_pct`
+- `ml_ema200_dist_pct`
+- `ml_entry_long_trigger`
+- `ml_entry_short_trigger`
+- `ml_tp1_hit_event`
+- `ml_tp2_hit_event`
 - `ml_pivot_distance_nearest`
 - `ml_pivot_cluster_count`
 - `ml_pivot_active_zone_code`
+- `ml_pivot_layer_length`
+- `ml_pivot_volume_nearest`
+- `ml_pivot_volume_distribution_pct`
+- `ml_msb_direction_code`
+- `ml_msb_momentum_zscore`
+- `ml_ob_active_count`
+- `ml_ob_hpz_active_count`
+- `ml_ob_nearest_distance`
+- `ml_ob_nearest_quality_score`
+- `ml_ob_nearest_poc`
+- `ml_ob_nearest_direction_code`
+- `ml_ob_nearest_mitigated_code`
+- `ml_ob_reliability_pct`
+- `ml_luminance_signal`
+- `ml_luminance_upper_threshold`
+- `ml_luminance_lower_threshold`
+- `ml_luminance_intensity`
+- `ml_luminance_direction_code`
+- `ml_luminance_breakout_code`
+- `ml_luminance_bull_ob_active_count`
+- `ml_luminance_bear_ob_active_count`
+- `ml_luminance_bull_ob_mitigated_count`
+- `ml_luminance_bear_ob_mitigated_count`
+- `ml_luminance_bull_ob_nearest_distance`
+- `ml_luminance_bear_ob_nearest_distance`
+- `ml_luminance_bull_ob_nearest_intensity`
+- `ml_luminance_bear_ob_nearest_intensity`
 
-Once the required harnesses exist, the contract must also include harness-family exports for pivot and MSB / OB states.
+The live `v6` indicator exports the minimum subset above. Research-only diagnostics outside this list stay out of the live Pine packet until a later checkpoint re-admits them without breaking the TradingView plot budget.
+
+BigBeluga, MSB/OB, and Luminance harness-family exports are now part of the minimum contract via the `ml_pivot_*`, `ml_msb_*`, `ml_ob_*`, and `ml_luminance_*` fields above.
 
 The export contract must remain always-on and schema-stable for training capture.
 
@@ -211,7 +277,13 @@ The packet must include:
 6. confidence-bin calibration tables
 7. bucket-level TP1 / TP2 / reversal statistics
 8. event-response thresholds and suppression rules
-9. run metadata and sample counts
+9. fib snapshot / lookback-family decisions when they are part of the admitted contract
+10. run metadata and sample counts
+
+Packet promotion rule:
+
+1. Packet fields must come from features/modules that survived SHAP review, feature-admission review, and out-of-sample validation.
+2. The packet is not permission to preserve every candidate setting or indicator family that existed before training.
 
 Allowed packet statuses:
 
@@ -227,6 +299,7 @@ Allowed packet statuses:
 The following are legacy and must not drive any new implementation:
 
 - 1H-only fib contract
+- `warbird_forecasts_1h` and other predicted-price forecast surfaces
 - 5-minute cron as the model contract driver
 - cloud-to-local sync as a standing subsystem
 - unconstrained model-generated stop prices
@@ -246,10 +319,10 @@ Primary current Pine target:
 
 Planned AG build surfaces:
 
+- `scripts/ag/build-fib-snapshots.py`
 - `scripts/ag/build-fib-dataset.py`
 - `scripts/ag/train-fib-model.py`
 - `scripts/ag/evaluate-configs.py`
 - `scripts/ag/generate-packet.py`
 
 This file exists to summarize the model contract cleanly. It is not permission to ignore the active plan.
-
