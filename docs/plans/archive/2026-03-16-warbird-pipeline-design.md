@@ -35,7 +35,7 @@ AutoGluon (5 predictors, one per target)
       ↓
 warbird_forecasts_1h (written via predict-warbird.py)
       ↓
-Vercel Cron (5M) → detect-setups → warbird_conviction → warbird_setups
+Supabase pg_cron (5M) → detect-setups → warbird_conviction → warbird_setups
 ```
 
 **Non-negotiable rules:**
@@ -73,7 +73,7 @@ Uses Databento API key (`DATABENTO_API_KEY`). Same date range: 2024-01-01 → 20
 
 Writes to: `cross_asset_1h(ts, symbol_code, open, high, low, close, volume)`
 
-Vercel Cron continuation: an existing or new cron writes ongoing `cross_asset_1h` bars on a 1H cadence. Confirm this exists before relying on it.
+Supabase pg_cron continuation: an existing or new cron writes ongoing `cross_asset_1h` bars on a 1H cadence. Confirm this exists before relying on it.
 
 ### 3.3 FRED Series — `scripts/backfill-fred.py` (NEW)
 
@@ -284,7 +284,7 @@ Conviction levels and logic are otherwise correct.
 ## 9. Trading Economics Calendar Scraper
 
 **Replaces:** `app/api/cron/econ-calendar/route.ts` (current FRED-only implementation)
-**Env var needed:** `TRADINGECONOMICS_API_KEY` (add to `.env.local` and Vercel)
+**Env var needed:** `TRADINGECONOMICS_API_KEY` (add to `.env.local` and Supabase)
 
 ### What to collect:
 
@@ -301,13 +301,13 @@ ts, event_name, importance, actual, forecast, previous, surprise, source
 
 ### Approach: TE scraper (not API, API key TBD)
 
-Scrape Trading Economics calendar pages for US + major CB events. Parse HTML for importance stars, actual/forecast/previous values. Run on Vercel Cron daily at 6am Central.
+Scrape Trading Economics calendar pages for US + major CB events. Parse HTML for importance stars, actual/forecast/previous values. Run on Supabase pg_cron daily at 6am Central.
 
 ---
 
 ## 10. Google News RSS Scraper
 
-**New cron:** Vercel Cron, daily at 7am Central
+**New cron:** Supabase pg_cron, daily at 7am Central
 **Writes to:** `econ_news_1d` → sentiment aggregation → `news_signals`
 
 ### 6 topic segments (from `google_news_keywords.md` memory):

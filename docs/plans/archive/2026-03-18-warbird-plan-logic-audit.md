@@ -97,7 +97,7 @@
 
 9. **Cron windows may under-cover MES session logic**
    - Evidence:
-     - `vercel.json:18` (`detect-setups` limited to `12-21 UTC` weekdays)
+     - `Supabase cron migration files:18` (`detect-setups` limited to `12-21 UTC` weekdays)
      - MES market-hours logic exists but schedule still restricts route entry points.
    - Risk: unobserved setups outside scheduled window despite market-open periods.
 

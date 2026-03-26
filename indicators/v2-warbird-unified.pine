@@ -85,7 +85,7 @@ vixMaxRiskOn  = input.float(20.40, "VIX Max (risk-on filter)", step=0.1, group=g
 use10YConfirm = input.bool(false, "Include 10Y in confirmation", group=groupIM)
 groupIMModel = "Intermarket Model (v2)"
 imModel           = input.string("Score + Hysteresis", "Decision Model", options=["Binary Gates", "Score + Hysteresis"], group=groupIMModel)
-requireAnchors    = input.bool(true, "Require NQ + BANK alignment", group=groupIMModel)
+requireAnchors    = true
 scoreThresholdPct = input.float(0.67, "Score Threshold %", minval=0.50, maxval=1.00, step=0.01, group=groupIMModel)
 confirmBars       = input.int(2, "Bars Required To Flip", minval=1, maxval=10, group=groupIMModel)
 cooldownBars      = input.int(3, "Flip Cooldown (bars)", minval=0, maxval=50, group=groupIMModel)
@@ -95,16 +95,7 @@ wBANK = input.int(2, "Weight: BANK", minval=0, maxval=10, group=groupIMModel)
 wVIX  = input.int(2, "Weight: VIX", minval=0, maxval=10, group=groupIMModel)
 wDXY  = input.int(1, "Weight: DXY", minval=0, maxval=10, group=groupIMModel)
 w10Y  = input.int(1, "Weight: US10Y", minval=0, maxval=10, group=groupIMModel)
-groupNews = "News Proxy (Automatic Reaction)"
-useNewsProxy = input.bool(true, "Use Macro News Proxy", group=groupNews, tooltip="Pine cannot read TradingView news text directly. This uses post-event cross-asset shock reaction as a proxy.")
-tfNews = input.timeframe("5", "Proxy Timeframe", group=groupNews)
-proxyLookbackBars = input.int(3, "Proxy Lookback Bars", minval=1, maxval=30, group=groupNews)
-nqShockPct = input.float(0.25, "NQ Shock Threshold (%)", minval=0.01, step=0.01, group=groupNews)
-dxyShockPct = input.float(0.10, "DXY Shock Threshold (%)", minval=0.01, step=0.01, group=groupNews)
-vixShockPct = input.float(4.00, "VIX Shock Threshold (%)", minval=0.10, step=0.10, group=groupNews)
-y10ShockAbs = input.float(0.03, "US10Y Shock Threshold (abs)", minval=0.001, step=0.001, group=groupNews, tooltip="0.03 is roughly 3 bps.")
-minProxyScore = input.int(3, "Minimum Proxy Score (1-4)", minval=1, maxval=4, group=groupNews)
-proxyHoldBars = input.int(12, "Proxy Posture Hold (bars)", minval=1, maxval=200, group=groupNews)
+useNewsProxy = false
 //=====================
 // VISUALS (colors/widths locked to spec — see constants above)
 //=====================
@@ -157,7 +148,7 @@ atrPct = close != 0 ? atrRaw / close * 100.0 : 0.0  // AG feature: atr_pct_20
 // Computes fib levels on each HTF, flags alignment with 15m levels
 //=====================
 groupHTF = "HTF Confluence"
-htfConfTolPct = input.float(0.15, "HTF Confluence Tolerance (%)", minval=0.01, maxval=1.00, step=0.01, group=groupHTF, tooltip="How close HTF and 15m fib levels must be to count as confluent (% of range)")
+htfConfTolPct = 0.15
 
 // Fetch HTF high/low using tuple syntax (2 calls per TF = 6 total)
 [htf1hHigh, htf1hLow] = request.security(syminfo.tickerid, "60", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
@@ -338,8 +329,8 @@ htfConfTotal = htfConfPivot + htfConf382 + htfConf618  // AG feature: htf_conf_t
 // Uses close-location-value (CLV) approach: (close-low)/(high-low) weights volume
 //=====================
 groupVolDelta = "Volume Delta"
-volDeltaLookback = input.int(5, "Volume Delta Lookback (bars)", minval=1, maxval=20, group=groupVolDelta, tooltip="How many bars around a fib touch to measure volume split")
-volDeltaTolPts = input.float(2.0, "Fib Touch Tolerance (points)", minval=0.25, maxval=10.0, step=0.25, group=groupVolDelta, tooltip="How close price must get to a fib level to count as a touch")
+volDeltaLookback = 5
+volDeltaTolPts = 2.0
 
 // Close Location Value: (close-low)/(high-low) — 1.0 = closed at high (bullish), 0.0 = closed at low (bearish)
 barRange = high - low
@@ -423,8 +414,8 @@ scoreOnRaw = scoreOn >= scoreNeeded
 scoreOffRaw = scoreOff >= scoreNeeded
 anchorsOn = nqBull and bkBull
 anchorsOff = nqBear and bkBear
-scoreOnCandidate = scoreOnRaw and (not requireAnchors or anchorsOn)
-scoreOffCandidate = scoreOffRaw and (not requireAnchors or anchorsOff)
+scoreOnCandidate = scoreOnRaw and anchorsOn
+scoreOffCandidate = scoreOffRaw and anchorsOff
 candidateOn = imModel == "Binary Gates" ? riskOnBinary : scoreOnCandidate
 candidateOff = imModel == "Binary Gates" ? riskOffBinary : scoreOffCandidate
 onExclusive = candidateOn and not candidateOff
@@ -460,50 +451,14 @@ else
     regime := 0
 riskOnBase = (not useIntermarket) or regime == 1
 riskOffBase = (not useIntermarket) or regime == -1
-proxyClose(string symbol) =>
-    request.security(symbol, tfNews, close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-nqNews = proxyClose(symNQ)
-dxNews = proxyClose(symDXY)
-vxNews = proxyClose(symVIX)
-y10News = proxyClose(sym10Y)
-nqRef = nz(nqNews[proxyLookbackBars], nqNews)
-dxRef = nz(dxNews[proxyLookbackBars], dxNews)
-vxRef = nz(vxNews[proxyLookbackBars], vxNews)
-y10Ref = nz(y10News[proxyLookbackBars], y10News)
-nqNewsPct = nqRef != 0 ? (nqNews / nqRef - 1.0) * 100.0 : 0.0
-dxNewsPct = dxRef != 0 ? (dxNews / dxRef - 1.0) * 100.0 : 0.0
-vxNewsPct = vxRef != 0 ? (vxNews / vxRef - 1.0) * 100.0 : 0.0
-y10NewsDelta = y10News - y10Ref
-hawkishProxyScore = (
-    (nqNewsPct <= -nqShockPct ? 1 : 0) +
-    (dxNewsPct >= dxyShockPct ? 1 : 0) +
-    (vxNewsPct >= vixShockPct ? 1 : 0) +
-    (y10NewsDelta >= y10ShockAbs ? 1 : 0)
-)
-dovishProxyScore = (
-    (nqNewsPct >= nqShockPct ? 1 : 0) +
-    (dxNewsPct <= -dxyShockPct ? 1 : 0) +
-    (vxNewsPct <= -vixShockPct ? 1 : 0) +
-    (y10NewsDelta <= -y10ShockAbs ? 1 : 0)
-)
-hawkishProxySignal = useNewsProxy and hawkishProxyScore >= minProxyScore and hawkishProxyScore > dovishProxyScore
-dovishProxySignal = useNewsProxy and dovishProxyScore >= minProxyScore and dovishProxyScore > hawkishProxyScore
+float hawkishProxyScore = 0.0
+float dovishProxyScore = 0.0
 var int newsPosture = 0
 var int newsPostureBar = na
-if useNewsProxy
-    if hawkishProxySignal
-        newsPosture := -1
-        newsPostureBar := bar_index
-    else if dovishProxySignal
-        newsPosture := 1
-        newsPostureBar := bar_index
-    if not na(newsPostureBar) and bar_index - newsPostureBar > proxyHoldBars
-        newsPosture := 0
-else
-    newsPosture := 0
-    newsPostureBar := na
-riskOn = newsPosture == 1 ? true : newsPosture == -1 ? false : riskOnBase
-riskOff = newsPosture == -1 ? true : newsPosture == 1 ? false : riskOffBase
+newsPosture := 0
+newsPostureBar := na
+riskOn = riskOnBase
+riskOff = riskOffBase
 if enableDebugLogs and barstate.isconfirmed
     bool stateFlip = riskOn != riskOn[1] or riskOff != riskOff[1] or regime != regime[1] or newsPosture != newsPosture[1]
     if stateFlip

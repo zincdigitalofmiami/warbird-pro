@@ -34,8 +34,15 @@ type NewsSignalRow = {
   confidence: number | null;
 };
 
+function normalizeNewsDirection(direction: string | null | undefined): "BULLISH" | "BEARISH" | null {
+  if (!direction) return null;
+  if (direction === "BULLISH" || direction === "LONG") return "BULLISH";
+  if (direction === "BEARISH" || direction === "SHORT") return "BEARISH";
+  return null;
+}
+
 type SetupRow = {
-  ts: string;
+  bar_close_ts: string;
   counter_trend: boolean;
 };
 
@@ -608,10 +615,10 @@ async function buildDataset(outputPath: string) {
     });
 
     const setups20 = setups
-      .filter((setup) => new Date(setup.ts).getTime() <= tsMs)
+      .filter((setup) => new Date(setup.bar_close_ts).getTime() <= tsMs)
       .slice(-20);
     const setups7d = setups.filter((setup) => {
-      const delta = tsMs - new Date(setup.ts).getTime();
+      const delta = tsMs - new Date(setup.bar_close_ts).getTime();
       return delta >= 0 && delta <= 7 * 24 * 60 * 60 * 1000;
     });
 
@@ -672,8 +679,9 @@ async function buildDataset(outputPath: string) {
       trump_events_7d: trumpEvents7d,
       news_layers_24h: news24h.length,
       news_net_sentiment_24h: news24h.reduce((sum, news) => {
-        if (news.direction === "LONG") return sum + Number(news.confidence ?? 0);
-        if (news.direction === "SHORT") return sum - Number(news.confidence ?? 0);
+        const direction = normalizeNewsDirection(news.direction);
+        if (direction === "BULLISH") return sum + Number(news.confidence ?? 0);
+        if (direction === "BEARISH") return sum - Number(news.confidence ?? 0);
         return sum;
       }, 0),
       hours_to_next_high_impact: nextHighImpact

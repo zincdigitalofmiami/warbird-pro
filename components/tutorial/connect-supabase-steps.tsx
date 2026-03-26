@@ -20,15 +20,11 @@ export function ConnectSupabaseSteps() {
 
       <TutorialStep title="Declare environment variables">
         <p>
-          Rename the{" "}
-          <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
-            .env.example
-          </span>{" "}
-          file in your Next.js app to{" "}
+          Create a{" "}
           <span className="relative rounded bg-muted px-[0.3rem] py-[0.2rem] font-mono text-xs font-medium text-secondary-foreground border">
             .env.local
           </span>{" "}
-          and populate with values from{" "}
+          file in your Next.js app and populate it with values from{" "}
           <a
             href="https://app.supabase.com/project/_/settings/api"
             target="_blank"

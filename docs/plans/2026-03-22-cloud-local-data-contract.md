@@ -52,7 +52,7 @@ Verified against `supabase/migrations/` (files 002-012).
 ### Warbird v2 (8)
 `warbird_daily_bias`, `warbird_structure_4h`, `warbird_forecasts_1h`, `warbird_triggers_15m`, `warbird_conviction`, `warbird_setups`, `warbird_setup_events`, `warbird_risk`
 
-- `warbird_forecasts_1h`: written by EXTERNAL service via `WARBIRD_FORECAST_WRITER_URL` (local Mac AG model). No Vercel cron writes to it.
+- `warbird_forecasts_1h`: written by EXTERNAL service via `WARBIRD_FORECAST_WRITER_URL` (local Mac AG model). No Supabase pg_cron job writes to it.
 
 ### Ops (2)
 `job_log`, `coverage_log`
@@ -170,4 +170,4 @@ UNION ALL SELECT ts, series_id, value, 'yields', created_at FROM econ_yields_1d
 - Table prefixes: `mes_`, `cross_asset_`, `econ_`, `warbird_` for canonical tables.
 - New training-reporting tables: snake_case, explicit PK/index/watermark fields.
 - Local writes training outputs; cloud dashboard reads them.
-- All crons currently run on Vercel. Migration to Supabase pg_cron is FUTURE intent, not current state.
+- All recurring crons/functions are owned by Supabase (pg_cron + Supabase-side execution surfaces).

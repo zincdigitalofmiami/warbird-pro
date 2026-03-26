@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import {
   calculateTraditionalPivots,
   pivotLevelsToLines,
@@ -25,7 +25,12 @@ interface DailyBar {
 
 export async function GET() {
   try {
-    const supabase = createAdminClient();
+    const supabase = await createClient();
+    const { data: authData, error: authError } = await supabase.auth.getClaims();
+
+    if (authError || !authData?.claims) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     // Try mes_1d first
     const { data: dailyBars, error: dailyError } = await supabase

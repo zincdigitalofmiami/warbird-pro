@@ -15,7 +15,7 @@
 
 ## Route-by-Route Matrix
 
-### Cron Routes (13 routes, 21 schedules in vercel.json)
+### Cron Routes (13 routes, 21 schedules in Supabase cron migration files)
 
 | Route | Schedule | What It Does | Decision | Reason |
 |-------|----------|-------------|----------|--------|
@@ -59,11 +59,11 @@ None of these patterns conflict with adding local PostgreSQL for training.
 
 ### No routes are dead or superseded
 
-Every route in `vercel.json` has an active purpose. No route has been made obsolete by checkpoint decisions 1-3.
+Every route in `Supabase cron migration files` has an active purpose. No route has been made obsolete by checkpoint decisions 1-3.
 
 ### The forecast route is the explicit bridge
 
-`cron/forecast` already implements the cloud-to-local bridge pattern: it runs on Vercel Cron, invokes `WARBIRD_FORECAST_WRITER_URL` (which points to a local or external inference endpoint), then checks if fresh forecasts appeared in cloud Supabase. This is the publication pattern the architecture rethink envisions — local inference writes results to cloud, cloud cron verifies freshness.
+`cron/forecast` already implements the cloud-to-local bridge pattern: it runs on Supabase pg_cron, invokes `WARBIRD_FORECAST_WRITER_URL` (which points to a local or external inference endpoint), then checks if fresh forecasts appeared in cloud Supabase. This is the publication pattern the architecture rethink envisions — local inference writes results to cloud, cloud cron verifies freshness.
 
 ### detect-setups stays cloud
 
@@ -233,9 +233,9 @@ Intraday pulls (MES only) stay in market hours:
 | Plan: do not preserve routes just because they exist | Yes | All 17 routes independently justified |
 | Plan: preserve only routes that serve final architecture | Yes | Each route maps to a clear architectural role |
 | AGENTS.md: production boundary (no local dependency) | Yes | All cron routes depend only on cloud + external APIs |
-| AGENTS.md: 13 cron routes match | Yes | 13 route files, 21 schedules in vercel.json |
+| AGENTS.md: 13 cron routes match | Yes | 13 route files, 21 schedules in Supabase cron migration files |
 | Cost boundary | Yes | No new routes, no new API calls |
-| AGENTS.md: no dead schedules in vercel.json | Yes | All 21 schedules have active routes |
+| AGENTS.md: no dead schedules in Supabase cron migration files | Yes | All 21 schedules have active routes |
 
 ---
 
@@ -244,5 +244,5 @@ Intraday pulls (MES only) stay in market hours:
 1. **No routes to remove.** All 17 stay.
 2. **No routes to add.** Local health monitoring is a future concern.
 3. **mes-catchup evolves** per Checkpoint 2 (add ohlcv-1s fetch) — separate implementation task.
-4. **vercel.json stays as-is.** 21 schedules are all active and correct.
-5. **Future: local sync/publish script** — Not a Vercel route. Runs locally, pushes to cloud. Designed in Checkpoint 5 (schema ownership).
+4. **Supabase cron migration files stays as-is.** 21 schedules are all active and correct.
+5. **Future: local sync/publish script** — Not a Supabase route. Runs locally, pushes to cloud. Designed in Checkpoint 5 (schema ownership).

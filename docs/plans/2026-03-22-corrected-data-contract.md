@@ -191,9 +191,9 @@ These tables will exist ONLY in local PostgreSQL. No cloud migration needed:
 
 ---
 
-## Vercel Environment Variables
+## Supabase Environment Variables
 
-### Current (from `vercel env ls`)
+### Current (from `deployment secrets inventory`)
 
 | Variable | Environments | Status |
 |----------|-------------|--------|
@@ -287,11 +287,11 @@ SELECT ts, series_id, value, 'yields', created_at FROM econ_yields_1d
 
 1. **Apply migrations 010, 011, 012 to cloud:** `npx supabase db push --linked`
 2. **Verify warbird v1 tables exist after push**
-3. **Add `CRON_SECRET` to Vercel env vars**
+3. **Add `CRON_SECRET` to Supabase project secrets**
 
 ### P1 — Env Cleanup
 
-4. Remove `POSTGRES_PRISMA_URL` from Vercel env
+4. Remove `POSTGRES_PRISMA_URL` from Supabase env
 5. Remove duplicate env vars (PUBLISHABLE_KEY, SECRET_KEY)
 6. Add or remove `WARBIRD_FORECAST_WRITER_URL` based on whether forecast health check is needed
 

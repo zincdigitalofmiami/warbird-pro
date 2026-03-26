@@ -1,157 +1,201 @@
-# Agent Safety Gates (Fail-Closed)
+# Warbird Agent Safety Gates
 
-Use this document as mandatory operating policy for any coding agent working in this repository.
+Use this document as the Warbird-specific fail-closed operating contract for Claude Code, Codex, and any subagent working in this repository.
+
+This document exists for one reason: agents in this repo must not self-certify. Completion requires repo evidence.
 
 ## 1. Authority Order
 
 Resolve instruction conflicts in this exact order:
 
-1. `AGENTS.md` (repo root)
+1. `AGENTS.md`
 2. `CLAUDE.md`
-3. `docs/what-we-learned-from-our-mistakes.md`
-4. `docs/v16-migration-plan.md`
-5. If #4 is missing, fallback: `/Users/zincdigital/.claude/plans/frolicking-zooming-wombat.md`
+3. `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+4. `WARBIRD_MODEL_SPEC.md`
+5. `docs/agent-safety-gates.md`
 
-If any required authority file is missing, stop and ask for the exact path mapping before changing code.
+If a task touches one specific phase or checkpoint, reread that exact active-plan section before editing.
 
-## 2. Phase Lock
+## 2. Model Policy
 
-All tasks must run in two phases:
+Default Claude Code model policy for this repo:
 
-1. `Phase A (Read-Only)`:
-- No file edits.
-- No schema changes.
-- Gather evidence only.
+1. Use `opusplan` for normal repo work.
+2. Use raw `opus` only for planning, architecture, or review.
+3. Use `sonnet` for bounded execution-only tasks when plan ambiguity is already closed.
 
-2. `Phase B (Write)`:
-- Allowed only after explicit user approval phrase:
-  `APPROVE WRITE PHASE`
+`Opus` is allowed to reason. It is not allowed to self-attest completion without proof.
 
-No edits are permitted before approval.
+## 3. Execution Phases
 
-## 3. Mandatory Preflight (Every Task)
+Every substantive task must run in this order:
 
-Run and report:
+1. `Preflight`
+2. `Write`
+3. `Verification`
+4. `Closure`
 
-1. `git status --short`
-2. targeted file discovery (`rg --files` / `rg -n`)
-3. read and summarize all governing docs used for the task
-4. inventory:
-- impacted architecture areas
-- impacted tables/enums/routes/scripts
-- unknowns and risks
+### Preflight
 
-Claims must be backed by command/file evidence.
+Before editing:
 
-## 4. Hard Guardrails During Write Phase
+1. Run `git status --short`
+2. Discover the touched surface with `rg --files` / `rg -n`
+3. Read the governing docs for the touched surface
+4. Inventory:
+   - impacted code paths
+   - impacted tables / routes / scripts / indicators
+   - verification gates
+   - blockers / unknowns
 
-1. Edit only files listed in the approved write-set.
-2. Smallest possible change set.
-3. No dependency additions/removals unless explicitly approved.
-4. No broad refactors or naming churn.
-5. No destructive git commands (`reset --hard`, forced checkout of unrelated files).
-6. Do not revert unrelated user changes.
-7. If uncertainty exists on a high-risk change, stop and escalate.
+### Write
 
-## 5. Data + Model Safety Rules
+During edits:
 
-1. No mock or placeholder production data.
-2. No label leakage (no future information in features).
-3. Keep target definitions explicit and versioned.
-4. Keep inference write-path compatible with active schema unless migration is approved.
-5. Persist model metadata (`model_version`, feature snapshot/rationale) on writes.
-6. Treat data continuity failures as a hard block for trading-critical outputs.
+1. Touch the smallest viable write-set.
+2. Do not refactor unrelated areas.
+3. Do not revert unrelated user changes.
+4. Do not add dependencies unless explicitly approved.
+5. Treat any contract ambiguity as a stop trigger.
 
-## 6. High-Risk Stop Triggers (Fail Closed)
+### Verification
 
-Stop implementation and report blockers if any are true:
+Verification is part of the task, not an optional follow-up.
 
-1. Build/typecheck fails.
-2. Migration/schema mismatch is unresolved.
-3. Feed continuity is unverified for logic dependent on continuity.
-4. Contract mismatch exists between model outputs and DB/API consumers.
-5. Required authority docs are missing or contradictory.
+If a required gate is not run, the task is `INCOMPLETE`.
 
-When stopped, report:
-- blocker
-- evidence
-- safe options
-- recommended option
+### Closure
 
-## 7. Mandatory Verification Gates (Before Claiming Done)
+The final response must use the completion schema in Section 7. Any other format is non-compliant for implementation work.
 
-Run and report results for:
+## 4. Pine-Specific Tool Routing
 
-1. `npx tsc --noEmit`
-2. `npm run build`
-3. targeted tests for touched logic
-4. route/script/runtime checks for touched execution paths
+When the task touches Pine indicators, strategies, harnesses, or TradingView mechanics:
 
-If a gate fails, task is not complete.
+1. Prefer the Pine helpers that are confirmed available in the current environment:
+   - `pine-patterns` skill
+   - `tradingview-indicator-contract-audit` skill when contract/audit work is needed
+   - `./scripts/guards/pine-lint.sh`
+   - `./scripts/guards/check-contamination.sh`
+   - `./scripts/guards/check-indicator-strategy-parity.sh` when both the indicator and strategy are in scope
+2. Treat `pinescript-server`, TradingView CLI, or chart-capable MCP flows as optional only after confirming they are actually configured in the active Codex profile.
+3. Do not treat tool presence, slash-command names, or plan references as proof that a Pine / TradingView tool is really installed.
+4. Repo guard scripts remain the hard completion gates, and Deep Backtesting or live-chart validation remain manual unless a real chart-capable tool is installed and verified.
 
-## 8. Required Response Template
+## 5. Hard Guardrails
 
-Every agent response must follow:
+These rules are fail-closed:
 
-1. Findings
-2. Plan
-3. Changes Applied (or Proposed)
-4. Verification Results
-5. Risks / Open Questions
-6. Next Step
+1. No mock, demo, placeholder, or fake production data.
+2. No label leakage or future-data contamination.
+3. No Prisma or ORM paths.
+4. No inactive Databento symbols.
+5. No broad naming churn.
+6. No silent schema/API contract changes.
+7. No destructive git commands.
+8. No "done" claim when any required verification is missing.
 
-## 9. Hardened Codex Prompt (Copy/Paste)
+## 6. Verification Matrix
+
+Run the required gates for the files you actually touched.
+
+### Pine / Indicator / Strategy Work
+
+If any touched file ends in `.pine`:
+
+1. `./scripts/guards/pine-lint.sh <each touched .pine file>`
+2. `./scripts/guards/check-contamination.sh`
+3. `npm run build`
+
+If either of these files is touched:
+
+- `indicators/v6-warbird-complete.pine`
+- `indicators/v6-warbird-complete-strategy.pine`
+
+Also run:
+
+4. `./scripts/guards/check-indicator-strategy-parity.sh`
+
+### Next.js / API / Shared TS Work
+
+If any touched file is under `app/`, `components/`, `lib/`, or changes runtime config:
+
+1. `npm run build`
+
+Add route/runtime checks for the touched path when the task changes actual execution flow.
+
+### Supabase / Cron / Ingestion Work
+
+If any touched file is under `supabase/`, `app/api/cron/`, or ingestion libraries:
+
+1. `npm run build`
+2. Run the narrowest path-specific runtime or script validation available
+
+### Docs-Only Work
+
+If only docs changed, no build gate is required unless the docs describe a newly claimed operational truth that should have been validated.
+
+## 7. Required Completion Schema
+
+For implementation work, the final response must contain these exact headings:
 
 ```text
-You are Codex, Principal Quant Architect for ZINC Fusion v16. Operate fail-closed.
+STATUS: COMPLETE | INCOMPLETE
+TOUCHED FILES:
+- path
 
-Authority order:
-1) AGENTS.md
-2) CLAUDE.md
-3) docs/what-we-learned-from-our-mistakes.md
-4) docs/v16-migration-plan.md
-5) fallback: /Users/zincdigital/.claude/plans/frolicking-zooming-wombat.md
+VERIFICATION:
+- PASS: command
+- FAIL: command
+- NOT RUN: command — reason
 
-Two-phase lock:
-- Phase A (read-only): inspect, inventory, plan, risks, verification plan.
-- Phase B (write): only after explicit user text "APPROVE WRITE PHASE".
-
-Preflight every task:
-- git status --short
-- targeted rg/find discovery
-- read governing docs
-- produce inventory + unknowns + risks
-
-Write guardrails:
-- modify only approved write-set
-- no dependency churn unless approved
-- no broad refactors
-- no destructive git commands
-- never revert unrelated user changes
-
-Data/model safety:
-- no fake production data
-- no leakage
-- explicit labels/versioning
-- preserve schema/API compatibility unless approved
-- persist model metadata on inference writes
-
-Mandatory verification before completion:
-- npx tsc --noEmit
-- npm run build
-- targeted tests/runtime checks
-
-Hard stop conditions:
-- missing governing docs
-- unresolved schema contract mismatch
-- unverified continuity for continuity-dependent logic
-- failed verification gates
-
-Output format:
-1) Findings
-2) Plan
-3) Changes Applied (or Proposed)
-4) Verification Results
-5) Risks / Open Questions
-6) Next Step
+BLOCKERS:
+- none
 ```
+
+Rules:
+
+1. `STATUS: COMPLETE` is allowed only if all required gates passed.
+2. `STATUS: COMPLETE` cannot include any `FAIL:` or `NOT RUN:` items.
+3. `STATUS: INCOMPLETE` is mandatory if any gate failed, was skipped, or was impossible to run.
+4. `TOUCHED FILES` must list the actual edited files, or `- none`.
+5. `BLOCKERS` must be `- none` only when status is complete.
+
+## 8. High-Risk Stop Triggers
+
+Stop and report blockers if any are true:
+
+1. Required authority docs conflict.
+2. A schema/API/model contract mismatch is unresolved.
+3. A Pine task lacks required guard passes.
+4. Runtime validation is required but unavailable.
+5. The assistant cannot prove that the claimed file edits exist.
+6. The assistant cannot prove that verification commands actually passed.
+
+When blocked, report:
+
+1. the blocker
+2. the evidence
+3. the safest next options
+4. the recommended next option
+
+## 9. Warbird Verifier Intent
+
+The repo-local Claude hooks should enforce this contract:
+
+1. Block `Stop` when the completion schema is missing or false.
+2. Block `TaskCompleted` when a teammate tries to close work without proof.
+3. Default the project to `opusplan`.
+4. Keep Pine helper commands advisory and repo verification mandatory.
+
+## 10. Local Claude Wiring
+
+The current local Claude Code implementation in this workspace is:
+
+1. `.claude/settings.json` (gitignored local project settings)
+   - sets `model` to `opusplan`
+   - adds `Stop` and `TaskCompleted` verifiers
+2. `.claude/rules/warbird-opus-execution-contract.md` (gitignored local rule)
+   - keeps the completion schema and Pine command routing in active context
+3. `scripts/claude/verify-warbird-stop.sh`
+   - deterministic stop gate for completion schema, file existence, Pine guards, parity, and build checks

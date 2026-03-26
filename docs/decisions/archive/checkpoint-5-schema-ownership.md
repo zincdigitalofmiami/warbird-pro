@@ -181,7 +181,7 @@ Every table classified into one of four ownership categories. Most data tables e
 
 ### Sync-Down Job (Cloud → Local)
 
-Runs locally (not a Vercel cron). Pulls from cloud Supabase into local PG:
+Runs locally (not a Supabase pg_cron). Pulls from cloud Supabase into local PG:
 - All "Both" tables: incremental sync by `ts` watermark
 - Frequency: daily (overnight) for most tables, more frequent for MES during market hours if needed
 - Uses `LOCAL_DATABASE_URL` + `SUPABASE_URL` (per Checkpoint 3, `.env.training`)

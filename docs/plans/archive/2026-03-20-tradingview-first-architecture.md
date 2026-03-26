@@ -11,7 +11,7 @@
 
 ## Executive Summary
 
-TradingView becomes the entire frontend. AutoGluon becomes the brain. A local Python server connects them via webhooks. The custom Next.js dashboard, Vercel frontend hosting, and Realtime chart infrastructure are eliminated.
+TradingView becomes the entire frontend. AutoGluon becomes the brain. A local Python server connects them via webhooks. The custom Next.js dashboard, Supabase frontend hosting, and Realtime chart infrastructure are eliminated.
 
 The model's job is NOT price prediction. It is an **entry gate** — it tells you whether RIGHT NOW, at THIS fib level, with THESE market conditions, the entry will be CLEAN (20+ points, 10-15 point stop) or DIRTY (stopped out before target).
 
@@ -561,8 +561,8 @@ async def handle_bar(data: BarData):
 | Component | Status | Savings |
 |---|---|---|
 | Next.js frontend (app/ directory) | **Eliminated** | Zero frontend maintenance |
-| Vercel hosting (frontend) | **Eliminated** | ~$20-50/mo saved |
-| Vercel cron routes (most) | **Reduced to ~3-4** | Fewer function invocations |
+| Supabase hosting (frontend) | **Eliminated** | ~$20-50/mo saved |
+| Supabase pg_cron routes (most) | **Reduced to ~3-4** | Fewer function invocations |
 | Realtime subscriptions | **Eliminated** | TV handles live data |
 | Auth UI (login, signup, password) | **Eliminated** | TV handles auth |
 | Custom chart rendering | **Eliminated** | TV charts are superior |
@@ -574,7 +574,7 @@ async def handle_bar(data: BarData):
 |---|---|
 | Supabase (lean) | Macro data storage (FRED, news, econ), trade log, model performance tracking |
 | pg_cron jobs (~10-15) | FRED/econ/news/GPR/trump-effect ingestion — enrichment data for model |
-| Vercel cron (~3-4) | Complex compute that can't be pg_cron (news processing, maybe forecast health check) |
+| Supabase pg_cron (~3-4) | Complex compute that can't be pg_cron (news processing, maybe forecast health check) |
 | Local PostgreSQL | Training warehouse, macro data cache, trade log |
 | AutoGluon training | Weekly retrain on local machine |
 | Local Python server | FastAPI — receives webhooks, runs inference |

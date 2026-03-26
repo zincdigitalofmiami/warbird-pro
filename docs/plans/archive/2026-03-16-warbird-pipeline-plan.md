@@ -7,9 +7,9 @@
 
 **Goal:** Build the complete Warbird v1 data pipeline — from backfill through training — using 1H-only fibs, TP1/TP2-only targets, and 5 fib-relative binary labels.
 
-**Architecture:** All data flows through Supabase. Dataset builder reads Supabase, outputs a local CSV. AutoGluon trains locally from that CSV. Inference is written back to Supabase via predict-warbird.py. Vercel cron reads from Supabase to run the conviction engine.
+**Architecture:** All data flows through Supabase. Dataset builder reads Supabase, outputs a local CSV. AutoGluon trains locally from that CSV. Inference is written back to Supabase via predict-warbird.py. Supabase pg_cron reads from Supabase to run the conviction engine.
 
-**Tech Stack:** Python (Databento SDK, fredapi/requests, openpyxl, arch), TypeScript/Node (Supabase JS client), AutoGluon TabularPredictor, Vercel Cron, Supabase Postgres.
+**Tech Stack:** Python (Databento SDK, fredapi/requests, openpyxl, arch), TypeScript/Node (Supabase JS client), AutoGluon TabularPredictor, Supabase pg_cron, Supabase Postgres.
 
 ---
 
@@ -1351,9 +1351,9 @@ export async function GET(request: Request) {
 }
 ```
 
-**Step 2: Add to vercel.json**
+**Step 2: Add to Supabase cron migration files**
 
-Find the `crons` array in `vercel.json` and add:
+Find the `crons` array in `Supabase cron migration files` and add:
 ```json
 { "path": "/api/cron/google-news", "schedule": "0 13 * * 1-5" }
 ```
@@ -1376,7 +1376,7 @@ npm run build 2>&1 | tail -20
 **Step 5: Commit**
 
 ```bash
-git add app/api/cron/google-news/route.ts vercel.json
+git add app/api/cron/google-news/route.ts Supabase cron migration files
 git commit -m "feat: add Google News RSS scraper cron for 6 topic segments"
 ```
 
@@ -1493,20 +1493,20 @@ git commit -m "docs: align canonical spec and agent rules to 1H-only, no runner,
 
 ---
 
-## Task 15: Update vercel.json Cron Cadence for detect-setups
+## Task 15: Update Supabase cron migration files Cron Cadence for detect-setups
 
 **Files:**
-- Modify: `vercel.json`
+- Modify: `Supabase cron migration files`
 
 **Step 1: Find detect-setups cron entry**
 
 ```bash
-grep -n "detect-setups" vercel.json
+grep -n "detect-setups" Supabase cron migration files
 ```
 
 **Step 2: Change schedule to every 5 minutes (weekdays, 6am–4pm Central)**
 
-Vercel Cron format. Every 5 minutes during market hours:
+Supabase pg_cron format. Every 5 minutes during market hours:
 ```json
 { "path": "/api/cron/detect-setups", "schedule": "*/5 12-21 * * 1-5" }
 ```
@@ -1515,7 +1515,7 @@ Vercel Cron format. Every 5 minutes during market hours:
 **Step 3: Commit**
 
 ```bash
-git add vercel.json
+git add Supabase cron migration files
 git commit -m "config: update detect-setups cron to 5-minute cadence"
 ```
 
@@ -1531,7 +1531,7 @@ npm run build
 
 Must pass with zero errors.
 
-**Step 2: Deploy to Vercel**
+**Step 2: Deploy to Supabase**
 
 ```bash
 git push origin main
@@ -1547,9 +1547,9 @@ Authorization: Bearer {CRON_SECRET}
 
 Check `job_log` for a SUCCESS entry. Check `warbird_conviction` for a new row.
 
-**Step 4: Verify the new cron routes appear in Vercel dashboard**
+**Step 4: Verify the new cron routes appear in Supabase dashboard**
 
-Go to Vercel → Project → Cron Jobs. Confirm `google-news` and updated `detect-setups` cadence are visible.
+Go to Supabase → Project → Cron Jobs. Confirm `google-news` and updated `detect-setups` cadence are visible.
 
 ---
 
@@ -1576,7 +1576,7 @@ Task 13 (train model)
 Task 10 (TE calendar scraper)     ← parallel with Task 11
 Task 11 (Google News scraper)
 Task 14 (doc updates)
-Task 15 (vercel.json cron timing)
+Task 15 (Supabase cron migration files cron timing)
     ↓
 Task 16 (build + deploy)
 ```

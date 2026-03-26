@@ -1,5 +1,13 @@
 {
   "mcpServers": {
+    "memory": {
+      "type": "stdio",
+      "command": "/opt/homebrew/bin/npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"],
+      "env": {
+        "MEMORY_FILE_PATH": "/Volumes/Satechi Hub/warbird-pro/.claude/memory.jsonl"
+      }
+    },
     "sequentialthinking": {
       "type": "stdio",
       "command": "./node_modules/.bin/mcp-server-sequential-thinking",

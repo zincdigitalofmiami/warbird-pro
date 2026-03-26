@@ -29,7 +29,7 @@ The local PostgreSQL warehouse (Checkpoint 1) receives only `mes_1m` and higher 
 
 ### Option A: `mes_1s` via cron-batched Historical API (chosen)
 
-Extend the existing mes-catchup Vercel Cron to also fetch `ohlcv-1s` from Databento Historical API every 5 minutes. Write 1s bars to cloud Supabase `mes_1s`. Chart subscribes via Realtime.
+Extend the existing mes-catchup Supabase pg_cron to also fetch `ohlcv-1s` from Databento Historical API every 5 minutes. Write 1s bars to cloud Supabase `mes_1s`. Chart subscribes via Realtime.
 
 **Data flow per cron cycle:**
 
@@ -173,7 +173,7 @@ True real-time via Live API is a clear v2 upgrade path if sub-second responsiven
 | Plan: no retained `mes_1s` for training | Yes | `mes_1s` not synced to local PG, TTL cleanup in cloud |
 | AGENTS.md: `mes_1s` is canonical continuity ingestion layer | Yes | Preserved as ingestion layer |
 | AGENTS.md: `mes_1m` derived from `mes_1s` when available | Yes | DB aggregation: 1s → 1m |
-| AGENTS.md: no continuous local runtime for chart serving | Yes | Cloud-only via Vercel Cron + Supabase |
+| AGENTS.md: no continuous local runtime for chart serving | Yes | Cloud-only via Supabase pg_cron + Supabase |
 | AGENTS.md: 5-minute maximum acceptable latency | Yes | Cron runs every 5 min |
 | WARBIRD_CANONICAL.md: `series.update()` for live ticks | Yes | Realtime `mes_1s` → `series.update()` in chart |
 | Cost boundary | Yes | `ohlcv-1s` is free on Standard plan |
@@ -187,7 +187,7 @@ True real-time via Live API is a clear v2 upgrade path if sub-second responsiven
 2. **DB-side derivation:** Postgres function to aggregate `mes_1s → mes_1m`. Called after each 1s batch insert (trigger or explicit call in cron).
 3. **Keep existing `mes_1m → mes_15m/1h/4h/1d` aggregation** — can stay in TypeScript initially, migrate to DB functions per plan.
 4. **`mes_1s` table in cloud Supabase:** New migration. Ephemeral. Realtime enabled.
-5. **TTL cleanup job:** `pg_cron` or Vercel Cron to `DELETE FROM mes_1s WHERE ts < now() - interval '48 hours'`.
+5. **TTL cleanup job:** `pg_cron` or Supabase pg_cron to `DELETE FROM mes_1s WHERE ts < now() - interval '48 hours'`.
 6. **Chart update:** `LiveMesChart.tsx` subscribes to `mes_1s` Realtime (instead of or in addition to `mes_1m`) for forming-bar updates.
 7. **Local PG:** No `mes_1s` table. Receives `mes_1m` only via backfill/sync.
 8. **Future upgrade path (v2):** Databento Live WebSocket → cloud relay for true sub-second updates.

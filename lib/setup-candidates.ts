@@ -96,7 +96,7 @@ export interface SetupCandidate {
  */
 export function fromWarbirdSetup(row: {
   id: number
-  ts: string
+  bar_close_ts: string
   direction: string
   status: string
   entry_price: number | null
@@ -110,7 +110,7 @@ export function fromWarbirdSetup(row: {
   notes?: string | null
   created_at: string
 }): SetupCandidate {
-  const ts = new Date(row.ts).getTime() / 1000
+  const ts = new Date(row.bar_close_ts).getTime() / 1000
 
   return {
     id: String(row.id),

@@ -1,0 +1,5 @@
+interface:
+  display_name: "TradingView Indicator Review"
+  short_description: "Deep MES/ES Pine review with hard safety stops."
+  default_prompt: "Use $tradingview-indicator-review for severity-ranked Pine findings, no-repaint checks, ML export audits, and checkpointed release review."
+

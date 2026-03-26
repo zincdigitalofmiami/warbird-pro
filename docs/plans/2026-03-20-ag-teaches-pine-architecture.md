@@ -10,14 +10,47 @@
 - Do not create new architecture or plan docs for this indicator without explicit approval.
 - All other plan docs are archived under `docs/plans/archive/`.
 
+Historical note: any remaining references below to the paired strategy, parity-only checkpoints, or Deep Backtesting are archived execution history unless a newer update-log entry explicitly reactivates them.
+
 ---
 
 ## Update Log
 
-- 2026-03-23: Rewrote the active plan from the live audit: locked current Vercel cron reality vs target Supabase-owned runtime, exact Databento/FRED/news scope, raw Google News intake contract, cloud realtime/dashboard surfaces, and the 2-consecutive-PT1-miss rollback rule.
+- 2026-03-26: Bound the active Pine path back to indicator-only by explicit user direction. The paired Pine strategy, local indicator/strategy parity, and Deep Backtesting are retired from the active blocking path. `indicators/v6-warbird-complete-strategy.pine` and `scripts/guards/check-indicator-strategy-parity.sh` remain as legacy scratch/reference surfaces only and do not block indicator work unless the plan is explicitly reopened.
+- 2026-03-26: Rolled back the indicator-side fixed-color fib budget hack in `indicators/v6-warbird-complete.pine` after it changed the live operator-visible fib presentation without explicit approval. The four hidden-export removals (`ml_msb_bull_break`, `ml_msb_bear_break`, `ml_luminance_over_upper`, `ml_luminance_over_lower`) remain in both indicator and strategy to preserve parity, but the fib color inputs are restored and the live TradingView plot-budget blocker is reopened pending an approved non-visual reduction path.
+- 2026-03-26: Completed a bounded Pine exhaustion-budget checkpoint in `indicators/v6-warbird-complete.pine`: removed the native exhaustion `plotshape()` and exhaustion `alertcondition()`, preserved `fib_exh_flag` logic, and moved exhaustion visibility into the bottom-left `WARBIRD METRICS` table (`EXH ON/OFF`, live energy %, `AT FIB`). Validation passed (`./scripts/guards/pine-lint.sh`, `./scripts/guards/check-contamination.sh`, `npm run build`). Next blocker remains additional live plot-count reduction to reach TradingView's `<=64` hard cap.
+- 2026-03-26: Verified the backend checkpoint and tightened the remaining defects: `20260326000018` now preserves cutover state via `*_legacy_20260326` backup copies instead of renaming live production tables in place, `indicators/v6-warbird-complete.pine` and `indicators/v6-warbird-complete-strategy.pine` now export the 52-field minimum live packet (`53` and `56` total plot-style calls respectively), and `scripts/guards/check-indicator-strategy-parity.sh` now enforces real total plot counts instead of hidden-field count alone. Local gates passed (`pine-lint`, parity, `npm run build`). Next blocker is manual TradingView Strategy Tester + Deep Backtesting validation on the now-loadable scripts.
+- 2026-03-26: Manual TradingView validation established the live Pine blocker the local guards had missed: TradingView enforces a hard maximum of `64` plot counts per script, hidden `display.none` plots still count, and the current Warbird indicator/strategy export surfaces exceed that budget and will not load. Repo guards and status docs were updated so parity success no longer implies loadability. The next blocking Pine checkpoint is export-budget reduction to a `<=64` live plot-count contract.
+- 2026-03-26: Applied the raw-news schema (`20260326000019`) and Supabase cron wrapper migration (`20260326000020`) to the live database, created Vault route-url secrets for Newsfilter/Finnhub, and verified live pg_cron ownership for both provider pulls. Current live blocker is no longer schema or scheduling; it is the missing Vault provider secrets `warbird_newsfilter_api_key` and `warbird_finnhub_api_key`, which cause both cron wrapper functions to skip before fetch.
+- 2026-03-26: Corrected Pine / TradingView toolchain reality in the active plan and docs. The current Codex profile does not actually have `pinescript-server`, a TradingView chart MCP, or a TradingView CLI configured, so any references to CLI/MCP chart capture are conditional future capability, not a current execution path. Present truth is: repo guard scripts + installed skills for Pine authoring, and manual TradingView UI for live chart validation and Deep Backtesting.
+- 2026-03-26: Removed Google News from the active ingestion contract after live validation showed Google RSS article links are aggregator URLs that would require custom decoding. Deleted the Google cron route and poller, locked Newsfilter as the primary curated article source, and kept Finnhub as the secondary metadata/open-data source. Validation passed with `npm run build` and `python3 -m py_compile scripts/raw_news_contract.py scripts/poll-finnhub-news.py scripts/poll-newsfilter-news.py`.
+- 2026-03-26: Absorbed execution delta for the fib-engine and validation contract: AG/training must use point-in-time fib snapshots materialized from confirmed lookback/confluence state instead of repaint-prone live chart reads, Deep Backtesting is required but not sufficient by itself, pivot state is a critical trigger/reversal gate (distance matters, but it is not the sole decision maker), intermarket trigger alignment must respect each symbol's correlative path across 15m/1H/4H, and overlapping MA/volume/trend features across the three installed harnesses must be de-duplicated by feature family.
+- 2026-03-26: Completed a bounded `news_signals` contract-alignment checkpoint: added `supabase/migrations/20260326000016_news_signal_direction.sql` with a dedicated `market_impact_direction` enum, updated the active news writers at that checkpoint to emit `BULLISH` / `BEARISH`, normalized dataset readers for legacy plus new values, and validated with `npm run build` plus `python3 -m py_compile scripts/build-dataset.py`. Next blocker: pair promoted news signals with MES price-action context before live use, then replace the legacy `warbird_forecasts_1h` path.
+- 2026-03-26: Locked the balanced architecture decision: production remains cloud-first (`provider -> cloud Supabase -> live routes/dashboard`), the local database is snapshot-based training/research only, legacy `warbird_forecasts_1h` semantics are retired in favor of MES 15m fib-outcome state (`tp1_probability`, `tp2_probability`, `reversal_risk`), and `news_signals` is locked as a derived `BULLISH`/`BEARISH` event-response surface that must be paired with price action before promotion.
+- 2026-03-26: Cut MES live ingestion to a Supabase-owned minute schedule (`supabase/migrations/20260326000015_mes_1m_supabase_cron.sql`) that calls `/api/cron/mes-1m`, removed the Supabase `mes-catchup` schedule, and reduced live MES processing to incremental `ohlcv-1m` pulls with touched-bucket `mes_15m` rollups only; `mes-catchup` now remains manual backfill/rebuild-only.
+- 2026-03-24: Applied TradingView dashboard correction in Phase 3 manual-validation path: top-right table offset tuned (down/left via spacer row/col), correlation view switched from single-symbol to the plan-frozen cross-asset set (`NQ`, `DXY`, `US10Y`, `VIX`), and strategy-side top-right panel now includes closed trades, win rate, wins/losses, and profit factor. Operator note: `1h` signal preference observed, but canonical contract remains MES `15m` unless the plan lock is explicitly reopened.
+- 2026-03-24: Added Massive provider limit guards (bounded retries, `429` handling, `Retry-After` compliance, exponential backoff) in both live cron ingestion and the 2-year backfill path to keep inflation-expectations pulls stable under plan limits.
+- 2026-03-24: Validated Massive REST auth with `MASSIVE_API_KEY` in `.env.local`, confirmed `GET /fed/v1/inflation-expectations` live pull, and completed 2-year backfill (`scripts/backfill-massive-inflation-expectations.py`) writing 165 rows across 7 provider-tagged inflation-expectation series into `econ_inflation_1d` (`2024-04-01` to `2026-03-01`).
+- 2026-03-24: Implemented `MASSIVE_API_KEY` runtime wiring in `.env.local`, added Massive inflation-expectations ingestion (`/api/cron/massive/inflation-expectations` + `scripts/backfill-massive-inflation-expectations.py`), and deactivated FRED `T5YIE`/`T10YIE` to prevent source overlap.
+- 2026-03-24: Locked a provider-agnostic macro requirement for Phase 4 (`yields`, `inflation`, `inflation expectations`, `labor market`) with Massive `/fed` endpoints approved as optional parity/fallback ingestion while Databento remains the only intraday market-data contract.
+- 2026-03-24: Validated Newsfilter Query API auth/endpoint docs and live endpoint behavior; access is API-key gated (`POST https://api.newsfilter.io/search`) and remains blocked as `pending_provider_access` until a valid key is issued.
+- 2026-03-24: Added a curated Newsfilter tertiary raw-news contract (exact source allowlist + S&P/watchlist gating) under the same Phase 4 Google/Finnhub raw-news workflow and promotion gates.
+- 2026-03-24: Added a Phase 4 plan delta for a lean Finnhub open-data secondary news feed folded into the existing Google News work, with strict relevance gating and no premium sentiment/tick dependencies.
+- 2026-03-24: Added an explicit Phase 3 manual TradingView Strategy Tester + Deep Backtesting validation protocol, evidence checklist, and close criteria to unblock deterministic Phase 3 closure before Phase 4.
+- 2026-03-24: Completed Phase 3 checkpoint 2 local parity preflight by adding `scripts/guards/check-indicator-strategy-parity.sh`, validating hidden export parity and core predicate/encoding parity between indicator and strategy, and locking manual TradingView Deep Backtesting as the remaining blocker.
+- 2026-03-24: Completed Phase 3 checkpoint 1 by creating `indicators/v6-warbird-complete-strategy.pine` as a true Pine `strategy()` with indicator-parity entry predicates, deterministic stop/target execution using the locked stop-family + `20pt+` gate, and full hidden export contract parity with `indicators/v6-warbird-complete.pine`; validation gates passed.
+- 2026-03-24: Completed Phase 2 implementation checkpoint 5 in `indicators/v6-warbird-complete.pine` by replacing the interim local pivot path with admitted BigBeluga harness signals, wiring admitted LuxAlgo MSB/OB + Luminance export families into the always-on hidden contract, and reclassifying setup-event wiring to harness-backed states; validation gates passed.
+- 2026-03-24: Plan delta absorbed from execution directive: `Luminance Breakout Engine [LuxAlgo]` is now a required exact-copy standalone harness (not later-phase candidate).
+- 2026-03-24: Completed Phase 2 implementation checkpoint 4 by admitting the required standalone exact-copy `Luminance Breakout Engine [LuxAlgo]` harness at `indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine`, confirming source access, and wiring hidden luminance harness exports for training capture.
+- 2026-03-24: Completed Phase 2 implementation checkpoint 3 by admitting the required standalone exact-copy `Market Structure Break & OB Probability Toolkit [LuxAlgo]` harness at `indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine`, confirming source access, and wiring hidden MSB/OB harness exports for training capture.
+- 2026-03-24: Completed Phase 2 implementation checkpoint 2 by admitting the required standalone exact-copy `Pivot Levels [BigBeluga]` harness at `indicators/harnesses/bigbeluga-pivot-levels-harness.pine`, confirming source access, and wiring hidden pivot harness exports for training capture.
+- 2026-03-26: Supabase is now the sole cron/function producer. `score-trades` Supabase pg_cron stopped and removed from `Supabase cron migration files`. All recurring job scheduling is Supabase pg_cron only. The app runtime is frontend dashboard and route handlers only.
+- 2026-03-26: Completed cost/abuse hardening checkpoint: public read APIs now require authenticated user cookies instead of service-role reads, admin coverage moved to low-cost Supabase RPC + 5 minute polling, dashboard duplicate polling collapsed, FRED and cross-asset ingestion made incremental, measured-moves retired as a writer in favor of `detect-setups`, dedup loops moved to unique-key upserts, and cron auth now fails closed when `CRON_SECRET` is missing.
+- 2026-03-24: Completed Phase 2 implementation checkpoint 1 in `indicators/v6-warbird-complete.pine`: structural fib-direction hardening, explicit directional `0/1` levels, bounded stop-family + `20pt+` eligibility interface, always-on hidden export contract fields, and the first always-on hidden event-response block; validation gates passed.
+- 2026-03-23: Rewrote the active plan from the live audit: locked current Supabase pg_cron reality vs target Supabase-owned runtime, exact Databento/FRED/news scope, raw Google News intake contract, cloud realtime/dashboard surfaces, and the 2-consecutive-PT1-miss rollback rule.
 - 2026-03-23: Absorbed the March 23 execution delta into an explicit phase-order lock and recorded a Phase 2 kickoff audit against `indicators/v6-warbird-complete.pine`.
-- 2026-03-23: Added audited Phase 4 operations requirements for the local PostgreSQL training warehouse, cloud publish-up tables, and packet / run lifecycle after verifying the linked Vercel project and live Supabase schema.
-- 2026-03-23: Added phased execution guide for canonical 15m contract, local-first publish-up data flow, third-party Pine admission gate, BigBeluga pivot replacement, required harness-module admission for BigBeluga plus LuxAlgo Market Structure Break & OB Probability Toolkit, and later-phase candidate evaluation rules.
+- 2026-03-23: Added audited Phase 4 operations requirements for the local PostgreSQL training warehouse, cloud publish-up tables, and packet / run lifecycle after verifying the linked Supabase project and live Supabase schema.
+- 2026-03-23: Added phased execution guide for canonical 15m contract, cloud-first production plus local training publish-up flow, third-party Pine admission gate, BigBeluga pivot replacement, required harness-module admission for BigBeluga plus LuxAlgo Market Structure Break & OB Probability Toolkit, and later-phase candidate evaluation rules.
 - 2026-03-22: Added dependency-security remediation checkpoint order (plan updates first, then implementation). Scope includes Next.js and transitive lockfile remediation plus `xlsx` ingestion-surface removal/replacement.
 - 2026-03-20: Converted the active plan into a single-indicator plan.
 - 2026-03-20: Archived older plan docs and removed them from the active path.
@@ -53,7 +86,7 @@ Deliver the best possible **fib continuation/reversal entry indicator** on Tradi
 - TP1 (1.236 extension) and TP2 (1.618 extension) path visualization
 - probability, win rate, and trade stats visible in a right-side chart table
 - AG used aggressively to improve it offline
-- Deep Backtesting used to prove it
+- manual chart validation plus point-in-time dataset checks used to prove it
 
 The goal is canonical. Whatever it takes to get there is what we do.
 
@@ -87,8 +120,9 @@ These are the required chart outputs. Each must map to a defined calculation. Ea
 3. Whatever appears in the table must map to a defined calculation.
 4. Pine must remain the visible production surface.
 5. AG is offline only — never in the live signal path.
-6. Deep Backtesting is the proof layer.
-7. **NEVER hand-roll code when a working implementation exists.** Copy the exact working code. Adapt the interface, not the internals. If you can't explain why your version differs line-by-line, you don't understand it well enough to rewrite it. Hand-rolled library integrations produce broken signals that poison AG training data.
+6. Visual chart validation and local point-in-time dataset checks must agree closely enough before a fib or trigger mechanic is trusted.
+7. Deep Backtesting and paired-strategy parity are optional research tools only; they are not active blockers for the indicator path unless explicitly reopened.
+8. **NEVER hand-roll code when a working implementation exists.** Copy the exact working code. Adapt the interface, not the internals. If you can't explain why your version differs line-by-line, you don't understand it well enough to rewrite it. Hand-rolled library integrations produce broken signals that poison AG training data.
 
 ---
 
@@ -230,18 +264,19 @@ AG's job: evaluate which stop family member works best for which fib level / reg
 
 ## Scope Freeze
 
-This plan is only for the indicator below and its paired validation strategy:
+This plan is only for the indicator below:
 
 - `AutoFib Structure + Intermarket Alerts`
 
 This plan includes:
 
 - the live indicator
-- the paired Pine strategy used for Deep Backtesting
 - the offline AG optimization loop that tunes the indicator
 
 This plan does not include:
 
+- the paired Pine strategy
+- Deep Backtesting as an active delivery blocker
 - dashboards
 - FastAPI
 - Cloudflare Tunnel
@@ -267,14 +302,14 @@ That indicator must:
 
 ### Validation
 
-The same signal logic must also exist in a Pine **strategy**.
+Validation for the active path is indicator-only.
 
-That strategy exists only to:
+Active validation exists to:
 
-- run Deep Backtesting
-- measure entry quality
-- validate that entries can hit 20+ points before stop
-- compare parameter sets over long history
+- verify live chart behavior on the canonical MES `15m` surface
+- confirm the operator-visible table/levels/labels are correct
+- check point-in-time dataset alignment for AG and offline analysis
+- reject regressions before they contaminate offline calibration work
 
 ### Optimization
 
@@ -297,7 +332,7 @@ The live chart never waits on AG.
 2. Every live entry must be explainable from Pine-visible state on that bar.
 3. No hidden server-side decision engine.
 4. No dynamic input injection hacks.
-5. The strategy and indicator must share the same core entry predicate.
+5. The indicator is the only active Pine surface. Any strategy file is research-only and cannot block indicator work unless explicitly reopened.
 6. The optimization target is not “looks smart.” It is entry quality:
    - reaches TP1 / TP2 with the `20pt+` eligibility gate satisfied
    - acceptable adverse excursion
@@ -543,6 +578,8 @@ Keep and improve:
 - active fib period selection
 - structural break re-anchoring
 - zone logic
+- lookback intelligence beyond a simple zigzag
+- point-in-time anchor stability suitable for offline snapshot materialization
 
 Add:
 
@@ -578,6 +615,12 @@ Use Pine to compute:
 - agreement score
 - hysteresis state
 - flip persistence
+
+Intermarket trigger rule:
+
+1. Each intermarket symbol must be interpreted through its own correlative path to MES, not through naive same-direction voting.
+2. Trigger quality must respect aligned 15m / 1H / 4H trend state on MES and aligned correlative-path state on the approved intermarket set.
+3. If correlation-path agreement is absent, the trigger degrades or is suppressed even if the fib geometry alone looks attractive.
 
 ### C. Volatility / Credit / Macro Engine
 
@@ -1108,30 +1151,56 @@ The March 23 execution delta is binding execution order for all Phase 2+ work:
 3. Build the always-on hidden event-response block before decorative bolt-ons.
 4. Bolt in the required exact-copy BigBeluga standalone harness.
 5. Bolt in the required exact-copy LuxAlgo Market Structure Break & OB Probability Toolkit standalone harness.
-6. Admit LuxAlgo Luminance Breakout Engine only as a later-phase exact-copy standalone harness candidate.
+6. Bolt in the required exact-copy LuxAlgo Luminance Breakout Engine standalone harness.
 7. Export real TradingView data with the fib contract plus harness outputs loaded.
-8. Run module admission in stages: fib baseline, event-response, BigBeluga, Market Structure Break & OB Probability Toolkit, optional later-phase harnesses, then parameter and joint configuration.
+8. Run module admission in stages: fib baseline, event-response, BigBeluga, Market Structure Break & OB Probability Toolkit, Luminance, then parameter and joint configuration.
+
+#### 2026-03-26 Execution Correction
+
+The project must not return to the earlier “build the full indicator zoo first” approach.
+
+From this point forward:
+
+1. Build only the minimal exportable Pine core required to generate a point-in-time training surface.
+2. Train first on that surface and publish SHAP / feature-admission evidence.
+3. Add or keep indicator modules, assets, and settings only if the training evidence shows they matter and the live Pine surface can mirror them.
+4. If a setting or module exists only because it seemed intuitively useful before training, it is a removal candidate until SHAP / admission evidence says otherwise.
+
+Minimal Pine export surface means:
+
+1. fib lines / fib-state fields
+2. pivot-state / pivot-distance fields
+3. admitted indicator and harness outputs from the canonical indicator surface
+
+It does not mean preloading extra UI/config sprawl or unrelated experimental modules into Pine before training evidence exists.
 
 #### Contract First
 
 1. The canonical trade object is now the **MES 15m fib setup**, keyed by the MES 15m bar-close timestamp in `America/Chicago`.
 2. Any remaining `1H` wording in older drafts or reference files is legacy and must not drive new implementation.
-3. Every live, strategy, dataset, and AG artifact must map back to the same 15m setup contract before any module work continues.
-4. If a candidate feature or script cannot align exactly to the 15m bar-close contract, it is research-only and cannot enter the production path.
+3. Pine is the canonical signal surface.
+4. The Next.js dashboard is the mirrored operator surface and may render the same fib engine/state alongside TradingView, but it must consume the same 15m contract rather than acting as a separate decision engine.
+5. Every live, strategy, dataset, AG, and dashboard artifact must map back to the same 15m setup contract before any module work continues.
+6. If a candidate feature or script cannot align exactly to the 15m bar-close contract, it is research-only and cannot enter the production path.
 
 #### Data Flow Rule
 
-1. Do **not** build or extend a standing cloud-to-local sync subsystem.
-2. Prefer local-first capture for indicator-enriched data:
+1. Production ownership is cloud-first:
+   - `provider -> cloud Supabase -> live routes/dashboard`
+2. Local work is training/research only:
+   - `cloud snapshots + TradingView exports/capture -> local warehouse -> publish approved artifacts back to cloud`
+3. Do **not** build or extend a standing cloud-to-local sync subsystem or a local-first production ingestion path.
+4. Use local capture only for explicit training inputs:
    - TradingView chart exports
-   - TradingView Direct Live Chart CLI / MCP capture
+   - validated local TradingView CLI / MCP capture only after the exact server or binary is installed and documented in the active environment
+   - explicit cloud snapshot loads into the local warehouse
    - local research datasets
-3. Publish promoted artifacts and dashboards **from local to cloud** only:
+5. Publish promoted artifacts **from local to cloud** only:
    - promoted packets
    - training reports
    - SHAP summaries
    - approved feature metrics
-4. Cloud remains a display / operations surface, not the recurring source of truth for indicator-enriched training sync.
+6. Cloud Supabase remains the production system of record for recurring ingestion, cron ownership, dashboard state, and operator-facing live tables.
 
 #### Third-Party Pine Admission Gate
 
@@ -1150,9 +1219,9 @@ Third-party scripts are allowed only through this gate:
 6. Only modules that survive out-of-sample admission may be folded into the main indicator / strategy pair.
 7. If exact-copy harnessing is not possible, stop the work. Do not substitute a hand-rolled internal copy.
 
-#### Required Harness Modules And Later-Phase Candidates
+#### Required Harness Modules
 
-These modules are not equal. The first two are required harness paths. The third remains a later-phase candidate only.
+These modules are required harness paths.
 
 1. **Pivot Levels [BigBeluga]**
    - Required harness module.
@@ -1174,7 +1243,7 @@ These modules are not equal. The first two are required harness paths. The third
      - if exact-copy use is blocked, do not build a substitute structure / OB engine
    - Source page: [Market Structure Break & OB Probability Toolkit](https://www.luxalgo.com/library/indicator/market-structure-break-ob-probability-toolkit/)
 3. **LuxAlgo Luminance Breakout Engine**
-   - Later-phase candidate breakout / volatility / continuation-state features.
+   - Required harness module.
    - Must enter through the standalone feature-harness path first.
    - Source page: [Luminance Breakout Engine](https://www.luxalgo.com/library/indicator/luminance-breakout-engine/)
 
@@ -1186,7 +1255,7 @@ Use these exact source pages and platform docs. Do not rely on summaries, screen
 | --- | --- | --- | --- | --- | --- |
 | `Pivot Levels [BigBeluga]` | Required | [TradingView open-source page](https://www.tradingview.com/script/h5TO1j8H-Pivot-Levels-BigBeluga/) | Script page shows `OPEN-SOURCE SCRIPT` and `Chart Source code` | Open the TradingView script page, confirm `OPEN-SOURCE SCRIPT`, click `Source code`, load it in Pine Editor, save a private working copy, then build the harness from that copy only | Pivot layer detection, level extension logic, any volume / importance logic the source exposes, mitigation / state transitions if present |
 | `Market Structure Break & OB Probability Toolkit [LuxAlgo]` | Required | [TradingView open-source page](https://www.tradingview.com/script/ObcbP092-Market-Structure-Break-OB-Probability-Toolkit-LuxAlgo/) and [LuxAlgo library page](https://www.luxalgo.com/library/indicator/market-structure-break-ob-probability-toolkit/) | TradingView script page shows `OPEN-SOURCE SCRIPT` and `Chart Source code` | Open the TradingView script page directly, confirm `OPEN-SOURCE SCRIPT`, click `Source code`, load it in Pine Editor, save a private working copy, then build the harness from that copy only | Momentum Z-Score validated MSB logic, OB creation from the candle preceding confirmed MSB, POC line logic, HP-OB score logic, session-range logic, mitigation logic, overlap filtering |
-| `Luminance Breakout Engine [LuxAlgo]` | Later-phase only | [TradingView open-source page](https://www.tradingview.com/script/FIWesyBd-Luminance-Breakout-Engine-LuxAlgo/) and [LuxAlgo library page](https://www.luxalgo.com/library/indicator/luminance-breakout-engine/) | TradingView script page shows `OPEN-SOURCE SCRIPT` and `Chart Source code` | Do not retrieve until later-phase capacity is approved. When approved, use the same TradingView source-code workflow as above | Weighted composite ROC engine, adaptive deviation envelope, breakout glow triggers, order-block origin logic, volume split stats |
+| `Luminance Breakout Engine [LuxAlgo]` | Required | [TradingView open-source page](https://www.tradingview.com/script/FIWesyBd-Luminance-Breakout-Engine-LuxAlgo/) and [LuxAlgo library page](https://www.luxalgo.com/library/indicator/luminance-breakout-engine/) | TradingView script page shows `OPEN-SOURCE SCRIPT` and `Chart Source code` | Open the TradingView script page directly, confirm `OPEN-SOURCE SCRIPT`, click `Source code`, load it in Pine Editor, save a private working copy, then build the harness from that copy only | Weighted composite ROC engine, adaptive deviation envelope, breakout glow triggers, order-block origin logic, volume split stats |
 
 Source-handling rules:
 
@@ -1281,7 +1350,7 @@ Required between-checkpoint audits:
 3. Freeze the initial v1 external series list.
 4. Eliminate any data source Pine cannot request reliably.
 5. Freeze the canonical 15m setup contract before adding any new module surface.
-6. Inventory the required harness modules and later-phase candidates as separate harnesses, not as immediate main-indicator merges.
+6. Inventory the required harness modules as separate harnesses, not as immediate main-indicator merges.
 
 Phase 1 target files and outputs:
 
@@ -1331,12 +1400,14 @@ Planned harness file paths:
 7. Add the hidden event-response block.
 8. Replace the current pivot path with the BigBeluga-based pivot harness / integration path.
 9. Bolt in the Market Structure Break & OB Probability Toolkit harness path as a required standalone module after the event-response interface is in place.
+10. Bolt in the Luminance Breakout Engine harness path as a required standalone module after MSB / OB harness admission.
 
 Phase 2 target files:
 
 - `indicators/v6-warbird-complete.pine`
 - `indicators/harnesses/bigbeluga-pivot-levels-harness.pine`
 - `indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine`
+- `indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine`
 
 Phase 2 required hidden export contract:
 
@@ -1349,7 +1420,13 @@ Phase 2 required hidden export contract:
 - `ml_regime_bucket_code`
 - `ml_session_bucket_code`
 - every event-response export listed above
-- required BigBeluga and MSB / OB harness exports once those harnesses exist
+- required BigBeluga, MSB / OB, and Luminance harness exports once those harnesses exist
+
+Live-surface constraint:
+
+- TradingView hard-caps each script at `64` plot counts.
+- Hidden `display.none` plots still count toward that cap.
+- The live indicator contract must fit within that budget even when local parity passes.
 
 Phase 2 hard implementation order:
 
@@ -1360,6 +1437,7 @@ Phase 2 hard implementation order:
 5. Add the event-response block and exports
 6. Only then start the required BigBeluga harness
 7. Only after BigBeluga source access and export contract are clean, start the required MSB / OB harness
+8. Only after MSB / OB source access and export contract are clean, start the required Luminance harness
 
 Phase 2 required audit outputs:
 
@@ -1392,8 +1470,8 @@ Current findings and blockers before edits:
    - Existing consensus/correlation/exhaustion logic is not a substitute for the required event-response module.
 4. Pivot path is still hand-rolled.
    - `ta.pivothigh/ta.pivotlow` are still the active pivot path; no BigBeluga standalone harness exists yet.
-5. Required and candidate third-party harnesses are not staged yet.
-   - No standalone exact-copy harness files exist for BigBeluga, the required Market Structure Break & OB Probability Toolkit module, or the later-phase Luminance candidate.
+5. Required third-party harnesses are not staged yet.
+   - No standalone exact-copy harness files exist for BigBeluga, the required Market Structure Break & OB Probability Toolkit module, or the required Luminance module.
 
 Baseline gate status:
 
@@ -1401,17 +1479,266 @@ Baseline gate status:
 - `./scripts/guards/check-contamination.sh` => pass.
 - `npm run build` => pass.
 
+Next blocking item at kickoff time (resolved in the checkpoint below):
+
+- Implement the Phase 2 fib-core hardening pass in `indicators/v6-warbird-complete.pine`, then define and wire the always-on hidden event-response interface before starting the required BigBeluga and Market Structure Break & OB Probability Toolkit harness work. (Resolved 2026-03-24)
+
+#### Phase 2 Checkpoint 1 Lock (2026-03-24, target: `indicators/v6-warbird-complete.pine`)
+
+Checkpoint target in one sentence: complete the first implementation hardening block by replacing midpoint-direction semantics, freezing the required hidden export interface, and shipping an always-on event-response module before any third-party harness admission.
+
+Files touched:
+
+- `indicators/v6-warbird-complete.pine`
+
+Exact line references for replaced midpoint and local pivot path usage:
+
+1. Midpoint direction replacement:
+   - previous midpoint-driven direction path removed
+   - active structural-leg direction now at `indicators/v6-warbird-complete.pine:144-154` (`regime := lowIdx > highIdx ? 1 : -1`, directional `l_zero` / `l_one`).
+2. Directional fib contract and stop/target gate now at:
+   - `indicators/v6-warbird-complete.pine:156-178` (directional fib levels, bounded stop-family interface, `targetEligible20pt`).
+3. Event-response and gating path now at:
+   - `indicators/v6-warbird-complete.pine:284-344` (cross-asset states, macro window coding, event mode coding, suppression gating, confidence scoring).
+4. Pivot interaction coding for event-response interface now at:
+   - `indicators/v6-warbird-complete.pine:200-209` (cluster count, interaction code, nearest-pivot distance).
+
+Export-field inventory before/after:
+
+- Before (required contract gaps): `ml_confidence_score`, `ml_direction_code`, `ml_setup_archetype_code`, `ml_fib_level_touched`, `ml_target_eligible_20pt`, `ml_stop_family_code`, `ml_regime_bucket_code`, `ml_session_bucket_code`, and all required `ml_event_*` fields were missing.
+- After (now present as always-on hidden exports): `ml_confidence_score`, `ml_direction_code`, `ml_setup_archetype_code`, `ml_fib_level_touched`, `ml_target_eligible_20pt`, `ml_stop_family_code`, `ml_regime_bucket_code`, `ml_session_bucket_code`, `ml_event_mode_code`, `ml_event_shock_score`, `ml_event_reversal_score`, `ml_event_volume_shock`, `ml_event_macro_window_code`, `ml_event_nq_state`, `ml_event_dxy_state`, `ml_event_zn_state`, `ml_event_vix_state`, `ml_event_pivot_interaction_code`, plus pivot contract placeholders (`ml_pivot_distance_nearest`, `ml_pivot_cluster_count`, `ml_pivot_active_zone_code`).
+
+Harness source-access confirmation:
+
+- BigBeluga pivot harness: not started in this checkpoint (source access pending).
+- Market Structure Break & OB Probability Toolkit harness: not started in this checkpoint (source access pending).
+- Luminance harness: not started in this checkpoint (status at checkpoint time; later reclassified as required on 2026-03-24).
+
+Still-missing export fields:
+
+- Required third-party harness-family exports (BigBeluga + MSB/OB internals) are still missing because harness admission has not started yet.
+
+Validation gates run:
+
+- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass (warning only: visible plots)
+- `./scripts/guards/check-contamination.sh` => pass
+- `npm run build` => pass
+
 Next blocking item:
 
-- Implement the Phase 2 fib-core hardening pass in `indicators/v6-warbird-complete.pine`, then define and wire the always-on hidden event-response interface before starting the required BigBeluga and Market Structure Break & OB Probability Toolkit harness work.
+- Start the required exact-copy `Pivot Levels [BigBeluga]` standalone harness admission path (source access confirmation + harness file creation + hidden export contract wiring) before touching the required MSB / OB harness.
 
-### Phase 3: Strategy Build
+#### Phase 2 Checkpoint 2 Lock (2026-03-24, target: `indicators/harnesses/bigbeluga-pivot-levels-harness.pine`)
+
+Checkpoint target in one sentence: land the required BigBeluga module as a standalone exact-copy harness with a stable hidden export surface before starting the required MSB / OB harness path.
+
+Files touched:
+
+- `indicators/harnesses/bigbeluga-pivot-levels-harness.pine`
+
+Harness source-access confirmation:
+
+- Source page: [Pivot Levels [BigBeluga]](https://www.tradingview.com/script/h5TO1j8H-Pivot-Levels-BigBeluga/)
+- `OPEN-SOURCE SCRIPT`: confirmed on the TradingView script page.
+- `Source code`: confirmed available on the TradingView script page.
+- Retrieved source body used for this checkpoint came from the script page source path and was then staged as a private local harness copy before interface wiring.
+
+Exact-copy scope confirmation:
+
+- Original BigBeluga internals are preserved in `indicators/harnesses/bigbeluga-pivot-levels-harness.pine:1-128`.
+- Interface-only harness wiring is appended in `indicators/harnesses/bigbeluga-pivot-levels-harness.pine:131-177` and does not rewrite source internals.
+
+Hidden export inventory for the BigBeluga harness:
+
+- `ml_pivot_distance_nearest`
+- `ml_pivot_cluster_count`
+- `ml_pivot_active_zone_code` (`1=support`, `2=resistance`, `3=active`; `0` fallback when no display layer is available)
+- `ml_pivot_layer_length` (active nearest layer length)
+- `ml_pivot_volume_nearest` (nearest layer-side volume)
+- `ml_pivot_volume_distribution_pct` (nearest layer-side share of displayed pivot volume)
+
+Still-missing fields / integration work after this checkpoint:
+
+- Main indicator pivot path replacement is still pending; `indicators/v6-warbird-complete.pine` remains on the interim local pivot logic until the integration checkpoint.
+- Required MSB / OB harness exports remain missing because that required harness has not started yet.
+
+Validation gates run:
+
+- `./scripts/guards/pine-lint.sh indicators/harnesses/bigbeluga-pivot-levels-harness.pine` => pass (warning only: visible plots)
+- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass (warning only: visible plots)
+- `./scripts/guards/check-contamination.sh` => pass
+- `npm run build` => pass
+
+Next blocking item:
+
+- Start required exact-copy source-access confirmation and standalone harness admission for `Market Structure Break & OB Probability Toolkit [LuxAlgo]` before any BigBeluga-to-main-indicator integration or Luminance harness work.
+
+#### Phase 2 Checkpoint 3 Lock (2026-03-24, target: `indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine`)
+
+Checkpoint target in one sentence: land the required LuxAlgo MSB/OB module as a standalone exact-copy harness with a stable hidden export surface before the required Luminance harness work.
+
+Files touched:
+
+- `indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine`
+
+Harness source-access confirmation:
+
+- Source page: [TradingView open-source page](https://www.tradingview.com/script/ObcbP092-Market-Structure-Break-OB-Probability-Toolkit-LuxAlgo/)
+- Library page: [LuxAlgo library page](https://www.luxalgo.com/library/indicator/market-structure-break-ob-probability-toolkit/)
+- `OPEN-SOURCE SCRIPT`: confirmed on the TradingView script page.
+- `Source code`: confirmed available on the TradingView script page.
+- Retrieved source body for this checkpoint was staged from the open-source script path and locked as the standalone harness body before interface wiring.
+
+Exact-copy scope confirmation:
+
+- Original LuxAlgo internals are preserved in `indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine:1-330`.
+- Interface-only harness wiring is appended in `indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine:332-380` and does not rewrite source internals.
+
+Hidden export inventory for the LuxAlgo harness:
+
+- `ml_msb_direction_code` (`1=bull`, `-1=bear`, `0=none`)
+- `ml_msb_momentum_zscore`
+- `ml_msb_bull_break`
+- `ml_msb_bear_break`
+- `ml_ob_active_count`
+- `ml_ob_hpz_active_count`
+- `ml_ob_nearest_distance`
+- `ml_ob_nearest_quality_score`
+- `ml_ob_nearest_poc`
+- `ml_ob_nearest_direction_code`
+- `ml_ob_nearest_mitigated_code`
+- `ml_ob_reliability_pct`
+
+Still-missing fields / integration work after this checkpoint:
+
+- Main indicator integration is still pending; `indicators/v6-warbird-complete.pine` does not yet consume the standalone BigBeluga and LuxAlgo harness exports.
+- Pivot-path replacement in the main indicator remains pending until the integration checkpoint.
+
+Validation gates run:
+
+- `./scripts/guards/pine-lint.sh indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine` => pass (warning only: visible plots)
+- `./scripts/guards/pine-lint.sh indicators/harnesses/bigbeluga-pivot-levels-harness.pine` => pass (warning only: visible plots)
+- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass (warning only: visible plots)
+- `./scripts/guards/check-contamination.sh` => pass
+- `npm run build` => pass
+
+Next blocking item (superseded by plan delta on 2026-03-24):
+
+- Start the Phase 2 main-indicator integration checkpoint to replace the interim local pivot path with the admitted BigBeluga harness signals and wire the admitted LuxAlgo MSB/OB harness-family exports into the canonical hidden export contract in `indicators/v6-warbird-complete.pine`. (Superseded by required Luminance harness admission)
+
+#### Phase 2 Checkpoint 4 Lock (2026-03-24, target: `indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine`)
+
+Checkpoint target in one sentence: land the required LuxAlgo Luminance module as a standalone exact-copy harness with a stable hidden export surface before main-indicator integration.
+
+Files touched:
+
+- `indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine`
+
+Harness source-access confirmation:
+
+- Source page: [TradingView open-source page](https://www.tradingview.com/script/FIWesyBd-Luminance-Breakout-Engine-LuxAlgo/)
+- Library page: [LuxAlgo library page](https://www.luxalgo.com/library/indicator/luminance-breakout-engine/)
+- `OPEN-SOURCE SCRIPT`: confirmed on the TradingView script page.
+- `Source code`: confirmed available on the TradingView script page.
+- Retrieved source body for this checkpoint was staged from the open-source script path and locked as the standalone harness body before interface wiring.
+
+Exact-copy scope confirmation:
+
+- Original LuxAlgo Luminance internals are preserved in `indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine:1-306`.
+- Interface-only harness wiring is appended in `indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine:308-360` and does not rewrite source internals.
+
+Hidden export inventory for the Luminance harness:
+
+- `ml_luminance_signal`
+- `ml_luminance_upper_threshold`
+- `ml_luminance_lower_threshold`
+- `ml_luminance_intensity`
+- `ml_luminance_direction_code`
+- `ml_luminance_breakout_code`
+- `ml_luminance_over_upper`
+- `ml_luminance_over_lower`
+- `ml_luminance_bull_ob_active_count`
+- `ml_luminance_bear_ob_active_count`
+- `ml_luminance_bull_ob_mitigated_count`
+- `ml_luminance_bear_ob_mitigated_count`
+- `ml_luminance_bull_ob_nearest_distance`
+- `ml_luminance_bear_ob_nearest_distance`
+- `ml_luminance_bull_ob_nearest_intensity`
+- `ml_luminance_bear_ob_nearest_intensity`
+
+Still-missing fields / integration work after this checkpoint:
+
+- Main indicator integration is still pending; `indicators/v6-warbird-complete.pine` does not yet consume the standalone BigBeluga, LuxAlgo MSB/OB, and LuxAlgo Luminance harness exports.
+- Pivot-path replacement in the main indicator remains pending until the integration checkpoint.
+
+Validation gates run:
+
+- `./scripts/guards/pine-lint.sh indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine` => pass (warning only: visible plots)
+- `./scripts/guards/pine-lint.sh indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine` => pass (warning only: visible plots)
+- `./scripts/guards/pine-lint.sh indicators/harnesses/bigbeluga-pivot-levels-harness.pine` => pass (warning only: visible plots)
+- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass (warning only: visible plots)
+- `./scripts/guards/check-contamination.sh` => pass
+- `npm run build` => pass
+
+Next blocking item:
+
+- Start the Phase 2 main-indicator integration checkpoint to replace the interim local pivot path with the admitted BigBeluga harness signals and wire the admitted LuxAlgo MSB/OB and LuxAlgo Luminance harness-family exports into the canonical hidden export contract in `indicators/v6-warbird-complete.pine`.
+
+#### Phase 2 Checkpoint 5 Lock (2026-03-24, target: `indicators/v6-warbird-complete.pine`)
+
+Checkpoint target in one sentence: replace the interim local pivot-event path with admitted harness-backed signals and complete the canonical hidden export contract inside the live main indicator.
+
+Files touched:
+
+- `indicators/v6-warbird-complete.pine`
+
+Integration scope completed in this checkpoint:
+
+- Replaced the interim local pivot-event wiring with admitted BigBeluga-derived pivot state (`ml_pivot_*` family) for interaction code, nearest distance, cluster count, and active-zone state.
+- Wired admitted LuxAlgo MSB/OB feature family into the main indicator hidden contract:
+  - `ml_msb_*`
+  - `ml_ob_*`
+- Wired admitted LuxAlgo Luminance feature family into the main indicator hidden contract:
+  - `ml_luminance_signal`
+  - `ml_luminance_upper_threshold`
+  - `ml_luminance_lower_threshold`
+  - `ml_luminance_intensity`
+  - `ml_luminance_direction_code`
+  - `ml_luminance_breakout_code`
+  - `ml_luminance_over_upper`
+  - `ml_luminance_over_lower`
+  - `ml_luminance_bull_ob_active_count`
+  - `ml_luminance_bear_ob_active_count`
+  - `ml_luminance_bull_ob_mitigated_count`
+  - `ml_luminance_bear_ob_mitigated_count`
+  - `ml_luminance_bull_ob_nearest_distance`
+  - `ml_luminance_bear_ob_nearest_distance`
+  - `ml_luminance_bull_ob_nearest_intensity`
+  - `ml_luminance_bear_ob_nearest_intensity`
+- Added remaining BigBeluga export fields to the main indicator contract:
+  - `ml_pivot_layer_length`
+  - `ml_pivot_volume_nearest`
+  - `ml_pivot_volume_distribution_pct`
+
+Validation gates run:
+
+- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass (warning only: visible plots)
+- `./scripts/guards/check-contamination.sh` => pass
+- `npm run build` => pass
+
+Next blocking item:
+
+- Restore the active indicator-only contract and operator-approved visuals in `indicators/v6-warbird-complete.pine` without strategy dependencies or Deep Backtesting requirements.
+
+### Phase 3: Strategy Path (retired from active scope on 2026-03-26)
+
+Historical record only. The paired strategy, parity guard, and Deep Backtesting protocol below are no longer active blockers for the indicator unless the user explicitly reopens them.
 
 1. Port the shared logic into a Pine strategy.
 2. Implement stop / target mechanics.
 3. Add 20-point minimum target gate.
 4. Run Deep Backtesting over the longest reliable MES history.
-5. Keep required harness modules and later-phase bolt-ons isolated behind shared feature flags until they survive training admission.
+5. Keep required harness modules and any additional bolt-ons isolated behind shared feature flags until they survive training admission.
 
 Phase 3 target file:
 
@@ -1427,6 +1754,203 @@ Phase 3 must prove:
 
 Phase 3 validation checklist must compare indicator and strategy outputs for the same historical bars before Phase 4 begins.
 
+#### Phase 3 Checkpoint 1 Lock (2026-03-24, target: `indicators/v6-warbird-complete-strategy.pine`)
+
+Checkpoint target in one sentence: convert the planned strategy surface from placeholder to executable Pine strategy while preserving indicator parity for setup predicate and hidden export contract.
+
+Files touched:
+
+- `indicators/v6-warbird-complete-strategy.pine`
+
+Implementation completed in this checkpoint:
+
+- Converted top-level declaration from `indicator(...)` to `strategy(...)` with bar-close-safe execution (`process_orders_on_close = true`) and no pyramiding.
+- Preserved the same core entry predicates as the indicator:
+  - `longSignal`
+  - `shortSignal`
+  - same `targetEligible20pt` gating
+  - same event-suppression path
+- Added deterministic strategy execution layer:
+  - snapshot stop and target levels on signal
+  - long/short flip handling
+  - `strategy.exit` with split TP1/TP2 logic and shared stop
+- Preserved full hidden export contract parity with the indicator (`ml_*` family) at the time of the checkpoint. The current canonical contract is re-hardened in Phase 3 checkpoint 3 and includes the required `ml_pivot_*`, `ml_msb_*`, `ml_ob_*`, and `ml_luminance_*` fields without the retired legacy session-activity exports.
+
+Validation gates run:
+
+- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete-strategy.pine` => pass (warning only: visible plots)
+- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass (warning only: visible plots)
+- hidden export parity check (`ml_*` names): indicator count `107`, strategy count `107`, no diff
+- `./scripts/guards/check-contamination.sh` => pass
+- `npm run build` => pass
+
+Next blocking item:
+
+- Run the Phase 3 indicator-vs-strategy parity checklist across the same historical bars, then execute Deep Backtesting and document any predicate/exit drift before opening Phase 4.
+
+#### Phase 3 Checkpoint 2 Lock (2026-03-24, target: strategy-indicator parity preflight)
+
+Checkpoint target in one sentence: execute repeatable local parity gates that verify indicator/strategy contract and signal encoding alignment before manual TradingView validation.
+
+Files touched:
+
+- `scripts/guards/check-indicator-strategy-parity.sh`
+
+Local parity preflight completed in this checkpoint:
+
+- Added a dedicated parity guard script that fails on:
+  - hidden export contract drift (`ml_*` names)
+  - core predicate drift for:
+    - `longSignal`
+    - `shortSignal`
+    - `setupArchetypeCode`
+    - `eventModeCode`
+    - `eventPivotInteractionCode`
+    - stop-family and `20pt+` gate encodings
+  - missing strategy execution primitives (`strategy.entry` / `strategy.exit` split TP handling)
+- Verified the strategy still passes Pine lint and project build gates after parity guard admission.
+
+Validation gates run:
+
+- `bash scripts/guards/check-indicator-strategy-parity.sh` => pass
+- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete-strategy.pine` => pass (warning only: visible plots)
+- `./scripts/guards/check-contamination.sh` => pass
+- `npm run build` => pass
+
+Manual constraint acknowledged in this checkpoint:
+
+- Deep Backtesting and same-bar visual/pnl parity cannot be completed from the terminal-only path in this repo and must be run in TradingView Strategy Tester / Deep Backtesting UI.
+
+Next blocking item:
+
+- Run manual TradingView Strategy Tester + Deep Backtesting parity validation for `indicators/v6-warbird-complete-strategy.pine` against `indicators/v6-warbird-complete.pine` on the same MES 15m history window, then document drift findings before Phase 4.
+
+#### Phase 3 Checkpoint 3 Lock (2026-03-26, target: predicate hardening + contract re-parity)
+
+Checkpoint target in one sentence: re-harden the shared indicator/strategy live predicate around the already-computed setup archetypes and remove strategy-side hidden-export drift that reintroduced retired legacy ML fields.
+
+Files touched:
+
+- `indicators/v6-warbird-complete.pine`
+- `indicators/v6-warbird-complete-strategy.pine`
+- `WARBIRD_MODEL_SPEC.md`
+
+Implementation completed in this checkpoint:
+
+- Tightened the shared live signal predicate in both Pine surfaces so `longSignal` / `shortSignal` now require a direction-aligned setup archetype in addition to the existing velocity cross, MTF alignment, regime, midpoint, `20pt+`, and event-suppression gates.
+- Locked signal-eligible setup archetypes to:
+  - `1` = accept continuation
+  - `2` = zone rejection
+  - `3` = pivot continuation
+  - `5` = reentry after TP1
+- Left setup archetype `4` (`failed move reversal`) as reversal context only; it does not authorize a same-direction continuation entry.
+- Removed strategy-only hidden-export drift that had broken parity:
+  - deleted the `showMLData` input/gating path
+  - retired legacy `ml_session_*` activity flags from the strategy export surface
+  - retired legacy `ml_fib_regime`
+  - retired legacy `.786` and `1.0` export families
+- Re-hardened local indicator/strategy parity and unified the hidden export surface, but manual TradingView validation then proved the combined live plot budget is still invalid because the current export surface exceeds TradingView's hard `64` plot-count cap.
+- Follow-up Pine checkpoint completed after that validation: reduced the live indicator/strategy hidden export packet to the `52`-field minimum contract so the scripts now fit inside TradingView's plot budget (`53` total plot-style calls in the indicator, `56` in the strategy).
+
+Validation gates run:
+
+- `scripts/guards/check-indicator-strategy-parity.sh` => pass before plot-budget validation was added; this proved parity only, not TradingView loadability
+- `scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass before plot-budget validation was added
+- `scripts/guards/pine-lint.sh indicators/v6-warbird-complete-strategy.pine` => pass before plot-budget validation was added
+
+Backend checkpoint implemented in this follow-up:
+
+- Added `supabase/migrations/20260326000021_admin_coverage_15m_fix.sql` to rewrite `get_admin_table_coverage()` so it no longer references retired `warbird_forecasts_1h`, tolerates missing tables, and uses `bar_close_ts` when present instead of assuming every table exposes `ts`.
+- Updated `app/api/cron/mes-1m/route.ts` so the `market_closed` and `no_gap` early-return paths now write `job_log` rows with `SKIPPED` status before returning.
+- Reworked `supabase/migrations/20260326000018_15m_canonical_cutover.sql` so the five live execution tables are preserved through cutover rather than hard-dropped:
+  - one-time backup copies are created as `*_legacy_20260326`
+  - new 15m-canonical tables are created under the production names
+  - existing trigger / conviction / setup / setup-event / risk rows are copied forward into the new schema with preserved primary keys and sequence reset
+- Reduced the live Pine hidden export surface to the minimum `52`-field contract in both `indicators/v6-warbird-complete.pine` and `indicators/v6-warbird-complete-strategy.pine`, which brings the live scripts back under TradingView's `64`-plot hard cap.
+
+Validation gates run:
+
+- `scripts/guards/check-indicator-strategy-parity.sh` => pass after plot-budget reduction; hidden export names remain equal and total plot-style counts now fit under TradingView's hard cap.
+- `npm run build` => pass after the admin coverage RPC repair, cutover preservation patch, and `mes-1m` skip-path logging changes.
+
+Next blocking item:
+
+- Rerun manual Phase 3 TradingView validation on the hardened shared predicate now that the scripts fit inside the live plot budget, then close Phase 3 or capture any remaining live-chart defects.
+
+#### Phase 3 Manual TradingView Validation Protocol (required before Phase 4)
+
+Use this exact protocol to close the remaining Phase 3 blocker.
+
+Manual execution scope:
+
+1. TradingView chart symbol and timeframe:
+   - symbol: canonical MES continuous contract used in live workflow
+   - timeframe: `15m`
+2. Load both scripts on the same chart:
+   - `indicators/v6-warbird-complete.pine`
+   - `indicators/v6-warbird-complete-strategy.pine`
+3. Ensure both scripts use identical inputs for:
+   - stop-family selection
+   - `20pt+` eligibility gate
+   - event-response and harness-related settings
+4. Run Strategy Tester baseline on the chosen history window.
+5. Run Deep Backtesting on the same history window.
+
+Deep Backtesting stance for this protocol:
+
+1. Use Deep Backtesting for long-history metrics and date-range stress tests.
+2. Do not use Deep Backtesting as the sole bar-level truth source.
+3. TradingView documents that Deep Backtesting can differ from regular mode because calculation starts earlier or at the custom range start, which changes stateful calculations such as EMA/RMA, and Deep Backtesting results are not drawn on the chart itself.
+4. On MES `15m`, Bar Magnifier should be enabled during serious validation because TradingView uses lower-timeframe data for more realistic intrabar fills when available.
+5. If regular Strategy Tester, Deep Backtesting, and chart inspection disagree materially, treat that as a blocker to investigate rather than as proof that one surface is automatically correct.
+
+Required parity checks:
+
+1. Entry predicate parity:
+   - every strategy long entry aligns to a visible indicator long signal on the same bar
+   - every strategy short entry aligns to a visible indicator short signal on the same bar
+2. Event-response parity:
+   - no strategy entries during obvious indicator suppress states (`eventModeCode` suppress set)
+3. Stop/target parity:
+   - strategy exits occur only through configured stop + TP path (TP1/TP2 split model)
+4. Contract parity:
+   - hidden export names remain equal (`ml_*` contract parity already gate-checked locally)
+
+Required evidence capture (record in this plan checkpoint before opening Phase 4):
+
+1. Chart metadata:
+   - symbol
+   - timeframe
+   - history window start/end
+2. Strategy Tester summary metrics:
+   - net profit
+   - profit factor
+   - percent profitable
+   - max drawdown
+   - total closed trades
+3. Deep Backtesting summary metrics:
+   - net profit
+   - profit factor
+   - percent profitable
+   - max drawdown
+   - total closed trades
+4. Bar Magnifier notes:
+   - whether Bar Magnifier was enabled
+   - whether fill-path behavior changed materially with it on
+5. Drift notes:
+   - count of observed entry-bar mismatches (if any)
+   - count of observed exit-path mismatches (if any)
+   - root-cause notes for any mismatch
+
+Phase 3 close criteria:
+
+1. Manual Strategy Tester and Deep Backtesting runs completed on MES `15m`.
+2. Bar Magnifier impact reviewed and recorded.
+3. No unresolved entry predicate mismatches.
+4. No unresolved stop-family / `20pt+` gate mismatches.
+5. Drift notes and metrics are written into this active plan.
+6. Next blocking item updated to Phase 4 dataset + AG loop kickoff.
+
 ### Phase 4: Dataset + AG Loop
 
 1. Export chart data with the final feature columns.
@@ -1434,13 +1958,21 @@ Phase 3 validation checklist must compare indicator and strategy outputs for the
 3. Train AG on settings and feature robustness.
 4. Select the best candidate rule set.
 5. Train module admission first, then parameter admission, then joint configuration.
-6. Treat each required or candidate third-party script as a standalone exported feature family before main-indicator promotion.
+6. Treat each required third-party script as a standalone exported feature family before main-indicator promotion.
 7. Publish results upward from local after evaluation; do not add a recurring cloud-to-local sync layer.
+
+Phase 4 decision rule:
+
+1. Phase 4 is the filter for what truly earns its way into the live indicator.
+2. SHAP, admission reports, and out-of-sample validation decide which assets, modules, and setting families survive.
+3. Do not expand the live indicator with additional settings or “zoo” modules ahead of that evidence.
+4. Minimal exportability comes before expansion; evidence-driven promotion comes before UI/config sprawl.
 
 Phase 4 exact local targets:
 
 - local PostgreSQL database: `warbird_training`
 - local AG scripts:
+  - `scripts/ag/build-fib-snapshots.py`
   - `scripts/ag/load-source-snapshots.py`
   - `scripts/ag/build-fib-dataset.py`
   - `scripts/ag/compute-features.py`
@@ -1449,15 +1981,16 @@ Phase 4 exact local targets:
   - `scripts/ag/generate-packet.py`
   - `scripts/ag/publish-artifacts.py`
 - raw-news intake surfaces:
-  - `supabase/migrations/20260323000013_news_rss.sql`
-  - `scripts/poll-google-news.py`
+  - `supabase/migrations/20260326000019_news_raw_extraction_and_scoring.sql`
+  - `scripts/poll-finnhub-news.py`
+  - `scripts/poll-newsfilter-news.py`
 
 Phase 4 exact training order:
 
 1. fib + event-response baseline only
 2. BigBeluga admission
 3. Market Structure Break & OB Probability Toolkit admission
-4. optional later-phase harness admission
+4. Luminance Breakout Engine admission
 5. parameter admission inside surviving modules
 6. joint configuration on surviving modules only
 
@@ -1487,8 +2020,12 @@ Phase 4 exact local warehouse entities:
   - `news_signals`
   - `geopolitical_risk_1d`
   - `trump_effect_1d`
-  - `econ_news_rss_articles`
-  - `econ_news_rss_article_segments`
+  - `econ_news_topics`
+  - `econ_news_article_assessments`
+  - `econ_news_finnhub_articles`
+  - `econ_news_finnhub_article_segments`
+  - `econ_news_newsfilter_articles`
+  - `econ_news_newsfilter_article_segments`
 - `training_runs`
 - `features_catalog`
 - `shap_results`
@@ -1624,6 +2161,13 @@ AG helps answer not just entry/targets but also:
 
 **Pine indicator = production interface. AG = optimizer for that interface.**
 
+Operational correction:
+
+1. We do not pre-load the indicator with every plausible rule, asset, and setting family and then hope AG sorts it out later.
+2. We build the minimal exportable core first.
+3. AG + SHAP + admission testing decide what is actually important.
+4. Only then do surviving assets, settings, and feature families earn permanent places in the live indicator and packet contract.
+
 Before AG is fully useful, the indicator needs a defined contract:
 
 - Inputs (all tunable parameters)
@@ -1654,19 +2198,20 @@ Then AG can output things like:
 Training data comes from **two sources**:
 
 1. **Supabase DB / local research extracts** — MES 15m OHLCV, cross-asset prices, FRED economic series, GPR index, Trump Effect, news signals, economic calendar, pulled into local research workflows without introducing a standing cloud-to-local sync subsystem
-2. **TradingView local exports / CLI-MCP capture** — indicator-specific columns (MACD, RSI, Heikin Ashi, third-party feature harness outputs, etc.) that map to the exact indicators on Kirk's chart
+2. **TradingView local exports and any later-validated chart capture tooling** — fib lines, pivot-state fields, and admitted indicator / harness outputs from the canonical indicator surface. Do not assume CLI/MCP chart capture exists until the exact tool is installed and documented.
 
 For indicators present on the TradingView chart but not yet in our dataset, we **create the missing indicator in Pine Script first** (using Pine tools and skills), **test it**, then add its output to the training dataset alongside the rest of the data.
 
 The dataset builder must:
 
 1. Pull base OHLCV + cross-asset + macro data into the local research workflow without adding a recurring sync subsystem
-2. Ingest TradingView exports / CLI-MCP captures for indicator columns
-3. Create and test any missing Pine indicators or standalone feature harnesses needed for features
-4. Identify every fib pullback event in the history
-5. Compute all features at each pullback
-6. Generate forward-looking labels (TP1/TP2 hit, reversal, stop, pullback depth)
-7. Output a single CSV ready for AG training
+2. Ingest TradingView exports for indicator columns, plus any later-validated CLI/MCP chart captures only after the exact tool is installed and documented
+3. Materialize point-in-time fib snapshots before downstream feature assembly
+4. Create and test any missing Pine indicators or standalone feature harnesses needed for features
+5. Identify every fib pullback event in the history from the snapshot surface
+6. Compute all features at each pullback
+7. Generate forward-looking labels (TP1/TP2 hit, reversal, stop, pullback depth)
+8. Output a single CSV ready for AG training
 
 #### Locked Dataset Alignment Contract
 
@@ -1697,6 +2242,28 @@ The dataset builder must obey these alignment rules:
 9. **Leakage check**
    - the builder must run a final leakage audit confirming that no joined feature timestamp exceeds the MES row timestamp
 
+#### Fib Snapshot Surface For AG
+
+The fib engine is a first-class state surface and must be materialized point-in-time for training.
+
+Rules:
+
+1. AG training must consume explicit fib snapshots, not ad hoc recomputation from a fully known history window.
+2. The snapshot builder must emit one row per MES 15m bar close, keyed by the canonical bar timestamp.
+3. Each snapshot may use only data available at or before that bar close, including pivot confirmation/right-bar rules.
+4. Once a snapshot row is written for a bar, later anchor discoveries may not rewrite that historical row.
+5. Snapshot rows must record, at minimum:
+   - active anchor high / low
+   - anchor timestamps / bar indexes
+   - selected lookback family or period set
+   - active fib direction
+   - 0 / 1 / pivot / TP1 / TP2 prices
+   - target-eligibility state
+   - pivot-distance and pivot-state fields used by the trigger
+6. The canonical implementation surface for offline fib snapshots is Python in `scripts/ag/build-fib-snapshots.py`, because it needs deterministic materialization for AG and leakage audits.
+7. A simple zigzag-only anchor path is not sufficient for Warbird. The engine must preserve the lookback/confluence intelligence that makes the fib state useful, while still being point-in-time clean.
+8. User-referenced non-open-source fib indicators, including `Auto Fib Golden Target (with custom text)` when source is unavailable, may be behavior references only. They are not approved code sources and may not be cloned internally.
+
 #### Feature Boundary — Two Tiers
 
 **Tier 1: Pine-Live Features** — computable in Pine from chart OHLCV, `request.security()`, `request.economic()`, or Pine transforms. These drive the live indicator signal.
@@ -1705,9 +2272,33 @@ The dataset builder must obey these alignment rules:
 
 **Rule:** AG trains on everything available. But only Tier 1 features can become production features. Tier 2 insights must pass through a Pine-analogue gate before they influence the live indicator.
 
+#### Feature-Family De-Duplication Rule
+
+The three installed harnesses are signal sources, not permission to flood the model with redundant variants of the same concept.
+
+Rules:
+
+1. Do not keep overlapping MA / trend / volume features from multiple surfaces unless they encode materially different information.
+2. If a harness already exports the canonical state for a concept family, a separate hand-built copy of that same family is research-only until it proves additive value.
+3. Prefer harness-native volume / structure / order-block / breakout states over generic duplicated proxies when the harness is exact-copy and admitted.
+4. AG admission should compare feature families, not reward the same idea repeated in different columns.
+
+Neural-layer policy (research-only unless promoted):
+
+1. Neural feature extraction from text/event data is allowed for offline discovery only.
+2. Candidate neural cues include policy/lobbying-style event text, obscure news context, and cross-source narrative drift.
+3. Neural outputs must be timestamp-aligned to MES 15m bar close and leak-audited before any model training use.
+4. No neural score may enter live Pine unless a deterministic Pine-analogue or mirrored-live contract is proven additive and non-breaking.
+
 #### Pine-Reproducible Feature Set
 
 **A. Fib Structure Features** (from chart OHLCV)
+
+Fib-structure rules:
+
+1. The live and offline fib engine may use confirmed lookback/confluence logic, but the training surface must come from frozen point-in-time snapshots.
+2. Do not reduce the Warbird fib engine to a simple zigzag feature family.
+3. Pivot distance and pivot-state features are critical to trigger admission and reversal derivation, but they are not the sole final decision maker.
 
 | Feature | Pine Source | Description |
 |---------|------------|-------------|
@@ -1769,8 +2360,9 @@ AG trains on the FULL economic context from all 10 Supabase FRED tables + GPR + 
 | Full FRED series (all 10 tables) | Supabase `econ_*_1d` | Must find exact `request.economic()` equivalent OR prove a Tier 1 proxy (e.g., US10Y, VIX) captures the same signal |
 | GPR geopolitical risk index | Supabase `geopolitical_risk_1d` | Must prove VIX + intermarket captures the same signal, OR stays research-only |
 | Trump Effect / policy uncertainty | Supabase `trump_effect_1d` | Must prove a Pine time/calendar analogue exists, OR stays research-only |
-| News signal counts by segment | Supabase `news_signals` | Must prove time-of-day + volatility proxy captures the same effect, OR stays research-only |
+| Bullish/bearish news polarity counts and event buckets | Supabase `news_signals` | Must prove a mirrored-live contract that pairs polarity with price action, session timing, and volatility context, OR stays research-only |
 | Economic calendar events | Supabase + user-maintained | Pine calendar logic (`is_fomc_week`, `is_cpi_day`) IF AG proves these events materially change outcomes |
+| Neural text/event cues (policy/lobbying/obscure narrative signals) | multi-source raw news + policy/event disclosures | Must prove a deterministic mirrored-live contract or Pine analogue exists, OR stays research-only |
 
 **Promotion gate:** A Tier 2 insight only enters Pine if there is an exact Pine analogue that AG can prove correlates. "AG discovered it matters" is not enough — "AG proved Pine feature X captures the same signal" is required.
 
@@ -2207,6 +2799,7 @@ PINE IMPLEMENTATION NOTES
 
 | File | Purpose |
 |------|---------|
+| `scripts/ag/build-fib-snapshots.py` | Materialize point-in-time MES 15m fib state snapshots with frozen anchors and trigger-context fields for AG |
 | `scripts/ag/build-fib-dataset.py` | Find all fib pullback events, compute features (Tier 1 + Tier 2 from Supabase), generate labels |
 | `scripts/ag/train-fib-model.py` | TP1/TP2 probability models + stop-family evaluation with walk-forward CV |
 | `scripts/ag/evaluate-configs.py` | Parameter grid evaluation — each config maps to a Pine input set |
@@ -2218,28 +2811,33 @@ Existing files (`build-dataset.py`, `train-warbird.py`, `fib-engine.ts`, `trigge
 
 ### 14. Audited Runtime, Scheduling, and Ownership Snapshot (2026-03-23)
 
-This snapshot is based on the linked Vercel project, the repo runtime surfaces, the production environment variable set, and the live Supabase/Postgres database.
+This snapshot is based on the linked Supabase project, the repo runtime surfaces, the production environment variable set, and the live Supabase/Postgres database.
 
 #### Verified live environment
 
-1. Vercel project `warbird-pro` is linked and active as a Next.js deployment.
+1. Supabase project `warbird-pro` is linked and active as a Next.js deployment.
 2. Production environment variables include the required Supabase/Postgres connection surface plus `DATABENTO_API_KEY` and `FRED_API_KEY`.
-3. Supabase cloud has 12 applied migrations (`20260315000001` through `20260318000012`) plus the new raw-news migration staged in-repo.
+3. Supabase cloud now has the raw-news schema and raw-news Supabase cron wrapper migrations applied live (`20260326000019`, `20260326000020`) in addition to the earlier baseline schema.
 4. Local PostgreSQL 17 is installed, running on `:5432`, and `warbird_training` now exists locally.
 5. The repo currently has **no** `supabase/functions/` directory and **no** repo-owned `pg_cron` schedule definitions.
 
-#### Current runtime ownership: Vercel cron -> Next.js API routes
+#### Current runtime ownership: Supabase pg_cron is the sole schedule producer
 
-The current recurring job layer is still owned by Vercel cron and App Router route handlers.
+Supabase pg_cron owns all recurring job scheduling. Supabase hosts the Next.js App Router route handlers that pg_cron calls via pg_net. Supabase does not own any cron schedules.
+
+1. All recurring jobs are triggered by Supabase pg_cron via pg_net HTTP POST to the App Router route.
+2. Supabase is retained only for dashboard delivery and read-oriented API/UI surfaces.
 
 | Responsibility | Current route | Current schedule | Current write surface |
 | --- | --- | --- | --- |
-| MES catch-up | `app/api/cron/mes-catchup/route.ts` | `*/5 * * * 0-5` | `mes_1m`, `mes_15m`, `mes_1h`, `mes_4h`, `mes_1d`, `job_log` |
+| MES minute pull (primary) | `app/api/cron/mes-1m/route.ts` | Supabase `pg_cron`: `* * * * 0-5` (`public.run_mes_1m_pull`) | `mes_1m`, `mes_15m`, `job_log` |
+| MES catch-up (legacy manual only) | `app/api/cron/mes-catchup/route.ts` | no recurring schedule | `mes_1m`, `mes_15m`, `mes_1h`, `mes_4h`, `mes_1d`, `job_log` |
 | Cross-asset catch-up | `app/api/cron/cross-asset/route.ts` | `*/15 * * * *` | `cross_asset_1h`, `cross_asset_1d`, `job_log` |
 | FRED rates | `app/api/cron/fred/[category]/route.ts` | `0 5 * * *` | `econ_rates_1d`, `job_log` |
 | FRED yields | `app/api/cron/fred/[category]/route.ts` | `0 6 * * *` | `econ_yields_1d`, `job_log` |
 | FRED vol | `app/api/cron/fred/[category]/route.ts` | `0 7 * * *` | `econ_vol_1d`, `job_log` |
-| FRED inflation | `app/api/cron/fred/[category]/route.ts` | `0 8 * * *` | `econ_inflation_1d`, `job_log` |
+| FRED inflation (realized only) | `app/api/cron/fred/[category]/route.ts` | `0 8 * * *` | `econ_inflation_1d`, `job_log` |
+| Massive inflation expectations | `app/api/cron/massive/inflation-expectations/route.ts` | `30 8 * * *` | `econ_inflation_1d`, `job_log` |
 | FRED fx | `app/api/cron/fred/[category]/route.ts` | `0 9 * * *` | `econ_fx_1d`, `job_log` |
 | FRED labor | `app/api/cron/fred/[category]/route.ts` | `0 10 * * *` | `econ_labor_1d`, `job_log` |
 | FRED activity | `app/api/cron/fred/[category]/route.ts` | `0 11 * * *` | `econ_activity_1d`, `job_log` |
@@ -2248,13 +2846,14 @@ The current recurring job layer is still owned by Vercel cron and App Router rou
 | FRED indexes | `app/api/cron/fred/[category]/route.ts` | `0 14 * * *` | `econ_indexes_1d`, `job_log` |
 | Economic calendar | `app/api/cron/econ-calendar/route.ts` | `0 15 * * *` | `econ_calendar`, `job_log` |
 | Macro surprise -> signals | `app/api/cron/news/route.ts` | `0 16 * * *` | `news_signals`, `job_log` |
-| Raw Google News / segment scrape | `app/api/cron/google-news/route.ts` | `0 13 * * 1-5` | currently `econ_news_1d`, `news_signals`, `job_log`; target contract changes below |
+| Newsfilter raw articles (primary) | `app/api/cron/newsfilter-news/route.ts` | Supabase `pg_cron`: `*/15 11-23 * * 1-5` (`public.run_newsfilter_raw_pull`) | `econ_news_newsfilter_articles`, `econ_news_newsfilter_article_segments`, `econ_news_article_assessments`, `job_log` |
+| Finnhub raw articles (secondary) | `app/api/cron/finnhub-news/route.ts` | Supabase `pg_cron`: `5,20,35,50 11-23 * * 1-5` (`public.run_finnhub_raw_pull`) | `econ_news_finnhub_articles`, `econ_news_finnhub_article_segments`, `econ_news_article_assessments`, `job_log` |
 | Geopolitical risk | `app/api/cron/gpr/route.ts` | `0 19 * * *` | `geopolitical_risk_1d`, `job_log` |
 | Trump effect | `app/api/cron/trump-effect/route.ts` | `30 19 * * *` | `trump_effect_1d`, `job_log` |
 | Detect setups | `app/api/cron/detect-setups/route.ts` | `*/5 12-21 * * 1-5` | legacy `warbird_*` setup stack, `job_log` |
 | Measured moves | `app/api/cron/measured-moves/route.ts` | `0 18 * * 1-5` | `measured_moves`, `job_log` |
-| Score trades | `app/api/cron/score-trades/route.ts` | `10,25,40,55 * * * 1-5` | `trade_scores`, `job_log` |
-| Forecast | `app/api/cron/forecast/route.ts` | `30 * * * 1-5` | legacy `warbird_forecasts_1h`, `job_log` |
+| Score trades | `app/api/cron/score-trades/route.ts` | **STOPPED** — removed from Supabase cron migration files 2026-03-26 | `trade_scores`, `job_log` |
+| Legacy forecast check | `app/api/cron/forecast/route.ts` | `30 * * * 1-5` | legacy `warbird_forecasts_1h`, `job_log` |
 
 #### Target runtime ownership: Supabase-owned schedules and functions
 
@@ -2262,18 +2861,20 @@ The target runtime for recurring jobs is:
 
 1. Supabase-owned schedules
 2. Supabase-owned function execution for recurring ingestion, aggregation, and publish-up work
-3. Vercel retained only for dashboard delivery and read-oriented API/UI surfaces
+3. Supabase retained only for dashboard delivery and read-oriented API/UI surfaces
 
 Target Supabase-owned recurring function inventory:
 
 | Target function | Replaces current route | Writes |
 | --- | --- | --- |
-| `mes-catchup` | `/api/cron/mes-catchup` | `mes_*`, `job_log` |
+| `mes-1m-pull` | `/api/cron/mes-1m` | `mes_1m`, `mes_15m`, `job_log` |
+| `mes-catchup` (legacy/manual) | `/api/cron/mes-catchup` | `mes_*`, `job_log` |
 | `cross-asset` | `/api/cron/cross-asset` | `cross_asset_*`, `job_log` |
 | `fred-rates` | `/api/cron/fred/rates` | `econ_rates_1d`, `job_log` |
 | `fred-yields` | `/api/cron/fred/yields` | `econ_yields_1d`, `job_log` |
 | `fred-vol` | `/api/cron/fred/vol` | `econ_vol_1d`, `job_log` |
 | `fred-inflation` | `/api/cron/fred/inflation` | `econ_inflation_1d`, `job_log` |
+| `massive-inflation-expectations` | `/api/cron/massive/inflation-expectations` | `econ_inflation_1d`, `job_log` |
 | `fred-fx` | `/api/cron/fred/fx` | `econ_fx_1d`, `job_log` |
 | `fred-labor` | `/api/cron/fred/labor` | `econ_labor_1d`, `job_log` |
 | `fred-activity` | `/api/cron/fred/activity` | `econ_activity_1d`, `job_log` |
@@ -2281,21 +2882,22 @@ Target Supabase-owned recurring function inventory:
 | `fred-money` | `/api/cron/fred/money` | `econ_money_1d`, `job_log` |
 | `fred-indexes` | `/api/cron/fred/indexes` | `econ_indexes_1d`, `job_log` |
 | `econ-calendar` | `/api/cron/econ-calendar` | `econ_calendar`, `job_log` |
-| `google-news-raw` | `/api/cron/google-news` | `econ_news_rss_articles`, `econ_news_rss_article_segments`, `job_log` |
 | `news-aggregate` | `/api/cron/news` | `news_signals`, `job_log` |
+| `newsfilter-raw` | `/api/cron/newsfilter-news` | `econ_news_newsfilter_articles`, `econ_news_newsfilter_article_segments`, `econ_news_article_assessments`, `job_log` |
+| `finnhub-raw` | `/api/cron/finnhub-news` | `econ_news_finnhub_articles`, `econ_news_finnhub_article_segments`, `econ_news_article_assessments`, `job_log` |
 | `gpr` | `/api/cron/gpr` | `geopolitical_risk_1d`, `job_log` |
 | `trump-effect` | `/api/cron/trump-effect` | `trump_effect_1d`, `job_log` |
 | `detect-setups` | `/api/cron/detect-setups` | canonical setup tables + dashboard live state + `job_log` |
 | `measured-moves` | `/api/cron/measured-moves` | `measured_moves`, `job_log` |
 | `score-trades` | `/api/cron/score-trades` | trade outcomes + `job_log` |
-| `forecast` | `/api/cron/forecast` | `live_predictions`, `job_log` |
+| `setup-outcome-publish` (legacy `/api/cron/forecast` route name until cutover) | `/api/cron/forecast` | `indicator_state_live`, `live_predictions`, `job_log` |
 
-#### Runtime migration rules
+#### Runtime rules
 
-1. Do not delete a Vercel cron until the Supabase-owned replacement exists, writes the same or intentionally revised contract, and has passed checkpoint validation.
-2. Do not preserve Vercel cron as a silent fallback after Supabase cutover; one owner per recurring job.
-3. Every recurring job must keep `job_log` writes, deterministic schedule ownership, and explicit input/output table lists.
-4. Raw-news ingestion and model ops may be research-first locally, but the recurring production owner must end up in Supabase, not Vercel and not a local always-on process.
+1. Supabase pg_cron is the only schedule producer. No recurring schedules in `Supabase cron migration files`.
+2. Every recurring job must keep `job_log` writes, deterministic schedule ownership, and explicit input/output table lists.
+3. Local research runs are allowed, but recurring production ownership must end up in Supabase, not Supabase and not a local always-on process.
+4. Supabase is for the Next.js frontend dashboard and read-oriented API/UI route handlers only.
 
 ---
 
@@ -2307,9 +2909,13 @@ This is the exact approved source boundary for Phase 1 through Phase 4 work.
 
 1. Databento `GLBX.MDP3 Standard ($179 / month)` is the approved exchange-data boundary.
 2. FRED is the approved macro / release / calendar boundary.
-3. Google News RSS is approved as **raw research intake only**.
-4. Google Finance watchlist / AI summary capture is approved as **manual operator / research capture only** and is not a recurring training or live contract.
-5. The ZL external AI-news pipeline is out of scope for Warbird until a separate contract audit is completed.
+3. Massive is approved for one live macro exception only: `GET /fed/v1/inflation-expectations`; treasury yields, realized inflation, and labor market remain FRED-sourced.
+4. Massive stocks/indices intraday or delayed market-data products are not part of the Warbird feature contract; Databento remains the sole market intraday source.
+5. Newsfilter is approved as the **primary curated raw-news intake** only through the exact source-allowlist and query gates in Section 19.
+6. Finnhub open-data is approved as a **lean secondary raw-news intake** only through free endpoints (`/company-news`, `/news`) plus free analyst/insider proxy endpoints (`/stock/recommendation`, `/stock/insider-sentiment`, `/stock/insider-transactions`) under the relevance/noise gates in Section 19.
+7. Google News RSS is **not approved** for Warbird ingestion. Google RSS article links are aggregator URLs and Warbird will not ship custom decoding logic for them.
+8. Google Finance watchlist / AI summary capture is approved as **manual operator / research capture only** and is not a recurring training or live contract.
+9. The ZL external AI-news pipeline is out of scope for Warbird until a separate contract audit is completed.
 
 #### Databento schema scope
 
@@ -2358,12 +2964,39 @@ Hard rules:
 | `econ_yields_1d` | `DGS2`, `DGS5`, `DGS10`, `DGS30`, `T10Y2Y`, `T10Y3M` |
 | `econ_fx_1d` | `DTWEXBGS`, `DEXUSEU`, `DEXJPUS` |
 | `econ_vol_1d` | `VIXCLS`, `OVXCLS` |
-| `econ_inflation_1d` | `CPILFESL`, `T10YIE`, `CPIAUCSL`, `T5YIE` |
+| `econ_inflation_1d` | `CPILFESL`, `CPIAUCSL` (FRED realized inflation) |
 | `econ_labor_1d` | `UNRATE`, `PAYEMS`, `ICSA`, `CCSA` |
 | `econ_activity_1d` | `INDPRO`, `RSXFS`, `DGORDER` |
 | `econ_money_1d` | `M2SL`, `WALCL` |
 | `econ_commodities_1d` | `DCOILWTICO`, `GVZCLS` |
 | `econ_indexes_1d` | `USEPUINDXD`, `BAMLH0A0HYM2` |
+
+#### Massive inflation-expectations map (approved exception)
+
+| Table | Massive field | Provider-tagged `series_id` |
+| --- | --- | --- |
+| `econ_inflation_1d` | `forward_years_5_to_10` | `MASSIVE_IE_FORWARD_YEARS_5_TO_10` |
+| `econ_inflation_1d` | `market_10_year` | `MASSIVE_IE_MARKET_10_YEAR` |
+| `econ_inflation_1d` | `market_5_year` | `MASSIVE_IE_MARKET_5_YEAR` |
+| `econ_inflation_1d` | `model_10_year` | `MASSIVE_IE_MODEL_10_YEAR` |
+| `econ_inflation_1d` | `model_1_year` | `MASSIVE_IE_MODEL_1_YEAR` |
+| `econ_inflation_1d` | `model_30_year` | `MASSIVE_IE_MODEL_30_YEAR` |
+| `econ_inflation_1d` | `model_5_year` | `MASSIVE_IE_MODEL_5_YEAR` |
+
+#### Mandatory macro package (provider-agnostic)
+
+These four macro domains are required in every Phase 4+ training snapshot:
+
+1. `yields`
+2. `inflation`
+3. `inflation_expectations`
+4. `labor_market`
+
+Source policy:
+
+1. `yields`, `inflation` (realized), and `labor_market` remain on the existing FRED ingestion path.
+2. `inflation_expectations` is sourced from Massive endpoint `GET /fed/v1/inflation-expectations`.
+3. Massive inflation-expectations rows are mapped into `econ_inflation_1d` via deterministic provider-tagged `series_id` values and logged via `job_log`; no second macro feature path is allowed.
 
 Dollar-state rule:
 
@@ -2401,7 +3034,7 @@ The AG system needs a local PostgreSQL training warehouse. This is the research 
 1. Hold explicit source snapshots aligned to the MES 15m bar-close contract.
 2. Hold feature-engineering staging tables and auditable training artifacts.
 3. Hold SHAP, calibration, packet candidates, and evaluation outputs.
-4. Hold raw-news intake tables and any later deterministic aggregation outputs before publish-up.
+4. Hold mirrored raw-news snapshots, article-derived research features, and deterministic aggregation outputs under evaluation before publish-up.
 5. Never become a required always-on dependency for the cloud dashboard or live chart.
 
 #### Exact local source-snapshot surface
@@ -2446,11 +3079,11 @@ Every snapshot table or extract must record:
 
 #### Local warehouse rules
 
-1. Populate it through explicit snapshot loads and local TradingView capture flows only.
-2. Do not build or extend a standing cloud-to-local sync subsystem.
+1. Populate it through explicit cloud snapshots and local TradingView capture flows only.
+2. Do not build or extend a standing cloud-to-local sync subsystem or a local-first production ingestion path.
 3. The local warehouse may hold scratch tables and intermediate joins.
 4. No live production endpoint may depend on the local warehouse being up.
-5. Raw Google News intake is local-first research data until separately approved for cloud retention.
+5. Research news collection may target local, but recurring production-owned raw-news retention remains cloud-first; local copies are optional research mirrors only.
 
 ---
 
@@ -2460,7 +3093,7 @@ Cloud is the display, realtime, and operator-facing operations surface. It is no
 
 #### Verified current cloud state
 
-1. Legacy cloud tables from the earlier 1H / 4H architecture still exist:
+1. Legacy cloud tables from the earlier 1H / 4H architecture still exist and do not match the locked MES 15m fib-outcome contract:
    - `warbird_forecasts_1h`
    - `warbird_daily_bias`
    - `warbird_structure_4h`
@@ -2488,13 +3121,23 @@ Cloud is the display, realtime, and operator-facing operations surface. It is no
 
 #### Required cloud realtime dashboard entities
 
-Current dashboard consumers already expect `mes_1m` and `mes_15m`. Keep those. Add these:
+Current dashboard consumers already expect `mes_1m` and `mes_15m`. Keep those. The Next.js dashboard and any TradingView-facing mirror must consume the same MES 15m fib/state contract. Add these:
 
 | Table | Purpose | Minimum key columns |
 | --- | --- | --- |
 | `fib_state_live` | mirrored fib object per MES 15m bar | `bar_close_ts`, `symbol_code`, `timeframe`, `fib_zero`, `fib_one`, `fib_236`, `fib_618`, `direction_code`, `eligible_20pt`, `stop_family_code`, `packet_id` |
-| `indicator_state_live` | mirrored event-response + packet state per MES 15m bar | `bar_close_ts`, `symbol_code`, `timeframe`, `event_mode_code`, `confidence_score`, `reversal_risk`, `tp1_probability`, `tp2_probability`, `regime_bucket_code`, `session_bucket_code`, `packet_id` |
-| `live_predictions` | operator-facing prediction state | `bar_close_ts`, `symbol_code`, `timeframe`, `action_state`, `signal_direction`, `activation_id`, `packet_id`, `reason_code`, `emitted_at`, `alert_ready` |
+| `indicator_state_live` | mirrored 15m fib setup outcome state per MES 15m bar | `bar_close_ts`, `symbol_code`, `timeframe`, `event_mode_code`, `confidence_score`, `reversal_risk`, `tp1_probability`, `tp2_probability`, `regime_bucket_code`, `session_bucket_code`, `packet_id` |
+| `live_predictions` | operator-facing setup action state, not a predicted-price surface | `bar_close_ts`, `symbol_code`, `timeframe`, `action_state`, `signal_direction`, `activation_id`, `packet_id`, `reason_code`, `emitted_at`, `alert_ready` |
+
+#### Locked replacement semantics for the legacy forecast surface
+
+1. `warbird_forecasts_1h` is a legacy misnamed surface from the pre-15m architecture and must not drive new work.
+2. Its replacement contract is the MES 15m setup outcome surface:
+   - `indicator_state_live.tp1_probability`
+   - `indicator_state_live.tp2_probability`
+   - `indicator_state_live.reversal_risk`
+   - `live_predictions.action_state`
+3. No new publish-up contract may use predicted-price tables as the primary model output.
 
 #### Cloud rules
 
@@ -2502,8 +3145,9 @@ Current dashboard consumers already expect `mes_1m` and `mes_15m`. Keep those. A
 2. Do not overload `public.models` or `trade_scores` for the new packet lifecycle.
 3. Keep cloud tables strictly publish-up targets, dashboard state, and run history.
 4. Do not make cloud tables part of the direct live Pine decision path.
-5. Every publish-up write must be idempotent on its natural key.
-6. Cloud Realtime is the dashboard transport; Databento is not a dashboard-direct contract.
+5. Do not create new predicted-price or `1H forecast` tables; the live model surface is MES 15m setup-outcome state keyed by `bar_close_ts`.
+6. Every publish-up write must be idempotent on its natural key.
+7. Cloud Realtime is the dashboard transport; Databento is not a dashboard-direct contract.
 
 #### Cloud pruning sequence
 
@@ -2617,20 +3261,115 @@ News is now explicitly split into:
 2. deterministic aggregation
 3. promoted live-capable signals
 
-#### Raw Google News intake contract
+#### Raw Newsfilter + Finnhub intake contract
 
-Raw Google News intake is approved only through:
+Raw Finnhub secondary intake is approved only through:
 
-- migration: `supabase/migrations/20260323000013_news_rss.sql`
-- poller: `scripts/poll-google-news.py`
-- local-first research target by default
+- migration: `supabase/migrations/20260326000019_news_raw_extraction_and_scoring.sql`
+- poller: `scripts/poll-finnhub-news.py`
+- production target: cloud-first retained raw capture
+- local target: optional research/training-only mirror
 
-The raw tables are:
+Raw Newsfilter primary intake is approved only through:
 
-- `econ_news_rss_articles`
-- `econ_news_rss_article_segments`
+- migration: `supabase/migrations/20260326000019_news_raw_extraction_and_scoring.sql`
+- poller: `scripts/poll-newsfilter-news.py`
+- production target: cloud-first retained raw capture
+- local target: optional research/training-only mirror
+- live schedule wrapper: `supabase/migrations/20260326000020_supabase_news_raw_cron.sql`
+- current live blocker: missing Vault secret `warbird_newsfilter_api_key`
 
-These tables are for article/card capture only. They do **not** create live sentiment or packet features by themselves.
+The active raw tables are:
+
+- `econ_news_topics`
+- `econ_news_finnhub_articles`
+- `econ_news_finnhub_article_segments`
+- `econ_news_newsfilter_articles`
+- `econ_news_newsfilter_article_segments`
+- `econ_news_article_assessments`
+
+Legacy Google RSS tables (`econ_news_rss_articles`, `econ_news_rss_article_segments`) remain historical only and must not receive new writes.
+
+`econ_news_article_assessments` is research-only scoring metadata. It exists to record deterministic topic identification, reading evidence, and benchmark-fit scoring on top of raw article capture. It does **not** create live sentiment or packet features by itself.
+
+#### Full article extraction and scoring contract
+
+1. Raw-news rows must retain the source card fields and the extracted article body, not just the headline and first lines.
+2. Article extraction must use a proven parser/extractor, not hand-rolled DOM heuristics:
+   - Finnhub uses the shared `@mozilla/readability` + `jsdom` extractor against the publisher article page.
+   - Newsfilter uses the official article-content endpoint (`/articles/{id}.html`) as the primary body source.
+3. Stored body text must exclude footer, sidebar, nav, and page chrome. Only article/news content is retained.
+4. Canonical topic tagging remains normalized through `econ_news_topics` and provider segment-link tables.
+5. Deterministic research scoring is allowed only into `econ_news_article_assessments`; it is not a live signal surface.
+
+#### External research lock for news usage
+
+Primary-source literature supports using news as a paired modality with market data, not as a standalone price-forecast oracle:
+
+1. sentiment polarity is useful, but domain-specific modeling matters ([FinBERT](https://arxiv.org/abs/1908.10063))
+2. structured events improve movement prediction over raw text alone ([Ding et al. 2014](https://aclanthology.org/D14-1148/))
+3. fine-grained event extraction works best when combined with stock trade data ([Chen et al. 2019](https://aclanthology.org/D19-5105/))
+4. grouping and aggregating news by time/topic/category before fusing with trade data is more robust than one-headline-one-signal logic ([Chen et al. 2019](https://aclanthology.org/D19-5106/))
+5. recent market-prediction work shows both delayed pricing effects and the limits of sentiment-only features ([Wang et al. 2024](https://aclanthology.org/2024.findings-emnlp.189/))
+
+Warbird therefore treats news as an intraday event-response layer for MES 15m fib setups, not as an independent price-target engine.
+
+#### Initial promoted news/event families for MES research
+
+Derived event families under evaluation include:
+
+1. macro surprise and policy-outlook shocks
+2. analyst / rating / major-corporate narrative shocks that materially affect index leadership
+3. geopolitical / war / policy-escalation shocks
+4. energy / oil disruption shocks
+
+Each family must still pass the promotion boundary below before it can influence live logic.
+
+#### Finnhub secondary feed contract (lean / no-noise)
+
+Allowed endpoints for the secondary feed are:
+
+- `/company-news` for approved watchlist symbols only
+- `/news` with controlled category scope (`general`, `forex`) and incremental `minId` usage
+- `/stock/recommendation`, `/stock/insider-sentiment`, `/stock/insider-transactions` as side-channel proxy features keyed to the same watchlist
+
+Explicitly excluded from the secondary feed contract:
+
+- `/news-sentiment` (premium)
+- `/stock/social-sentiment` (premium)
+- `/stock/tick` and `/stock/candle` (premium)
+- any premium-only analyst estimate or target endpoint
+
+Relevance and anti-noise gates are mandatory:
+
+1. Keep only rows whose ticker or `related` field intersects the approved Warbird watchlist.
+2. Keep only rows that map to at least one approved segment keyword family.
+3. Keep only rows whose publisher domain passes the trusted-domain filter.
+4. De-duplicate by `(normalized headline, publisher domain, published minute)` before storage.
+5. Enforce a per-segment cap per pull window and log dropped rows by drop reason.
+
+If a row fails any gate, it is dropped and logged; do not coerce it into a segment.
+
+#### Newsfilter primary feed contract (curated source allowlist)
+
+The Newsfilter feed is the canonical primary article source and must remain lean.
+
+Required source-id allowlist (exact):
+
+- `cnbc`
+- `reuters`
+- `bloomberg`
+- `sec-api`
+- `usDod`
+- `barrons`
+
+Required query gates:
+
+1. keyword gate includes `S&P` (exact or equivalent tokenization).
+2. symbol gate uses the approved Warbird watchlist only.
+3. title/description search is constrained to S&P-centered market context.
+4. results from sources outside the allowlist are dropped.
+5. all rows still pass the shared relevance and anti-noise gates above.
 
 #### Exact S&P-centered raw-news segments
 
@@ -2650,11 +3389,12 @@ The current approved segment set is:
 
 #### Raw-news rules
 
-1. Store Google News URLs as Google News URLs; do not pretend they are canonical publisher URLs.
-2. Use publisher metadata from the RSS `source` element for domain filtering and attribution.
+1. Google News is not an approved ingestion source for Warbird.
+2. Store Newsfilter `source.id` and source metadata explicitly for auditability of allowlist enforcement.
 3. Keep multi-segment article mapping normalized.
-4. Do not write synthetic sentiment from the raw poller.
-5. Do not promote raw-news rows directly into live Pine logic.
+4. Retain extracted article body text and extraction metadata (`canonical_url`, `extraction_status`, `extraction_method`, `body_word_count`) on the raw article row.
+5. Do not write synthetic sentiment from the raw poller.
+6. Do not promote raw-news rows or research scores directly into live Pine logic.
 
 #### Promotion boundary for news
 
@@ -2662,9 +3402,76 @@ The current approved segment set is:
 2. A future raw-news aggregator may write to `news_signals` only after:
    - timestamp alignment is locked to the MES 15m contract
    - the aggregation logic is deterministic
+   - polarity is expressed as `BULLISH` / `BEARISH` market impact, not `LONG` / `SHORT`
+   - each promoted signal is paired with contemporaneous price-action context (MES impulse, volatility expansion, session bucket, and cross-asset shock state), not emitted as a text-only score
    - leakage risk is audited
    - the feature family proves additive value out of sample
-3. If no Pine analogue or mirrored-live path exists, the news insight stays research-only.
+3. Finnhub analyst/insider proxy series follow the same promotion gate as raw headlines; they are research-only until deterministic mapping and additive-value checks pass.
+4. Newsfilter source-allowlist rows follow the same promotion gate as Finnhub rows.
+5. If no Pine analogue or mirrored-live path exists, or if the news event cannot be paired cleanly with price action, the insight stays research-only.
+
+#### 2026-03-26 checkpoint: news_signals polarity contract alignment
+
+Scope completed in repo:
+
+1. Added `supabase/migrations/20260326000016_news_signal_direction.sql` to move `news_signals.direction` onto a dedicated `market_impact_direction` enum (`BULLISH`, `BEARISH`) without touching the shared trading `signal_direction` enum.
+2. Updated the live news writers at that checkpoint so both emitted `BULLISH` / `BEARISH` instead of mixed `LONG` / `SHORT` semantics.
+3. Updated dataset readers in `scripts/warbird/build-warbird-dataset.ts` and `scripts/build-dataset.py` to normalize legacy and new values safely during transition.
+
+Validation completed:
+
+- `npm run build`
+- `python3 -m py_compile scripts/build-dataset.py`
+
+Remaining blocker after this checkpoint:
+
+1. The new migration still must be applied to the live Supabase database before the cloud writers are guaranteed to accept the locked polarity contract.
+2. Promoted news still needs explicit MES price-action pairing before it can move from research context into live logic.
+3. After the news pairing surface is defined, the next larger runtime migration remains the legacy `warbird_forecasts_1h` replacement.
+
+#### 2026-03-26 checkpoint: raw full-article extraction and research scoring
+
+Scope completed in repo:
+
+1. Added `supabase/migrations/20260326000019_news_raw_extraction_and_scoring.sql` to extend the raw-news contract with canonical topics, provider raw tables, full-body extraction fields, and the research-only `econ_news_article_assessments` surface.
+2. Added `config/news_raw_contract.json` plus shared helpers so Finnhub and Newsfilter use the same watchlist, topic taxonomy, dedupe contract, and Reuters-benchmark scoring rubric.
+3. Removed the Google News route and poller after live validation proved Google RSS is an aggregator-only path that would require custom decoding.
+4. Locked `scripts/poll-newsfilter-news.py` as the primary path and `scripts/poll-finnhub-news.py` as the secondary path for dry-run sampling and retained raw capture when provider access exists.
+
+Validation completed:
+
+- `npm run build`
+- `python3 -m py_compile scripts/raw_news_contract.py scripts/poll-finnhub-news.py scripts/poll-newsfilter-news.py`
+
+Remaining blockers after this checkpoint:
+
+1. Live Vault still does not have `warbird_newsfilter_api_key` or `warbird_finnhub_api_key`, so the Supabase cron wrappers skip before provider fetch.
+2. The first live provider dry runs and retained sample pulls still need to be executed after those Vault secrets are present.
+3. Legacy Google RSS tables remain in the historical schema, but they are no longer part of the active ingestion path.
+
+#### 2026-03-26 checkpoint: Supabase live raw-news runtime wiring
+
+Scope completed live:
+
+1. Applied `supabase/migrations/20260326000019_news_raw_extraction_and_scoring.sql` to the linked Supabase project, creating the canonical topic, provider raw-article, provider segment-link, and research-assessment surfaces.
+2. Applied `supabase/migrations/20260326000020_supabase_news_raw_cron.sql` to the linked Supabase project, creating `public.run_newsfilter_raw_pull()` and `public.run_finnhub_raw_pull()` plus their pg_cron jobs.
+3. Created the live Vault route-url secrets `warbird_newsfilter_raw_cron_url` and `warbird_finnhub_raw_cron_url` pointing to the active App Router cron endpoints.
+4. Executed both live cron wrapper functions once and verified the skip path is now strictly provider-secret gated, not schema-gated or schedule-gated.
+
+Validation completed:
+
+- `npm run build`
+- `select jobname, schedule from cron.job where jobname in ('warbird_newsfilter_raw_pull', 'warbird_finnhub_raw_pull');`
+- `select proname from pg_proc join pg_namespace n on n.oid = pg_proc.pronamespace where n.nspname = 'public' and proname in ('run_newsfilter_raw_pull', 'run_finnhub_raw_pull');`
+- `select name from vault.decrypted_secrets where name in ('warbird_cron_secret', 'warbird_newsfilter_raw_cron_url', 'warbird_finnhub_raw_cron_url', 'warbird_newsfilter_api_key', 'warbird_finnhub_api_key');`
+- `select public.run_newsfilter_raw_pull();`
+- `select public.run_finnhub_raw_pull();`
+
+Remaining blocker after this checkpoint:
+
+1. Live Vault still lacks `warbird_newsfilter_api_key` and `warbird_finnhub_api_key`.
+2. Until those two secrets exist, the live cron wrapper functions will skip before making any provider request.
+3. No raw-news rows should promote beyond research-only storage until the later pairing boundary with MES price action is locked and validated.
 
 #### Out-of-scope for now
 
@@ -2686,8 +3493,8 @@ The current approved segment set is:
    - build `scripts/ag/evaluate-configs.py`
    - build `scripts/ag/generate-packet.py`
    - build `scripts/ag/publish-artifacts.py`
-3. **Apply the raw-news schema and keep it raw** — use `econ_news_rss_articles` and `econ_news_rss_article_segments` for intake only, no synthetic sentiment promotion yet.
-4. **Document and build the Supabase-owned recurring function surface** that replaces the current Vercel cron layer in sequence.
+3. **Finish the provider-secret cutover and keep it raw** — `econ_news_finnhub_*` and `econ_news_newsfilter_*` are live in cloud now; the next blocker is setting `warbird_newsfilter_api_key` and `warbird_finnhub_api_key` in Vault, then proving dry-run and retained sample pulls before any later promotion work.
+4. **Supabase pg_cron is the sole schedule producer** — MES minute path live, `score-trades` stopped. Remaining App Router routes are called by pg_cron via pg_net. No Supabase-owned schedules.
 5. **Map the current Pine indicator input and hidden export schema** — every `input.*()`, every gate, every hidden export, every external dependency.
 6. **Execute Phase 2 hardening in `indicators/v6-warbird-complete.pine`**:
    - fix fib direction
@@ -2718,5 +3525,5 @@ The current approved segment set is:
    - `live_predictions`
 11. **Define packet activation and rollback transitions in code before the first promoted packet goes operational**, including the 2-consecutive-PT1-miss rule.
 12. **Migrate dashboard and admin/status consumers** to the new publish-up and live-state surface.
-13. **Cut recurring job ownership from Vercel to Supabase in sequence**, one schedule at a time, with validation at each checkpoint.
+13. **Supabase owns all recurring job scheduling** — Supabase pg_cron schedules removed. App Router routes remain as callable handlers for pg_cron via pg_net.
 14. **Only after reader/writer cutover is complete, remove dormant or superseded cloud tables.**

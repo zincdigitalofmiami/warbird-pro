@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { validateCronRequest } from "@/lib/cron-auth";
 import { isMarketOpen, isWeekendBar } from "@/lib/market-hours";
 import { fetchOhlcv } from "@/lib/ingestion/databento";
 
@@ -9,6 +10,7 @@ type JobLogStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
 
 const DEFAULT_SHARD_COUNT = 4;
 const SHARD_INTERVAL_MINUTES = 15;
+const INITIAL_LOOKBACK_HOURS = 6;
 
 async function writeJobLog(
   supabase: ReturnType<typeof createAdminClient>,
@@ -35,12 +37,9 @@ async function writeJobLog(
 // aggregates to daily bars.
 
 export async function GET(request: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const authError = validateCronRequest(request);
+  if (authError) {
+    return authError;
   }
 
   const startTime = Date.now();
@@ -139,8 +138,6 @@ export async function GET(request: Request) {
       });
     }
 
-    // Fetch window: last 2 hours with 30-min safety buffer
-    const start = new Date(now.getTime() - 2 * 60 * 60 * 1000);
     const end = new Date(now.getTime() - 30 * 60 * 1000);
 
     let totalRows1h = 0;
@@ -149,6 +146,26 @@ export async function GET(request: Request) {
 
     for (const sym of symbolsForShard) {
       try {
+        const { data: latestBar, error: latestBarError } = await supabase
+          .from("cross_asset_1h")
+          .select("ts")
+          .eq("symbol_code", sym.code)
+          .order("ts", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (latestBarError) {
+          throw new Error(`cross_asset_1h latest ts query failed: ${latestBarError.message}`);
+        }
+
+        const start = latestBar?.ts
+          ? new Date(new Date(latestBar.ts).getTime() + 60 * 60 * 1000)
+          : new Date(now.getTime() - INITIAL_LOOKBACK_HOURS * 60 * 60 * 1000);
+
+        if (start >= end) {
+          continue;
+        }
+
         const bars = await fetchOhlcv({
           dataset: "GLBX.MDP3",
           symbol: sym.databento_symbol!,
@@ -178,30 +195,53 @@ export async function GET(request: Request) {
         if (error) throw new Error(`cross_asset_1h upsert: ${error.message}`);
         totalRows1h += rows1h.length;
 
-        // Aggregate to daily
-        const dailyBar = {
-          ts: new Date(start.toISOString().split("T")[0] + "T00:00:00Z"),
-          open: validBars[0].open,
-          high: Math.max(...validBars.map((b) => b.high)),
-          low: Math.min(...validBars.map((b) => b.low)),
-          close: validBars[validBars.length - 1].close,
-          volume: validBars.reduce((s, b) => s + b.volume, 0),
-        };
+        const touchedDays = [...new Set(validBars.map((bar) => new Date(bar.time * 1000).toISOString().slice(0, 10)))];
 
-        const { error: dErr } = await supabase.from("cross_asset_1d").upsert(
-          {
-            ts: dailyBar.ts.toISOString(),
-            symbol_code: sym.code,
-            open: dailyBar.open,
-            high: dailyBar.high,
-            low: dailyBar.low,
-            close: dailyBar.close,
-            volume: dailyBar.volume,
-          },
-          { onConflict: "ts,symbol_code" },
-        );
-        if (dErr) throw new Error(`cross_asset_1d upsert: ${dErr.message}`);
-        totalRows1d++;
+        for (const day of touchedDays) {
+          const dayStartIso = `${day}T00:00:00Z`;
+          const dayEnd = new Date(`${day}T00:00:00Z`);
+          dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+
+          const { data: dayBars, error: dayBarsError } = await supabase
+            .from("cross_asset_1h")
+            .select("ts, open, high, low, close, volume")
+            .eq("symbol_code", sym.code)
+            .gte("ts", dayStartIso)
+            .lt("ts", dayEnd.toISOString())
+            .order("ts", { ascending: true });
+
+          if (dayBarsError) {
+            throw new Error(`cross_asset_1h day aggregation read failed: ${dayBarsError.message}`);
+          }
+
+          if (!dayBars || dayBars.length === 0) {
+            continue;
+          }
+
+          const dailyBar = {
+            ts: dayStartIso,
+            open: Number(dayBars[0].open),
+            high: Math.max(...dayBars.map((bar) => Number(bar.high))),
+            low: Math.min(...dayBars.map((bar) => Number(bar.low))),
+            close: Number(dayBars[dayBars.length - 1].close),
+            volume: dayBars.reduce((sum, bar) => sum + Number(bar.volume), 0),
+          };
+
+          const { error: dErr } = await supabase.from("cross_asset_1d").upsert(
+            {
+              ts: dailyBar.ts,
+              symbol_code: sym.code,
+              open: dailyBar.open,
+              high: dailyBar.high,
+              low: dailyBar.low,
+              close: dailyBar.close,
+              volume: dailyBar.volume,
+            },
+            { onConflict: "ts,symbol_code" },
+          );
+          if (dErr) throw new Error(`cross_asset_1d upsert: ${dErr.message}`);
+          totalRows1d++;
+        }
       } catch (e) {
         errors.push(`${sym.code}: ${e instanceof Error ? e.message : String(e)}`);
       }

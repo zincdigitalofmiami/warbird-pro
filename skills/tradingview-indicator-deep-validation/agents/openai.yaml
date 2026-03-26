@@ -1,0 +1,4 @@
+interface:
+  display_name: "TV Indicator Deep Validation"
+  short_description: "Deep test and review Pine indicators."
+  default_prompt: "Use $tradingview-indicator-deep-validation to build, deep-test, and review this TradingView indicator with current project context and checkpointed outputs."

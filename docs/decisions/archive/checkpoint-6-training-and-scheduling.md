@@ -9,7 +9,7 @@
 
 ## Decision
 
-**Three-tier scheduling.** Simple API ingestion moves to `pg_cron` + `http` extension inside Supabase Postgres (cheapest, zero invocation cost). Complex compute stays in Vercel Cron. Training and inference run on local machine cron.
+**Three-tier scheduling.** Simple API ingestion moves to `pg_cron` + `http` extension inside Supabase Postgres (cheapest, zero invocation cost). Complex compute stays in Supabase pg_cron. Training and inference run on local machine cron.
 
 **Two-mode model lifecycle.** Weekly core training (Sunday, full retrain on all data). Fast frequent inference (every 5 min during market hours, ~15s per invocation).
 
@@ -63,13 +63,13 @@ SELECT cron.schedule(
 
 **Routes that move to pg_cron + http:**
 
-| Current Vercel Route | pg_cron Replacement | Why It Fits |
+| Current Supabase Route | pg_cron Replacement | Why It Fits |
 |---------------------|--------------------|----|
 | `cron/fred/[category]` (9 schedules) | 9 pg_cron jobs | Simple GET JSON → INSERT. Perfect fit. |
 | `cron/econ-calendar` | 1 pg_cron job | GET JSON → INSERT. |
 | `cron/gpr` | 1 pg_cron job | GET → parse → INSERT (XLS parsing may need a helper function). |
 | `cron/trump-effect` | 1 pg_cron job | GET JSON → INSERT. |
-| `cron/news` | 1 pg_cron job | If logic is simple enough. Otherwise stays Vercel. |
+| `cron/news` | 1 pg_cron job | If logic is simple enough. Otherwise stays Supabase. |
 | `cron/google-news` | Maybe | RSS/XML parsing in SQL is possible but ugly. Evaluate. |
 | NEW: `mes-1d` | 1 pg_cron job | Databento ohlcv-1d GET → INSERT. |
 | NEW: `mes-stats` | 1 pg_cron job | Databento statistics GET → INSERT. |
@@ -88,11 +88,11 @@ SELECT cron.schedule(
 - Each job must complete within 10 minutes
 - Jobs tracked in `cron.job_run_details` (built-in monitoring)
 
-### Tier 2: Vercel Cron (Complex Compute)
+### Tier 2: Supabase pg_cron (Complex Compute)
 
 **What:** Routes that need heavy TypeScript computation, complex API interactions, or multi-step orchestration.
 
-**Routes that stay Vercel:**
+**Routes that stay Supabase:**
 
 | Route | Schedule | Why It Can't Be pg_cron |
 |-------|----------|------------------------|
@@ -108,7 +108,7 @@ SELECT cron.schedule(
 | `google-news` | `0 13 * * 1-5` | RSS parsing + NLP (evaluate pg_cron later) |
 | `news` | `0 16 * * *` | Complex processing (evaluate later) |
 
-**Vercel routes reduced from 21 schedules → ~11 schedules.** Simpler, cheaper.
+**Supabase routes reduced from 21 schedules → ~11 schedules.** Simpler, cheaper.
 
 ### Tier 3: Local Machine Cron (Training + Inference)
 
@@ -244,7 +244,7 @@ MON-FRI market hours:
     ├─ publish to cloud (<2s)
     └─ total: <15s per invocation
 
-  Every 30 min (Vercel cron/forecast):
+  Every 30 min (Supabase pg_cron/forecast):
     └─ health-check: is forecast fresh?
        YES → dashboard shows live forecast
        NO  → logs stale_forecast warning
@@ -252,13 +252,13 @@ MON-FRI market hours:
 
 ---
 
-## Scheduling Migration: Vercel → pg_cron
+## Scheduling Migration: Supabase → pg_cron
 
 ### pg_cron Jobs (22 total, all well-spaced)
 
 | Job | Schedule (UTC) | Source |
 |-----|---------------|--------|
-| `fred-rates` | `0 5 * * *` | Migrated from Vercel |
+| `fred-rates` | `0 5 * * *` | Migrated from Supabase |
 | `fred-yields` | `0 6 * * *` | Migrated |
 | `fred-vol` | `0 7 * * *` | Migrated |
 | `fred-inflation` | `0 8 * * *` | Migrated |
@@ -281,7 +281,7 @@ MON-FRI market hours:
 | `opt-stats` | `30 0 * * 1-5` | New |
 | `opt-def` | `0 1 * * 1-5` | New |
 
-### Vercel Cron (11 schedules remain)
+### Supabase pg_cron (11 schedules remain)
 
 | Route | Schedule |
 |-------|----------|
@@ -312,7 +312,7 @@ MON-FRI market hours:
 
 | Rule | Passes? | Note |
 |------|---------|------|
-| Cost boundary | Yes | pg_cron + http = zero extra cost. Reduces Vercel invocations. |
+| Cost boundary | Yes | pg_cron + http = zero extra cost. Reduces Supabase invocations. |
 | Production boundary | Yes | Dashboard works without local machine |
 | AGENTS.md: no new paid plans | Yes | http extension included in Supabase |
 | AGENTS.md: no continuous local runtime for production | Yes | Local is training/inference only |
@@ -328,8 +328,8 @@ MON-FRI market hours:
 2. **Store API keys:** `ALTER DATABASE postgres SET app.fred_api_key = '...';` or Supabase Vault
 3. **Write PL/pgSQL functions** for each data source ingestion
 4. **Schedule 22 pg_cron jobs** (well-spaced, staggered)
-5. **Remove migrated Vercel routes** from `vercel.json` and delete route files (13 → ~11 Vercel, 9+ FRED routes gone)
+5. **Remove migrated Supabase routes** from `Supabase cron migration files` and delete route files (13 → ~11 Supabase, 9+ FRED routes gone)
 6. **Local cron setup:** 4 jobs via macOS launchd or crontab
 7. **Update training scripts** to read from local PG training_snapshots
 8. **New inference script:** lightweight predict → publish loop
-9. **Monitor:** pg_cron in `cron.job_run_details`, Vercel in `job_log`, local in `model_runs`
+9. **Monitor:** pg_cron in `cron.job_run_details`, Supabase in `job_log`, local in `model_runs`

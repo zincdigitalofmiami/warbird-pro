@@ -119,7 +119,7 @@
 4. **Cadence:** Weekly retrain, daily SHAP refresh, 15m prediction refresh to dashboard.
 5. **Feature matrix:** 54 columns v1, spaced lengths, no dense grids.
 6. **Regime v1:** ADX/ER/VIX-vol. Skip Hurst/FDI.
-7. **Supabase owns compute:** All crons + functions migrate from Vercel. Vercel = dashboard/API only.
+7. **Supabase owns compute:** All crons + functions migrate from Supabase. Supabase = dashboard/API only.
 8. **No custom skill replacement:** Use superpowers + memory for domain context.
 
 ---
@@ -131,7 +131,7 @@
 | v2 TV verification | Load overhauled indicator into TradingView | Kirk | Ready |
 | Phase 3 | Strategy build + deep backtesting | VSCode | Needs execution plan |
 | Phase 4 | Dataset + AG loop + local DB setup | VSCode | Needs execution plan |
-| Supabase migration | Vercel crons → pg_cron + Edge Functions | VSCode | Needs execution plan |
+| Supabase scheduling | pg_cron is sole schedule producer — MES minute live, score-trades stopped | VSCode | Done |
 | Indicator decision | COT, Volume Delta, Bear Prob, FCI evaluation | All agents | After TV verification |
 | GPT research pending | LuxAlgo styling spec + Pine data export methods | GPT 4.6 | In progress |
 

@@ -45,34 +45,10 @@ export interface WarbirdStructure4HRow {
   structural_note: string | null;
 }
 
-export interface WarbirdForecastRow {
-  id: number;
-  ts: string;
-  symbol_code: string;
-  bias_1h: WarbirdBias;
-  target_price_1h: number;
-  target_price_4h: number;
-  target_mae_1h: number;
-  target_mae_4h: number;
-  target_mfe_1h: number;
-  target_mfe_4h: number;
-  prob_hit_sl_first: number | null;
-  prob_hit_pt1_first: number | null;
-  prob_hit_pt2_after_pt1: number | null;
-  expected_max_extension: number | null;
-  setup_score: number | null;
-  confidence: number | null;
-  mfe_mae_ratio_1h: number | null;
-  current_price: number | null;
-  model_version: string | null;
-  feature_snapshot: Record<string, unknown> | null;
-  created_at?: string;
-}
-
 export interface WarbirdTriggerRow {
   id: number;
-  ts: string;
-  forecast_id: number;
+  bar_close_ts: string;
+  timeframe: "M15";
   symbol_code: string;
   direction: WarbirdDirection;
   decision: WarbirdTriggerDecision;
@@ -93,24 +69,28 @@ export interface WarbirdTriggerRow {
 
 export interface WarbirdConvictionRow {
   id: number;
-  ts: string;
-  forecast_id: number;
-  trigger_id: number | null;
+  bar_close_ts: string;
+  timeframe: "M15";
+  trigger_id: number;
   symbol_code: string;
   level: WarbirdConvictionLevel;
   counter_trend: boolean;
   all_layers_agree: boolean;
   daily_bias: WarbirdBias;
   bias_4h: WarbirdBias;
-  bias_1h: WarbirdBias;
+  bias_15m: WarbirdBias;
   trigger_decision: WarbirdTriggerDecision;
 }
 
 export interface WarbirdRiskRow {
   id: number;
-  ts: string;
-  forecast_id: number;
+  bar_close_ts: string;
+  timeframe: "M15";
   symbol_code: string;
+  tp1_probability: number | null;
+  tp2_probability: number | null;
+  reversal_risk: number | null;
+  confidence_score: number | null;
   garch_sigma: number | null;
   garch_vol_ratio: number | null;
   zone_1_upper: number | null;
@@ -130,9 +110,9 @@ export interface WarbirdRiskRow {
 export interface WarbirdSetupRow {
   id: number;
   setup_key: string;
-  ts: string;
+  bar_close_ts: string;
+  timeframe: "M15";
   symbol_code: string;
-  forecast_id: number;
   trigger_id: number;
   conviction_id: number;
   direction: WarbirdDirection;
@@ -185,17 +165,11 @@ export interface WarbirdSignal {
     agrees_with_daily: boolean;
   };
   directional: {
-    bias_1h: WarbirdBias;
-    price_target_1h: number | null;
-    price_target_4h: number | null;
-    mae_band_1h: number | null;
-    mae_band_4h: number | null;
-    mfe_band_1h: number | null;
-    mfe_band_4h: number | null;
+    bias_15m: WarbirdBias;
     prob_hit_sl_first: number | null;
     prob_hit_pt1_first: number | null;
     prob_hit_pt2_after_pt1: number | null;
-    expected_max_extension: number | null;
+    reversal_risk: number | null;
     setup_score: number | null;
     confidence: number | null;
   };
@@ -244,7 +218,6 @@ export interface WarbirdSignal {
 
 export interface WarbirdSignalResponse {
   signal: WarbirdSignal | null;
-  forecast: WarbirdForecastRow | null;
   setup: WarbirdSetupRow | null;
   trigger: WarbirdTriggerRow | null;
   conviction: WarbirdConvictionRow | null;

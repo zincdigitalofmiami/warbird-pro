@@ -46,13 +46,13 @@
 | **Model ops tables (synced UP from local)** | shap_results, training_reports, model_packets, shap_indicator_settings, model_metrics | Local is source of truth — synced UP after training/promotion |
 | **Local-only tables** | — | training_features, training_snapshots, feature_matrix, training_labels, features_catalog |
 | **Writes from** | Supabase crons (pg_cron + Edge Functions), local inference publish (sync-up) | sync-down from cloud, feature builder, AG training |
-| **Who reads** | Dashboard (Vercel Next.js) — displays EVERYTHING: SHAP, reports, win rates, probabilities, model metrics, predictions, calibration curves, promoted packet values | AG training, SHAP pipeline, feature engineering |
+| **Who reads** | Dashboard (Supabase Next.js) — displays EVERYTHING: SHAP, reports, win rates, probabilities, model metrics, predictions, calibration curves, promoted packet values | AG training, SHAP pipeline, feature engineering |
 
 **Dashboard is the command center.** Cloud holds whatever the dashboard needs to display. Don't filter what gets synced up — if the trader needs to see it, it lives on cloud.
 
 ### Decision: Two-Tier Architecture (Supabase + Local Mac)
 
-**All server-side crons and functions run on Supabase. Vercel is UI + API only.**
+**All server-side crons and functions run on Supabase. The app runtime is UI + API only.**
 
 - **Tier 1 (Supabase):** ALL crons, ALL ingestion, ALL background compute
   - pg_cron + http extension: simple GET→INSERT (FRED, econ-calendar, GPR, trump-effect)
@@ -60,9 +60,9 @@
   - Database functions (PL/pgSQL): aggregation, feature engineering, materialized view refresh
 - **Tier 2 (Local Mac):** Training + research only — sync-down, build-features, AG train, SHAP, inference, packet generation
 
-**Vercel (Next.js):** Dashboard UI + API routes for frontend + auth. No crons. No background compute.
+**Next.js runtime:** Dashboard UI + API routes for frontend + auth. No crons. No background compute.
 
-**Why:** Data gravity — compute sits next to the database. Zero network round-trips for pg_cron. Kills Vercel invocation costs. Clean separation of concerns.
+**Why:** Data gravity — compute sits next to the database. Zero network round-trips for pg_cron. Cuts app-host invocation cost and removes scheduler drift. Clean separation of concerns.
 
 ---
 
@@ -198,7 +198,7 @@ Add these explicit sub-steps:
 - Store results in `shap_results` and `shap_indicator_settings` tables
 
 **4.6 Outcome Feedback Loop**
-- `score-trades` Vercel cron already captures TP1_HIT, TP2_HIT, STOPPED, EXPIRED
+- `score-trades` route captures TP1_HIT, TP2_HIT, STOPPED, EXPIRED — schedule stopped 2026-03-26; route callable manually or via Supabase pg_cron when re-enabled
 - Close the loop: feed scored outcomes back into training labels
 - Add `label_origin` field: `forward_scan` (synthetic) vs `setup_event` (real outcome)
 - Prioritize `setup_event` labels when available; fall back to `forward_scan` for history

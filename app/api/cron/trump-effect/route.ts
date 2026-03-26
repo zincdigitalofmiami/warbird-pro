@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { validateCronRequest } from "@/lib/cron-auth";
 
 export const maxDuration = 60;
 
@@ -44,12 +45,9 @@ async function writeJobLog(
 }
 
 export async function GET(request: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const authError = validateCronRequest(request);
+  if (authError) {
+    return authError;
   }
 
   const startTime = Date.now();
@@ -95,24 +93,22 @@ export async function GET(request: Request) {
         source_url: d.html_url || null,
       }));
 
-    let rowsAffected = 0;
-    if (rows.length > 0) {
-      // Use insert (not upsert) since trump_effect_1d uses auto-increment ID.
-      // Check for duplicates by title + ts to avoid re-inserting.
-      for (const row of rows) {
-        const { data: existing } = await supabase
-          .from("trump_effect_1d")
-          .select("id")
-          .eq("ts", row.ts)
-          .eq("title", row.title)
-          .limit(1);
+    const dedupedRows = Array.from(
+      new Map(rows.map((row) => [`${row.ts}::${row.title}`, row])).values(),
+    );
 
-        if (!existing || existing.length === 0) {
-          const { error } = await supabase.from("trump_effect_1d").insert(row);
-          if (error) throw new Error(`trump_effect insert: ${error.message}`);
-          rowsAffected++;
-        }
-      }
+    let rowsAffected = 0;
+    if (dedupedRows.length > 0) {
+      const { data: insertedRows, error } = await supabase
+        .from("trump_effect_1d")
+        .upsert(dedupedRows, {
+          onConflict: "ts,title",
+          ignoreDuplicates: true,
+        })
+        .select("id");
+
+      if (error) throw new Error(`trump_effect upsert: ${error.message}`);
+      rowsAffected = insertedRows?.length ?? 0;
     }
 
     const durationMs = Date.now() - startTime;

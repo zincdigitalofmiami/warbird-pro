@@ -6,7 +6,6 @@ import {
 import type {
   WarbirdConvictionRow,
   WarbirdDailyBiasRow,
-  WarbirdForecastRow,
   WarbirdRiskRow,
   WarbirdSetupEventRow,
   WarbirdSetupRow,
@@ -21,18 +20,42 @@ import TV from "@/lib/colors";
 export function composeWarbirdSignal(params: {
   daily: WarbirdDailyBiasRow | null;
   structure: WarbirdStructure4HRow | null;
-  forecast: WarbirdForecastRow | null;
+  trigger: WarbirdTriggerRow | null;
   conviction: WarbirdConvictionRow | null;
   risk: WarbirdRiskRow | null;
   setup: WarbirdSetupRow | null;
 }): WarbirdSignal | null {
-  const { daily, structure, forecast, conviction, risk, setup } = params;
-  if (!forecast) return null;
+  const { daily, structure, trigger, conviction, risk, setup } = params;
+
+  const generatedAt =
+    setup?.bar_close_ts ??
+    trigger?.bar_close_ts ??
+    conviction?.bar_close_ts ??
+    risk?.bar_close_ts ??
+    null;
+  const symbol =
+    setup?.symbol_code ??
+    trigger?.symbol_code ??
+    conviction?.symbol_code ??
+    risk?.symbol_code ??
+    null;
+
+  if (!generatedAt || !symbol) {
+    return null;
+  }
+
+  const directionalBias =
+    conviction?.bias_15m ??
+    (setup?.direction === "LONG"
+      ? "BULL"
+      : setup?.direction === "SHORT"
+        ? "BEAR"
+        : "NEUTRAL");
 
   return {
     version: WARBIRD_SIGNAL_VERSION,
-    generatedAt: forecast.ts,
-    symbol: forecast.symbol_code,
+    generatedAt,
+    symbol,
     daily: {
       bias: daily?.bias ?? "NEUTRAL",
       price_vs_200d_ma: daily?.price_vs_200d_ma ?? null,
@@ -44,24 +67,13 @@ export function composeWarbirdSignal(params: {
       agrees_with_daily: structure?.agrees_with_daily ?? false,
     },
     directional: {
-      bias_1h: forecast.bias_1h,
-      price_target_1h: forecast.target_price_1h,
-      price_target_4h: forecast.target_price_4h,
-      mae_band_1h: forecast.target_mae_1h,
-      mae_band_4h: forecast.target_mae_4h,
-      mfe_band_1h: forecast.target_mfe_1h,
-      mfe_band_4h: forecast.target_mfe_4h,
-      prob_hit_sl_first:
-        forecast.prob_hit_sl_first ?? numberFromFeatureSnapshot(forecast, "prob_hit_sl_first"),
-      prob_hit_pt1_first:
-        forecast.prob_hit_pt1_first ?? numberFromFeatureSnapshot(forecast, "prob_hit_pt1_first"),
-      prob_hit_pt2_after_pt1:
-        forecast.prob_hit_pt2_after_pt1 ?? numberFromFeatureSnapshot(forecast, "prob_hit_pt2_after_pt1"),
-      expected_max_extension:
-        forecast.expected_max_extension ?? numberFromFeatureSnapshot(forecast, "expected_max_extension"),
-      setup_score:
-        forecast.setup_score ?? numberFromFeatureSnapshot(forecast, "setup_score"),
-      confidence: forecast.confidence ?? null,
+      bias_15m: directionalBias,
+      prob_hit_sl_first: null,
+      prob_hit_pt1_first: risk?.tp1_probability ?? null,
+      prob_hit_pt2_after_pt1: risk?.tp2_probability ?? null,
+      reversal_risk: risk?.reversal_risk ?? null,
+      setup_score: trigger?.trigger_quality_ratio != null ? trigger.trigger_quality_ratio * 100 : null,
+      confidence: risk?.confidence_score ?? trigger?.trigger_quality_ratio ?? null,
     },
     conviction: {
       level: conviction?.level ?? "NO_TRADE",
@@ -92,9 +104,7 @@ export function composeWarbirdSignal(params: {
       vix_percentile_20d: risk?.vix_percentile_20d ?? null,
       vix_percentile_regime: risk?.vix_percentile_regime ?? null,
       regime: risk?.regime_label ?? REGIME_LABEL,
-      days_into_regime:
-        risk?.days_into_regime ??
-        getDaysIntoRegime(forecast.ts),
+      days_into_regime: risk?.days_into_regime ?? getDaysIntoRegime(generatedAt),
     },
     zones: risk
       ? {
@@ -105,21 +115,12 @@ export function composeWarbirdSignal(params: {
         }
       : undefined,
     feedback: {
-      win_rate_last20: numberFromFeatureSnapshot(forecast, "win_rate_last20"),
-      current_streak: numberFromFeatureSnapshot(forecast, "current_streak"),
-      avg_r_recent: numberFromFeatureSnapshot(forecast, "avg_r_recent"),
-      setup_frequency_7d: numberFromFeatureSnapshot(forecast, "setup_frequency_7d"),
+      win_rate_last20: null,
+      current_streak: null,
+      avg_r_recent: null,
+      setup_frequency_7d: null,
     },
   };
-}
-
-function numberFromFeatureSnapshot(
-  forecast: Pick<WarbirdForecastRow, "feature_snapshot"> & { feature_snapshot?: unknown },
-  key: string,
-): number | null {
-  const snapshot = (forecast as { feature_snapshot?: Record<string, unknown> }).feature_snapshot;
-  const value = snapshot?.[key];
-  return typeof value === "number" ? value : null;
 }
 
 export function warbirdSignalToTargets(
@@ -148,8 +149,8 @@ export function warbirdSignalToTargets(
   }
 
   const tpTargets = [
-    { id: "tp1", price: signal.setup?.tp1 ?? signal.directional.price_target_1h, band: signal.directional.mae_band_1h },
-    { id: "tp2", price: signal.setup?.tp2 ?? signal.directional.price_target_4h, band: signal.directional.mae_band_4h },
+    { id: "tp1", price: signal.setup?.tp1 ?? null },
+    { id: "tp2", price: signal.setup?.tp2 ?? null },
   ];
 
   for (const target of tpTargets) {
@@ -161,7 +162,7 @@ export function warbirdSignalToTargets(
       startTime: lastCandleTime,
       endTime: futureEndTime,
       price: target.price,
-      bandHalfWidth: target.band ?? 0,
+      bandHalfWidth: 0,
       tags: ["WARBIRD", signal.conviction.level],
       color: TV.bull.primary,
       mcProbTouch: hitProb,
@@ -188,7 +189,7 @@ export function warbirdSignalToTargets(
 export function warbirdSetupToCandidate(
   setup: WarbirdSetupRow,
 ): SetupCandidate {
-  const ts = Math.floor(new Date(setup.ts).getTime() / 1000);
+  const ts = Math.floor(new Date(setup.bar_close_ts).getTime() / 1000);
   const isBullish = setup.direction === "LONG";
 
   return {

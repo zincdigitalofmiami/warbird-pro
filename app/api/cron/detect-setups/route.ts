@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { validateCronRequest } from "@/lib/cron-auth";
 import { isMarketOpen, isWeekendBar } from "@/lib/market-hours";
 import type { CandleData } from "@/lib/types";
 import { buildDailyBiasLayer } from "@/scripts/warbird/daily-layer";
@@ -8,7 +9,7 @@ import { buildFibGeometry } from "@/scripts/warbird/fib-engine";
 import { evaluateTrigger } from "@/scripts/warbird/trigger-15m";
 import { evaluateConviction } from "@/scripts/warbird/conviction-matrix";
 import { REGIME_LABEL, WARBIRD_DEFAULT_SYMBOL, getDaysIntoRegime } from "@/lib/warbird/constants";
-import type { WarbirdForecastRow } from "@/lib/warbird/types";
+import type { WarbirdBias } from "@/lib/warbird/types";
 
 export const maxDuration = 60;
 
@@ -43,34 +44,6 @@ type JobLogPayload = {
   error_message?: string;
 };
 
-type ForecastGateMetrics = {
-  probHitSlFirst: number | null;
-  probHitPt1First: number | null;
-  probHitPt2AfterPt1: number | null;
-  setupScore: number | null;
-};
-
-type ForecastGateThresholds = {
-  maxProbHitSlFirst: number;
-  minProbHitPt1First: number;
-  minProbHitPt2AfterPt1: number;
-  minSetupScore: number;
-};
-
-type ForecastGateDecision = {
-  allow: boolean;
-  reasons: string[];
-  metrics: ForecastGateMetrics;
-  thresholds: ForecastGateThresholds;
-};
-
-const DEFAULT_FORECAST_GATE_THRESHOLDS: ForecastGateThresholds = {
-  maxProbHitSlFirst: 0.45,
-  minProbHitPt1First: 0.5,
-  minProbHitPt2AfterPt1: 0.35,
-  minSetupScore: 55,
-};
-
 async function writeJobLog(
   supabase: ReturnType<typeof createAdminClient>,
   payload: JobLogPayload,
@@ -102,101 +75,14 @@ function hasNonWeekendContinuity(candles: CandleData[], intervalSec: number): bo
   return true;
 }
 
-function readEnvNumber(name: string): number | null {
-  const raw = process.env[name];
-  if (!raw) return null;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) return null;
-  return parsed;
-}
-
-function parseSnapshotMetric(snapshot: Record<string, unknown> | null | undefined, key: string): number | null {
-  const value = snapshot?.[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function resolveForecastMetrics(forecast: WarbirdForecastRow): ForecastGateMetrics {
-  const snapshot =
-    forecast.feature_snapshot && typeof forecast.feature_snapshot === "object"
-      ? (forecast.feature_snapshot as Record<string, unknown>)
-      : null;
-
-  return {
-    probHitSlFirst: forecast.prob_hit_sl_first ?? parseSnapshotMetric(snapshot, "prob_hit_sl_first"),
-    probHitPt1First: forecast.prob_hit_pt1_first ?? parseSnapshotMetric(snapshot, "prob_hit_pt1_first"),
-    probHitPt2AfterPt1:
-      forecast.prob_hit_pt2_after_pt1 ?? parseSnapshotMetric(snapshot, "prob_hit_pt2_after_pt1"),
-    setupScore: forecast.setup_score ?? parseSnapshotMetric(snapshot, "setup_score"),
-  };
-}
-
-function resolveForecastGateThresholds(): ForecastGateThresholds {
-  return {
-    maxProbHitSlFirst:
-      readEnvNumber("WARBIRD_MAX_PROB_HIT_SL_FIRST") ??
-      DEFAULT_FORECAST_GATE_THRESHOLDS.maxProbHitSlFirst,
-    minProbHitPt1First:
-      readEnvNumber("WARBIRD_MIN_PROB_HIT_PT1_FIRST") ??
-      DEFAULT_FORECAST_GATE_THRESHOLDS.minProbHitPt1First,
-    minProbHitPt2AfterPt1:
-      readEnvNumber("WARBIRD_MIN_PROB_HIT_PT2_AFTER_PT1") ??
-      DEFAULT_FORECAST_GATE_THRESHOLDS.minProbHitPt2AfterPt1,
-    minSetupScore:
-      readEnvNumber("WARBIRD_MIN_SETUP_SCORE") ??
-      DEFAULT_FORECAST_GATE_THRESHOLDS.minSetupScore,
-  };
-}
-
-function evaluateForecastGate(forecast: WarbirdForecastRow): ForecastGateDecision {
-  const metrics = resolveForecastMetrics(forecast);
-  const thresholds = resolveForecastGateThresholds();
-  const reasons: string[] = [];
-
-  if (metrics.probHitSlFirst == null) {
-    reasons.push("missing_prob_hit_sl_first");
-  } else if (metrics.probHitSlFirst > thresholds.maxProbHitSlFirst) {
-    reasons.push(
-      `prob_hit_sl_first>${thresholds.maxProbHitSlFirst.toFixed(2)} (${metrics.probHitSlFirst.toFixed(3)})`,
-    );
-  }
-
-  if (metrics.probHitPt1First == null) {
-    reasons.push("missing_prob_hit_pt1_first");
-  } else if (metrics.probHitPt1First < thresholds.minProbHitPt1First) {
-    reasons.push(
-      `prob_hit_pt1_first<${thresholds.minProbHitPt1First.toFixed(2)} (${metrics.probHitPt1First.toFixed(3)})`,
-    );
-  }
-
-  if (metrics.probHitPt2AfterPt1 == null) {
-    reasons.push("missing_prob_hit_pt2_after_pt1");
-  } else if (metrics.probHitPt2AfterPt1 < thresholds.minProbHitPt2AfterPt1) {
-    reasons.push(
-      `prob_hit_pt2_after_pt1<${thresholds.minProbHitPt2AfterPt1.toFixed(2)} (${metrics.probHitPt2AfterPt1.toFixed(3)})`,
-    );
-  }
-
-  if (metrics.setupScore == null) {
-    reasons.push("missing_setup_score");
-  } else if (metrics.setupScore < thresholds.minSetupScore) {
-    reasons.push(`setup_score<${thresholds.minSetupScore} (${metrics.setupScore.toFixed(2)})`);
-  }
-
-  return {
-    allow: reasons.length === 0,
-    reasons,
-    metrics,
-    thresholds,
-  };
+function directionToBias(direction: "LONG" | "SHORT"): WarbirdBias {
+  return direction === "LONG" ? "BULL" : "BEAR";
 }
 
 export async function GET(request: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const authError = validateCronRequest(request);
+  if (authError) {
+    return authError;
   }
 
   const startTime = Date.now();
@@ -224,7 +110,15 @@ export async function GET(request: Request) {
     // - 1D/4H for macro context layers
     // - 15m for strict setup geometry authority
     // - 1m for microstructure + indicator computation
-    const [dailyBarsRes, fourHourBarsRes, fifteenMinBarsRes, oneMinBarsRes, forecastRes] =
+    const [
+      dailyBarsRes,
+      fourHourBarsRes,
+      fifteenMinBarsRes,
+      oneMinBarsRes,
+      gprRes,
+      vixRes,
+      trumpEffectRes,
+    ] =
       await Promise.all([
         supabase
           .from("mes_1d")
@@ -249,12 +143,23 @@ export async function GET(request: Request) {
           .order("ts", { ascending: false })
           .limit(60),
         supabase
-          .from("warbird_forecasts_1h")
-          .select("*")
-          .eq("symbol_code", WARBIRD_DEFAULT_SYMBOL)
+          .from("geopolitical_risk_1d")
+          .select("ts, gpr_daily")
           .order("ts", { ascending: false })
           .limit(1)
-          .returns<WarbirdForecastRow>()
+          .maybeSingle(),
+        supabase
+          .from("econ_vol_1d")
+          .select("ts, value")
+          .eq("series_id", "VIXCLS")
+          .order("ts", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from("trump_effect_1d")
+          .select("ts")
+          .order("ts", { ascending: false })
+          .limit(1)
           .maybeSingle(),
       ]);
 
@@ -262,7 +167,9 @@ export async function GET(request: Request) {
     if (fourHourBarsRes.error) throw new Error(`mes_4h query failed: ${fourHourBarsRes.error.message}`);
     if (fifteenMinBarsRes.error) throw new Error(`mes_15m query failed: ${fifteenMinBarsRes.error.message}`);
     if (oneMinBarsRes.error) throw new Error(`mes_1m query failed: ${oneMinBarsRes.error.message}`);
-    if (forecastRes.error) throw new Error(`warbird_forecasts_1h query failed: ${forecastRes.error.message}`);
+    if (gprRes.error) throw new Error(`geopolitical_risk_1d query failed: ${gprRes.error.message}`);
+    if (vixRes.error) throw new Error(`econ_vol_1d query failed: ${vixRes.error.message}`);
+    if (trumpEffectRes.error) throw new Error(`trump_effect_1d query failed: ${trumpEffectRes.error.message}`);
 
     const dailyBars = toCandles(dailyBarsRes.data);
     const fourHourBars = toCandles(fourHourBarsRes.data);
@@ -311,73 +218,48 @@ export async function GET(request: Request) {
 
     await supabase.from("warbird_daily_bias").upsert(daily, { onConflict: "ts" });
     await supabase.from("warbird_structure_4h").upsert(structure, { onConflict: "ts" });
+    let rowsWritten = 2;
 
-    // ── Layer 3: 1H forecast (model output) ────────────────────────────
-    const forecast = (forecastRes.data as WarbirdForecastRow | null) ?? null;
-    if (!forecast) {
-      await writeJobLog(supabase, {
-        job_name: "detect-setups",
-        status: "SKIPPED",
-        rows_affected: 2,
-        duration_ms: Date.now() - startTime,
-        error_message: "No warbird_forecasts_1h row available",
-      });
-      return NextResponse.json({ skipped: true, reason: "no_forecast" });
-    }
+    const barCloseTs = new Date(fifteenMinBars[fifteenMinBars.length - 1].time * 1000).toISOString();
+    const triggerBarTs = new Date(oneMinBars[oneMinBars.length - 1].time * 1000).toISOString();
+    const geometryBias = structure.bias_4h !== "NEUTRAL" ? structure.bias_4h : daily.bias;
 
-    const forecastAgeMs = Date.now() - new Date(forecast.ts).getTime();
-    const maxForecastAgeMs = 90 * 60 * 1000;
-    if (forecastAgeMs > maxForecastAgeMs) {
-      await writeJobLog(supabase, {
-        job_name: "detect-setups",
-        status: "SKIPPED",
-        rows_affected: 2,
-        duration_ms: Date.now() - startTime,
-        error_message: `stale_forecast age_ms=${forecastAgeMs}`,
-      });
-      return NextResponse.json({
-        skipped: true,
-        reason: "stale_forecast",
-        forecast_ts: forecast.ts,
-        forecast_age_ms: forecastAgeMs,
-      });
-    }
-
-    const forecastGate = evaluateForecastGate(forecast);
-
-    // ── Layer 4: 15m fib geometry (strict setup authority) ──────────────
-    const triggerGeometry = buildFibGeometry(fifteenMinBars, forecast.bias_1h);
+    // ── Layer 3: 15m fib geometry (strict setup authority) ──────────────
+    const triggerGeometry = buildFibGeometry(fifteenMinBars, geometryBias);
     if (!triggerGeometry) {
       await writeJobLog(supabase, {
         job_name: "detect-setups",
         status: "SKIPPED",
-        rows_affected: 3,
+        rows_affected: rowsWritten,
         duration_ms: Date.now() - startTime,
         error_message: "no_fib_geometry",
       });
       return NextResponse.json({ skipped: true, reason: "no_fib_geometry" });
     }
 
-    // ── Layer 5: Conviction (bias alignment) ───────────────────────────
+    const bias15m = directionToBias(triggerGeometry.direction);
+
+    // ── Layer 4: Conviction (bias alignment) ───────────────────────────
     const convictionResult = evaluateConviction({
       dailyBias: daily.bias,
       bias4h: structure.bias_4h,
-      bias1h: forecast.bias_1h,
+      bias15m,
     });
 
-    // ── Layer 6: Trigger (1m indicators + microstructure at 15m fib zone)
+    // ── Layer 5: Trigger (1m indicators + microstructure at 15m fib zone)
     // Trigger uses the 15m fib levels for zone proximity — that's where
-    // the intraday reversal happens, not at the wide 1H levels.
+    // the intraday reversal happens.
     const { trigger: triggerResult, features: triggerFeatures } = evaluateTrigger({
       candles1m: oneMinBars,
-      forecast,
       geometry: triggerGeometry,
+      barCloseTs,
+      symbolCode: WARBIRD_DEFAULT_SYMBOL,
     });
 
     // ── Persist trigger ────────────────────────────────────────────────
     const { data: triggerRow, error: triggerError } = await supabase
       .from("warbird_triggers_15m")
-      .upsert(triggerResult, { onConflict: "symbol_code,ts,forecast_id" })
+      .upsert(triggerResult, { onConflict: "symbol_code,timeframe,bar_close_ts" })
       .select("*")
       .single();
 
@@ -385,61 +267,85 @@ export async function GET(request: Request) {
       throw new Error(`warbird_triggers_15m upsert failed: ${triggerError.message}`);
     }
     const triggerId = triggerRow.id;
+    rowsWritten += 1;
 
     // ── Persist conviction ─────────────────────────────────────────────
-    const convictionTs = new Date().toISOString();
     const convictionPayload = {
-      ts: convictionTs,
-      forecast_id: forecast.id,
+      bar_close_ts: barCloseTs,
+      timeframe: "M15",
       trigger_id: triggerId,
       symbol_code: WARBIRD_DEFAULT_SYMBOL,
       ...convictionResult,
       daily_bias: daily.bias,
       bias_4h: structure.bias_4h,
-      bias_1h: forecast.bias_1h,
+      bias_15m: bias15m,
       trigger_decision: triggerResult.decision,
     };
 
     const { data: conviction, error: convictionError } = await supabase
       .from("warbird_conviction")
-      .upsert(convictionPayload, { onConflict: "forecast_id" })
+      .upsert(convictionPayload, { onConflict: "symbol_code,timeframe,bar_close_ts" })
       .select("*")
       .single();
 
     if (convictionError) {
       throw new Error(`warbird_conviction upsert failed: ${convictionError.message}`);
     }
+    rowsWritten += 1;
 
-    // ── Create setup only if trigger says GO, conviction allows, and
-    // promoted forecast probabilities pass execution gates.
+    const latestGprTs = gprRes.data?.ts ? new Date(gprRes.data.ts).getTime() : null;
+    const latestTrumpTs = trumpEffectRes.data?.ts ? new Date(trumpEffectRes.data.ts).getTime() : null;
+    const riskPayload = {
+      bar_close_ts: barCloseTs,
+      timeframe: "M15",
+      symbol_code: WARBIRD_DEFAULT_SYMBOL,
+      tp1_probability: null,
+      tp2_probability: null,
+      reversal_risk: null,
+      confidence_score: triggerFeatures.triggerScore,
+      garch_sigma: null,
+      garch_vol_ratio: null,
+      zone_1_upper: null,
+      zone_1_lower: null,
+      zone_2_upper: null,
+      zone_2_lower: null,
+      gpr_level:
+        latestGprTs != null && Date.now() - latestGprTs <= 14 * 24 * 60 * 60 * 1000
+          ? Number(gprRes.data?.gpr_daily ?? null)
+          : null,
+      trump_effect_active:
+        latestTrumpTs != null
+          ? Date.now() - latestTrumpTs <= 7 * 24 * 60 * 60 * 1000
+          : null,
+      vix_level: vixRes.data?.value != null ? Number(vixRes.data.value) : null,
+      vix_percentile_20d: null,
+      vix_percentile_regime: null,
+      vol_state_name: null,
+      regime_label: REGIME_LABEL,
+      days_into_regime: getDaysIntoRegime(barCloseTs),
+    };
+
+    const { error: riskError } = await supabase
+      .from("warbird_risk")
+      .upsert(riskPayload, { onConflict: "symbol_code,timeframe,bar_close_ts" });
+
+    if (riskError) {
+      throw new Error(`warbird_risk upsert failed: ${riskError.message}`);
+    }
+    rowsWritten += 1;
+
+    // ── Create setup only if trigger says GO and conviction allows. ─────
     let setupId: number | null = null;
     const triggerEligible = triggerResult.decision === "GO" && conviction.level !== "NO_TRADE";
 
-    if (triggerEligible && !forecastGate.allow) {
-      const gateReason = `forecast_gate_failed: ${forecastGate.reasons.join("; ")}`;
-      const { error: triggerUpdateError } = await supabase
-        .from("warbird_triggers_15m")
-        .update({ no_trade_reason: gateReason })
-        .eq("id", triggerId);
-      if (triggerUpdateError) {
-        throw new Error(`warbird_triggers_15m gate update failed: ${triggerUpdateError.message}`);
-      }
-    }
-
-    if (triggerEligible && forecastGate.allow) {
-      const setupKey = [
-        forecast.id,
-        convictionTs.slice(0, 13),
-        triggerGeometry.direction,
-        Number(triggerGeometry.fibRatio ?? 0).toFixed(3),
-        triggerFeatures.triggerScore.toFixed(2),
-      ].join(":");
+    if (triggerEligible) {
+      const setupKey = `${WARBIRD_DEFAULT_SYMBOL}:M15:${barCloseTs}`;
 
       const setupPayload = {
         setup_key: setupKey,
-        ts: convictionTs,
+        bar_close_ts: barCloseTs,
+        timeframe: "M15",
         symbol_code: WARBIRD_DEFAULT_SYMBOL,
-        forecast_id: forecast.id,
         trigger_id: triggerId,
         conviction_id: conviction.id,
         direction: triggerGeometry.direction,
@@ -458,13 +364,13 @@ export async function GET(request: Request) {
         volume_ratio: triggerFeatures.volumeRatio,
         trigger_quality_ratio: triggerFeatures.triggerScore,
         current_event: "TRIGGERED",
-        trigger_bar_ts: triggerResult.ts,
+        trigger_bar_ts: triggerBarTs,
         notes: buildSetupNotes(triggerGeometry, triggerFeatures),
       };
 
       const { data: setup, error: setupError } = await supabase
         .from("warbird_setups")
-        .upsert(setupPayload, { onConflict: "setup_key" })
+        .upsert(setupPayload, { onConflict: "symbol_code,timeframe,bar_close_ts" })
         .select("*")
         .single();
 
@@ -473,6 +379,7 @@ export async function GET(request: Request) {
       }
 
       setupId = setup.id;
+      rowsWritten += 1;
 
       const { data: existingEvent } = await supabase
         .from("warbird_setup_events")
@@ -487,14 +394,14 @@ export async function GET(request: Request) {
           .from("warbird_setup_events")
           .insert({
             setup_id: setup.id,
-            ts: setup.ts,
+            ts: setup.trigger_bar_ts,
             event_type: "TRIGGERED",
             price: setup.entry_price,
             note: setup.notes,
             metadata: {
               conviction_level: setup.conviction_level,
               regime_label: REGIME_LABEL,
-              days_into_regime: getDaysIntoRegime(setup.ts),
+              days_into_regime: getDaysIntoRegime(setup.bar_close_ts),
               actual_retrace_ratio: triggerGeometry.actualRetraceRatio,
               fib_source: "15m",
               trigger_score: triggerFeatures.triggerScore,
@@ -513,6 +420,7 @@ export async function GET(request: Request) {
         if (eventError) {
           throw new Error(`warbird_setup_events insert failed: ${eventError.message}`);
         }
+        rowsWritten += 1;
       }
 
       if (triggerGeometry.measuredMove && setupId != null) {
@@ -530,27 +438,22 @@ export async function GET(request: Request) {
           },
           { onConflict: "setup_id" },
         );
+        rowsWritten += 1;
       }
     }
 
-    const outcomeRows = setupId ? 5 : 3;
-    const partialReason = triggerEligible && !forecastGate.allow
-      ? `forecast_gate_failed: ${forecastGate.reasons.join("; ")}`
-      : undefined;
-
     await writeJobLog(supabase, {
       job_name: "detect-setups",
-      status: partialReason ? "PARTIAL" : "SUCCESS",
-      rows_affected: outcomeRows,
+      status: "SUCCESS",
+      rows_affected: rowsWritten,
       duration_ms: Date.now() - startTime,
-      error_message: partialReason,
     });
 
     return NextResponse.json({
       success: true,
       daily_bias: daily.bias,
       bias_4h: structure.bias_4h,
-      bias_1h: forecast.bias_1h,
+      bias_15m: bias15m,
       trigger_decision: triggerResult.decision,
       trigger_score: triggerFeatures.triggerScore,
       trigger_features: {
@@ -563,12 +466,6 @@ export async function GET(request: Request) {
         hour_utc: triggerFeatures.hourUtc,
       },
       conviction: conviction.level,
-      forecast_gate: {
-        allow: forecastGate.allow,
-        reasons: forecastGate.reasons,
-        metrics: forecastGate.metrics,
-        thresholds: forecastGate.thresholds,
-      },
       fib_source: "15m",
       precise_entry: triggerFeatures.preciseEntry,
       precise_stop: triggerFeatures.preciseStop,

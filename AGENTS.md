@@ -15,16 +15,18 @@ Everything else is archived or reference-only and should not drive current imple
 - The canonical trade object is the **MES 15m fib setup**.
 - The canonical key is the MES 15m bar-close timestamp in `America/Chicago`.
 - Any remaining `1H` wording in old docs, specs, scripts, or comments is legacy and must not drive new work.
-- Pine is the live production surface.
+- Pine is the canonical signal surface. The Next.js dashboard is the mirrored operator surface on the same contract, not a separate decision engine.
+- Live model outputs are TP1/TP2/reversal outcome state for the MES 15m fib setup, not predicted-price forecasts.
+- `news_signals` is a derived `BULLISH` / `BEARISH` market-impact surface and must be paired with price action; it is not a standalone trade engine.
 - AutoGluon is offline only and may only promote Pine-ready packet outputs.
 
 ## Stack
 
-- Next.js (App Router) on Vercel — backend/API only (frontend is TradingView)
-- Supabase (Postgres, Auth, Realtime, RLS) — NO Prisma, NO ORM
+- Next.js (App Router) — frontend dashboard and route handlers only (frontend is TradingView)
+- Supabase (Postgres, Auth, Realtime, RLS, pg_cron) — NO Prisma, NO ORM
 - AutoGluon (local Python) — entry gate model
 - TradingView + Rabid Raccoon v2 Pine Script — all visualization
-- Vercel Cron Jobs for ingestion scheduling
+- Supabase pg_cron — sole scheduling and recurring function producer
 
 ## Hard Rules
 
@@ -50,7 +52,8 @@ Everything else is archived or reference-only and should not drive current imple
 
 - All cron routes validate `CRON_SECRET` and log to `job_log`.
 - All cron routes: `export const maxDuration = 60`
-- Dead schedules must be removed from `vercel.json`.
+- Supabase pg_cron is the sole schedule producer. No recurring schedules outside `Supabase cron migration files`.
+- Dead schedules must be removed by updating the corresponding `Supabase cron migration files` definitions.
 
 ### Production Boundary
 
@@ -63,7 +66,7 @@ Everything else is archived or reference-only and should not drive current imple
 - `npm run build` must pass before every push.
 - No `/* */` block comments to disable code. Use `//` only.
 - No `--no-verify` on git hooks.
-- Push to repo → merge to main → Vercel auto-deploys. Never `npx vercel --prod`.
+- Push to repo → merge to main → deployment pipeline auto-deploys.
 
 ### Process
 
@@ -90,7 +93,7 @@ Everything else is archived or reference-only and should not drive current imple
 
 - `Pivot Levels [BigBeluga]` is required.
 - `Market Structure Break & OB Probability Toolkit [LuxAlgo]` is required.
-- `Luminance Breakout Engine [LuxAlgo]` is later-phase only.
+- `Luminance Breakout Engine [LuxAlgo]` is required.
 - For required or approved harnesses:
   - confirm the TradingView page shows `OPEN-SOURCE SCRIPT`
   - retrieve code through the script page's `Source code` entry
@@ -100,8 +103,8 @@ Everything else is archived or reference-only and should not drive current imple
 
 ## MES Ingestion — Current State
 
-**Current:** `mes-catchup` is a monolithic cron (every 5 min) fetching ohlcv-1m + ohlcv-1h, aggregating in TypeScript.
+**Current:** `mes-1m` is a lightweight route called every minute by Supabase pg_cron (`warbird_mes_1m_pull`). Fetches ohlcv-1m incrementally from Databento, upserts `mes_1m`, rolls up touched 15m buckets into `mes_15m`.
 
-**Planned:** Split into isolated per-schema routes when the active plan explicitly calls for it.
+**Legacy catchup:** `mes-catchup` is locked behind explicit manual params. No recurring schedule. Manual backfill only.
 
 **Databento free schemas (Standard $179/mo):** ohlcv-1s, ohlcv-1m, ohlcv-1h, ohlcv-1d, definition, statistics. Currently using 2 of 6.

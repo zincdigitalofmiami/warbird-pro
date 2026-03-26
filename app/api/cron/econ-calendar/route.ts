@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { validateCronRequest } from "@/lib/cron-auth";
 import { isMarketOpen } from "@/lib/market-hours";
 
 export const maxDuration = 60;
@@ -97,12 +98,9 @@ async function fetchTeCalendar(): Promise<TeEvent[]> {
 }
 
 export async function GET(request: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const authError = validateCronRequest(request);
+  if (authError) {
+    return authError;
   }
 
   const startTime = Date.now();
@@ -128,28 +126,34 @@ export async function GET(request: Request) {
   try {
     const events = await fetchTeCalendar();
 
-    let rowsAffected = 0;
-    for (const event of events) {
-      // Dedup by event_name + ts (no unique constraint on table)
-      const { data: existing } = await supabase
-        .from("econ_calendar")
-        .select("id")
-        .eq("ts", event.ts)
-        .eq("event_name", event.event_name)
-        .limit(1);
+    const rows = Array.from(
+      new Map(
+        events.map((event) => [
+          `${event.ts}::${event.event_name}`,
+          {
+            ts: event.ts,
+            event_name: event.event_name,
+            importance: event.importance,
+            actual: event.actual,
+            forecast: event.forecast,
+            previous: event.previous,
+          },
+        ]),
+      ).values(),
+    );
 
-      if (!existing || existing.length === 0) {
-        const { error } = await supabase.from("econ_calendar").insert({
-          ts: event.ts,
-          event_name: event.event_name,
-          importance: event.importance,
-          actual: event.actual,
-          forecast: event.forecast,
-          previous: event.previous,
-        });
-        if (error) throw new Error(`econ_calendar insert: ${error.message}`);
-        rowsAffected++;
-      }
+    let rowsAffected = 0;
+    if (rows.length > 0) {
+      const { data: insertedRows, error } = await supabase
+        .from("econ_calendar")
+        .upsert(rows, {
+          onConflict: "ts,event_name",
+          ignoreDuplicates: true,
+        })
+        .select("id");
+
+      if (error) throw new Error(`econ_calendar upsert: ${error.message}`);
+      rowsAffected = insertedRows?.length ?? 0;
     }
 
     const durationMs = Date.now() - startTime;

@@ -82,10 +82,24 @@ if [ -n "$VAR_IN_IF" ]; then
 fi
 
 # W4: plot() without display parameter (visible on chart)
-VISIBLE_PLOTS=$(grep -n 'plot(' "$FILE" | grep -v 'display=' | grep -v '//' | grep -v 'plotshape' || true)
+VISIBLE_PLOTS=$(grep -n 'plot(' "$FILE" | grep -Ev 'display[[:space:]]*=' | grep -v '//' | grep -v 'plotshape' || true)
 if [ -n "$VISIBLE_PLOTS" ]; then
     echo "WARNING [W4]: plot() calls without display= (visible on chart):"
     echo "$VISIBLE_PLOTS" | head -5
+    WARNINGS=$((WARNINGS + 1))
+fi
+
+# W9/E9: TradingView plot-count budget
+# Official TradingView hard cap is 64 plot counts per script, and hidden plots still count.
+PLOT_RAW=$(grep -E -c 'plot(shape|char|arrow|bar|candle)?\(' "$FILE" 2>/dev/null || echo 0)
+PLOT_COMMENT=$(grep -E 'plot(shape|char|arrow|bar|candle)?\(' "$FILE" 2>/dev/null | grep '^\s*//' | wc -l | tr -d ' ')
+PLOT_ACTUAL=$((PLOT_RAW - PLOT_COMMENT))
+echo "INFO: plot-style calls: $PLOT_ACTUAL (TradingView hard cap: 64)"
+if [ "$PLOT_ACTUAL" -gt 64 ]; then
+    echo "ERROR [E9]: plot-style call count exceeds TradingView hard cap ($PLOT_ACTUAL/64)"
+    ERRORS=$((ERRORS + 1))
+elif [ "$PLOT_ACTUAL" -gt 48 ]; then
+    echo "WARNING [W9]: plot-style call count above 75% of TradingView hard cap ($PLOT_ACTUAL/64)"
     WARNINGS=$((WARNINGS + 1))
 fi
 

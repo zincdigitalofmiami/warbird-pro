@@ -35,6 +35,7 @@ async function fetchSeries(
   seriesId: string,
   apiKey: string,
   limit = 100,
+  observationStart?: string,
 ): Promise<{ date: string; value: number }[]> {
   const params = new URLSearchParams({
     series_id: seriesId,
@@ -43,6 +44,10 @@ async function fetchSeries(
     sort_order: "desc",
     limit: String(limit),
   });
+
+  if (observationStart) {
+    params.set("observation_start", observationStart);
+  }
 
   const response = await fetch(`${FRED_BASE}?${params}`, {
     signal: AbortSignal.timeout(30_000),
@@ -101,7 +106,23 @@ export async function ingestCategory(category: string): Promise<{
   let totalRows = 0;
 
   for (const { series_id } of seriesList) {
-    const observations = await fetchSeries(series_id, apiKey);
+    const { data: latestRow, error: latestErr } = await supabase
+      .from(tableName)
+      .select("ts")
+      .eq("series_id", series_id)
+      .order("ts", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestErr) {
+      throw new Error(`Failed to query latest ${tableName} ts for ${series_id}: ${latestErr.message}`);
+    }
+
+    const observationStart = latestRow?.ts
+      ? new Date(latestRow.ts).toISOString().slice(0, 10)
+      : undefined;
+
+    const observations = await fetchSeries(series_id, apiKey, 100, observationStart);
 
     if (observations.length === 0) continue;
 

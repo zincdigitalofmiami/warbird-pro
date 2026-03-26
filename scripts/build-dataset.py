@@ -251,10 +251,18 @@ def add_news_features(df: pd.DataFrame, supabase) -> pd.DataFrame:
     if not news.empty:
         news["ts"] = pd.to_datetime(news["ts"], utc=True).dt.floor("h")
         if "direction" in news.columns:
+            news["direction_norm"] = news["direction"].replace({
+                "LONG": "BULLISH",
+                "SHORT": "BEARISH",
+                "up": "BULLISH",
+                "down": "BEARISH",
+                "bullish": "BULLISH",
+                "bearish": "BEARISH",
+            })
             news_agg = news.groupby("ts").agg(
-                news_up=("direction", lambda x: (x == "up").sum()),
-                news_down=("direction", lambda x: (x == "down").sum()),
-                news_total=("direction", "count"),
+                news_up=("direction_norm", lambda x: (x == "BULLISH").sum()),
+                news_down=("direction_norm", lambda x: (x == "BEARISH").sum()),
+                news_total=("direction_norm", "count"),
             ).reset_index()
             df = df.merge(news_agg, on="ts", how="left")
             for c in ["news_up", "news_down", "news_total"]:

@@ -1,0 +1,5 @@
+interface:
+  display_name: "TradingView Indicator Repair"
+  short_description: "Root-cause Pine defect repair with regression gates."
+  default_prompt: "Use $tradingview-indicator-repair to reproduce, isolate, fix, and verify Pine defects with minimal blast radius and checkpoint validation."
+

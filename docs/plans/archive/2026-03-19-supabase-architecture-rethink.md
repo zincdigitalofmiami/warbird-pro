@@ -58,13 +58,13 @@ The project has **schema definitions** (12 migrations) and **stub routes** (21 c
 
 ### What's Missing for a Real Financial Data Pipeline
 
-1. **No `pg_cron` usage** — All scheduling via Vercel Cron (external). Supabase has built-in `pg_cron` + `pg_net` for zero-latency DB-native scheduling.
+1. **No `pg_cron` usage** — All scheduling via Supabase pg_cron (external). Supabase has built-in `pg_cron` + `pg_net` for zero-latency DB-native scheduling.
 2. **No Postgres aggregation functions** — 1m → 15m → 1h → 4h → 1d aggregation is done in TypeScript, not as DB triggers or functions.
 3. **No materialized views** — No pre-computed query results for dashboard or chart.
 4. **No 1m bar retention policy** — Bars are ingested but no explicit retention. Need ALL 1m bars for training.
 5. **No feature engineering in DB** — Fibonacci, pivots, swing detection, measured moves all computed in TypeScript at request time.
 6. **No data completeness validation** — No DB-level gap detection or continuity checks.
-7. **No Supabase Edge Functions** — Could replace Vercel Cron for DB-adjacent work.
+7. **No Supabase Edge Functions** — Could replace Supabase pg_cron for DB-adjacent work.
 
 ---
 
@@ -74,7 +74,7 @@ The project has **schema definitions** (12 migrations) and **stub routes** (21 c
 
 1. **Push compute to the database** — Postgres is where the data lives. Aggregation, feature engineering, and data validation should happen as close to the data as possible.
 2. **Use `pg_cron` for DB-internal scheduling** — Zero network latency. No external cron dependency for data-only work.
-3. **Use Vercel Cron only for external API calls** — Databento, FRED, news APIs need HTTP access that `pg_cron` + `pg_net` can handle, but Vercel routes are better for complex API parsing.
+3. **Use Supabase pg_cron only for external API calls** — Databento, FRED, news APIs need HTTP access that `pg_cron` + `pg_net` can handle, but Supabase routes are better for complex API parsing.
 4. **Cloud-only, no Docker** — Use Supabase cloud project directly. Manage migrations via `supabase db push` from CLI linked to cloud project, or apply via Dashboard SQL editor.
 5. **Keep all 1m bars** — `mes_1m` is canonical training data. Never truncate.
 6. **Type generation from schema** — Run `supabase gen types typescript --linked` to get compile-time safety.
@@ -89,7 +89,7 @@ graph TB
         NEWS[News / GPR APIs]
     end
 
-    subgraph Vercel [Vercel - Next.js App Router]
+    subgraph Supabase [Supabase - Next.js App Router]
         CRON_INGEST[Cron: Ingest Raw Data]
         API_READ[API: Read Routes]
         NEXT_APP[Next.js Pages + Components]
@@ -163,9 +163,9 @@ graph TB
 
 #### Layer 1: Ingestion — Keep What Works
 
-The current Vercel Cron approach for external API calls is fine. These routes need HTTP access to Databento, FRED, etc. Keep them, but simplify:
+The current Supabase pg_cron approach for external API calls is fine. These routes need HTTP access to Databento, FRED, etc. Keep them, but simplify:
 
-- **Vercel Cron routes** handle ONLY raw data fetching and INSERT
+- **Supabase pg_cron routes** handle ONLY raw data fetching and INSERT
 - Remove all computation logic from cron routes
 - After INSERT, Postgres triggers fire automatically
 
@@ -187,7 +187,7 @@ Create PL/pgSQL functions for all data transformations:
 
 #### Layer 3: `pg_cron` — DB-Native Scheduling
 
-Replace some Vercel Crons with `pg_cron` for DB-only work:
+Replace some Supabase Crons with `pg_cron` for DB-only work:
 
 ```sql
 -- Aggregate 1m bars every 5 minutes
@@ -252,7 +252,7 @@ The key change: instead of Python computing features from raw 1m bars, the DB ha
 
 ### Keep
 
-- Vercel Cron for external API ingestion (Databento, FRED, news)
+- Supabase pg_cron for external API ingestion (Databento, FRED, news)
 - Supabase cloud project as single source of truth
 - Next.js App Router for frontend
 - Lightweight Charts for MES chart
@@ -275,7 +275,7 @@ The key change: instead of Python computing features from raw 1m bars, the DB ha
 
 - TypeScript aggregation in cron routes (replaced by DB triggers)
 - In-memory fib/pivot computation in API routes (replaced by DB reads)
-- Complex setup-engine.ts state machine running in Vercel (consider moving to DB)
+- Complex setup-engine.ts state machine running in Supabase (consider moving to DB)
 
 ---
 

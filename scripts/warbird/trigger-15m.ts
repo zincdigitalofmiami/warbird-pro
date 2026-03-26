@@ -29,7 +29,6 @@ import {
 import type { CandleData } from "@/lib/types";
 import type {
   WarbirdDirection,
-  WarbirdForecastRow,
   WarbirdTriggerDecision,
   WarbirdTriggerRow,
 } from "@/lib/warbird/types";
@@ -66,10 +65,14 @@ const TRIGGER_WAIT_THRESHOLD = 0.30;
 export interface TriggerInputs {
   /** 1-minute candles — the microstructure data */
   candles1m: CandleData[];
-  /** Forecast from the model (bias + risk context) */
-  forecast: WarbirdForecastRow;
   /** 15m fib geometry (zone, direction, levels) */
   geometry: WarbirdFibGeometry;
+  /** Canonical MES 15m bar close for this setup candidate */
+  barCloseTs: string;
+  /** MES symbol code */
+  symbolCode?: string;
+  /** Optional expected MAE in points from a promoted model surface */
+  expectedMaePts?: number | null;
   /** Cross-asset correlation score (optional) */
   correlationScore?: number | null;
 }
@@ -403,7 +406,7 @@ function computeTriggerScore(
 export function evaluateTrigger(
   inputs: TriggerInputs,
 ): { trigger: Omit<WarbirdTriggerRow, "id">; features: TriggerFeatures } {
-  const { candles1m, forecast, geometry, correlationScore } = inputs;
+  const { candles1m, geometry, correlationScore, barCloseTs, symbolCode, expectedMaePts } = inputs;
 
   const ordered = [...candles1m].sort((a, b) => a.time - b.time);
   const recentBars = ordered.slice(-TRIGGER_LOOKBACK_1M);
@@ -474,7 +477,8 @@ export function evaluateTrigger(
 
   // ── MAE/MFE risk check ───────────────────────────────────────────────
   const stopDistance = Math.abs(preciseEntry - preciseStop);
-  const maeBlocksTrade = stopDistance > 0 && forecast.target_mae_1h > stopDistance * 1.5;
+  const maeBlocksTrade =
+    stopDistance > 0 && expectedMaePts != null && expectedMaePts > stopDistance * 1.5;
 
   // ── Decision ─────────────────────────────────────────────────────────
   let decision: WarbirdTriggerDecision = "WAIT";
@@ -530,9 +534,9 @@ export function evaluateTrigger(
 
   // ── Build trigger row ────────────────────────────────────────────────
   const trigger: Omit<WarbirdTriggerRow, "id"> = {
-    ts: new Date(lastBar.time * 1000).toISOString(),
-    forecast_id: forecast.id,
-    symbol_code: forecast.symbol_code || WARBIRD_DEFAULT_SYMBOL,
+    bar_close_ts: barCloseTs,
+    timeframe: "M15",
+    symbol_code: symbolCode ?? WARBIRD_DEFAULT_SYMBOL,
     direction,
     decision,
     fib_level: fibLevel,
@@ -559,8 +563,7 @@ function buildNoGoResult(
   inputs: TriggerInputs,
   reason: string,
 ): { trigger: Omit<WarbirdTriggerRow, "id">; features: TriggerFeatures } {
-  const { forecast, geometry } = inputs;
-  const now = new Date().toISOString();
+  const { geometry, barCloseTs, symbolCode } = inputs;
 
   const features: TriggerFeatures = {
     sentiment: 50, rsi: 50, stochastic: 50, stochRsi: 50, cci: 50, bbp: 50,
@@ -576,9 +579,9 @@ function buildNoGoResult(
   };
 
   const trigger: Omit<WarbirdTriggerRow, "id"> = {
-    ts: now,
-    forecast_id: forecast.id,
-    symbol_code: forecast.symbol_code || WARBIRD_DEFAULT_SYMBOL,
+    bar_close_ts: barCloseTs,
+    timeframe: "M15",
+    symbol_code: symbolCode ?? WARBIRD_DEFAULT_SYMBOL,
     direction: geometry.direction,
     decision: "NO_GO",
     fib_level: geometry.fibLevel,

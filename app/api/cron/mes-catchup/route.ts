@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { validateCronRequest } from "@/lib/cron-auth";
 import { isMarketOpen, isWeekendBar } from "@/lib/market-hours";
 import { fetchOhlcv, type OhlcvBar } from "@/lib/ingestion/databento";
 import { aggregateMesTimeframes } from "@/lib/mes-aggregation";
-import { activeMesContract, getContractSegments } from "@/lib/contract-roll";
+import { getContractSegments } from "@/lib/contract-roll";
 
 export const maxDuration = 60;
 
-// Primary MES data path. Runs every 5 minutes via Vercel Cron.
-// Fetches ohlcv-1m + ohlcv-1h from Databento Historical API → Supabase.
-// Uses explicit contract symbols per time period to match TradingView volume roll.
+// Legacy backfill route.
+// Lightweight live ingestion is owned by /api/cron/mes-1m.
+// Keep this route only for explicit manual rebuild/backfill operations.
 //
 // Manual modes:
 //   ?days=N       — forced backfill N days back (max 90)
@@ -19,17 +20,24 @@ export const maxDuration = 60;
 const MES_TABLES = ["mes_1m", "mes_15m", "mes_1h", "mes_4h", "mes_1d"] as const;
 
 export async function GET(request: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const authError = validateCronRequest(request);
+  if (authError) {
+    return authError;
   }
 
   const reqUrl = new URL(request.url);
-  const isManual = reqUrl.searchParams.has("days") || reqUrl.searchParams.has("force") || reqUrl.searchParams.has("purge");
-  if (!isManual && !isMarketOpen()) {
+  const force = reqUrl.searchParams.get("force") === "1";
+  const isManual =
+    reqUrl.searchParams.has("days") ||
+    reqUrl.searchParams.has("force") ||
+    reqUrl.searchParams.has("purge");
+  if (!isManual) {
+    return NextResponse.json({
+      skipped: true,
+      reason: "legacy_route_disabled_use_mes_1m",
+    });
+  }
+  if (!force && !isMarketOpen()) {
     return NextResponse.json({ skipped: true, reason: "market_closed" });
   }
 
@@ -77,7 +85,7 @@ export async function GET(request: Request) {
       // Purge without days param: default 30 days
       gapStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     } else {
-      // Normal cron: find the latest 1m bar and fill from there
+      // Incremental manual mode: find the latest 1m bar and fill from there
       const { data: latest, error: latestErr } = await supabase
         .from("mes_1m")
         .select("ts")

@@ -289,7 +289,7 @@ Does NOT create forecasts itself.
 |-----------|---------|
 | "mes_1s is canonical continuity ingestion layer" | Table exists (migration 011) but **nothing writes to it**. mes-catchup fetches ohlcv-1m, not ohlcv-1s. |
 | "mes_1m derived from mes_1s when available" | mes_1m is written directly from Databento ohlcv-1m. No 1s→1m derivation exists. |
-| "pg_cron for DB-internal scheduling" | **Zero pg_cron jobs.** All scheduling is Vercel Cron. |
+| "pg_cron for DB-internal scheduling" | **Zero pg_cron jobs.** All scheduling is Supabase pg_cron. |
 | "Postgres functions for aggregation" | **One function total** (update_updated_at). All aggregation is TypeScript. |
 | "Feature engineering in DB" | **Zero DB-side feature engineering.** All in TypeScript/Python. |
 | "Materialized views" | **None.** |

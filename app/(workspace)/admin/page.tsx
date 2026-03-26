@@ -71,18 +71,19 @@ interface SymbolEntry {
   is_active: boolean;
 }
 
-interface ForecastEntry {
+interface TriggerEntry {
   id: number;
   ts: string;
   symbol_code: string;
-  bias_1h: string;
-  target_price_1h: number | null;
-  target_price_4h: number | null;
-  target_mae_1h: number | null;
-  target_mfe_1h: number | null;
-  confidence: number | null;
-  model_version: string | null;
-  created_at: string;
+  direction: string;
+  decision: string;
+  fib_level: number | null;
+  entry_price: number | null;
+  stop_loss: number | null;
+  tp1: number | null;
+  tp2: number | null;
+  trigger_quality_ratio: number | null;
+  no_trade_reason: string | null;
 }
 
 interface MeasuredMoveEntry {
@@ -105,7 +106,7 @@ interface AdminData {
   activeSetups: SetupEntry[];
   recentSetups: SetupEntry[];
   symbols: SymbolEntry[];
-  forecasts: ForecastEntry[];
+  triggers: TriggerEntry[];
   measuredMoves: MeasuredMoveEntry[];
   generatedAt: string;
 }
@@ -198,7 +199,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 30_000);
+    const interval = setInterval(fetchData, 300_000);
     return () => clearInterval(interval);
   }, [fetchData]);
 
@@ -274,8 +275,8 @@ export default function AdminPage() {
           <TabsTrigger value="jobs" className="text-xs data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40">
             Job Log
           </TabsTrigger>
-          <TabsTrigger value="forecasts" className="text-xs data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40">
-            Forecasts
+          <TabsTrigger value="triggers" className="text-xs data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40">
+            Triggers
           </TabsTrigger>
           <TabsTrigger value="symbols" className="text-xs data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40">
             Symbols
@@ -677,24 +678,21 @@ export default function AdminPage() {
           </Card>
         </TabsContent>
 
-        {/* --- Forecasts Tab --- */}
-        <TabsContent value="forecasts" className="mt-4">
+        {/* --- Triggers Tab --- */}
+        <TabsContent value="triggers" className="mt-4">
           <Card className="bg-white/[0.02] border-white/[0.06]">
             <CardHeader className="pb-3">
               <CardTitle className="text-white text-sm">
-                Forecasts ({data.forecasts.length})
+                Triggers ({data.triggers.length})
               </CardTitle>
               <CardDescription className="text-white/30 text-xs">
-                Latest 1H core forecaster outputs
+                Latest MES 15m trigger evaluations
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {data.forecasts.length === 0 ? (
+              {data.triggers.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 gap-2">
-                  <span className="text-white/20 text-sm">No forecasts yet</span>
-                  <span className="text-white/10 text-xs">
-                    Run scripts/ag/train-fib-model.py (Phase 4 — not yet built)
-                  </span>
+                  <span className="text-white/20 text-sm">No triggers yet</span>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -703,40 +701,54 @@ export default function AdminPage() {
                       <TableRow className="border-white/5">
                         <TableHead className="text-white/30 text-[10px]">Time</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Symbol</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Bias</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">1H Price</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">4H Price</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">MAE</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">MFE</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Conf</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Dir</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Decision</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Fib</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Entry</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">SL</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">TP1</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">TP2</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Score</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">No-Go Reason</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.forecasts.map((f) => (
-                        <TableRow key={f.id} className="border-white/5">
+                      {data.triggers.map((trigger) => (
+                        <TableRow key={trigger.id} className="border-white/5">
                           <TableCell className="text-white/50 text-xs font-mono">
-                            {formatTs(f.ts)}
+                            {formatTs(trigger.ts)}
                           </TableCell>
                           <TableCell className="text-white/70 text-xs font-mono">
-                            {f.symbol_code}
+                            {trigger.symbol_code}
                           </TableCell>
-                          <TableCell className={`text-xs font-medium ${f.bias_1h === "BULL" ? "text-cyan-400" : f.bias_1h === "BEAR" ? "text-red-400" : "text-white/40"}`}>
-                            {f.bias_1h}
+                          <TableCell className={`text-xs font-medium ${directionColor(trigger.direction)}`}>
+                            {trigger.direction}
                           </TableCell>
-                          <TableCell className="text-cyan-400/70 text-xs tabular-nums">
-                            {f.target_price_1h?.toFixed(2) ?? "—"}
+                          <TableCell>
+                            <Badge variant="outline" className="text-[10px] bg-zinc-500/20 text-zinc-300 border-zinc-500/30">
+                              {trigger.decision}
+                            </Badge>
                           </TableCell>
-                          <TableCell className="text-emerald-400/70 text-xs tabular-nums">
-                            {f.target_price_4h?.toFixed(2) ?? "—"}
+                          <TableCell className="text-white/40 text-xs tabular-nums">
+                            {trigger.fib_level?.toFixed(2) ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-white/60 text-xs tabular-nums">
+                            {trigger.entry_price?.toFixed(2) ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-red-400/60 text-xs tabular-nums">
+                            {trigger.stop_loss?.toFixed(2) ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-emerald-400/60 text-xs tabular-nums">
+                            {trigger.tp1?.toFixed(2) ?? "—"}
+                          </TableCell>
+                          <TableCell className="text-emerald-400/60 text-xs tabular-nums">
+                            {trigger.tp2?.toFixed(2) ?? "—"}
                           </TableCell>
                           <TableCell className="text-white/50 text-xs tabular-nums">
-                            {f.target_mae_1h?.toFixed(2) ?? "—"}
+                            {trigger.trigger_quality_ratio != null ? trigger.trigger_quality_ratio.toFixed(3) : "—"}
                           </TableCell>
-                          <TableCell className="text-white/50 text-xs tabular-nums">
-                            {f.target_mfe_1h?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-white/50 text-xs tabular-nums">
-                            {f.confidence != null ? `${(f.confidence * 100).toFixed(0)}%` : "—"}
+                          <TableCell className="text-white/30 text-xs max-w-[220px] truncate">
+                            {trigger.no_trade_reason ?? "—"}
                           </TableCell>
                         </TableRow>
                       ))}

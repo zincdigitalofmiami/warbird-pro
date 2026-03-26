@@ -28,7 +28,6 @@ import { ForecastTargetsPrimitive } from "@/lib/charts/ForecastTargetsPrimitive"
 import { SetupMarkersPrimitive } from "@/lib/charts/SetupMarkersPrimitive";
 import { FibLinesPrimitive } from "@/lib/charts/FibLinesPrimitive";
 import { ensureFutureWhitespace } from "@/lib/charts/ensureFutureWhitespace";
-import { calculateFibonacciMultiPeriod } from "@/lib/fibonacci";
 import { getEventDisplayPhase } from "@/lib/event-display";
 import type { SetupCandidate } from "@/lib/setup-candidates";
 import { RegimeAnchorPrimitive } from "@/lib/charts/RegimeAnchorPrimitive";
@@ -36,6 +35,7 @@ import { REGIME_LABEL, REGIME_START_ISO } from "@/lib/warbird/constants";
 import { warbirdSignalToTargets } from "@/lib/warbird/projection";
 import type { WarbirdSignal } from "@/lib/warbird/types";
 import TV from "@/lib/colors";
+import { buildFibGeometry } from "@/scripts/warbird/fib-engine";
 
 type MesPoint = {
   time: number;
@@ -56,6 +56,19 @@ const DEFAULT_BAR_SPACING = 10;
 const MIN_BAR_SPACING = 8;
 const MAX_TOUCH_MARKERS = 1;
 const MAX_HOOK_MARKERS = 1;
+// Keep bar rendering aligned with the V15 daily chart styling.
+const THEME = {
+  upColor: "#26C6DA",
+  downColor: "#FF0000",
+  borderUpColor: "transparent",
+  borderDownColor: "transparent",
+  wickUpColor: "#FFFFFF",
+  wickDownColor: "rgba(178,181,190,0.83)",
+  gridColor: "rgba(255,255,255,0.04)",
+  crosshairColor: "rgba(255,255,255,0.55)",
+  labelBgColor: "rgba(20,10,40,0.9)",
+  textColor: "rgba(255,255,255,0.4)",
+} as const;
 
 // ─── Gap-Free Time Mapping ──────────────────────────────────────────────────
 
@@ -306,14 +319,14 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         autoSize: true,
         layout: {
           background: { type: ColorType.Solid, color: "transparent" },
-          textColor: "rgba(255,255,255,0.4)",
+          textColor: THEME.textColor,
           fontFamily: "Inter, sans-serif",
           fontSize: 11,
           attributionLogo: false,
         },
         grid: {
-          vertLines: { color: "rgba(255,255,255,0.04)" },
-          horzLines: { color: "rgba(255,255,255,0.04)" },
+          vertLines: { color: THEME.gridColor },
+          horzLines: { color: THEME.gridColor },
         },
         rightPriceScale: {
           borderColor: "transparent",
@@ -353,39 +366,39 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         crosshair: {
           mode: CrosshairMode.Normal,
           vertLine: {
-            color: "rgba(255,255,255,0.65)",
+            color: THEME.crosshairColor,
             width: 1,
             style: LineStyle.Solid,
-            labelBackgroundColor: "rgba(42,46,57,0.95)",
+            labelBackgroundColor: THEME.labelBgColor,
           },
           horzLine: {
-            color: "rgba(255,255,255,0.65)",
+            color: THEME.crosshairColor,
             width: 1,
             style: LineStyle.Solid,
-            labelBackgroundColor: "rgba(42,46,57,0.95)",
+            labelBackgroundColor: THEME.labelBgColor,
           },
         },
         handleScroll: {
           mouseWheel: false,
-          pressedMouseMove: false,
-          horzTouchDrag: false,
+          pressedMouseMove: true,
+          horzTouchDrag: true,
           vertTouchDrag: false,
         },
         handleScale: {
           mouseWheel: false,
-          pinch: false,
+          pinch: true,
           axisPressedMouseMove: { time: true, price: true },
           axisDoubleClickReset: { time: true, price: true },
         },
       });
 
       const series = chart.addSeries(CandlestickSeries, {
-        upColor: "#26C6DA",
-        downColor: "#FF0000",
-        borderUpColor: "transparent",
-        borderDownColor: "transparent",
-        wickUpColor: "#FFFFFF",
-        wickDownColor: "rgba(178,181,190,0.83)",
+        upColor: THEME.upColor,
+        downColor: THEME.downColor,
+        borderUpColor: THEME.borderUpColor,
+        borderDownColor: THEME.borderDownColor,
+        wickUpColor: THEME.wickUpColor,
+        wickDownColor: THEME.wickDownColor,
         priceLineVisible: true,
         lastValueVisible: true,
         priceFormat: {
@@ -865,10 +878,22 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
 
       const currentPrice = realPoints[realPoints.length - 1].close;
       const locked = lockedFibRef.current;
+      const bias15m = signal?.directional.bias_15m ?? "NEUTRAL";
+      const lockedDirectionConflictsBias =
+        bias15m === "BULL"
+          ? locked?.isBullish === false
+          : bias15m === "BEAR"
+            ? locked?.isBullish === true
+            : false;
 
       // Structural break locking: if current price is within the locked anchor
       // range, keep the existing fib (don't recompute to a narrower range)
-      if (locked && currentPrice <= locked.anchorHigh && currentPrice >= locked.anchorLow) {
+      if (
+        locked &&
+        !lockedDirectionConflictsBias &&
+        currentPrice <= locked.anchorHigh &&
+        currentPrice >= locked.anchorLow
+      ) {
         const anchorIdx = Math.min(locked.anchorHighBarIndex, locked.anchorLowBarIndex);
         const anchorGfTime = pointsRef.current.length > anchorIdx
           ? pointsRef.current[anchorIdx].time
@@ -879,12 +904,16 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
 
       // Structural break OR first computation — recompute
       const candles = realPoints.map(toCandle);
-      const fibResult = calculateFibonacciMultiPeriod(candles);
-      if (!fibResult) {
+      const geometry = buildFibGeometry(candles, bias15m);
+      if (!geometry) {
         fibPrimitiveRef.current.setFibResult(null);
         lockedFibRef.current = null;
         return;
       }
+      const fibResult: FibResult = {
+        ...geometry.fibResult,
+        isBullish: geometry.direction === "LONG",
+      };
 
       // Lock the new anchor
       lockedFibRef.current = fibResult;
@@ -899,7 +928,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
           : undefined;
 
       fibPrimitiveRef.current.setFibResult(fibResult, anchorGfTime);
-    }, [lastPrice]);
+    }, [lastPrice, signal?.directional.bias_15m]);
 
     useEffect(() => {
       if (!regimePrimitiveRef.current) return;

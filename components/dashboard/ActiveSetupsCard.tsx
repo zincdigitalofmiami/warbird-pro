@@ -1,7 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
 interface SetupCounts {
   active: number;
   counterTrend: number;
@@ -11,39 +9,13 @@ interface SetupCounts {
   expired: number;
 }
 
-export default function ActiveSetupsCard() {
-  const [counts, setCounts] = useState<SetupCounts | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const historyRes = await fetch("/api/warbird/history?days=7&limit=100");
-        const history = await historyRes.json();
-        const active = (history.setups ?? []).filter((s: { status: string }) =>
-          ["ACTIVE", "TP1_HIT"].includes(s.status),
-        );
-        const recent = history.events ?? [];
-
-        setCounts({
-          active: active.filter((s: { status: string }) => s.status === "ACTIVE").length,
-          counterTrend: active.filter((s: { counter_trend: boolean }) => s.counter_trend).length,
-          tp1Hit: recent.filter((e: { event_type: string }) => e.event_type === "TP1_HIT").length,
-          tp2Hit: recent.filter((e: { event_type: string }) => e.event_type === "TP2_HIT").length,
-          stopped: recent.filter((e: { event_type: string }) => e.event_type === "STOPPED").length,
-          expired: recent.filter((e: { event_type: string }) => e.event_type === "EXPIRED").length,
-        });
-      } catch {
-        // silent
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
-    const interval = setInterval(fetchData, 60_000);
-    return () => clearInterval(interval);
-  }, []);
-
+export default function ActiveSetupsCard({
+  counts,
+  loading = false,
+}: {
+  counts: SetupCounts | null;
+  loading?: boolean;
+}) {
   return (
     <div
       className="rounded-lg p-5"

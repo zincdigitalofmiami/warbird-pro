@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { validateCronRequest } from "@/lib/cron-auth";
 import { ingestCategory, VALID_CATEGORIES } from "@/lib/ingestion/fred";
 
 export const maxDuration = 60;
@@ -27,18 +28,15 @@ async function writeJobLog(
 }
 
 // Dynamic route: /api/cron/fred/rates, /api/cron/fred/yields, etc.
-// Each category is a separate Vercel Cron entry, staggered hourly.
+// Each category is a separate recurring cron path with Supabase-owned scheduling.
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ category: string }> },
 ) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const authError = validateCronRequest(request);
+  if (authError) {
+    return authError;
   }
 
   const { category } = await params;

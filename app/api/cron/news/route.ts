@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { validateCronRequest } from "@/lib/cron-auth";
 
 export const maxDuration = 60;
 
@@ -29,12 +30,9 @@ async function writeJobLog(
 // Reads macro_reports_1d for surprise values and creates directional signals.
 
 export async function GET(request: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const authError = validateCronRequest(request);
+  if (authError) {
+    return authError;
   }
 
   const startTime = Date.now();
@@ -71,35 +69,47 @@ export async function GET(request: Request) {
       });
     }
 
-    let signalsCreated = 0;
+    const rowMap = new Map<
+      string,
+      {
+        ts: string;
+        signal_type: string;
+        direction: "BULLISH" | "BEARISH";
+        confidence: number;
+        source_headline: string;
+      }
+    >();
 
     for (const report of reports) {
       const surprise = Number(report.surprise);
-      if (isNaN(surprise) || surprise === 0) continue;
-
-      // Generate signal: positive surprise → BULLISH, negative → BEARISH
-      const direction = surprise > 0 ? "BULLISH" : "BEARISH";
-      const confidence = Math.min(Math.abs(surprise) / 2, 1); // Normalize to 0-1
-
-      // Dedup
-      const { data: existing } = await supabase
-        .from("news_signals")
-        .select("id")
-        .eq("ts", report.ts)
-        .eq("signal_type", `macro_${report.report_type}`)
-        .limit(1);
-
-      if (!existing || existing.length === 0) {
-        const { error } = await supabase.from("news_signals").insert({
-          ts: report.ts,
-          signal_type: `macro_${report.report_type}`,
-          direction,
-          confidence,
-          source_headline: `${report.report_type}: surprise ${surprise > 0 ? "+" : ""}${surprise.toFixed(2)}`,
-        });
-        if (error) throw new Error(`news_signals insert: ${error.message}`);
-        signalsCreated++;
+      if (isNaN(surprise) || surprise === 0) {
+        continue;
       }
+
+      const signalType = `macro_${report.report_type}`;
+      rowMap.set(`${report.ts}::${signalType}`, {
+        ts: report.ts,
+        signal_type: signalType,
+        direction: surprise > 0 ? "BULLISH" : "BEARISH",
+        confidence: Math.min(Math.abs(surprise) / 2, 1),
+        source_headline: `${report.report_type}: surprise ${surprise > 0 ? "+" : ""}${surprise.toFixed(2)}`,
+      });
+    }
+
+    const rows = Array.from(rowMap.values());
+
+    let signalsCreated = 0;
+    if (rows.length > 0) {
+      const { data: insertedRows, error: insertError } = await supabase
+        .from("news_signals")
+        .upsert(rows, {
+          onConflict: "ts,signal_type",
+          ignoreDuplicates: true,
+        })
+        .select("id");
+
+      if (insertError) throw new Error(`news_signals upsert: ${insertError.message}`);
+      signalsCreated = insertedRows?.length ?? 0;
     }
 
     const durationMs = Date.now() - startTime;

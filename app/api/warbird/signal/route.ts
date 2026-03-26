@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { composeWarbirdSignal } from "@/lib/warbird/projection";
 import { fetchLatestWarbirdState } from "@/lib/warbird/queries";
 
@@ -7,14 +7,18 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const symbolCode = url.searchParams.get("symbol") ?? "MES";
-    const supabase = createAdminClient();
+    const supabase = await createClient();
+    const { data: authData, error: authError } = await supabase.auth.getClaims();
+
+    if (authError || !authData?.claims) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     const state = await fetchLatestWarbirdState(supabase, symbolCode);
     const signal = composeWarbirdSignal(state);
 
     return NextResponse.json({
       signal,
-      forecast: state.forecast,
       setup: state.setup,
       trigger: state.trigger,
       conviction: state.conviction,

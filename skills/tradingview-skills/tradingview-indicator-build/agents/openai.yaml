@@ -1,0 +1,5 @@
+interface:
+  display_name: "TradingView Indicator Build"
+  short_description: "Checkpointed MES/ES Pine implementation workflow."
+  default_prompt: "Use $tradingview-indicator-build to implement Pine features with safety stops, quant validation, ML contract discipline, and release gates."
+

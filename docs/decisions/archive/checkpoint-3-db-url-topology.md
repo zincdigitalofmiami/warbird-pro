@@ -22,7 +22,7 @@
 | `NEXT_PUBLIC_SUPABASE_URL` | lib/supabase/*.ts, all cron routes, TS scripts | Cloud Supabase URL |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | lib/supabase/client.ts, server.ts, proxy.ts | Anon key (frontend reads) |
 | `SUPABASE_SERVICE_ROLE_KEY` | lib/supabase/admin.ts, Python scripts | Admin writes (backend) |
-| `CRON_SECRET` | All 13 cron routes | Vercel Cron auth header |
+| `CRON_SECRET` | All 13 cron routes | Supabase pg_cron auth header |
 | `DATABENTO_API_KEY` | lib/ingestion/databento.ts | Market data API |
 | `FRED_API_KEY` | lib/ingestion/fred.ts, econ-calendar route | Economic data API |
 | `TRADINGECONOMICS_API_KEY` | cron/econ-calendar route | Calendar data API |
@@ -35,13 +35,13 @@
 
 | Var | Origin | Status |
 |-----|--------|--------|
-| `POSTGRES_DATABASE` | Supabase Vercel integration | **Dead** — nothing reads it |
-| `POSTGRES_HOST` | Supabase Vercel integration | **Dead** |
-| `POSTGRES_PASSWORD` | Supabase Vercel integration | **Dead** |
-| `POSTGRES_PRISMA_URL` | Supabase Vercel integration | **Dead** — no Prisma in project |
-| `POSTGRES_URL` | Supabase Vercel integration | **Dead** |
-| `POSTGRES_URL_NON_POOLING` | Supabase Vercel integration | **Dead** |
-| `POSTGRES_USER` | Supabase Vercel integration | **Dead** |
+| `POSTGRES_DATABASE` | Supabase Supabase integration | **Dead** — nothing reads it |
+| `POSTGRES_HOST` | Supabase Supabase integration | **Dead** |
+| `POSTGRES_PASSWORD` | Supabase Supabase integration | **Dead** |
+| `POSTGRES_PRISMA_URL` | Supabase Supabase integration | **Dead** — no Prisma in project |
+| `POSTGRES_URL` | Supabase Supabase integration | **Dead** |
+| `POSTGRES_URL_NON_POOLING` | Supabase Supabase integration | **Dead** |
+| `POSTGRES_USER` | Supabase Supabase integration | **Dead** |
 
 ### Missing env vars
 
@@ -61,7 +61,7 @@ Only documents 2 of 11+ actual vars. Wildly incomplete.
 
 - `.env.local` — Next.js local dev (cloud Supabase + API keys). Loaded by Next.js automatically.
 - `.env.training` — Local scripts (local PG + optional cloud read for migration). Loaded explicitly by scripts via `dotenv` or shell `source`.
-- Vercel env vars — Production (set in Vercel dashboard, not in files).
+- Supabase project secrets — Production (set in Supabase dashboard, not in files).
 
 **Strengths:**
 - Each file has one obvious purpose. No mixed-use.
@@ -96,7 +96,7 @@ The plan is explicit: "any runtime should have one obvious primary database targ
 
 ### Dead vars must go
 
-The `POSTGRES_*` vars are artifacts of the Supabase Vercel integration wizard. No code reads them. They contain cloud credentials in raw connection string format — a liability with no value. Remove them.
+The `POSTGRES_*` vars are artifacts of the Supabase Supabase integration wizard. No code reads them. They contain cloud credentials in raw connection string format — a liability with no value. Remove them.
 
 ### .env.example must be complete
 
@@ -108,8 +108,8 @@ The current .env.example documents 2 of 11+ vars. Anyone cloning this repo would
 
 | Runtime | Primary DB | Env source | Vars needed |
 |---------|-----------|------------|-------------|
-| **Vercel Cron routes** | Cloud Supabase | Vercel dashboard | `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, API keys |
-| **Next.js local dev** | Cloud Supabase | `.env.local` | Same as Vercel |
+| **Supabase pg_cron routes** | Cloud Supabase | Supabase dashboard | `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, API keys |
+| **Next.js local dev** | Cloud Supabase | `.env.local` | Same as Supabase |
 | **Browser (frontend)** | Cloud Supabase | `NEXT_PUBLIC_*` only | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` |
 | **Python training** | Local PG | `.env.training` | `LOCAL_DATABASE_URL` |
 | **Python inference** | Local PG | `.env.training` | `LOCAL_DATABASE_URL` |
@@ -133,12 +133,12 @@ The current .env.example documents 2 of 11+ vars. Anyone cloning this repo would
 # Warbird Pro — Environment Variables
 # ═══════════════════════════════════════════════════════════
 
-# ── Cloud Supabase (Next.js app + Vercel Cron) ───────────
+# ── Cloud Supabase (Next.js app + Supabase pg_cron) ───────────
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 
-# ── Vercel Cron ───────────────────────────────────────────
+# ── Supabase pg_cron ───────────────────────────────────────────
 CRON_SECRET=your-cron-secret
 
 # ── Market Data ───────────────────────────────────────────
@@ -195,4 +195,4 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 4. **Add `.env.training` to `.gitignore`** (contains credentials).
 5. **Update Python scripts** to read `LOCAL_DATABASE_URL` instead of `SUPABASE_URL` when targeting local PG (implementation phase, after local PG is set up).
 6. **Update `build-warbird-dataset.ts`** to optionally read from local PG via `LOCAL_DATABASE_URL`.
-7. **No changes to Vercel env vars or Next.js app code** — cloud path is unchanged.
+7. **No changes to Supabase project secrets or Next.js app code** — cloud path is unchanged.

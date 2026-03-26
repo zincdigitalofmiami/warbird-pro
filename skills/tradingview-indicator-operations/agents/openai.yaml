@@ -1,0 +1,4 @@
+interface:
+  display_name: "TradingView Indicator Operations"
+  short_description: "Review, build, repair, and optimize Pine indicators."
+  default_prompt: "Use $tradingview-indicator-operations to run Indicator Review, Indicator Build, Indicator Repair, or Indicator Optimize with checkpointed safety gates and project-context validation."

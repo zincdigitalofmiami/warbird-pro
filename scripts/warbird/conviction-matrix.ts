@@ -2,10 +2,10 @@
  * Warbird Conviction Matrix — Multi-Layer Bias Alignment
  *
  * Canonical spec Section 3:
- *   MAXIMUM  — Daily + 4H + 1H all agree (full position)
- *   HIGH     — Daily + 4H agree, 1H neutral (reduced size)
- *   MODERATE — 4H + 1H agree, daily neutral (TP1 focus)
- *   LOW      — 4H + 1H agree, daily against (counter-trend, TP1 only)
+ *   MAXIMUM  — Daily + 4H + 15m all agree (full position)
+ *   HIGH     — Daily + 4H agree, 15m neutral (reduced size)
+ *   MODERATE — 4H + 15m agree, daily neutral (TP1 focus)
+ *   LOW      — 4H + 15m agree, daily against (counter-trend, TP1 only)
  *   NO_TRADE — insufficient alignment or daily against with no support
  *
  * Conviction is purely about bias alignment — it answers "how confident
@@ -21,7 +21,7 @@ import type {
 export interface ConvictionInput {
   dailyBias: WarbirdBias;
   bias4h: WarbirdBias;
-  bias1h: WarbirdBias;
+  bias15m: WarbirdBias;
 }
 
 export interface ConvictionResult {
@@ -31,13 +31,13 @@ export interface ConvictionResult {
 }
 
 export function evaluateConviction(input: ConvictionInput): ConvictionResult {
-  const { dailyBias, bias4h, bias1h } = input;
+  const { dailyBias, bias4h, bias15m } = input;
 
   // ── MAXIMUM: all three layers agree on direction ──────────────────────
   if (
     dailyBias !== "NEUTRAL" &&
     dailyBias === bias4h &&
-    bias4h === bias1h
+    bias4h === bias15m
   ) {
     return {
       level: "MAXIMUM",
@@ -46,11 +46,11 @@ export function evaluateConviction(input: ConvictionInput): ConvictionResult {
     };
   }
 
-  // ── HIGH: daily + 4H agree, 1H neutral (not yet confirming) ──────────
+  // ── HIGH: daily + 4H agree, 15m neutral (not yet confirming) ─────────
   if (
     dailyBias !== "NEUTRAL" &&
     dailyBias === bias4h &&
-    bias1h === "NEUTRAL"
+    bias15m === "NEUTRAL"
   ) {
     return {
       level: "HIGH",
@@ -59,11 +59,11 @@ export function evaluateConviction(input: ConvictionInput): ConvictionResult {
     };
   }
 
-  // ── MODERATE: 4H + 1H agree, daily neutral ───────────────────────────
+  // ── MODERATE: 4H + 15m agree, daily neutral ──────────────────────────
   if (
     dailyBias === "NEUTRAL" &&
     bias4h !== "NEUTRAL" &&
-    bias4h === bias1h
+    bias4h === bias15m
   ) {
     return {
       level: "MODERATE",
@@ -72,12 +72,12 @@ export function evaluateConviction(input: ConvictionInput): ConvictionResult {
     };
   }
 
-  // ── LOW: 4H + 1H agree, daily AGAINST (counter-trend) ────────────────
+  // ── LOW: 4H + 15m agree, daily AGAINST (counter-trend) ───────────────
   if (
     dailyBias !== "NEUTRAL" &&
     bias4h !== "NEUTRAL" &&
-    bias4h === bias1h &&
-    dailyBias !== bias1h
+    bias4h === bias15m &&
+    dailyBias !== bias15m
   ) {
     return {
       level: "LOW",

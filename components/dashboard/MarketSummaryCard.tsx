@@ -18,32 +18,10 @@ export default function MarketSummaryCard() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const res = await fetch("/api/live/mes15m");
+        const res = await fetch("/api/live/mes15m/summary", { cache: "no-store" });
         const json = await res.json();
-        if (json.points && json.points.length > 0) {
-          const points = json.points;
-          const latest = points[points.length - 1];
-          const first = points[0];
-
-          // Session high/low from all points
-          let sessionHigh = -Infinity;
-          let sessionLow = Infinity;
-          for (const p of points) {
-            if (p.high > sessionHigh) sessionHigh = p.high;
-            if (p.low < sessionLow) sessionLow = p.low;
-          }
-
-          const change = latest.close - first.open;
-          const changePercent = (change / first.open) * 100;
-
-          setData({
-            price: latest.close,
-            change,
-            changePercent,
-            high: sessionHigh,
-            low: sessionLow,
-            ts: json.meta?.lastUpdated ?? "",
-          });
+        if (json.summary) {
+          setData(json.summary);
         }
       } catch {
         // silent

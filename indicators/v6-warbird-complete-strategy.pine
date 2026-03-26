@@ -1,0 +1,942 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Kirk / ZINC Digital
+// Warbird v6 — Complete Strategy: Visuals + ML Features + Event Response
+// Date: 2026-03-24
+//@version=6
+strategy("Warbird v6 Complete Strategy", overlay = false, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500, pyramiding = 0, process_orders_on_close = true)
+
+// =====================================================================
+// INPUT GROUPS
+// =====================================================================
+string G_STYL = "Style & Colors"
+string G_FIB  = "Fibonacci Engine"
+string G_OSC  = "Velocity Oscillator"
+string G_MTF  = "MTF & Consensus"
+string G_UI   = "Dashboard & UI"
+string G_CORR = "Correlation Analysis"
+string G_ADAP = "Adaptive Settings"
+string G_TRD  = "Trade Contract"
+string G_EVT  = "Event Response"
+string G_ML   = "ML Export & Debugging"
+
+// =====================================================================
+// INPUTS: STYLE
+// =====================================================================
+color c_bull    = input.color(#089981, "Bullish Color", group = G_STYL)
+color c_bear    = input.color(#f23645, "Bearish Color", group = G_STYL)
+color c_neut    = input.color(#787b86, "Neutral Color", group = G_STYL)
+color c_warn    = input.color(#ff9800, "Warning Color", group = G_STYL)
+color c_dash_bg = input.color(#1a1a2e, "Dashboard Background", group = G_UI)
+color c_dash_bd = input.color(#00BCD4, "Dashboard Border", group = G_UI)
+
+// =====================================================================
+// INPUTS: FIBONACCI ENGINE
+// =====================================================================
+int leftBars        = input.int(10, "Pivot Left Bars", minval = 1, group = G_FIB)
+int rightBars       = input.int(5, "Pivot Right Bars", minval = 1, group = G_FIB)
+float pivotAtrMult  = input.float(2.0, "Pivot ATR Multiplier", group = G_FIB)
+float sl_mult       = input.float(0.236, "Stop Loss Multiplier", group = G_FIB)
+float t1_mult       = input.float(1.236, "Target 1 Multiplier", group = G_FIB)
+float t2_mult       = input.float(1.618, "Target 2 Multiplier", group = G_FIB)
+float t3_mult       = input.float(2.000, "Target 3 Multiplier", group = G_FIB)
+
+// =====================================================================
+// INPUTS: TRADE CONTRACT
+// =====================================================================
+int minTargetPoints = input.int(20, "Min Target Eligibility (Points)", minval = 1, group = G_TRD)
+string stopFamily = input.string(
+     "FIB_INVALIDATION",
+     "Stop Family",
+     options = ["FIB_INVALIDATION", "FIB_PLUS_ATR_BUFFER", "STRUCTURE_BREACH", "FIXED_ATR_MULTIPLE"],
+     group = G_TRD
+ )
+float stopAtrBuffer = input.float(0.25, "Stop ATR Buffer", minval = 0.05, step = 0.05, group = G_TRD)
+int structureStopLookback = input.int(12, "Structure Stop Lookback", minval = 3, group = G_TRD)
+float fixedStopAtrMult = input.float(1.5, "Fixed ATR Stop Multiple", minval = 0.25, step = 0.25, group = G_TRD)
+
+// =====================================================================
+// INPUTS: VELOCITY OSCILLATOR
+// =====================================================================
+int fastLen   = input.int(8, "Fast Length", group = G_OSC)
+int slowLen   = input.int(17, "Slow Length", group = G_OSC)
+int sigLen    = input.int(9, "Signal Smoothing", group = G_OSC)
+float v_mult  = input.float(10.0, "Velocity Sensitivity", group = G_OSC)
+
+// =====================================================================
+// INPUTS: MTF & CORRELATION
+// =====================================================================
+string tf1 = input.timeframe("15", "MTF 1 Timeframe", group = G_MTF)
+string tf2 = input.timeframe("60", "MTF 2 Timeframe", group = G_MTF)
+string tf3 = input.timeframe("240", "MTF 3 Timeframe", group = G_MTF)
+int corrLen    = input.int(20, "Correlation Length", group = G_CORR)
+
+// =====================================================================
+// INPUTS: EVENT RESPONSE
+// =====================================================================
+string eventNqSymbol = input.symbol("CME_MINI:NQ1!", "NQ Event Symbol", group = G_EVT)
+string eventDxySymbol = input.symbol("TVC:DXY", "DXY Event Symbol", group = G_EVT)
+string eventZnSymbol = input.symbol("TVC:US10Y", "ZN/US10Y Event Symbol", group = G_EVT)
+string eventVixSymbol = input.symbol("CBOE:VIX", "VIX Event Symbol", group = G_EVT)
+float eventStateThresholdPct = input.float(0.15, "Cross-Asset State Threshold (%)", minval = 0.01, step = 0.01, group = G_EVT)
+float eventVolumeShockMult = input.float(1.8, "Volume Shock Multiplier", minval = 1.0, step = 0.1, group = G_EVT)
+int eventPostReleaseBars = input.int(12, "Post-Release Hold Bars", minval = 1, group = G_EVT)
+
+// =====================================================================
+// INPUTS: ADAPTIVE & ML
+// =====================================================================
+float exhAtrMult = input.float(0.7, "Exhaustion ATR Multiplier", minval = 0.3, maxval = 1.0, step = 0.05, group = G_ADAP)
+// showMLData removed — all ML plots now unconditional display.none
+
+// =====================================================================
+// CONSENSUS LOGIC (6 oscillators)
+// =====================================================================
+f_get_consensus() =>
+    float r = ta.rsi(close, 14)
+    float k = ta.stoch(close, high, low, 14)
+    float d = ta.sma(k, 3)
+    float cci = ta.cci(close, 20)
+    [_, bb_u, bb_l] = ta.bb(close, 20, 2)
+    float bbp = (close - bb_l) / (math.max(bb_u - bb_l, 0.0001))
+    [_, __, m_hist] = ta.macd(close, 12, 26, 9)
+    float vwap = ta.vwap(close)
+
+    int score = 0
+    score += (r > 50 ? 1 : -1)
+    score += (k > d ? 1 : -1)
+    score += (cci > 0 ? 1 : -1)
+    score += (bbp > 0.5 ? 1 : -1)
+    score += (m_hist > 0 ? 1 : -1)
+    score += (close > vwap ? 1 : -1)
+    score
+
+f_state_code(float delta, float threshold) =>
+    delta > threshold ? 1 : delta < -threshold ? -1 : 0
+
+f_nan_safe_avg4(float a, float b, float c, float d) =>
+    float total = 0.0
+    float count = 0.0
+    if not na(a)
+        total += a
+        count += 1.0
+    if not na(b)
+        total += b
+        count += 1.0
+    if not na(c)
+        total += c
+        count += 1.0
+    if not na(d)
+        total += d
+        count += 1.0
+    count > 0 ? total / count : na
+
+f_fmt_num(float v) =>
+    na(v) ? "n/a" : str.tostring(math.round(v, 2))
+
+f_us_econ(string field) =>
+    request.economic("US", field, ignore_invalid_symbol = true)
+
+type HarnessPivotLevel
+    int length
+    float levelH
+    float levelL
+    bool display
+    string style
+    int startH
+    int startL
+    bool extend
+    float volH
+    float volL
+
+type HarnessMsbOrderBlock
+    float qualityScore
+    float top
+    float bottom
+    bool isBull
+    bool isHPZ
+    bool mitigated
+    int mitigationBar
+
+type HarnessLuminanceOrderBlock
+    float top
+    float btm
+    int startTime
+    bool isBull
+    bool isMitigated
+    float intensity
+
+// =====================================================================
+// CORE CALCULATIONS
+// =====================================================================
+int score_curr = f_get_consensus()
+int score_mtf1 = request.security(syminfo.tickerid, tf1, f_get_consensus())
+int score_mtf2 = request.security(syminfo.tickerid, tf2, f_get_consensus())
+int score_mtf3 = request.security(syminfo.tickerid, tf3, f_get_consensus())
+
+float atr = ta.atr(14)
+float ph  = ta.pivothigh(high, leftBars, rightBars)
+float pl  = ta.pivotlow(low, leftBars, rightBars)
+
+var float anchorHigh = 0.0
+var float anchorLow  = 0.0
+var int   highIdx    = 0
+var int   lowIdx     = 0
+
+if not na(ph) and (anchorHigh == 0.0 or math.abs(ph - anchorHigh) > atr * pivotAtrMult)
+    anchorHigh := ph
+    highIdx    := bar_index - rightBars
+if not na(pl) and (anchorLow == 0.0 or math.abs(pl - anchorLow) > atr * pivotAtrMult)
+    anchorLow  := pl
+    lowIdx     := bar_index - rightBars
+
+float f_range = anchorHigh - anchorLow
+float fibMid  = (anchorHigh + anchorLow) / 2
+bool isValid  = anchorHigh != 0.0 and anchorLow != 0.0 and f_range > 0 and highIdx != lowIdx
+
+var int regime = 0
+if barstate.isconfirmed and isValid
+    regime := lowIdx > highIdx ? 1 : -1
+if regime == 0 and isValid
+    regime := lowIdx > highIdx ? 1 : -1
+bool isBull = regime == 1
+float dir = isBull ? 1.0 : -1.0
+
+// Directional fib semantics (0 -> 1 along active leg direction)
+float l_zero = isValid ? (isBull ? anchorLow : anchorHigh) : na
+float l_one = isValid ? (isBull ? anchorHigh : anchorLow) : na
+
+// Fib levels
+float l_236 = isValid ? l_zero + dir * f_range * 0.236 : na
+float l_382 = isValid ? l_zero + dir * f_range * 0.382 : na
+float l_piv = isValid ? l_zero + dir * f_range * 0.5 : na
+float l_618 = isValid ? l_zero + dir * f_range * 0.618 : na
+float l_786 = isValid ? l_zero + dir * f_range * 0.786 : na
+float l_t1  = isValid ? l_zero + dir * f_range * t1_mult : na
+float l_t2  = isValid ? l_zero + dir * f_range * t2_mult : na
+float l_t3  = isValid ? l_zero + dir * f_range * t3_mult : na
+
+// Bounded stop-family interface
+float entryPrice = close
+int stopFamilyCode = stopFamily == "FIB_INVALIDATION" ? 1 : stopFamily == "FIB_PLUS_ATR_BUFFER" ? 2 : stopFamily == "STRUCTURE_BREACH" ? 3 : 4
+float stopFibInvalidation = l_zero
+float stopFibAtrBuffer = isValid ? (isBull ? l_zero - atr * stopAtrBuffer : l_zero + atr * stopAtrBuffer) : na
+float structureStopLow = ta.lowest(low, structureStopLookback)
+float structureStopHigh = ta.highest(high, structureStopLookback)
+float stopStructureBreach = isBull ? structureStopLow : structureStopHigh
+float stopFixedAtr = isBull ? entryPrice - atr * fixedStopAtrMult : entryPrice + atr * fixedStopAtrMult
+float l_sl = stopFamilyCode == 1 ? stopFibInvalidation : stopFamilyCode == 2 ? stopFibAtrBuffer : stopFamilyCode == 3 ? stopStructureBreach : stopFixedAtr
+
+float targetPathPoints = isValid ? math.abs(l_t1 - entryPrice) : na
+bool targetEligible20pt = isValid and targetPathPoints >= minTargetPoints
+
+// =====================================================================
+// LEVEL INTERACTION TRACKING (from v4)
+// =====================================================================
+f_level_feat(float lvl) =>
+    float tol = atr * 0.05
+    bool touch = math.abs(close - lvl) < tol or math.abs(high - lvl) < tol or math.abs(low - lvl) < tol
+    int bs = nz(ta.barssince(touch), 100)
+    float tc_f = ta.sma(touch ? 1.0 : 0.0, 55) * 55
+    int tc = int(math.round(tc_f))
+    bool brk = (close[1] < lvl and close > lvl) or (close[1] > lvl and close < lvl)
+    bool hld = (regime == 1 ? high >= lvl and close < lvl : low <= lvl and close > lvl)
+    [touch, bs, tc, brk, hld]
+
+[t236, bs236, tc236, br236, h236] = f_level_feat(l_236)
+[t382, bs382, tc382, br382, h382] = f_level_feat(l_382)
+[t500, bs500, tc500, br500, h500] = f_level_feat(l_piv)
+[t618, bs618, tc618, br618, h618] = f_level_feat(l_618)
+[t786, bs786, tc786, br786, h786] = f_level_feat(l_786)
+[t100, bs100, tc100, br100, h100] = f_level_feat(l_one)
+
+int pivotClusterCount = (t236 ? 1 : 0) + (t382 ? 1 : 0) + (t500 ? 1 : 0) + (t618 ? 1 : 0) + (t786 ? 1 : 0) + (t100 ? 1 : 0)
+bool pivotNearZone = isValid and math.abs(close - l_piv) <= atr * 0.1
+bool pivotSupportTouch = regime == 1 and (t500 or t618 or t786)
+bool pivotResistanceTouch = regime == -1 and (t500 or t618 or t786)
+bool pivotRejected = (pivotSupportTouch and close > open and low <= l_piv) or (pivotResistanceTouch and close < open and high >= l_piv)
+bool pivotBreakthrough = br500 or br618 or br382
+int eventPivotInteractionCode = pivotClusterCount >= 2 and pivotNearZone ? 5 : pivotRejected ? 3 : pivotBreakthrough ? 4 : pivotSupportTouch ? 1 : pivotResistanceTouch ? 2 : 0
+
+float nearestPivotDistance = isValid ? math.min(math.min(math.abs(close - l_236), math.abs(close - l_382)), math.min(math.abs(close - l_618), math.abs(close - l_786))) : na
+int pivotActiveZoneCode = eventPivotInteractionCode == 1 ? 1 : eventPivotInteractionCode == 2 ? 2 : eventPivotInteractionCode == 5 ? 3 : 0
+int pivotLayerLength = 0
+float pivotNearestVolume = na
+float pivotNearestVolumePct = na
+
+int fibLevelTouched = 0
+if isValid
+    float nearest = math.abs(close - l_236)
+    fibLevelTouched := 236
+    float d382 = math.abs(close - l_382)
+    if d382 < nearest
+        nearest := d382
+        fibLevelTouched := 382
+    float d500 = math.abs(close - l_piv)
+    if d500 < nearest
+        nearest := d500
+        fibLevelTouched := 500
+    float d618 = math.abs(close - l_618)
+    if d618 < nearest
+        nearest := d618
+        fibLevelTouched := 618
+    float d786 = math.abs(close - l_786)
+    if d786 < nearest
+        nearest := d786
+        fibLevelTouched := 786
+    float d100 = math.abs(close - l_one)
+    if d100 < nearest
+        fibLevelTouched := 100
+
+// =====================================================================
+// EXHAUSTION ENGINE (from v4)
+// =====================================================================
+float p_vel = ta.roc(close, 5) / (atr + 0.0001)
+float v_vel = ta.roc(volume, 5)
+float exh_score = (p_vel > 0 and v_vel < 0) ? 1.0 : (p_vel < 0 and v_vel < 0) ? -1.0 : 0.0
+bool shrinking = ta.atr(3) < ta.atr(8) * exhAtrMult
+bool is_doji = math.abs(close - open) < (high - low + 0.0001) * 0.2
+float candle_exh = (shrinking ? 0.33 : 0) + (is_doji ? 0.33 : 0)
+float vol_delta = volume * ((high - low) == 0 ? 0 : (2 * close - high - low) / (high - low))
+float resonance = ta.correlation(vol_delta, close - close[1], 14)
+float energy = 100.0 - (math.abs(exh_score) * 40 + candle_exh * 40 + (resonance < 0.3 ? 20 : 0))
+energy := math.max(0, math.min(100, energy))
+bool fib_exh_flag = energy < 40 and (math.abs(close - l_piv) < atr * 0.1 or math.abs(close - l_618) < atr * 0.1 or math.abs(close - l_382) < atr * 0.1 or math.abs(close - l_t1) < atr * 0.1 or math.abs(close - l_sl) < atr * 0.1)
+
+// =====================================================================
+// SENTIMENT (from v4 — composite)
+// =====================================================================
+float rsi = ta.rsi(close, 14)
+[_, __, m_hist_sent] = ta.macd(close, 8, 17, 9)
+float bull_pct = (ta.sma(volume * math.max((close - low) / (high - low + 0.0001), 0), 20)) / (ta.sma(volume, 20) + 0.0001) * 100
+float sentiment = ((rsi - 50) * 0.5) + (m_hist_sent > 0 ? 20 : -20) + (bull_pct - 50) * 0.2
+
+// =====================================================================
+// SESSION FEATURES
+// =====================================================================
+int ny_h = hour(time, "America/New_York")
+int ny_m = minute(time, "America/New_York")
+int ny_t = ny_h * 100 + ny_m
+int sess = ny_t >= 930 and ny_t <= 1600 ? 2 : (ny_t >= 300 and ny_t < 930 ? 1 : 0)
+
+// =====================================================================
+// VELOCITY OSCILLATOR
+// =====================================================================
+[macd_v, sig_v, hist_v] = ta.macd(close, fastLen, slowLen, sigLen)
+float velocity = (macd_v / (math.max(atr, 0.0001))) * v_mult
+float velocity_sig = ta.ema(velocity, sigLen)
+
+plot(0, "Zero", color.new(c_neut, 50), display = display.all)
+p_vel_plot = plot(velocity, "Velocity", color.new(velocity > 0 ? c_bull : c_bear, 20), linewidth = 2, display = display.all)
+p_sig_plot = plot(velocity_sig, "Signal", color.new(c_neut, 40), linewidth = 1, display = display.all)
+fill(p_vel_plot, p_sig_plot, velocity > velocity_sig ? color.new(c_bull, 60) : color.new(c_bear, 60))
+
+// =====================================================================
+// CORRELATION
+// =====================================================================
+// Cross-asset set is frozen by plan: NQ, DXY, US10Y, VIX.
+float corrNq = ta.correlation(close, request.security(eventNqSymbol, timeframe.period, close), corrLen)
+float corrDxy = ta.correlation(close, request.security(eventDxySymbol, timeframe.period, close), corrLen)
+float corrZn = ta.correlation(close, request.security(eventZnSymbol, timeframe.period, close), corrLen)
+float corrVix = ta.correlation(close, request.security(eventVixSymbol, timeframe.period, close), corrLen)
+float corrVal = f_nan_safe_avg4(corrNq, corrDxy, corrZn, corrVix)
+
+// =====================================================================
+// REQUIRED HARNESS FEATURE INTEGRATION (BigBeluga + LuxAlgo)
+// =====================================================================
+
+// BigBeluga pivot export surface
+bool bbPivot1 = true
+int bbLen1 = 5
+bool bbPivot2 = true
+int bbLen2 = 25
+bool bbPivot3 = true
+int bbLen3 = 50
+bool bbPivot4 = true
+int bbLen4 = 100
+
+float bbPh1 = ta.pivothigh(bbLen1, bbLen1)
+float bbPl1 = ta.pivotlow(bbLen1, bbLen1)
+float bbPh2 = ta.pivothigh(bbLen2, bbLen2)
+float bbPl2 = ta.pivotlow(bbLen2, bbLen2)
+float bbPh3 = ta.pivothigh(bbLen3, bbLen3)
+float bbPl3 = ta.pivotlow(bbLen3, bbLen3)
+float bbPh4 = ta.pivothigh(bbLen4, bbLen4)
+float bbPl4 = ta.pivotlow(bbLen4, bbLen4)
+float bbAtr = ta.atr(200) * 1.5
+
+array<HarnessPivotLevel> bbLevels = array.from(
+     HarnessPivotLevel.new(bbLen1, ta.valuewhen(not na(bbPh1), high[bbLen1], 0), ta.valuewhen(not na(bbPl1), low[bbLen1], 0), bbPivot1, "--", ta.valuewhen(not na(bbPh1), bar_index[bbLen1], 0), ta.valuewhen(not na(bbPl1), bar_index[bbLen1], 0), true, ta.valuewhen(not na(bbPh1), math.sum(volume, bbLen1 * 2), 0), ta.valuewhen(not na(bbPl1), math.sum(volume, bbLen1 * 2), 0)),
+     HarnessPivotLevel.new(bbLen2, ta.valuewhen(not na(bbPh2), high[bbLen2], 0), ta.valuewhen(not na(bbPl2), low[bbLen2], 0), bbPivot2, "-", ta.valuewhen(not na(bbPh2), bar_index[bbLen2], 0), ta.valuewhen(not na(bbPl2), bar_index[bbLen2], 0), true, ta.valuewhen(not na(bbPh2), math.sum(volume, bbLen2 * 2), 0), ta.valuewhen(not na(bbPl2), math.sum(volume, bbLen2 * 2), 0)),
+     HarnessPivotLevel.new(bbLen3, ta.valuewhen(not na(bbPh3), high[bbLen3], 0), ta.valuewhen(not na(bbPl3), low[bbLen3], 0), bbPivot3, "-", ta.valuewhen(not na(bbPh3), bar_index[bbLen3], 0), ta.valuewhen(not na(bbPl3), bar_index[bbLen3], 0), true, ta.valuewhen(not na(bbPh3), math.sum(volume, bbLen3 * 2), 0), ta.valuewhen(not na(bbPl3), math.sum(volume, bbLen3 * 2), 0)),
+     HarnessPivotLevel.new(bbLen4, ta.valuewhen(not na(bbPh4), high[bbLen4], 0), ta.valuewhen(not na(bbPl4), low[bbLen4], 0), bbPivot4, "-", ta.valuewhen(not na(bbPh4), bar_index[bbLen4], 0), ta.valuewhen(not na(bbPl4), bar_index[bbLen4], 0), true, ta.valuewhen(not na(bbPh4), math.sum(volume, bbLen4 * 2), 0), ta.valuewhen(not na(bbPl4), math.sum(volume, bbLen4 * 2), 0))
+ )
+
+float bbTotalPivotVolume = 0.0
+for bbLevel in bbLevels
+    if bbLevel.display
+        bbTotalPivotVolume += bbLevel.volH + bbLevel.volL
+
+float bbNearestPivotDistance = na
+int bbPivotClusterCount = 0
+int bbPivotNearestLayerLength = 0
+int bbPivotActiveZoneCode = 0
+float bbPivotNearestVolume = na
+float bbPivotNearestVolumePct = na
+float bbClusterTol = bbAtr
+
+for bbLevel in bbLevels
+    if bbLevel.display
+        float bbDistH = math.abs(close - bbLevel.levelH)
+        float bbDistL = math.abs(close - bbLevel.levelL)
+
+        if bbDistH <= bbClusterTol
+            bbPivotClusterCount += 1
+        if bbDistL <= bbClusterTol
+            bbPivotClusterCount += 1
+
+        int bbStateH = low > bbLevel.levelH + bbAtr ? 1 : high < bbLevel.levelH - bbAtr ? 2 : 3
+        int bbStateL = low > bbLevel.levelL + bbAtr ? 1 : high < bbLevel.levelL - bbAtr ? 2 : 3
+
+        if na(bbNearestPivotDistance) or bbDistH < bbNearestPivotDistance
+            bbNearestPivotDistance := bbDistH
+            bbPivotNearestLayerLength := bbLevel.length
+            bbPivotActiveZoneCode := bbStateH
+            bbPivotNearestVolume := bbLevel.volH
+            bbPivotNearestVolumePct := bbTotalPivotVolume > 0 ? (bbLevel.volH / bbTotalPivotVolume) * 100.0 : na
+
+        if na(bbNearestPivotDistance) or bbDistL < bbNearestPivotDistance
+            bbNearestPivotDistance := bbDistL
+            bbPivotNearestLayerLength := bbLevel.length
+            bbPivotActiveZoneCode := bbStateL
+            bbPivotNearestVolume := bbLevel.volL
+            bbPivotNearestVolumePct := bbTotalPivotVolume > 0 ? (bbLevel.volL / bbTotalPivotVolume) * 100.0 : na
+
+// LuxAlgo MSB/OB export surface
+int hmPivotLenInput = 7
+float hmMsbZScoreInput = 0.5
+int hmObCountInput = 10
+bool hmHideOverlapsInput = false
+
+bool hmShowSessionsInput = true
+bool hmShowLondonInput = false
+string hmLondonSessInput = "0800-1700:1234567"
+bool hmShowNYInput = false
+string hmNySessInput = "1300-2200:1234567"
+bool hmShowTokyoInput = false
+string hmTokyoSessInput = "0000-0900:1234567"
+bool hmShowSydneyInput = false
+string hmSydneySessInput = "2100-0600:1234567"
+
+var array<HarnessMsbOrderBlock> hmObArray = array.new<HarnessMsbOrderBlock>()
+var float hmLastPh = na
+var float hmLastPl = na
+var int hmLastPhIdx = na
+var int hmLastPlIdx = na
+var float hmTotalMitigated = 0.0
+var float hmTotalObs = 0.0
+
+float hmPriceChange = ta.change(close)
+float hmAvgChange = ta.sma(hmPriceChange, 50)
+float hmStdChange = ta.stdev(hmPriceChange, 50)
+float hmMomentumZ = (hmPriceChange - hmAvgChange) / hmStdChange
+float hmVolPercent = ta.percentrank(volume, 100)
+
+float hmPh = ta.pivothigh(high, hmPivotLenInput, hmPivotLenInput)
+float hmPl = ta.pivotlow(low, hmPivotLenInput, hmPivotLenInput)
+
+if not na(hmPh)
+    hmLastPh := hmPh
+    hmLastPhIdx := bar_index - hmPivotLenInput
+if not na(hmPl)
+    hmLastPl := hmPl
+    hmLastPlIdx := bar_index - hmPivotLenInput
+
+bool hmIsMSBBull = close > hmLastPh and close[1] <= hmLastPh and hmMomentumZ > hmMsbZScoreInput
+bool hmIsMSBBear = close < hmLastPl and close[1] >= hmLastPl and hmMomentumZ < -hmMsbZScoreInput
+
+if hmIsMSBBull or hmIsMSBBear
+    hmTotalObs += 1
+    int hmObIdx = 0
+    for i = 1 to 10
+        if (hmIsMSBBull and close[i] < open[i]) or (hmIsMSBBear and close[i] > open[i])
+            hmObIdx := i
+            break
+
+    float hmObTop = high[hmObIdx]
+    float hmObBottom = low[hmObIdx]
+    float hmScore = math.min(100, (math.abs(hmMomentumZ) * 20) + (hmVolPercent * 0.5))
+    bool hmIsHpz = hmScore > 80
+
+    bool hmOverlapping = false
+    if hmHideOverlapsInput and hmObArray.size() > 0
+        for i = 0 to hmObArray.size() - 1
+            HarnessMsbOrderBlock hmExisting = hmObArray.get(i)
+            if not hmExisting.mitigated and ((hmObTop <= hmExisting.top and hmObTop >= hmExisting.bottom) or (hmObBottom <= hmExisting.top and hmObBottom >= hmExisting.bottom))
+                hmOverlapping := true
+                break
+
+    if not hmOverlapping
+        HarnessMsbOrderBlock hmNewOb = HarnessMsbOrderBlock.new(hmScore, hmObTop, hmObBottom, hmIsMSBBull, hmIsHpz, false, 0)
+        hmObArray.push(hmNewOb)
+
+    if hmIsMSBBull
+        hmLastPh := na
+    else
+        hmLastPl := na
+
+if hmObArray.size() > 0
+    for i = hmObArray.size() - 1 to 0
+        HarnessMsbOrderBlock hmOb = hmObArray.get(i)
+        if not hmOb.mitigated
+            bool hmIsMitigated = hmOb.isBull ? low < hmOb.bottom : high > hmOb.top
+            if hmIsMitigated
+                hmOb.mitigated := true
+                hmOb.mitigationBar := bar_index
+                hmTotalMitigated += 1
+                hmObArray.set(i, hmOb)
+
+    if hmObArray.size() > hmObCountInput
+        hmObArray.shift()
+
+float hmObReliabilityPct = hmTotalObs > 0 ? (hmTotalMitigated / hmTotalObs) * 100.0 : 0.0
+int hmMsbDirectionCode = hmIsMSBBull ? 1 : hmIsMSBBear ? -1 : 0
+
+int hmObActiveCount = 0
+int hmObActiveHpzCount = 0
+float hmObNearestDistance = na
+float hmObNearestQuality = na
+float hmObNearestPoc = na
+int hmObNearestDirectionCode = 0
+int hmObNearestMitigatedCode = 0
+
+if hmObArray.size() > 0
+    for i = 0 to hmObArray.size() - 1
+        HarnessMsbOrderBlock hmOb = hmObArray.get(i)
+        if not hmOb.mitigated
+            hmObActiveCount += 1
+            if hmOb.isHPZ
+                hmObActiveHpzCount += 1
+
+        float hmDistanceToOb = close > hmOb.top ? close - hmOb.top : close < hmOb.bottom ? hmOb.bottom - close : 0.0
+        if na(hmObNearestDistance) or hmDistanceToOb < hmObNearestDistance
+            hmObNearestDistance := hmDistanceToOb
+            hmObNearestQuality := hmOb.qualityScore
+            hmObNearestPoc := math.avg(hmOb.top, hmOb.bottom)
+            hmObNearestDirectionCode := hmOb.isBull ? 1 : -1
+            hmObNearestMitigatedCode := hmOb.mitigated ? 1 : 0
+
+bool hmInLondonSession = hmShowSessionsInput and hmShowLondonInput and not na(time(timeframe.period, hmLondonSessInput))
+bool hmInNySession = hmShowSessionsInput and hmShowNYInput and not na(time(timeframe.period, hmNySessInput))
+bool hmInTokyoSession = hmShowSessionsInput and hmShowTokyoInput and not na(time(timeframe.period, hmTokyoSessInput))
+bool hmInSydneySession = hmShowSessionsInput and hmShowSydneyInput and not na(time(timeframe.period, hmSydneySessInput))
+
+// LuxAlgo Luminance export surface
+int hlLength1Input = 5
+int hlLength2Input = 13
+int hlLength3Input = 21
+int hlLength4Input = 34
+int hlSmoothingInput = 5
+float hlMultInput = 2.0
+int hlObLimitInput = 3
+
+float hlRoc1 = ta.roc(close, hlLength1Input)
+float hlRoc2 = ta.roc(close, hlLength2Input)
+float hlRoc3 = ta.roc(close, hlLength3Input)
+float hlRoc4 = ta.roc(close, hlLength4Input)
+float hlCompositeRoc = (hlRoc1 + hlRoc2 + hlRoc3 + hlRoc4) / 4
+float hlSmoothedOsc = ta.ema(hlCompositeRoc, hlSmoothingInput)
+float hlVolatility = ta.stdev(hlSmoothedOsc, 100)
+float hlUpperThresh = hlVolatility * hlMultInput
+float hlLowerThresh = -hlVolatility * hlMultInput
+bool hlIsOverUpper = hlSmoothedOsc > hlUpperThresh
+bool hlIsOverLower = hlSmoothedOsc < hlLowerThresh
+bool hlIsBullish = hlSmoothedOsc > 0
+float hlLuminance = math.min(1.0, math.abs(hlSmoothedOsc) / math.max(1e-6, hlUpperThresh))
+
+var array<HarnessLuminanceOrderBlock> hlBullObs = array.new<HarnessLuminanceOrderBlock>()
+var array<HarnessLuminanceOrderBlock> hlBearObs = array.new<HarnessLuminanceOrderBlock>()
+
+if hlIsOverUpper and not hlIsOverUpper[1]
+    int hlObIndex = 1
+    for i = 1 to 5
+        if close[i] < open[i]
+            hlObIndex := i
+            break
+    HarnessLuminanceOrderBlock hlNewBullOb = HarnessLuminanceOrderBlock.new(high[hlObIndex], low[hlObIndex], time[hlObIndex], true, false, hlLuminance * 100)
+    hlBullObs.unshift(hlNewBullOb)
+    if hlBullObs.size() > hlObLimitInput
+        hlBullObs.pop()
+
+if hlIsOverLower and not hlIsOverLower[1]
+    int hlObIndex = 1
+    for i = 1 to 5
+        if close[i] > open[i]
+            hlObIndex := i
+            break
+    HarnessLuminanceOrderBlock hlNewBearOb = HarnessLuminanceOrderBlock.new(high[hlObIndex], low[hlObIndex], time[hlObIndex], false, false, hlLuminance * 100)
+    hlBearObs.unshift(hlNewBearOb)
+    if hlBearObs.size() > hlObLimitInput
+        hlBearObs.pop()
+
+if hlBullObs.size() > 0
+    for i = hlBullObs.size() - 1 to 0
+        HarnessLuminanceOrderBlock hlOb = hlBullObs.get(i)
+        if not hlOb.isMitigated and close < hlOb.btm
+            hlOb.isMitigated := true
+            hlBullObs.set(i, hlOb)
+
+if hlBearObs.size() > 0
+    for i = hlBearObs.size() - 1 to 0
+        HarnessLuminanceOrderBlock hlOb = hlBearObs.get(i)
+        if not hlOb.isMitigated and close > hlOb.top
+            hlOb.isMitigated := true
+            hlBearObs.set(i, hlOb)
+
+int hlLuminanceDirectionCode = hlIsBullish ? 1 : -1
+int hlLuminanceBreakoutCode = hlIsOverUpper ? 1 : hlIsOverLower ? -1 : 0
+int hlBullObActiveCount = 0
+int hlBearObActiveCount = 0
+int hlBullObMitigatedCount = 0
+int hlBearObMitigatedCount = 0
+float hlBullObNearestDistance = na
+float hlBearObNearestDistance = na
+float hlBullObNearestIntensity = na
+float hlBearObNearestIntensity = na
+
+if hlBullObs.size() > 0
+    for i = 0 to hlBullObs.size() - 1
+        HarnessLuminanceOrderBlock hlOb = hlBullObs.get(i)
+        if hlOb.isMitigated
+            hlBullObMitigatedCount += 1
+        else
+            hlBullObActiveCount += 1
+
+        float hlDist = close > hlOb.top ? close - hlOb.top : close < hlOb.btm ? hlOb.btm - close : 0.0
+        if na(hlBullObNearestDistance) or hlDist < hlBullObNearestDistance
+            hlBullObNearestDistance := hlDist
+            hlBullObNearestIntensity := hlOb.intensity
+
+if hlBearObs.size() > 0
+    for i = 0 to hlBearObs.size() - 1
+        HarnessLuminanceOrderBlock hlOb = hlBearObs.get(i)
+        if hlOb.isMitigated
+            hlBearObMitigatedCount += 1
+        else
+            hlBearObActiveCount += 1
+
+        float hlDist = close > hlOb.top ? close - hlOb.top : close < hlOb.btm ? hlOb.btm - close : 0.0
+        if na(hlBearObNearestDistance) or hlDist < hlBearObNearestDistance
+            hlBearObNearestDistance := hlDist
+            hlBearObNearestIntensity := hlOb.intensity
+
+// Replace interim local pivot path with admitted BigBeluga/MSB/Luminance harness signals
+pivotClusterCount := bbPivotClusterCount
+nearestPivotDistance := bbNearestPivotDistance
+pivotActiveZoneCode := bbPivotActiveZoneCode
+pivotLayerLength := bbPivotNearestLayerLength
+pivotNearestVolume := bbPivotNearestVolume
+pivotNearestVolumePct := bbPivotNearestVolumePct
+
+bool pivotSupportTouchHarness = pivotActiveZoneCode == 1
+bool pivotResistanceTouchHarness = pivotActiveZoneCode == 2
+bool pivotClusterConflictHarness = pivotClusterCount >= 2 and pivotActiveZoneCode == 3
+bool pivotRejectedHarness = (pivotSupportTouchHarness and close > open) or (pivotResistanceTouchHarness and close < open)
+bool pivotBreakthroughHarness = hmMsbDirectionCode != 0
+
+pivotNearZone := pivotActiveZoneCode == 3
+pivotSupportTouch := pivotSupportTouchHarness
+pivotResistanceTouch := pivotResistanceTouchHarness
+pivotRejected := pivotRejectedHarness
+pivotBreakthrough := pivotBreakthroughHarness
+eventPivotInteractionCode := pivotClusterConflictHarness ? 5 : pivotRejectedHarness ? 3 : pivotBreakthroughHarness ? 4 : pivotSupportTouchHarness ? 1 : pivotResistanceTouchHarness ? 2 : 0
+
+// =====================================================================
+// SIGNAL + EVENT-RESPONSE LOGIC
+// =====================================================================
+bool align_bull = score_mtf1 > 0 and score_mtf2 > 0 and score_mtf3 > 0
+bool align_bear = score_mtf1 < 0 and score_mtf2 < 0 and score_mtf3 < 0
+
+float mesImpulsePct = ta.roc(close, 1)
+float nqImpulsePct = request.security(eventNqSymbol, timeframe.period, ta.roc(close, 1))
+float dxyImpulsePct = request.security(eventDxySymbol, timeframe.period, ta.roc(close, 1))
+float znImpulsePct = request.security(eventZnSymbol, timeframe.period, ta.roc(close, 1))
+float vixImpulsePct = request.security(eventVixSymbol, timeframe.period, ta.roc(close, 1))
+
+int eventNqState = f_state_code(nqImpulsePct, eventStateThresholdPct)
+int eventDxyState = f_state_code(dxyImpulsePct, eventStateThresholdPct)
+int eventZnState = f_state_code(znImpulsePct, eventStateThresholdPct)
+int eventVixState = f_state_code(vixImpulsePct, eventStateThresholdPct)
+
+float volumeBaseline = ta.sma(volume, 20)
+int eventVolumeShock = volumeBaseline > 0 and volume > volumeBaseline * eventVolumeShockMult ? 1 : 0
+
+float econFedFunds = f_us_econ("IR")
+float econCpiYoy = f_us_econ("IRYY")
+float econUnemployment = f_us_econ("UR")
+bool macroReleaseNow = ta.change(nz(econFedFunds)) != 0 or ta.change(nz(econCpiYoy)) != 0 or ta.change(nz(econUnemployment)) != 0
+int barsSinceMacroRelease = nz(ta.barssince(macroReleaseNow), 10000)
+int eventMacroWindowCode = macroReleaseNow ? 2 : barsSinceMacroRelease <= eventPostReleaseBars ? 3 : 0
+
+float mesShockNorm = math.min(math.abs(mesImpulsePct) / 0.5, 1.0)
+float crossShockNorm = math.min((math.abs(nqImpulsePct) + math.abs(dxyImpulsePct) + math.abs(znImpulsePct) + math.abs(vixImpulsePct)) / (eventStateThresholdPct * 12.0), 1.0)
+float eventShockScore = math.max(0.0, math.min(100.0, mesShockNorm * 40.0 + crossShockNorm * 40.0 + float(eventVolumeShock) * 20.0))
+
+float reversalPressure = regime == 1 ? (eventNqState <= 0 ? 25.0 : 0.0) + (eventDxyState == 1 ? 20.0 : 0.0) + (eventZnState == 1 ? 15.0 : 0.0) + (eventVixState == 1 ? 20.0 : 0.0) + (fib_exh_flag ? 20.0 : 0.0) : (eventNqState >= 0 ? 25.0 : 0.0) + (eventDxyState == -1 ? 20.0 : 0.0) + (eventZnState == -1 ? 15.0 : 0.0) + (eventVixState == -1 ? 20.0 : 0.0) + (fib_exh_flag ? 20.0 : 0.0)
+float eventReversalScore = math.max(0.0, math.min(100.0, reversalPressure))
+
+bool riskOffStack = eventDxyState == 1 and eventZnState == 1 and eventVixState == 1
+bool ratesReliefStack = eventDxyState == -1 and eventZnState == -1 and eventVixState == -1
+bool headlineConflict = (regime == 1 and eventNqState == -1 and (eventDxyState == 1 or eventVixState == 1)) or (regime == -1 and eventNqState == 1 and (eventDxyState == -1 or eventVixState == -1))
+bool shockContinuation = eventShockScore >= 70 and eventReversalScore < 45
+bool shockFailure = eventShockScore >= 70 and eventReversalScore >= 45
+bool deescalationSqueeze = eventShockScore < 35 and eventReversalScore < 30 and eventVolumeShock == 0
+int eventModeCode = headlineConflict ? 6 : shockFailure ? 2 : shockContinuation ? 1 : riskOffStack ? 4 : ratesReliefStack ? 5 : deescalationSqueeze ? 3 : 0
+
+int regimeBucketCode = headlineConflict ? 4 : (eventNqState == 1 and eventDxyState <= 0 and eventVixState <= 0 ? 1 : eventNqState == -1 and (eventDxyState >= 0 or eventVixState >= 0) ? 3 : 2)
+
+int ct_h = hour(time, "America/Chicago")
+int ct_m = minute(time, "America/Chicago")
+int ct_t = ct_h * 100 + ct_m
+int sessionBucketCode = ct_t >= 830 and ct_t < 930 ? 1 : ct_t >= 930 and ct_t < 1130 ? 2 : ct_t >= 1130 and ct_t < 1300 ? 3 : ct_t >= 1300 and ct_t < 1500 ? 4 : 5
+
+bool msbAligned = regime == 1 ? hmMsbDirectionCode == 1 : hmMsbDirectionCode == -1
+bool luminanceAligned = regime == 1 ? hlLuminanceDirectionCode == 1 : hlLuminanceDirectionCode == -1
+bool setupAcceptContinuation = pivotBreakthrough and msbAligned and luminanceAligned and not fib_exh_flag
+bool setupZoneRejection = pivotRejected and ((regime == 1 and close > l_piv) or (regime == -1 and close < l_piv))
+bool setupPivotContinuation = eventPivotInteractionCode == 4 and msbAligned
+bool setupFailedMoveReversal = fib_exh_flag and ((regime == 1 and close < l_piv) or (regime == -1 and close > l_piv))
+bool setupReentryAfterTp1 = ((regime == 1 and low <= l_t1 and close > l_t1) or (regime == -1 and high >= l_t1 and close < l_t1)) and luminanceAligned
+int setupArchetypeCode = setupAcceptContinuation ? 1 : setupZoneRejection ? 2 : setupPivotContinuation ? 3 : setupFailedMoveReversal ? 4 : setupReentryAfterTp1 ? 5 : 0
+
+bool eventSuppress = eventModeCode == 2 or eventModeCode == 6
+float confidenceRaw = ((float(score_curr) + 6.0) / 12.0) * 30.0 + (align_bull or align_bear ? 22.0 : 8.0) + (energy * 0.3) + (targetEligible20pt ? 12.0 : -8.0) - (eventSuppress ? 20.0 : 0.0) - (eventReversalScore * 0.2)
+float confidenceScore = math.max(0.0, math.min(100.0, confidenceRaw))
+bool setupDirectionAligned = setupArchetypeCode == 1 or setupArchetypeCode == 2 or setupArchetypeCode == 3 or setupArchetypeCode == 5
+
+bool longSignal = ta.crossover(velocity, velocity_sig) and align_bull and regime == 1 and close > fibMid and targetEligible20pt and not eventSuppress and setupDirectionAligned
+bool shortSignal = ta.crossunder(velocity, velocity_sig) and align_bear and regime == -1 and close < fibMid and targetEligible20pt and not eventSuppress and setupDirectionAligned
+
+if longSignal
+    label.new(bar_index, low, "WARBIRD LONG", color=c_bull, textcolor=color.white, style=label.style_label_up, size=size.small, force_overlay=true)
+if shortSignal
+    label.new(bar_index, high, "WARBIRD SHORT", color=c_bear, textcolor=color.white, style=label.style_label_down, size=size.small, force_overlay=true)
+
+// =====================================================================
+// STRATEGY ORDER EXECUTION (parity with indicator predicate)
+// =====================================================================
+var float longStopSnapshot = na
+var float longTp1Snapshot = na
+var float longTp2Snapshot = na
+var float shortStopSnapshot = na
+var float shortTp1Snapshot = na
+var float shortTp2Snapshot = na
+
+bool canTradeBar = isValid and targetEligible20pt and not na(l_sl) and not na(l_t1) and not na(l_t2)
+
+if longSignal and canTradeBar and strategy.position_size <= 0
+    longStopSnapshot := l_sl
+    longTp1Snapshot := l_t1
+    longTp2Snapshot := l_t2
+    strategy.close("Short", comment = "flip_to_long")
+    strategy.entry("Long", strategy.long)
+
+if shortSignal and canTradeBar and strategy.position_size >= 0
+    shortStopSnapshot := l_sl
+    shortTp1Snapshot := l_t1
+    shortTp2Snapshot := l_t2
+    strategy.close("Long", comment = "flip_to_short")
+    strategy.entry("Short", strategy.short)
+
+if strategy.position_size > 0 and not na(longStopSnapshot) and not na(longTp1Snapshot) and not na(longTp2Snapshot)
+    strategy.exit("Long-TP1", from_entry = "Long", stop = longStopSnapshot, limit = longTp1Snapshot, qty_percent = 50)
+    strategy.exit("Long-TP2", from_entry = "Long", stop = longStopSnapshot, limit = longTp2Snapshot, qty_percent = 50)
+
+if strategy.position_size < 0 and not na(shortStopSnapshot) and not na(shortTp1Snapshot) and not na(shortTp2Snapshot)
+    strategy.exit("Short-TP1", from_entry = "Short", stop = shortStopSnapshot, limit = shortTp1Snapshot, qty_percent = 50)
+    strategy.exit("Short-TP2", from_entry = "Short", stop = shortStopSnapshot, limit = shortTp2Snapshot, qty_percent = 50)
+
+if strategy.position_size == 0
+    longStopSnapshot := na
+    longTp1Snapshot := na
+    longTp2Snapshot := na
+    shortStopSnapshot := na
+    shortTp1Snapshot := na
+    shortTp2Snapshot := na
+
+// =====================================================================
+// EXHAUSTION VISUAL
+// =====================================================================
+plotshape(fib_exh_flag, "Exhaustion", shape.diamond, location.abovebar, c_warn, 0, "EXH", color.white, true, size.tiny, force_overlay=true)
+
+// =====================================================================
+// DASHBOARD: CORRELATION & SENTIMENT (top right)
+// =====================================================================
+float stratClosedTrades = strategy.closedtrades
+float stratWinTrades = strategy.wintrades
+float stratLossTrades = strategy.losstrades
+float stratWinRatePct = stratClosedTrades > 0 ? (stratWinTrades / stratClosedTrades) * 100.0 : na
+float stratProfitFactor = math.abs(strategy.grossloss) > 0 ? strategy.grossprofit / math.abs(strategy.grossloss) : na
+float stratNetProfit = strategy.netprofit
+
+var table ui_top = table.new(position.top_right, 7, 6, bgcolor=color.new(c_dash_bg, 10), border_color=color.new(c_dash_bd, 50), border_width=1, force_overlay=true)
+if barstate.islast
+    // Spacer row/col approximates ~10% down and ~2% left from top-right anchor.
+    for col = 0 to 6
+        table.cell(ui_top, col, 0, "", bgcolor=color.new(c_dash_bg, 100), height=10)
+    for row = 0 to 5
+        table.cell(ui_top, 6, row, "", bgcolor=color.new(c_dash_bg, 100), width=2)
+
+    table.cell(ui_top, 0, 1, "NQ Corr", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    table.cell(ui_top, 1, 1, f_fmt_num(corrNq), text_color=na(corrNq) ? c_neut : corrNq > 0 ? c_bull : c_bear, bgcolor=color.new(c_dash_bg, 10))
+    table.cell(ui_top, 2, 1, "DXY Corr", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    table.cell(ui_top, 3, 1, f_fmt_num(corrDxy), text_color=na(corrDxy) ? c_neut : corrDxy > 0 ? c_bull : c_bear, bgcolor=color.new(c_dash_bg, 10))
+    table.cell(ui_top, 4, 1, "US10Y Corr", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    table.cell(ui_top, 5, 1, f_fmt_num(corrZn), text_color=na(corrZn) ? c_neut : corrZn > 0 ? c_bull : c_bear, bgcolor=color.new(c_dash_bg, 10))
+
+    table.cell(ui_top, 0, 2, "VIX Corr", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    table.cell(ui_top, 1, 2, f_fmt_num(corrVix), text_color=na(corrVix) ? c_neut : corrVix > 0 ? c_bull : c_bear, bgcolor=color.new(c_dash_bg, 10))
+    table.cell(ui_top, 2, 2, "Basket Corr", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    table.cell(ui_top, 3, 2, f_fmt_num(corrVal), text_color=na(corrVal) ? c_neut : corrVal > 0 ? c_bull : c_bear, bgcolor=color.new(c_dash_bg, 10))
+    table.cell(ui_top, 4, 2, "WARBIRD SENTIMENT", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    color g_col = score_curr > 3 ? c_bull : score_curr < -3 ? c_bear : c_neut
+    table.cell(ui_top, 5, 2, score_curr > 0 ? "BULLISH (" + str.tostring(score_curr) + ")" : "BEARISH (" + str.tostring(score_curr) + ")", text_color=color.white, bgcolor=color.new(g_col, 20))
+
+    table.cell(ui_top, 0, 3, "EXH ENERGY", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    color e_col = energy >= 70 ? c_bull : energy >= 40 ? c_warn : c_bear
+    table.cell(ui_top, 1, 3, str.tostring(math.round(energy)) + "%", text_color=color.white, bgcolor=color.new(e_col, 20))
+    table.cell(ui_top, 2, 3, "Shock", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    table.cell(ui_top, 3, 3, str.tostring(math.round(eventShockScore)) + "%", text_color=color.white, bgcolor=color.new(c_dash_bg, 10))
+    table.cell(ui_top, 4, 3, "Event Mode", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    table.cell(ui_top, 5, 3, str.tostring(eventModeCode), text_color=color.white, bgcolor=color.new(c_dash_bg, 10))
+
+    table.cell(ui_top, 0, 4, "Closed Trades", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    table.cell(ui_top, 1, 4, str.tostring(stratClosedTrades), text_color=color.white, bgcolor=color.new(c_dash_bg, 10))
+    table.cell(ui_top, 2, 4, "Win Rate", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    table.cell(ui_top, 3, 4, f_fmt_num(stratWinRatePct) + "%", text_color=na(stratWinRatePct) ? c_neut : c_bull, bgcolor=color.new(c_dash_bg, 10))
+    table.cell(ui_top, 4, 4, "Profit Factor", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    table.cell(ui_top, 5, 4, f_fmt_num(stratProfitFactor), text_color=na(stratProfitFactor) ? c_neut : stratProfitFactor >= 1 ? c_bull : c_bear, bgcolor=color.new(c_dash_bg, 10))
+
+    table.cell(ui_top, 0, 5, "Wins/Losses", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    table.cell(ui_top, 1, 5, str.tostring(stratWinTrades) + "/" + str.tostring(stratLossTrades), text_color=color.white, bgcolor=color.new(c_dash_bg, 10))
+    table.cell(ui_top, 2, 5, "Net Profit", text_color=color.white, bgcolor=color.new(c_dash_bd, 30))
+    table.cell(ui_top, 3, 5, str.tostring(math.round(stratNetProfit, 2)), text_color=stratNetProfit >= 0 ? c_bull : c_bear, bgcolor=color.new(c_dash_bg, 10))
+    table.cell(ui_top, 4, 5, "", text_color=color.white, bgcolor=color.new(c_dash_bg, 10))
+    table.cell(ui_top, 5, 5, "", text_color=color.white, bgcolor=color.new(c_dash_bg, 10))
+
+// =====================================================================
+// DASHBOARD: METRICS TABLE (bottom left)
+// =====================================================================
+var table metrics = table.new(position.bottom_left, 4, 8, bgcolor=color.new(c_dash_bg, 10), border_color=color.new(c_dash_bd, 50), border_width=1, force_overlay=true)
+if barstate.islast
+    table.cell(metrics, 0, 0, "WARBIRD METRICS", text_color=color.white, bgcolor=color.new(c_dash_bd, 20))
+    table.cell(metrics, 1, 0, "VALUE", text_color=color.white, bgcolor=color.new(c_dash_bd, 20))
+    table.cell(metrics, 2, 0, "% DIST", text_color=color.white, bgcolor=color.new(c_dash_bd, 20))
+    table.cell(metrics, 3, 0, "MTF", text_color=color.white, bgcolor=color.new(c_dash_bd, 20))
+    table.cell(metrics, 0, 1, "Current Price", text_color=c_neut)
+    table.cell(metrics, 1, 1, str.tostring(close), text_color=color.white)
+    table.cell(metrics, 0, 2, "Stop Loss", text_color=c_bear)
+    table.cell(metrics, 1, 2, str.tostring(math.round(l_sl, 2)), text_color=color.white)
+    table.cell(metrics, 2, 2, str.tostring(math.round(math.abs(l_sl-close)/close*100, 2)) + "%")
+    table.cell(metrics, 0, 3, "Target 1", text_color=c_bull)
+    table.cell(metrics, 1, 3, str.tostring(math.round(l_t1, 2)), text_color=color.white)
+    table.cell(metrics, 2, 3, str.tostring(math.round(math.abs(l_t1-close)/close*100, 2)) + "%")
+    table.cell(metrics, 0, 4, "Target 2", text_color=c_bull)
+    table.cell(metrics, 1, 4, str.tostring(math.round(l_t2, 2)), text_color=color.white)
+    table.cell(metrics, 2, 4, str.tostring(math.round(math.abs(l_t2-close)/close*100, 2)) + "%")
+    table.cell(metrics, 0, 5, "Target 3", text_color=c_bull)
+    table.cell(metrics, 1, 5, str.tostring(math.round(l_t3, 2)), text_color=color.white)
+    table.cell(metrics, 2, 5, str.tostring(math.round(math.abs(l_t3-close)/close*100, 2)) + "%")
+    table.cell(metrics, 3, 1, tf1 + ": " + str.tostring(score_mtf1), text_color=score_mtf1 > 0 ? c_bull : c_bear)
+    table.cell(metrics, 3, 2, tf2 + ": " + str.tostring(score_mtf2), text_color=score_mtf2 > 0 ? c_bull : c_bear)
+    table.cell(metrics, 3, 3, tf3 + ": " + str.tostring(score_mtf3), text_color=score_mtf3 > 0 ? c_bull : c_bear)
+
+// =====================================================================
+// VISUALS: FIB LINES ON CHART
+// =====================================================================
+if barstate.islast and isValid
+    int fibLeft = math.min(highIdx, lowIdx)
+    // 0 and 1 (white, 2pt) aligned to active leg direction
+    line.new(fibLeft, l_zero, bar_index, l_zero, color=color.white, width=2, force_overlay=true)
+    line.new(fibLeft, l_one, bar_index, l_one, color=color.white, width=2, force_overlay=true)
+    // Retracements (gray, 1pt)
+    line.new(fibLeft, l_236, bar_index, l_236, color=#808080, width=1, force_overlay=true)
+    line.new(fibLeft, l_382, bar_index, l_382, color=#808080, width=1, force_overlay=true)
+    line.new(fibLeft, l_piv, bar_index, l_piv, color=#ff9800, width=2, force_overlay=true)
+    line.new(fibLeft, l_618, bar_index, l_618, color=#808080, width=1, force_overlay=true)
+    line.new(fibLeft, l_786, bar_index, l_786, color=#808080, width=1, force_overlay=true)
+    // SL (red, 2pt dashed)
+    line.new(fibLeft, l_sl, bar_index, l_sl, color=#FF1744, width=2, style=line.style_dashed, force_overlay=true)
+    // Targets (green, 2pt)
+    line.new(fibLeft, l_t1, bar_index, l_t1, color=#4CAF50, width=2, force_overlay=true)
+    line.new(fibLeft, l_t2, bar_index, l_t2, color=#4CAF50, width=2, force_overlay=true)
+    line.new(fibLeft, l_t3, bar_index, l_t3, color=#4CAF50, width=2, force_overlay=true)
+
+// =====================================================================
+// TOP PULSE BAR
+// =====================================================================
+var table pulse = table.new(position.top_center, 1, 1, force_overlay=true)
+if barstate.islast
+    color p_col = align_bull ? c_bull : align_bear ? c_bear : c_neut
+    table.cell(pulse, 0, 0, "⚡ WARBIRD | " + (align_bull ? "STRONG BULL" : align_bear ? "STRONG BEAR" : "NEUTRAL") + " | EXH ENERGY: " + str.tostring(math.round(energy)) + "%", text_color=color.white, bgcolor=color.new(p_col, 20))
+
+// =====================================================================
+// ML FEATURE EXPORT (hidden plots)
+// =====================================================================
+
+// Required contract exports (always-on and schema-stable)
+// Live TradingView subset is trimmed to the minimum required packet so the script stays under the 64-plot cap.
+plot(confidenceScore, "ml_confidence_score", editable = false, display = display.none)
+plot(float(regime), "ml_direction_code", editable = false, display = display.none)
+plot(float(setupArchetypeCode), "ml_setup_archetype_code", editable = false, display = display.none)
+plot(float(fibLevelTouched), "ml_fib_level_touched", editable = false, display = display.none)
+plot(targetEligible20pt ? 1.0 : 0.0, "ml_target_eligible_20pt", editable = false, display = display.none)
+plot(float(stopFamilyCode), "ml_stop_family_code", editable = false, display = display.none)
+plot(float(regimeBucketCode), "ml_regime_bucket_code", editable = false, display = display.none)
+plot(float(sessionBucketCode), "ml_session_bucket_code", editable = false, display = display.none)
+plot(float(eventModeCode), "ml_event_mode_code", editable = false, display = display.none)
+plot(eventShockScore, "ml_event_shock_score", editable = false, display = display.none)
+plot(eventReversalScore, "ml_event_reversal_score", editable = false, display = display.none)
+plot(float(eventVolumeShock), "ml_event_volume_shock", editable = false, display = display.none)
+plot(float(eventMacroWindowCode), "ml_event_macro_window_code", editable = false, display = display.none)
+plot(float(eventNqState), "ml_event_nq_state", editable = false, display = display.none)
+plot(float(eventDxyState), "ml_event_dxy_state", editable = false, display = display.none)
+plot(float(eventZnState), "ml_event_zn_state", editable = false, display = display.none)
+plot(float(eventVixState), "ml_event_vix_state", editable = false, display = display.none)
+plot(float(eventPivotInteractionCode), "ml_event_pivot_interaction_code", editable = false, display = display.none)
+plot(nearestPivotDistance, "ml_pivot_distance_nearest", editable = false, display = display.none)
+plot(float(pivotClusterCount), "ml_pivot_cluster_count", editable = false, display = display.none)
+plot(float(pivotActiveZoneCode), "ml_pivot_active_zone_code", editable = false, display = display.none)
+plot(float(pivotLayerLength), "ml_pivot_layer_length", editable = false, display = display.none)
+plot(pivotNearestVolume, "ml_pivot_volume_nearest", editable = false, display = display.none)
+plot(pivotNearestVolumePct, "ml_pivot_volume_distribution_pct", editable = false, display = display.none)
+plot(float(hmMsbDirectionCode), "ml_msb_direction_code", editable = false, display = display.none)
+plot(hmMomentumZ, "ml_msb_momentum_zscore", editable = false, display = display.none)
+plot(float(hmObActiveCount), "ml_ob_active_count", editable = false, display = display.none)
+plot(float(hmObActiveHpzCount), "ml_ob_hpz_active_count", editable = false, display = display.none)
+plot(hmObNearestDistance, "ml_ob_nearest_distance", editable = false, display = display.none)
+plot(hmObNearestQuality, "ml_ob_nearest_quality_score", editable = false, display = display.none)
+plot(hmObNearestPoc, "ml_ob_nearest_poc", editable = false, display = display.none)
+plot(float(hmObNearestDirectionCode), "ml_ob_nearest_direction_code", editable = false, display = display.none)
+plot(float(hmObNearestMitigatedCode), "ml_ob_nearest_mitigated_code", editable = false, display = display.none)
+plot(hmObReliabilityPct, "ml_ob_reliability_pct", editable = false, display = display.none)
+// ml_session_london/ny/tokyo/sydney removed — dead code (always 0)
+plot(hlSmoothedOsc, "ml_luminance_signal", editable = false, display = display.none)
+plot(hlUpperThresh, "ml_luminance_upper_threshold", editable = false, display = display.none)
+plot(hlLowerThresh, "ml_luminance_lower_threshold", editable = false, display = display.none)
+plot(hlLuminance, "ml_luminance_intensity", editable = false, display = display.none)
+plot(float(hlLuminanceDirectionCode), "ml_luminance_direction_code", editable = false, display = display.none)
+plot(float(hlLuminanceBreakoutCode), "ml_luminance_breakout_code", editable = false, display = display.none)
+plot(float(hlBullObActiveCount), "ml_luminance_bull_ob_active_count", editable = false, display = display.none)
+plot(float(hlBearObActiveCount), "ml_luminance_bear_ob_active_count", editable = false, display = display.none)
+plot(float(hlBullObMitigatedCount), "ml_luminance_bull_ob_mitigated_count", editable = false, display = display.none)
+plot(float(hlBearObMitigatedCount), "ml_luminance_bear_ob_mitigated_count", editable = false, display = display.none)
+plot(hlBullObNearestDistance, "ml_luminance_bull_ob_nearest_distance", editable = false, display = display.none)
+plot(hlBearObNearestDistance, "ml_luminance_bear_ob_nearest_distance", editable = false, display = display.none)
+plot(hlBullObNearestIntensity, "ml_luminance_bull_ob_nearest_intensity", editable = false, display = display.none)
+plot(hlBearObNearestIntensity, "ml_luminance_bear_ob_nearest_intensity", editable = false, display = display.none)
+
+// =====================================================================
+// ALERTS
+// =====================================================================
+alertcondition(longSignal, "WARBIRD LONG", "WARBIRD LONG signal. Close={{close}}")
+alertcondition(shortSignal, "WARBIRD SHORT", "WARBIRD SHORT signal. Close={{close}}")
+alertcondition(fib_exh_flag, "EXHAUSTION at Fib Level", "Exhaustion detected at fib level. Energy={{plot_0}}. Close={{close}}")

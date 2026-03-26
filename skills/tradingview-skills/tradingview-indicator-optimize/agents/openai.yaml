@@ -1,0 +1,5 @@
+interface:
+  display_name: "TradingView Indicator Optimize"
+  short_description: "MES/ES Pine optimization with non-repair safeguards."
+  default_prompt: "Use $tradingview-indicator-optimize to improve Pine performance and robustness with dry-test checkpoints and strict non-repair boundaries."
+

@@ -21,17 +21,17 @@ It is NOT a simple candlestick pattern matcher. The old Touch → Hook → Go st
 
 | Layer | Technology | Status |
 |-------|-----------|--------|
-| Framework | Next.js (App Router) on Vercel | Working |
+| Framework | Next.js (App Router) | Working |
 | Cloud Database | Supabase (Postgres, Auth, Realtime, RLS) — NO Prisma, NO ORM | Working |
 | Local Database | Plain PostgreSQL via Homebrew (training warehouse) | Planned |
 | UI | Tailwind v4, shadcn/ui (56 components) | Working |
 | Chart | Lightweight Charts v5.1.0 (candles), Recharts (dashboard) | Working |
-| Live Data | mes-catchup Vercel Cron (5 min) → Databento ohlcv-1m → Supabase | Working |
-| Scheduling | Vercel Cron Jobs (13 routes, 23 schedules in vercel.json) | Working |
+| Live Data | mes-catchup Supabase pg_cron (5 min) → Databento ohlcv-1m → Supabase | Working |
+| Scheduling | Supabase pg_cron Jobs (13 routes, 23 schedules in Supabase cron migration files) | Working |
 | ML Training | AutoGluon TabularPredictor on Apple M4 Pro | Scripts exist, not yet trained |
 | Volatility | GJR-GARCH(1,1) with Student-t innovations | Script exists |
 | Repo | github.com/zincdigitalofmiami/warbird-pro | Active |
-| Live | warbird-pro.vercel.app | Deployed |
+| Live | ${SUPABASE_FUNCTIONS_BASE_URL} | Deployed |
 
 ### Dual-Database Architecture (In Progress)
 

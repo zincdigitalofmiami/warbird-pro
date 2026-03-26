@@ -2,7 +2,7 @@
 
 Canonical Warbird v1 MES trading platform on Next.js, Supabase, Databento, and Lightweight Charts.
 
-**Live:** [warbird-pro.vercel.app](https://warbird-pro.vercel.app)  
+**Live:** deployment URL managed in project operations docs  
 **Repo:** [github.com/zincdigitalofmiami/warbird-pro](https://github.com/zincdigitalofmiami/warbird-pro)  
 **Active plan:** `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
 
@@ -46,7 +46,7 @@ This is the intended steady-state authority map. Do not create multiple live wri
 
 - Canonical cutover is in place: legacy `forecasts` is gone and Warbird v1 writes to normalized `warbird_*` tables.
 - Active API surface is `app/api/warbird/signal` and `app/api/warbird/history`.
-- `mes-catchup` Vercel Cron (every 5 min, Sun-Fri) is the primary MES data path — no sidecar dependency.
+- `mes-1m` is the primary MES data path — called every minute by Supabase pg_cron (`warbird_mes_1m_pull`), no sidecar dependency.
 - The repo still contains some stale legacy scaffolding and documentation from the pre-cutover build plan.
 
 ## Immediate Priorities
@@ -59,10 +59,10 @@ This is the intended steady-state authority map. Do not create multiple live wri
 
 ## Runtime Components
 
-- App runtime: Next.js App Router on Vercel
+- App runtime: Next.js App Router (dashboard/API surface)
 - Database: Supabase Postgres + Auth + Realtime + RLS
 - Live market data: Databento
-- MES ingestion: `mes-catchup` Vercel Cron (every 5 min) via Databento Historical API
+- MES ingestion: Supabase pg_cron `warbird_mes_1m_pull` (every minute, Sun–Fri) via Databento ohlcv-1m
 - Historical backfill: [scripts/backfill.py](/Volumes/Satechi%20Hub/warbird-pro/scripts/backfill.py) (local research only)
 - Canonical Warbird engine: [scripts/warbird](/Volumes/Satechi%20Hub/warbird-pro/scripts/warbird)
 

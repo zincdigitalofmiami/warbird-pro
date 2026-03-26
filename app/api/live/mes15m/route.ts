@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { isWeekendBar } from "@/lib/market-hours";
+import { createClient } from "@/lib/supabase/server";
 
 /**
  * MES 15m Chart Data API
@@ -14,13 +14,18 @@ import { isWeekendBar } from "@/lib/market-hours";
 
 export async function GET(request: Request) {
   try {
+    const supabase = await createClient();
+    const { data: authData, error: authError } = await supabase.auth.getClaims();
+
+    if (authError || !authData?.claims) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const url = new URL(request.url);
     const backfill = Math.min(
       parseInt(url.searchParams.get("backfill") || "1000", 10),
       2000,
     );
-
-    const supabase = createAdminClient();
 
     const { data, error } = await supabase
       .from("mes_15m")

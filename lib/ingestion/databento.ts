@@ -1,5 +1,5 @@
 // Databento Historical HTTP API client — primary MES data path.
-// Called by Vercel Cron (mes-catchup) every 5 minutes during market hours.
+// Called by MES ingestion routes (primary: /api/cron/mes-1m; legacy manual: /api/cron/mes-catchup).
 // Uses ohlcv-1m (free schema on Standard plan) with explicit contract symbols.
 
 const DATABENTO_BASE = "https://hist.databento.com/v0";
