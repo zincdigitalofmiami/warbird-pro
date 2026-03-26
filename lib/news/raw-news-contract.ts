@@ -52,6 +52,8 @@ export const RAW_NEWS_CONTRACT = {
   premierDomains: new Set(contractJson.premier_domains),
   newsfilterSourceAllowlist: new Set(contractJson.newsfilter_source_allowlist),
   finnhubCategories: contractJson.finnhub_categories,
+  finnhubCompanyNewsSymbols: contractJson.finnhub_company_news_symbols,
+  minBenchmarkFitScore: contractJson.min_benchmark_fit_score,
   benchmarkWeights: contractJson.benchmark_weights as BenchmarkWeights,
   benchmarkTerms: contractJson.benchmark_terms,
   topics: contractJson.topics as TopicSpec[],

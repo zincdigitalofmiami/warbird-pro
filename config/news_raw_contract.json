@@ -19,7 +19,16 @@
     "6E",
     "6J",
     "DX",
-    "VX"
+    "VX",
+    "SPY",
+    "QQQ",
+    "TLT",
+    "USO",
+    "UUP",
+    "GLD",
+    "XLE",
+    "DIA",
+    "IWM"
   ],
   "blocked_domains": [
     "247wallst.com",
@@ -97,9 +106,20 @@
     "barrons"
   ],
   "finnhub_categories": [
-    "general",
-    "forex"
+    "general"
   ],
+  "finnhub_company_news_symbols": [
+    "SPY",
+    "QQQ",
+    "TLT",
+    "USO",
+    "UUP",
+    "GLD",
+    "XLE",
+    "DIA",
+    "IWM"
+  ],
+  "min_benchmark_fit_score": 0.55,
   "benchmark_weights": {
     "source_quality": 0.18,
     "market_relevance": 0.16,
@@ -166,7 +186,17 @@
       "vix",
       "vxn",
       "oil",
-      "euro"
+      "euro",
+      "iran",
+      "hormuz",
+      "strait of hormuz",
+      "ceasefire",
+      "opec",
+      "dxy",
+      "inflation expectations",
+      "breakeven",
+      "10-year",
+      "2-year"
     ]
   },
   "topics": [

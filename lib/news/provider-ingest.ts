@@ -8,6 +8,7 @@ import {
   buildArticleKey,
   buildDedupeKey,
   extractDomain,
+  extractWatchlistSymbols,
   isJunk,
   matchedKeywords,
   normalizeText,
@@ -55,6 +56,7 @@ const USER_AGENT =
 const DEFAULT_NEWSFILTER_LOOKBACK_DAYS = 3;
 const DEFAULT_NEWSFILTER_SIZE = 60;
 const DEFAULT_FINNHUB_LIMIT_PER_CATEGORY = 60;
+const DEFAULT_FINNHUB_COMPANY_LOOKBACK_DAYS = 1;
 
 function chunked<T>(values: T[], size: number): T[][] {
   const chunks: T[][] = [];
@@ -573,6 +575,24 @@ export async function runNewsfilterRawIngest(request: Request) {
   }
 }
 
+function isFinnhubRedirectUrl(sourceUrl: string): boolean {
+  try {
+    return new URL(sourceUrl).hostname === "finnhub.io";
+  } catch {
+    return false;
+  }
+}
+
+function finnhubDateParam(url: URL, key: string, fallbackDaysAgo: number): string {
+  const raw = normalizeText(url.searchParams.get(key));
+  if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - fallbackDaysAgo);
+  return d.toISOString().slice(0, 10);
+}
+
 export async function runFinnhubRawIngest(request: Request) {
   const authError = validateCronRequest(request);
   if (authError) {
@@ -586,6 +606,17 @@ export async function runFinnhubRawIngest(request: Request) {
   const limitPerCategory = parsePositiveInt(url, "limit_per_category", DEFAULT_FINNHUB_LIMIT_PER_CATEGORY, 120);
   const { topicCodes, invalidTopicCodes } = parseTopicCodes(url);
   const apiKey = providerApiKey(request, "FINNHUB_API_KEY");
+  const minFit = RAW_NEWS_CONTRACT.minBenchmarkFitScore;
+
+  // Company-news date range: defaults to last 1 day; supports ?from=YYYY-MM-DD&to=YYYY-MM-DD for backfill
+  const companyFrom = finnhubDateParam(url, "from", DEFAULT_FINNHUB_COMPANY_LOOKBACK_DAYS);
+  const companyTo = finnhubDateParam(url, "to", 0);
+
+  // Optional symbol override: ?symbols=SPY,QQQ for backfill targeting
+  const symbolsParam = normalizeText(url.searchParams.get("symbols"));
+  const companySymbols = symbolsParam
+    ? symbolsParam.split(",").map((s) => normalizeText(s).toUpperCase()).filter(Boolean)
+    : [...RAW_NEWS_CONTRACT.finnhubCompanyNewsSymbols];
 
   try {
     if (!apiKey) {
@@ -600,16 +631,14 @@ export async function runFinnhubRawIngest(request: Request) {
     const assessments = new Map<string, AssessmentInsertRow>();
     let duplicatesDropped = 0;
     let extractionFailures = 0;
+    let qualityFiltered = 0;
     let fetchedRows = 0;
 
+    // --- Phase 1: General news (CNBC direct URLs, body-extractable) ---
     for (const category of RAW_NEWS_CONTRACT.finnhubCategories) {
       const rows = await fetchJson<Array<Record<string, unknown>>>(
         `https://finnhub.io/api/v1/news?category=${encodeURIComponent(category)}&token=${encodeURIComponent(apiKey)}`,
-        {
-          headers: {
-            "User-Agent": USER_AGENT,
-          },
-        },
+        { headers: { "User-Agent": USER_AGENT } },
       );
       fetchedRows += rows.length;
 
@@ -620,21 +649,23 @@ export async function runFinnhubRawIngest(request: Request) {
         const publisherName = normalizeText(String(item.source ?? "")) || "Finnhub";
         const publisherDomain = extractDomain(sourceUrl);
         const publishedAt = new Date(Number(item.datetime ?? 0) * 1000).toISOString();
-        const relatedSymbols = String(item.related ?? "")
-          .split(",")
-          .map((value) => normalizeText(value).toUpperCase())
-          .filter(Boolean);
-        const matchedSymbols = relatedSymbols.filter((symbol) =>
-          RAW_NEWS_CONTRACT.watchlistSymbols.includes(symbol),
-        );
+        const imageUrl = normalizeText(String(item.image ?? ""));
 
-        if (!title || !sourceUrl || matchedSymbols.length === 0) {
+        if (!title || !sourceUrl) {
           continue;
         }
+        // General news `related` field is always empty — extract symbols from text instead
+        const textSymbols = extractWatchlistSymbols(`${title} ${summary ?? ""}`, []);
+
         if (!publisherDomain || !RAW_NEWS_CONTRACT.trustedDomains.has(publisherDomain)) {
           continue;
         }
         if (isJunk(title, summary ?? "", publisherDomain)) {
+          continue;
+        }
+
+        const finnhubId = Number(item.id ?? 0);
+        if (!Number.isFinite(finnhubId) || finnhubId <= 0) {
           continue;
         }
 
@@ -646,49 +677,42 @@ export async function runFinnhubRawIngest(request: Request) {
           continue;
         }
 
-        const extraction = await extractArticleFromUrl(sourceUrl);
-        if (extraction.extractionStatus === "FAILED") {
-          extractionFailures += 1;
-        }
-
-        const finnhubId = Number(item.id ?? 0);
-        if (!Number.isFinite(finnhubId) || finnhubId <= 0) {
+        // Pre-score on title+summary to decide if body extraction is worth it
+        const preScoreTopicHits = topicCodes.some((tc) => {
+          const topic = topicFromCode(tc);
+          return matchedKeywords(title, summary ?? "", topic.keywords).length > 0;
+        });
+        if (!preScoreTopicHits) {
           continue;
         }
 
-        const articleKey = buildArticleKey(String(finnhubId), sourceUrl, title, publishedAt);
-        articleRows.set(dedupeKey, {
-          article_key: articleKey,
-          provider: "finnhub",
-          finnhub_id: finnhubId,
-          source_category: category,
-          url: sourceUrl,
-          canonical_url: extraction.canonicalUrl,
-          publisher_name: publisherName,
-          publisher_domain: publisherDomain,
-          title,
-          summary,
-          article_excerpt: extraction.excerpt,
-          article_body: extraction.contentText,
-          body_word_count: Number(extraction.wordCount ?? 0),
-          image_url: normalizeText(String(item.image ?? "")) || extraction.imageUrl,
-          related_symbols: matchedSymbols,
-          published_at: publishedAt,
-          published_minute: publishedMinute,
-          normalized_title: normalizedTitle,
-          dedupe_key: dedupeKey,
-          extraction_status: extraction.extractionStatus ?? "FAILED",
-          extraction_method: extraction.extractionMethod,
-          provider_metadata: {
-            request_url: extraction.requestUrl,
-            final_url: extraction.finalUrl,
-            site_name: extraction.siteName,
-            byline: extraction.byline,
-            category,
-          },
-          extracted_at: new Date().toISOString(),
-        });
+        // Body extraction only for direct URLs (not finnhub.io redirects or Google News)
+        const canExtractBody = !isFinnhubRedirectUrl(sourceUrl) && publisherDomain !== "news.google.com";
+        let extraction = {
+          extractionStatus: "FAILED" as string,
+          extractionMethod: null as string | null,
+          contentText: null as string | null,
+          excerpt: null as string | null,
+          canonicalUrl: null as string | null,
+          imageUrl: null as string | null,
+          requestUrl: sourceUrl,
+          finalUrl: null as string | null,
+          siteName: null as string | null,
+          byline: null as string | null,
+          wordCount: 0,
+        };
+        if (canExtractBody) {
+          extraction = await extractArticleFromUrl(sourceUrl);
+          if (extraction.extractionStatus === "FAILED") {
+            extractionFailures += 1;
+          }
+        }
 
+        const articleKey = buildArticleKey(String(finnhubId), sourceUrl, title, publishedAt);
+        const matchedSymbols = textSymbols.length > 0 ? textSymbols : [];
+
+        // Score across topics, apply quality gate
+        let bestFitScore = 0;
         let matchedAnyTopic = false;
         for (const topicCode of topicCodes) {
           const topic = topicFromCode(topicCode);
@@ -701,7 +725,6 @@ export async function runFinnhubRawIngest(request: Request) {
             continue;
           }
 
-          matchedAnyTopic = true;
           const score = scoreArticle({
             provider: "finnhub",
             publisherDomain,
@@ -709,10 +732,20 @@ export async function runFinnhubRawIngest(request: Request) {
             title,
             summary,
             bodyText: extraction.contentText,
-            imageUrl: normalizeText(String(item.image ?? "")) || extraction.imageUrl,
+            imageUrl: imageUrl || extraction.imageUrl,
             explicitSymbols: matchedSymbols,
             matchedTopicKeywords,
           });
+
+          if (score.benchmarkFitScore < minFit) {
+            qualityFiltered += 1;
+            continue;
+          }
+
+          matchedAnyTopic = true;
+          if (score.benchmarkFitScore > bestFitScore) {
+            bestFitScore = score.benchmarkFitScore;
+          }
 
           segmentLinks.set(`${dedupeKey}::${topicCode}`, {
             dedupeKey,
@@ -734,8 +767,180 @@ export async function runFinnhubRawIngest(request: Request) {
           );
         }
 
-        if (!matchedAnyTopic) {
-          articleRows.delete(dedupeKey);
+        if (matchedAnyTopic) {
+          articleRows.set(dedupeKey, {
+            article_key: articleKey,
+            provider: "finnhub",
+            finnhub_id: finnhubId,
+            source_category: category,
+            url: sourceUrl,
+            canonical_url: extraction.canonicalUrl,
+            publisher_name: publisherName,
+            publisher_domain: publisherDomain,
+            title,
+            summary,
+            article_excerpt: extraction.excerpt,
+            article_body: extraction.contentText,
+            body_word_count: Number(extraction.wordCount ?? 0),
+            image_url: imageUrl || extraction.imageUrl,
+            related_symbols: matchedSymbols,
+            published_at: publishedAt,
+            published_minute: publishedMinute,
+            normalized_title: normalizedTitle,
+            dedupe_key: dedupeKey,
+            extraction_status: extraction.extractionStatus ?? "FAILED",
+            extraction_method: extraction.extractionMethod,
+            provider_metadata: {
+              request_url: extraction.requestUrl,
+              final_url: extraction.finalUrl,
+              site_name: extraction.siteName,
+              byline: extraction.byline,
+              category,
+            },
+            extracted_at: new Date().toISOString(),
+          });
+        }
+      }
+    }
+
+    // --- Phase 2: Company news (SPY, QQQ — title+summary only, URLs are broken redirects) ---
+    for (const symbol of companySymbols) {
+      const rows = await fetchJson<Array<Record<string, unknown>>>(
+        `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(symbol)}&from=${companyFrom}&to=${companyTo}&token=${encodeURIComponent(apiKey)}`,
+        { headers: { "User-Agent": USER_AGENT } },
+      );
+      fetchedRows += rows.length;
+
+      for (const item of rows.slice(0, limitPerCategory)) {
+        const title = normalizeText(String(item.headline ?? ""));
+        const summary = normalizeText(String(item.summary ?? "")) || null;
+        const sourceUrl = normalizeText(String(item.url ?? ""));
+        const publisherName = normalizeText(String(item.source ?? "")) || "Finnhub";
+        const publisherDomain = extractDomain(sourceUrl);
+        const publishedAt = new Date(Number(item.datetime ?? 0) * 1000).toISOString();
+        const imageUrl = normalizeText(String(item.image ?? ""));
+        const sourceCategory = `company_news:${symbol}`;
+
+        if (!title || !sourceUrl) {
+          continue;
+        }
+
+        // Company-news `related` contains the requested symbol
+        const relatedSymbols = String(item.related ?? "")
+          .split(",")
+          .map((v) => normalizeText(v).toUpperCase())
+          .filter(Boolean);
+        const matchedSymbols = relatedSymbols.length > 0
+          ? relatedSymbols.filter((s) => RAW_NEWS_CONTRACT.watchlistSymbols.includes(s) || s === symbol)
+          : [symbol];
+
+        // Publisher domain filter: company-news URLs are finnhub.io redirects,
+        // so use the `source` field name to filter instead
+        const effectiveDomain = isFinnhubRedirectUrl(sourceUrl)
+          ? publisherName.toLowerCase().replace(/\s+/g, "")
+          : publisherDomain ?? "";
+        // Block known junk sources from company-news
+        const blockedCompanySources = new Set(["benzinga", "chartmill"]);
+        if (blockedCompanySources.has(effectiveDomain)) {
+          continue;
+        }
+        if (isJunk(title, summary ?? "", publisherDomain)) {
+          continue;
+        }
+
+        const finnhubId = Number(item.id ?? 0);
+        if (!Number.isFinite(finnhubId) || finnhubId <= 0) {
+          continue;
+        }
+
+        const normalizedTitle = normalizeTitleForDedupe(title);
+        const publishedMinute = publishedMinuteIso(publishedAt);
+        const dedupeKey = buildDedupeKey(normalizedTitle, effectiveDomain, publishedMinute);
+        if (articleRows.has(dedupeKey)) {
+          duplicatesDropped += 1;
+          continue;
+        }
+
+        // Company-news URLs are broken finnhub.io redirects — no body extraction
+        let matchedAnyTopic = false;
+        let bestFitScore = 0;
+        for (const topicCode of topicCodes) {
+          const topic = topicFromCode(topicCode);
+          const matchedTopicKeywords = matchedKeywords(title, summary ?? "", topic.keywords);
+          if (matchedTopicKeywords.length === 0) {
+            continue;
+          }
+
+          const score = scoreArticle({
+            provider: "finnhub",
+            publisherDomain: effectiveDomain || null,
+            topic,
+            title,
+            summary,
+            bodyText: null,
+            imageUrl,
+            explicitSymbols: matchedSymbols,
+            matchedTopicKeywords,
+          });
+
+          if (score.benchmarkFitScore < minFit) {
+            qualityFiltered += 1;
+            continue;
+          }
+
+          matchedAnyTopic = true;
+          const articleKey = buildArticleKey(String(finnhubId), sourceUrl, title, publishedAt);
+          if (score.benchmarkFitScore > bestFitScore) {
+            bestFitScore = score.benchmarkFitScore;
+          }
+
+          segmentLinks.set(`${dedupeKey}::${topicCode}`, {
+            dedupeKey,
+            segment: topicCode,
+            queryText: `finnhub:company_news:${symbol}`,
+            matchedKeywords: matchedTopicKeywords,
+            matchedSymbols: score.identifiedSymbols,
+          });
+
+          assessments.set(
+            `${dedupeKey}::${topicCode}::${RAW_NEWS_CONTRACT.scoringVersion}`,
+            mapAssessmentRow({
+              provider: "finnhub",
+              dedupeKey,
+              articleKey,
+              topicCode,
+              score,
+            }),
+          );
+        }
+
+        if (matchedAnyTopic) {
+          const articleKey = buildArticleKey(String(finnhubId), sourceUrl, title, publishedAt);
+          articleRows.set(dedupeKey, {
+            article_key: articleKey,
+            provider: "finnhub",
+            finnhub_id: finnhubId,
+            source_category: sourceCategory,
+            url: sourceUrl,
+            canonical_url: null,
+            publisher_name: publisherName,
+            publisher_domain: effectiveDomain || null,
+            title,
+            summary,
+            article_excerpt: null,
+            article_body: null,
+            body_word_count: 0,
+            image_url: imageUrl || null,
+            related_symbols: matchedSymbols,
+            published_at: publishedAt,
+            published_minute: publishedMinute,
+            normalized_title: normalizedTitle,
+            dedupe_key: dedupeKey,
+            extraction_status: "FAILED",
+            extraction_method: null,
+            provider_metadata: { category: sourceCategory, symbol },
+            extracted_at: new Date().toISOString(),
+          });
         }
       }
     }
@@ -755,6 +960,9 @@ export async function runFinnhubRawIngest(request: Request) {
         assessments: assessments.size,
         duplicates_dropped: duplicatesDropped,
         extraction_failures: extractionFailures,
+        quality_filtered: qualityFiltered,
+        company_symbols: companySymbols,
+        company_date_range: { from: companyFrom, to: companyTo },
         errors: errors.length > 0 ? errors : undefined,
         duration_ms: Date.now() - startTime,
       });
@@ -772,6 +980,7 @@ export async function runFinnhubRawIngest(request: Request) {
         success: true,
         skipped: true,
         reason: "no_articles",
+        quality_filtered: qualityFiltered,
         errors: errors.length > 0 ? errors : undefined,
         duration_ms: Date.now() - startTime,
       });
@@ -800,7 +1009,7 @@ export async function runFinnhubRawIngest(request: Request) {
       duration_ms: Date.now() - startTime,
       error_message:
         errors.length > 0 || extractionFailures > 0
-          ? [...errors, `duplicates_dropped=${duplicatesDropped}`, `extraction_failures=${extractionFailures}`].join(" | ")
+          ? [...errors, `duplicates_dropped=${duplicatesDropped}`, `extraction_failures=${extractionFailures}`, `quality_filtered=${qualityFiltered}`].join(" | ")
           : null,
     });
 
@@ -812,6 +1021,7 @@ export async function runFinnhubRawIngest(request: Request) {
       assessments: assessed,
       duplicates_dropped: duplicatesDropped,
       extraction_failures: extractionFailures,
+      quality_filtered: qualityFiltered,
       errors: errors.length > 0 ? errors : undefined,
       duration_ms: Date.now() - startTime,
     });
