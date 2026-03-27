@@ -1,31 +1,13 @@
-import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { validateCronRequest } from "@/lib/cron-auth";
-import { isMarketOpen } from "@/lib/market-hours";
+// Edge Function: econ-calendar
+// Ported from app/api/cron/econ-calendar/route.ts
+// Fetches upcoming FRED release dates and upserts into econ_calendar.
+// Auth: x-cron-secret header validated against EDGE_CRON_SECRET env var.
+// Schedule: daily at 04:20 UTC Mon-Fri.
 
-export const maxDuration = 60;
-
-type JobLogStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
-
-async function writeJobLog(
-  supabase: ReturnType<typeof createAdminClient>,
-  params: {
-    job_name: string;
-    status: JobLogStatus;
-    rows_affected: number;
-    duration_ms: number;
-    error_message?: string | null;
-  },
-) {
-  const { error } = await supabase.from("job_log").insert({
-    ...params,
-    error_message: params.error_message ?? null,
-  });
-
-  if (error) {
-    throw new Error(`job_log insert failed: ${error.message}`);
-  }
-}
+import { createAdminClient } from "../_shared/admin.ts";
+import { validateCronRequest } from "../_shared/cron-auth.ts";
+import { isMarketOpen } from "../_shared/market-hours.ts";
+import { writeJobLog } from "../_shared/job-log.ts";
 
 type CalendarEvent = {
   ts: string;
@@ -37,7 +19,7 @@ type CalendarEvent = {
 };
 
 async function fetchFredCalendar(): Promise<CalendarEvent[]> {
-  const fredKey = process.env.FRED_API_KEY;
+  const fredKey = Deno.env.get("FRED_API_KEY");
   if (!fredKey) throw new Error("No FRED_API_KEY set");
 
   const now = new Date();
@@ -70,20 +52,25 @@ async function fetchFredCalendar(): Promise<CalendarEvent[]> {
     }));
 }
 
-export async function GET(request: Request) {
-  const authError = validateCronRequest(request);
-  if (authError) {
-    return authError;
-  }
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+Deno.serve(async (req: Request) => {
+  const authError = validateCronRequest(req);
+  if (authError) return authError;
 
   const startTime = Date.now();
   const supabase = createAdminClient();
-  const url = new URL(request.url);
+  const url = new URL(req.url);
   const force = url.searchParams.get("force") === "1";
 
   if (!force && !isMarketOpen()) {
     try {
-      await writeJobLog(supabase, {
+      await writeJobLog({
         job_name: "econ-calendar",
         status: "SKIPPED",
         rows_affected: 0,
@@ -93,7 +80,7 @@ export async function GET(request: Request) {
     } catch {
       // Ignore logging failure to preserve skip response.
     }
-    return NextResponse.json({ skipped: true, reason: "market_closed" });
+    return jsonResponse({ skipped: true, reason: "market_closed" });
   }
 
   try {
@@ -130,32 +117,33 @@ export async function GET(request: Request) {
     }
 
     const durationMs = Date.now() - startTime;
-    await writeJobLog(supabase, {
+    await writeJobLog({
       job_name: "econ-calendar",
       status: "SUCCESS",
       rows_affected: rowsAffected,
       duration_ms: durationMs,
     });
 
-    return NextResponse.json({
+    return jsonResponse({
       success: true,
       events: events.length,
       rows_affected: rowsAffected,
       duration_ms: durationMs,
     });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Internal error";
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Internal error";
+    let finalMessage = message;
     try {
-      await writeJobLog(supabase, {
+      await writeJobLog({
         job_name: "econ-calendar",
         status: "FAILED",
         rows_affected: 0,
         error_message: message,
         duration_ms: Date.now() - startTime,
       });
-    } catch {
-      // ignore logging failure
+    } catch (logError) {
+      finalMessage = `${message}; ${logError instanceof Error ? logError.message : String(logError)}`;
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonResponse({ error: finalMessage }, 500);
   }
-}
+});

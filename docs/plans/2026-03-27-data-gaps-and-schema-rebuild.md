@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-27
 **Author:** Kirk (via Claude Opus planning session)
-**Status:** APPROVED — ready for agent execution
+**Status:** ✅ EXECUTED — all 7 phases complete (see Execution Log below)
 **Governing docs:** `AGENTS.md`, `CLAUDE.md`, `docs/agent-safety-gates.md`
 **Prior plan:** `docs/plans/2026-03-27-news-macro-data-pipeline-instructions.md` (COMPLETE)
 
@@ -311,3 +311,129 @@ git log --all --diff-filter=D -- 'supabase/migrations/*.sql'
 | 7 (Warbird schema rebuild) | Nothing | P0 — this is the AG training surface |
 
 **Phase 7 is the most important but is research-only.** Phases 1-2 are quick fixes that unblock training data. Phases 3-6 are housekeeping.
+
+---
+
+## Execution Log — 2026-03-27
+
+**Executed by:** Claude Opus agent
+**Build status:** ✅ `npm run build` passes cleanly
+
+### Phase 1: GPR — ✅ COMPLETE (Option B)
+
+**Decision:** Option B — keep GPR as the ONE Vercel route exception.
+
+**Findings:**
+- No CSV alternative exists at the GPR source — only binary XLS format from `matteoiacoviello.com`.
+- `npm:xlsx` exceeds Supabase Edge Function memory (~150MB). Vercel route works fine (Node.js has ~1GB).
+- The existing Vercel route at `app/api/cron/gpr/route.ts` is working and tested.
+
+**Migration:** `20260328000029_gpr_vercel_fallback.sql`
+- Rewrites `run_gpr_pull()` to call the Vercel route URL instead of the Edge Function URL.
+- Uses vault secret `warbird_vercel_base_url` (must be manually inserted by Kirk).
+
+**⚠️ BLOCKER:** Kirk must insert `warbird_vercel_base_url` vault secret with the production Vercel URL before the GPR cron will work.
+
+### Phase 2: cross_asset_1d Backfill — ✅ COMPLETE
+
+**Findings:**
+- `cross_asset_1h` has data going back to 2024, sufficient for rollup.
+
+**Migration:** `20260328000030_cross_asset_1d_backfill.sql`
+- Rolls up `cross_asset_1h` → `cross_asset_1d` from 2024-01-01 forward.
+- Uses first-of-day open, max high, min low, last-of-day close, sum volume.
+- ON CONFLICT upsert to avoid duplicates.
+
+### Phase 3: econ-calendar Edge Function — ✅ COMPLETE
+
+**Findings:**
+- Shared Edge Function helpers already exist: `_shared/admin.ts`, `_shared/cron-auth.ts`, `_shared/market-hours.ts`, `_shared/job-log.ts`.
+- `FRED_API_KEY` must be set as Edge Function secret in Supabase dashboard.
+
+**Created:**
+- `supabase/functions/econ-calendar/index.ts` — Edge Function ported from Vercel route.
+- `supabase/config.toml` updated with `[functions.econ-calendar] verify_jwt = false`.
+
+**Migration:** `20260328000031_econ_calendar_edge_cron.sql`
+- Creates `run_econ_calendar_pull()` helper function following migration 023 pattern.
+- Schedules `warbird_econ_calendar` at `20 4 * * 1-5` (04:20 UTC).
+
+**Deleted:** `app/api/cron/econ-calendar/route.ts` — replaced by Edge Function.
+
+### Phase 4: Fix 3 Bad FRED Series — ✅ COMPLETE
+
+**Research findings:**
+1. `A191RL1A225SBEA` (Annual GDP Growth Rate) — does NOT exist on FRED. The quarterly version `A191RL1Q225SBEA` is already in our catalog. **Action:** Deactivate (no replacement needed).
+2. `CUSR0000SAH` (CPI Housing) — correct ID is `CUSR0000SAH1` (CPI Shelter, Monthly, SA). Confirmed on FRED.
+3. `NYGDPPCAPPPCD` (GDP Per Capita PPP) — correct ID is `NYGDPPCAPKDUSA` (Constant GDP per capita USA, Annual). Confirmed on FRED.
+
+**Migration:** `20260328000032_fix_fred_series_ids.sql`
+- Deactivates `A191RL1A225SBEA`.
+- Updates `CUSR0000SAH` → `CUSR0000SAH1`, reactivates.
+- Updates `NYGDPPCAPPPCD` → `NYGDPPCAPKDUSA`, reactivates.
+
+### Phase 5: Clean Stale Vault Secrets — ✅ COMPLETE
+
+**Migration:** `20260328000033_vault_cleanup_and_cron_spread.sql` (combined with Phase 6)
+- Deletes 3 stale vault secrets: `warbird_newsfilter_raw_cron_url`, `warbird_finnhub_raw_cron_url`, `warbird_mes_1m_cron_url`.
+
+### Phase 6: Spread Daily Pulls — ✅ COMPLETE
+
+**Migration:** `20260328000033_vault_cleanup_and_cron_spread.sql` (combined with Phase 5)
+- Reschedules GPR to 06:00 UTC (`0 6 * * 1-5`).
+- Reschedules Trump Effect to 08:00 UTC (`0 8 * * 1-5`).
+- Minimum 10-minute gap between all overnight jobs maintained.
+
+### Phase 7: Warbird Schema Audit — ✅ COMPLETE (research only)
+
+**KEY FINDING: The schema is NOT lost. The pipeline code is complete and correct.**
+
+Tables are empty because `detect-setups` lost its cron schedule during the Vercel → Supabase Edge cutover on 2026-03-26 and was never re-wired.
+
+**Audit details:**
+- `detect-setups/route.ts` (527 lines) — complete 5-layer pipeline: daily bias → 4H structure → 15m fib geometry → conviction → trigger. Writes to ALL warbird tables.
+- `score-trades/route.ts` (247 lines) — complete setup outcome monitor. STOPPED because no active setups exist to score.
+- `measured-moves/route.ts` — retired stub, no-ops.
+- `trade_scores` table — ZOMBIE, no writer. Superseded by warbird_setups outcome tracking fields.
+- `lib/setup-engine.ts` — DEAD CODE from migration 007 era, not imported by anything.
+- `build-warbird-dataset.ts` — AG training surface, works independently.
+- Migration 018 (`20260326000018_15m_canonical_cutover.sql`) is the canonical schema.
+
+**Active plan corrections needed:**
+- Line ~2891: Incorrectly says score-trades writes `trade_scores`.
+- Line ~3209: Incorrectly says detect-setups uses `warbird_forecasts_1h`.
+
+**Full audit:** `docs/plans/2026-03-27-phase7-warbird-schema-audit.md`
+
+**Recommended next action:** Port `detect-setups` and `score-trades` to Edge Functions and schedule via pg_cron. This will start populating all warbird tables automatically.
+
+---
+
+## Files Changed
+
+### Created
+| File | Phase | Purpose |
+|---|---|---|
+| `docs/plans/2026-03-27-phase7-warbird-schema-audit.md` | 7 | Complete warbird schema audit |
+| `supabase/migrations/20260328000029_gpr_vercel_fallback.sql` | 1 | GPR → Vercel route fallback |
+| `supabase/migrations/20260328000030_cross_asset_1d_backfill.sql` | 2 | cross_asset_1d rollup from 1h |
+| `supabase/migrations/20260328000031_econ_calendar_edge_cron.sql` | 3 | econ-calendar Edge Function cron |
+| `supabase/migrations/20260328000032_fix_fred_series_ids.sql` | 4 | Fix 3 broken FRED series |
+| `supabase/migrations/20260328000033_vault_cleanup_and_cron_spread.sql` | 5+6 | Vault cleanup + cron reschedule |
+| `supabase/functions/econ-calendar/index.ts` | 3 | econ-calendar Edge Function |
+
+### Modified
+| File | Phase | Purpose |
+|---|---|---|
+| `supabase/config.toml` | 3 | Added econ-calendar function config |
+
+### Deleted
+| File | Phase | Purpose |
+|---|---|---|
+| `app/api/cron/econ-calendar/route.ts` | 3 | Replaced by Edge Function |
+
+## Open Items
+
+1. **Kirk action required:** Insert `warbird_vercel_base_url` vault secret for Phase 1 GPR fix.
+2. **Kirk action required:** Ensure `FRED_API_KEY` is set as Edge Function secret for Phase 3.
+3. **Next plan:** Port `detect-setups` and `score-trades` to Edge Functions + pg_cron schedule — this will start populating all warbird tables and unblock AG training.

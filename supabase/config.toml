@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.trump-effect]
 verify_jwt = false
+
+[functions.econ-calendar]
+verify_jwt = false
