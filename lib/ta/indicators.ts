@@ -405,8 +405,8 @@ export function supertrendNormalized(
   for (let i = period; i < closes.length; i++) {
     atrVal = (atrVal * (period - 1) + tr[i]) / period;
     const hl2 = (highs[i] + lows[i]) / 2;
-    let newUpper = hl2 + factor * atrVal;
-    let newLower = hl2 - factor * atrVal;
+    const newUpper = hl2 + factor * atrVal;
+    const newLower = hl2 - factor * atrVal;
 
     if (newLower > lowerBand || closes[i - 1] < lowerBand) {
       lowerBand = newLower;

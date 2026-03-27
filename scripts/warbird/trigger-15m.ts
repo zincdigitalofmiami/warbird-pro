@@ -310,7 +310,7 @@ function computeTriggerScore(
   reversalSpeed: number,
   wickThrough: boolean,
   barsInZone: number,
-  anchorRange: number,
+  _anchorRange: number,
 ): number {
   let score = 0;
 
@@ -348,12 +348,12 @@ function computeTriggerScore(
 
   // Trend indicators aligning with direction
   const trendIndicators = [sentiment.ma, sentiment.supertrend, sentiment.marketStructure];
-  let trendAlignment = 0;
+  let _trendAlignment = 0;
   for (const trend of trendIndicators) {
     // For LONG at zone: trend below 50 means we're buying the dip in context
     // For SHORT at zone: trend above 50 means we're selling the rip in context
-    if (direction === "LONG" && trend < 40) trendAlignment++;
-    else if (direction === "SHORT" && trend > 60) trendAlignment++;
+    if (direction === "LONG" && trend < 40) _trendAlignment++;
+    else if (direction === "SHORT" && trend > 60) _trendAlignment++;
   }
 
   // ── SECONDARY: Squeeze + Momentum (0-0.25) ─────────────────────────

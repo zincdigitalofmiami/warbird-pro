@@ -52,7 +52,6 @@ export async function GET(request: Request) {
     // Purge: wipe all MES tables before rebuild (batched to avoid statement timeout)
     if (doPurge) {
       for (const table of MES_TABLES) {
-        let deleted = 0;
         // Delete in batches of 5000 rows to avoid Supabase statement timeout
         for (;;) {
           const { data, error } = await supabase
@@ -71,7 +70,6 @@ export async function GET(request: Request) {
             .gte("ts", oldest)
             .lte("ts", newest);
           if (delErr) throw new Error(`Failed to purge ${table}: ${delErr.message}`);
-          deleted += data.length;
         }
       }
     }
