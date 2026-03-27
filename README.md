@@ -22,9 +22,9 @@ Older plans, audits, checkpoints, and archived specs are not authoritative.
 
 - Daily bias: macro directional shadow
 - 4H structure: confirms or denies trend
-- 1H core forecaster: the only ML model in v1
-- 1H fib geometry: the only fib-anchor timeframe
-- 15M trigger: rule-based entry confirmation against 1H context
+- 15m fib-outcome engine: TP1_ONLY / TP2_HIT / STOPPED / REVERSAL / NO_TRADE classification
+- 15m fib geometry: multi-period confluence with 5-window family (8/13/21/34/55)
+- 15m trigger: oscillator extremes at fib zones with mechanical stop-loss (SL = -0.236 fib extension)
 
 ### MES Timeframe Authority
 
@@ -78,20 +78,16 @@ npm run dev
 
 ```text
 NEXT_PUBLIC_SUPABASE_URL
-NEXT_PUBLIC_SUPABASE_ANON_KEY
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 SUPABASE_SERVICE_ROLE_KEY
 DATABENTO_API_KEY
 FRED_API_KEY
 CRON_SECRET
-WARBIRD_FORECAST_WRITER_URL
-WARBIRD_FORECAST_WRITER_TOKEN
 ```
 
 Optional tuning:
 
 ```text
-WARBIRD_MAX_FORECAST_AGE_MS
-WARBIRD_FORECAST_WRITER_TIMEOUT_MS
 WARBIRD_MIN_PROB_HIT_PT1_FIRST
 WARBIRD_MIN_PROB_HIT_PT2_AFTER_PT1
 WARBIRD_MAX_PROB_HIT_SL_FIRST
