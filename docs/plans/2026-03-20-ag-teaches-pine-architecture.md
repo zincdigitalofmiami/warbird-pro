@@ -12,10 +12,14 @@
 
 Historical note: any remaining references below to the paired strategy, parity-only checkpoints, or Deep Backtesting are archived execution history unless a newer update-log entry explicitly reactivates them.
 
+Historical retention note: the canonical core data window is `2024-01-01T00:00:00Z` forward only. Pre-2024 core rows are out of scope for live support data and offline training.
+
 ---
 
 ## Update Log
 
+- 2026-03-27: Applied live retention-floor trim migration `supabase/migrations/20260327000024_trim_pre_2024_core_history.sql` to keep core historical data at `2024-01-01T00:00:00Z` forward only. Validation confirmed zero pre-2024 rows remain in `econ_rates_1d`, `econ_yields_1d`, `econ_fx_1d`, `econ_vol_1d`, `econ_inflation_1d`, `econ_labor_1d`, `econ_activity_1d`, `econ_money_1d`, `econ_commodities_1d`, `econ_indexes_1d`, `geopolitical_risk_1d`, and legacy `econ_news_1d`; MES and cross-asset intraday tables were already clean. Next blocker: finish the remaining Jan 1 2024 forward-only core backfill gaps, especially `cross_asset_1d` and stale `econ_inflation_1d` freshness.
+- 2026-03-26: Locked the Supabase Edge cron cutover guardrails. Runtime truth for recurring ingestion is `pg_cron -> pg_net -> Supabase Edge Functions -> Supabase DB`; Vercel/`npm run build` remains only the frontend app deploy gate and is not evidence that Edge Functions package, deploy, or run. Required cutover order is now: fix Supabase-function-only packaging/runtime issues, deploy each function with the Supabase toolchain, invoke each function directly with `x-cron-secret`, then apply the pg_cron cutover migration. Hard stop: do not call the cutover complete while any live pg_cron helper still targets a Vercel URL or while Edge runtime correctness is inferred from the Vercel build instead of direct function deploy/invoke proof.
 - 2026-03-26: Restored `app/api/cron/google-news/route.ts` and `scripts/poll-google-news.py` as dormant research assets for later evaluation. They are intentionally unscheduled and not part of the active ingestion contract.
 - 2026-03-26: Bound the active Pine path back to indicator-only by explicit user direction. The paired Pine strategy, local indicator/strategy parity, and Deep Backtesting are retired from the active blocking path. `indicators/v6-warbird-complete-strategy.pine` and `scripts/guards/check-indicator-strategy-parity.sh` remain as legacy scratch/reference surfaces only and do not block indicator work unless the plan is explicitly reopened.
 - 2026-03-26: Rolled back the indicator-side fixed-color fib budget hack in `indicators/v6-warbird-complete.pine` after it changed the live operator-visible fib presentation without explicit approval. The four hidden-export removals (`ml_msb_bull_break`, `ml_msb_bear_break`, `ml_luminance_over_upper`, `ml_luminance_over_lower`) remain in both indicator and strategy to preserve parity, but the fib color inputs are restored and the live TradingView plot-budget blocker is reopened pending an approved non-visual reduction path.
@@ -59,6 +63,37 @@ Historical note: any remaining references below to the paired strategy, parity-o
 - 2026-03-20: Added "AG Models Pine's Configuration Space" — AG output must be Pine-native (exact input values, thresholds, weights, gates, module decisions).
 - 2026-03-20: Added Forensic Review of current script — 8 high-risk problems to fix before AG training.
 - 2026-03-20: Restructured plan around Canonical Goal / Canonical Outputs / Canonical Standards / Locked v1 Mechanisms. The product goal and chart-output surface are canonical. The v1 build path is now locked.
+
+---
+
+## Supabase Edge Cutover Guardrails (2026-03-26)
+
+This checkpoint is binding for the current ingestion-runtime migration.
+
+1. Runtime truth for recurring ingestion is `pg_cron -> pg_net -> Supabase Edge Functions -> Supabase DB`.
+2. Vercel remains the frontend/dashboard app deploy surface only. `npm run build` is still required before push, but it is **not** proof that `supabase/functions/*` package or run.
+3. The old App Router cron routes are reference-only during the port. They are not the acceptance surface for the cutover.
+4. Required fix order:
+   - Fix Supabase-function-only packaging/runtime issues first.
+   - Keep imports and configuration Supabase/Deno-native.
+   - Deploy each function through the Supabase toolchain.
+   - Invoke each deployed function directly with `x-cron-secret`.
+   - Apply the pg_cron cutover migration only after direct function invocation succeeds.
+5. Required Supabase-native constraints:
+   - `verify_jwt = false` per cron-called function in `supabase/config.toml`
+   - `x-cron-secret` header validation inside each Edge Function
+   - Edge Function secrets, not Vercel headers, for provider/API keys
+   - function-local dependency/config handling that follows official Supabase Edge Function docs when `npm:`, `node:`, or JSON module imports are used
+6. Hard stops:
+   - Do not mark the cutover complete while any live pg_cron helper still targets a Vercel URL.
+   - Do not use Vercel build success as evidence that the Edge runtime is healthy.
+   - Do not apply the cutover migration before the target Edge Functions deploy and respond successfully via their `/functions/v1/<name>` URLs.
+7. Minimum proof required before close:
+   - each target function deployed
+   - each target function invoked directly with `x-cron-secret`
+   - live Vault has the edge base URL and edge cron secret
+   - live Edge Function secrets exist for provider/data-source credentials
+   - pg_cron helper functions point to `https://qhwgrzqjcdtdqppvhhme.supabase.co/functions/v1/<name>`
 
 ---
 

@@ -10,7 +10,7 @@
 
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
-create extension if not exists vault;
+create extension if not exists supabase_vault;
 
 -- ---------------------------------------------------------------------------
 -- series_catalog: register 13 new FRED series + 6 Massive inflation series
@@ -34,12 +34,12 @@ insert into series_catalog (series_id, name, category, frequency, is_active) val
   ('CES0500000003',  'Avg Hourly Earnings All Private',             'labor',     'monthly', true),
   ('JTSJOL',         'Job Openings JOLTS',                          'labor',     'monthly', true),
   -- Massive inflation series (6 fields from /fed/v1/inflation)
-  ('MASSIVE_CPI',          'CPI All Urban Consumers (Massive)',      'inflation', 'monthly', true),
-  ('MASSIVE_CPI_CORE',     'Core CPI ex food/energy (Massive)',      'inflation', 'monthly', true),
-  ('MASSIVE_CPI_YOY',      'CPI Year-over-Year % (Massive)',         'inflation', 'monthly', true),
-  ('MASSIVE_PCE',          'PCE Price Index (Massive)',               'inflation', 'monthly', true),
-  ('MASSIVE_PCE_CORE',     'Core PCE Price Index (Massive)',          'inflation', 'monthly', true),
-  ('MASSIVE_PCE_SPENDING', 'Nominal PCE Spending $B (Massive)',       'inflation', 'monthly', true)
+  ('MASSIVE_CPI',          'CPI All Urban Consumers (Massive)',      'inflation', 'monthly', false),
+  ('MASSIVE_CPI_CORE',     'Core CPI ex food/energy (Massive)',      'inflation', 'monthly', false),
+  ('MASSIVE_CPI_YOY',      'CPI Year-over-Year % (Massive)',         'inflation', 'monthly', false),
+  ('MASSIVE_PCE',          'PCE Price Index (Massive)',               'inflation', 'monthly', false),
+  ('MASSIVE_PCE_CORE',     'Core PCE Price Index (Massive)',          'inflation', 'monthly', false),
+  ('MASSIVE_PCE_SPENDING', 'Nominal PCE Spending $B (Massive)',       'inflation', 'monthly', false)
 on conflict (series_id) do nothing;
 
 -- ---------------------------------------------------------------------------

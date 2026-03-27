@@ -41,6 +41,7 @@ This is the intended steady-state authority map. Do not create multiple live wri
 - Local machines are for training, heavy calculations, and research processing only.
 - Production ingestion, cron jobs, reconciliation, and chart-serving must not depend on local machines.
 - If bar continuity is not provable, fib/model/setup logic is not safe.
+- Retained core historical data starts at `2024-01-01T00:00:00Z`. Anything earlier is out of scope for the canonical live/training dataset.
 
 ## Current Repo Reality
 
@@ -63,7 +64,7 @@ This is the intended steady-state authority map. Do not create multiple live wri
 - Database: Supabase Postgres + Auth + Realtime + RLS
 - Live market data: Databento
 - MES ingestion: Supabase pg_cron `warbird_mes_1m_pull` (every minute, Sun–Fri) via Databento ohlcv-1m
-- Historical backfill: [scripts/backfill.py](/Volumes/Satechi%20Hub/warbird-pro/scripts/backfill.py) (local research only)
+- Historical backfill: [scripts/backfill.py](/Volumes/Satechi%20Hub/warbird-pro/scripts/backfill.py) (local research only, `2024-01-01` forward)
 - Canonical Warbird engine: [scripts/warbird](/Volumes/Satechi%20Hub/warbird-pro/scripts/warbird)
 
 ## Local Development

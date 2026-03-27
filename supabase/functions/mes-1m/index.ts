@@ -1,11 +1,13 @@
-import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { validateCronRequest } from "@/lib/cron-auth";
-import { getContractSegments } from "@/lib/contract-roll";
-import { fetchOhlcv, type OhlcvBar } from "@/lib/ingestion/databento";
-import { isMarketOpen, isWeekendBar } from "@/lib/market-hours";
+// Edge Function: mes-1m
+// Ported from app/api/cron/mes-1m/route.ts
+// Triggered every minute by Supabase pg_cron (warbird_mes_1m_pull).
+// Auth: x-cron-secret header validated against EDGE_CRON_SECRET env var.
 
-export const maxDuration = 60;
+import { createAdminClient } from "../_shared/admin.ts";
+import { validateCronRequest } from "../_shared/cron-auth.ts";
+import { getContractSegments } from "../_shared/contract-roll.ts";
+import { fetchOhlcv, type OhlcvBar } from "../_shared/databento.ts";
+import { isMarketOpen, isWeekendBar } from "../_shared/market-hours.ts";
 
 const ONE_MINUTE_MS = 60_000;
 const BAR_15M_SEC = 900;
@@ -13,14 +15,6 @@ const LOOKBACK_ON_EMPTY_MINUTES = 180;
 const MAX_INCREMENTAL_LOOKBACK_MINUTES = 360;
 const INGEST_DELAY_SECONDS = 90;
 const UPSERT_CHUNK_SIZE = 200;
-
-type JobLogPayload = {
-  job_name: string;
-  status: "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
-  rows_affected?: number;
-  duration_ms: number;
-  error_message?: string;
-};
 
 function floorTo15m(timeSec: number): number {
   return Math.floor(timeSec / BAR_15M_SEC) * BAR_15M_SEC;
@@ -89,30 +83,25 @@ function aggregate15m(rows: Array<{
     }));
 }
 
-async function writeJobLog(
-  supabase: ReturnType<typeof createAdminClient>,
-  payload: JobLogPayload,
-) {
-  const { error } = await supabase.from("job_log").insert(payload);
-  if (error) {
-    throw new Error(`job_log insert failed: ${error.message}`);
-  }
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 }
 
-async function runMes1mPull(request: Request) {
-  const authError = validateCronRequest(request);
-  if (authError) {
-    return authError;
-  }
+Deno.serve(async (req: Request) => {
+  const authError = validateCronRequest(req);
+  if (authError) return authError;
 
   const startMs = Date.now();
-  const url = new URL(request.url);
+  const url = new URL(req.url);
   const force = url.searchParams.get("force") === "1";
   const supabase = createAdminClient();
 
   if (!force && !isMarketOpen()) {
     try {
-      await writeJobLog(supabase, {
+      await supabase.from("job_log").insert({
         job_name: "mes-1m-pull",
         status: "SKIPPED",
         rows_affected: 0,
@@ -122,7 +111,7 @@ async function runMes1mPull(request: Request) {
     } catch {
       // Ignore secondary logging failure to preserve skip response.
     }
-    return NextResponse.json({ skipped: true, reason: "market_closed" });
+    return jsonResponse({ skipped: true, reason: "market_closed" });
   }
 
   try {
@@ -148,7 +137,7 @@ async function runMes1mPull(request: Request) {
 
     if (rangeEndMs <= rangeStartMs) {
       try {
-        await writeJobLog(supabase, {
+        await supabase.from("job_log").insert({
           job_name: "mes-1m-pull",
           status: "SKIPPED",
           rows_affected: 0,
@@ -158,7 +147,7 @@ async function runMes1mPull(request: Request) {
       } catch {
         // Ignore secondary logging failure to preserve skip response.
       }
-      return NextResponse.json({
+      return jsonResponse({
         success: true,
         pulled_1m: 0,
         upserted_15m: 0,
@@ -198,7 +187,7 @@ async function runMes1mPull(request: Request) {
         duration_ms: Date.now() - startMs,
       });
 
-      return NextResponse.json({
+      return jsonResponse({
         success: true,
         pulled_1m: 0,
         upserted_15m: 0,
@@ -270,7 +259,7 @@ async function runMes1mPull(request: Request) {
       duration_ms: Date.now() - startMs,
     });
 
-    return NextResponse.json({
+    return jsonResponse({
       success: true,
       pulled_1m: mes1mRows.length,
       upserted_15m: mes15mRows.length,
@@ -291,14 +280,6 @@ async function runMes1mPull(request: Request) {
     } catch {
       // ignore secondary logging failures
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonResponse({ error: message }, 500);
   }
-}
-
-export async function GET(request: Request) {
-  return runMes1mPull(request);
-}
-
-export async function POST(request: Request) {
-  return runMes1mPull(request);
-}
+});

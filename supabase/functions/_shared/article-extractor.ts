@@ -1,20 +1,28 @@
-import { Readability } from "@mozilla/readability";
-import { JSDOM } from "jsdom";
+// Article body extractor using Readability + jsdom.
+// Ported from lib/news/article-extractor.mjs — imports use npm: prefix for Deno.
+
+import { Readability } from "npm:@mozilla/readability";
+import { parseHTML } from "npm:linkedom";
 
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
 
-function normalizeText(value) {
+function normalizeText(value: string | null | undefined): string {
   if (!value) {
     return "";
   }
   return value.replace(/\s+/g, " ").trim();
 }
 
-function extractMetaContent(document, selectors) {
+function extractMetaContent(
+  document: Document,
+  selectors: string[],
+): string | null {
   for (const selector of selectors) {
     const element = document.querySelector(selector);
-    const content = normalizeText(element?.getAttribute("content") || element?.getAttribute("href") || "");
+    const content = normalizeText(
+      element?.getAttribute("content") || element?.getAttribute("href") || "",
+    );
     if (content) {
       return content;
     }
@@ -22,19 +30,21 @@ function extractMetaContent(document, selectors) {
   return null;
 }
 
-function extractParagraphText(contentHtml) {
-  const contentDom = new JSDOM(contentHtml || "<body></body>");
-  const paragraphs = Array.from(contentDom.window.document.querySelectorAll("p"));
+function extractParagraphText(contentHtml: string | null): string {
+  const { document: contentDoc } = parseHTML(contentHtml || "<body></body>");
+  const paragraphs = Array.from(
+    contentDoc.querySelectorAll("p"),
+  );
   const parts = paragraphs
-    .map((paragraph) => normalizeText(paragraph.textContent || ""))
+    .map((paragraph: { textContent: string | null }) => normalizeText(paragraph.textContent || ""))
     .filter(Boolean);
   if (parts.length > 0) {
     return parts.join("\n\n");
   }
-  return normalizeText(contentDom.window.document.body?.textContent || "");
+  return normalizeText(contentDoc.body?.textContent || "");
 }
 
-function resolveCanonicalUrl(document, finalUrl) {
+function resolveCanonicalUrl(document: Document, finalUrl: string): string {
   return (
     extractMetaContent(document, [
       'link[rel="canonical"]',
@@ -44,7 +54,28 @@ function resolveCanonicalUrl(document, finalUrl) {
   );
 }
 
-function buildFailedResult(requestUrl, finalUrl, message) {
+type ExtractionResult = {
+  requestUrl: string;
+  finalUrl: string;
+  canonicalUrl: string;
+  title: string | null;
+  byline: string | null;
+  siteName: string | null;
+  excerpt: string | null;
+  imageUrl: string | null;
+  contentHtml: string | null;
+  contentText: string | null;
+  wordCount: number;
+  extractionStatus: string;
+  extractionMethod: string;
+  error: string | null;
+};
+
+function buildFailedResult(
+  requestUrl: string,
+  finalUrl: string,
+  message: string,
+): ExtractionResult {
   return {
     requestUrl,
     finalUrl,
@@ -63,7 +94,10 @@ function buildFailedResult(requestUrl, finalUrl, message) {
   };
 }
 
-export async function extractArticleFromUrl(requestUrl, options = {}) {
+export async function extractArticleFromUrl(
+  requestUrl: string,
+  options: { timeoutMs?: number } = {},
+): Promise<ExtractionResult> {
   const timeoutMs = options.timeoutMs ?? 20000;
   const response = await fetch(requestUrl, {
     headers: {
@@ -86,11 +120,18 @@ export async function extractArticleFromUrl(requestUrl, options = {}) {
   });
 }
 
-export function extractArticleFromHtml(html, context) {
+export function extractArticleFromHtml(
+  html: string,
+  context: { requestUrl?: string; finalUrl?: string },
+): ExtractionResult {
   const requestUrl = context?.requestUrl || context?.finalUrl || "";
   const finalUrl = context?.finalUrl || requestUrl;
-  const dom = new JSDOM(html, { url: finalUrl });
-  const document = dom.window.document;
+  // Inject <base> tag so Readability can resolve relative URLs (linkedom has no url option)
+  const htmlWithBase = html.replace(
+    /(<head[^>]*>)/i,
+    `$1<base href="${finalUrl}">`,
+  );
+  const { document } = parseHTML(htmlWithBase);
 
   const article = new Readability(document).parse();
   if (!article) {

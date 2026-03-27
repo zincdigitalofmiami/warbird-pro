@@ -1,5 +1,10 @@
-import { createHash } from "crypto";
-import contractJson from "@/config/news_raw_contract.json";
+// Raw news contract, scoring, and utilities.
+// Ported from lib/news/raw-news-contract.ts:
+//   - import { createHash } from "crypto" → import { createHash } from "node:crypto"
+//   - import contractJson from "@/config/..." → relative JSON with assert { type: "json" }
+
+import { createHash } from "node:crypto";
+import contractJson from "./news-raw-contract.json" assert { type: "json" };
 
 export type TopicSpec = {
   code: string;

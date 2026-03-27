@@ -35,6 +35,7 @@ Everything else is archived or reference-only and should not drive current imple
 - NEVER use mock, demo, placeholder, or fake data. Every data point must be real.
 - If a feature has no real data yet, show NOTHING.
 - NEVER query inactive symbols from Databento. Only `is_active=true AND data_source='DATABENTO'`.
+- Core historical retention starts at `2024-01-01T00:00:00Z`. Do not preserve, backfill, or train on pre-2024 core rows unless the user explicitly reopens that contract.
 
 ### Naming
 
@@ -105,6 +106,6 @@ Everything else is archived or reference-only and should not drive current imple
 
 **Current:** `mes-1m` is a lightweight route called every minute by Supabase pg_cron (`warbird_mes_1m_pull`). Fetches ohlcv-1m incrementally from Databento, upserts `mes_1m`, rolls up touched 15m buckets into `mes_15m`.
 
-**Legacy catchup:** `mes-catchup` is locked behind explicit manual params. No recurring schedule. Manual backfill only.
+**Legacy catchup:** `mes-catchup` is locked behind explicit manual params. No recurring schedule. Manual backfill only, with the retained history floor fixed at `2024-01-01T00:00:00Z`.
 
 **Databento free schemas (Standard $179/mo):** ohlcv-1s, ohlcv-1m, ohlcv-1h, ohlcv-1d, definition, statistics. Currently using 2 of 6.

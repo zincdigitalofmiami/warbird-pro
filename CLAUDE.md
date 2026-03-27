@@ -11,16 +11,25 @@ Read and follow AGENTS.md at the repository root.
 
 ### What Works
 - MES chart pipeline end-to-end (Databento → cron → Supabase → Realtime → chart)
-- Lightweight MES minute path: `/api/cron/mes-1m` pulls incremental `ohlcv-1m` and rolls up only touched 15m buckets
+- Lightweight MES minute path: Edge Function `mes-1m` pulls incremental `ohlcv-1m` and rolls up only touched 15m buckets
+- All cron/scheduled work runs via Supabase pg_cron → Edge Functions (zero Vercel cron invocations)
 - Supabase-owned minute schedule support for MES via `supabase/migrations/20260326000015_mes_1m_supabase_cron.sql` (pg_cron + pg_net + vault secrets)
-- Newsfilter primary + Finnhub secondary raw-news schema is now live in Supabase through `supabase/migrations/20260326000019_news_raw_extraction_and_scoring.sql`
-- Supabase-owned Newsfilter/Finnhub cron wrappers are now live through `supabase/migrations/20260326000020_supabase_news_raw_cron.sql`, calling `/api/cron/newsfilter-news` and `/api/cron/finnhub-news`
-- Live Vault route-url secrets now exist for the raw-news cron workers: `warbird_newsfilter_raw_cron_url` and `warbird_finnhub_raw_cron_url`
-- Shared article-body extraction now exists at `lib/news/article-extractor.mjs` using `@mozilla/readability` + `jsdom`; Finnhub uses it for strict article-body capture and Newsfilter uses its official article-content API
-- Repo-aligned `news_signals` polarity contract still exists: dedicated market-impact migration at `supabase/migrations/20260326000016_news_signal_direction.sql`, and dataset readers normalize legacy plus new values safely
+- Live core retention floor is now locked to `2024-01-01T00:00:00Z` forward only. `supabase/migrations/20260327000024_trim_pre_2024_core_history.sql` was applied live to surgically remove older rows from affected econ/geopolitical/legacy econ-news tables; MES and cross-asset intraday tables were already clean.
+- Finnhub Edge Function (`supabase/functions/finnhub-news/`) produces scored, body-extracted news articles into `econ_news_finnhub_articles` + `econ_news_article_assessments`. pg_cron schedule: every 15 min during market hours. Pending: Kirk must set `FINNHUB_API_KEY` as Edge Function secret to unblock.
+- GPR Edge Function (`supabase/functions/gpr/`) fetches Caldara-Iacoviello daily geopolitical risk index from public XLS. pg_cron schedule: daily 19:00 UTC Mon-Fri. No API key needed.
+- Trump Effect Edge Function (`supabase/functions/trump-effect/`) fetches Federal Register executive orders and memoranda. pg_cron schedule: daily 19:30 UTC Mon-Fri. No API key needed.
+- `news_signals` is now a materialized view aggregating all signal sources (article assessments, GPR, Trump Effect) with full provenance columns. Refreshed every 15 min during market hours by pg_cron.
+- `all_news_articles` unified read view across all news article providers (currently Finnhub only)
+- `series_catalog` is now FK-enforced from all 10 `econ_*_1d` tables (migration 028)
+- 22 new FRED macro series registered in `series_catalog` (migration 026): GDP, trade, government fiscal, prices, investment, expectations
+- `T5YIE` and `T10YIE` breakeven inflation series reactivated
+- Dead tables dropped (migration 028): `econ_news_1d`, `policy_news_1d`, Newsfilter tables (2), RSS tables (2)
+- Newsfilter removed entirely — no free API tier exists. Edge Function, pg_cron job, and helper function all dropped (migration 025).
+- Dead Vercel cron routes deleted: `mes-1m`, `cross-asset`, `google-news`, `finnhub-news`, `newsfilter-news`, `news` (macro→signals, dead feeder table)
+- Orphaned `lib/news/` directory deleted (provider-ingest, article-extractor, raw-news-contract — all superseded by Edge Function copies in `supabase/functions/_shared/`)
+- Unique constraints added on `econ_calendar(ts, event_name)` and `trump_effect_1d(ts, title)` to enforce upsert deduplication
 - Warbird v1 8-table normalized schema (migration 010 + 011 + 012)
 - Auth flow, API surface (/warbird/signal, /warbird/history, /live/mes15m, /pivots/mes)
-- Live cloud now includes the raw-news schema/tables plus the Supabase cron wrappers for provider pulls; Google raw-news ingestion is removed from the active contract
 - Required BigBeluga standalone harness now exists at `indicators/harnesses/bigbeluga-pivot-levels-harness.pine` with hidden `ml_pivot_*` exports staged for training capture
 - Required LuxAlgo standalone harness now exists at `indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine` with hidden `ml_msb_*` and `ml_ob_*` exports staged for training capture
 - Required LuxAlgo Luminance standalone harness now exists at `indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine` with hidden `ml_luminance_*` exports staged for training capture
@@ -29,8 +38,12 @@ Read and follow AGENTS.md at the repository root.
 
 ### What Doesn't Work Yet
 - mes_1s ingestion (table exists, nothing writes to it)
-- Google News route/poller are restored as dormant research assets (not scheduled and not part of the active ingestion contract)
-- Live Supabase Vault is still missing `warbird_newsfilter_api_key` and `warbird_finnhub_api_key`, so `public.run_newsfilter_raw_pull()` and `public.run_finnhub_raw_pull()` currently skip before provider fetch
+- Core backfill is not fully finished for the Jan 1, 2024 floor: `cross_asset_1d` still starts at `2026-03-15`, and `econ_inflation_1d` is still stale relative to the live schedule.
+- Finnhub Edge Function is deployed and wired but Kirk must set `FINNHUB_API_KEY` as a Supabase Edge Function secret before it produces rows (Phase 1 manual step)
+- FRED backfill script (`python scripts/backfill-fred.py`) needs to run AFTER migration 026 is applied to production to populate the 22 new series
+- TradingEconomics free tier is untested — Kirk must set API key and run curl tests (Phase 4 manual step)
+- `news_signals` materialized view BULLISH/BEARISH thresholds (market_relevance_score > 0.6 / < 0.4, GPR > 100 / < 80) are starter heuristics pending AG training refinement
+- `macro_reports_1d` not yet included in `news_signals` materialized view (pending TradingEconomics actual/forecast/surprise data evaluation)
 - ML model training (target `scripts/ag/*` path not built yet)
 - Python feature computation layer (not built yet)
 - AG training pipeline (not built yet)
@@ -41,7 +54,6 @@ Read and follow AGENTS.md at the repository root.
 - Cloud publish-up tables for packet / SHAP / report lifecycle (not built)
 - `scripts/warbird/fib-engine.ts` still reflects a legacy 1H helper path and is not the target point-in-time fib snapshot surface for AG training
 - Legacy `/api/cron/forecast` + `warbird_forecasts_1h` path still exists and does not match the locked MES 15m fib-outcome contract
-- `supabase/migrations/20260326000016_news_signal_direction.sql` still needs to be applied to the live database before `news_signals.direction` is guaranteed to accept the locked `BULLISH` / `BEARISH` contract in production
 
 ### Architecture Direction
 Follow the active architecture plan only.
@@ -53,6 +65,7 @@ Follow the active architecture plan only.
 - Pine is the canonical signal surface; the Next.js dashboard is the mirrored operator surface on the same contract, not a separate decision engine.
 - Cloud Supabase is the production system of record; the local warehouse is explicit-snapshot training/research only.
 - AG/offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close; repaint-prone live chart reads are not acceptable dataset truth.
+- Retained core historical data starts at `2024-01-01T00:00:00Z`. Pre-2024 core rows are out of scope for live support data and offline training.
 - Local machines are for training/calculations/research only.
 - Production ingestion, crons, and chart-serving must not depend on local machines.
 - No new predicted-price or `warbird_forecasts_1h`-style surfaces. Live model state is TP1/TP2/reversal outcome state on the MES 15m contract.

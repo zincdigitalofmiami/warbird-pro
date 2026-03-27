@@ -1,7 +1,16 @@
-import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { validateCronRequest } from "@/lib/cron-auth";
-import { extractArticleFromUrl } from "@/lib/news/article-extractor.mjs";
+// News provider ingest logic for Newsfilter and Finnhub.
+// Ported from lib/news/provider-ingest.ts:
+//   - NextResponse.json(...) → new Response(JSON.stringify(...), {...})
+//   - process.env → Deno.env.get()
+//   - createAdminClient from local admin.ts
+//   - validateCronRequest from local cron-auth.ts
+//   - extractArticleFromUrl from local article-extractor.ts
+//   - all contract imports from local raw-news-contract.ts
+//   - providerApiKey() no longer reads x-provider-api-key header — reads env directly
+
+import { createAdminClient } from "./admin.ts";
+import { validateCronRequest } from "./cron-auth.ts";
+import { extractArticleFromUrl } from "./article-extractor.ts";
 import {
   RAW_NEWS_CONTRACT,
   RAW_NEWS_TOPIC_MAP,
@@ -18,7 +27,7 @@ import {
   stripHtmlTags,
   type ArticleScore,
   type TopicSpec,
-} from "@/lib/news/raw-news-contract";
+} from "./raw-news-contract.ts";
 
 type JobLogStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
 
@@ -58,6 +67,13 @@ const DEFAULT_NEWSFILTER_SIZE = 60;
 const DEFAULT_FINNHUB_LIMIT_PER_CATEGORY = 60;
 const DEFAULT_FINNHUB_COMPANY_LOOKBACK_DAYS = 1;
 
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 function chunked<T>(values: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let index = 0; index < values.length; index += size) {
@@ -84,16 +100,6 @@ async function writeJobLog(
   if (error) {
     throw new Error(`job_log insert failed: ${error.message}`);
   }
-}
-
-function providerApiKey(request: Request, envVarName: string): string | null {
-  const headerKey = normalizeText(request.headers.get("x-provider-api-key"));
-  if (headerKey) {
-    return headerKey;
-  }
-
-  const envKey = normalizeText(process.env[envVarName]);
-  return envKey || null;
 }
 
 function parsePositiveInt(
@@ -291,7 +297,7 @@ function topicFromCode(topicCode: string): TopicSpec {
   return topic;
 }
 
-export async function runNewsfilterRawIngest(request: Request) {
+export async function runNewsfilterRawIngest(request: Request): Promise<Response> {
   const authError = validateCronRequest(request);
   if (authError) {
     return authError;
@@ -304,7 +310,7 @@ export async function runNewsfilterRawIngest(request: Request) {
   const lookbackDays = parsePositiveInt(url, "lookback_days", DEFAULT_NEWSFILTER_LOOKBACK_DAYS, 14);
   const size = parsePositiveInt(url, "size", DEFAULT_NEWSFILTER_SIZE, 120);
   const { topicCodes, invalidTopicCodes } = parseTopicCodes(url);
-  const apiKey = providerApiKey(request, "NEWSFILTER_API_KEY");
+  const apiKey = normalizeText(Deno.env.get("NEWSFILTER_API_KEY")) || null;
 
   try {
     if (!apiKey) {
@@ -489,7 +495,7 @@ export async function runNewsfilterRawIngest(request: Request) {
     }
 
     if (dryRun) {
-      return NextResponse.json({
+      return jsonResponse({
         success: true,
         dry_run: true,
         fetched_articles: fetchedRows.length,
@@ -511,7 +517,7 @@ export async function runNewsfilterRawIngest(request: Request) {
         duration_ms: Date.now() - startTime,
         error_message: errors.length > 0 ? errors.join(" | ") : "no_articles",
       });
-      return NextResponse.json({
+      return jsonResponse({
         success: true,
         skipped: true,
         reason: "no_articles",
@@ -547,7 +553,7 @@ export async function runNewsfilterRawIngest(request: Request) {
           : null,
     });
 
-    return NextResponse.json({
+    return jsonResponse({
       success: true,
       fetched_articles: fetchedRows.length,
       unique_articles: articleIdByDedupe.size,
@@ -571,7 +577,7 @@ export async function runNewsfilterRawIngest(request: Request) {
     } catch {
       // ignore log failure in error path
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonResponse({ error: message }, 500);
   }
 }
 
@@ -593,7 +599,7 @@ function finnhubDateParam(url: URL, key: string, fallbackDaysAgo: number): strin
   return d.toISOString().slice(0, 10);
 }
 
-export async function runFinnhubRawIngest(request: Request) {
+export async function runFinnhubRawIngest(request: Request): Promise<Response> {
   const authError = validateCronRequest(request);
   if (authError) {
     return authError;
@@ -605,14 +611,12 @@ export async function runFinnhubRawIngest(request: Request) {
   const dryRun = url.searchParams.get("dry_run") === "1";
   const limitPerCategory = parsePositiveInt(url, "limit_per_category", DEFAULT_FINNHUB_LIMIT_PER_CATEGORY, 120);
   const { topicCodes, invalidTopicCodes } = parseTopicCodes(url);
-  const apiKey = providerApiKey(request, "FINNHUB_API_KEY");
+  const apiKey = normalizeText(Deno.env.get("FINNHUB_API_KEY")) || null;
   const minFit = RAW_NEWS_CONTRACT.minBenchmarkFitScore;
 
-  // Company-news date range: defaults to last 1 day; supports ?from=YYYY-MM-DD&to=YYYY-MM-DD for backfill
   const companyFrom = finnhubDateParam(url, "from", DEFAULT_FINNHUB_COMPANY_LOOKBACK_DAYS);
   const companyTo = finnhubDateParam(url, "to", 0);
 
-  // Optional symbol override: ?symbols=SPY,QQQ for backfill targeting
   const symbolsParam = normalizeText(url.searchParams.get("symbols"));
   const companySymbols = symbolsParam
     ? symbolsParam.split(",").map((s) => normalizeText(s).toUpperCase()).filter(Boolean)
@@ -654,7 +658,6 @@ export async function runFinnhubRawIngest(request: Request) {
         if (!title || !sourceUrl) {
           continue;
         }
-        // General news `related` field is always empty — extract symbols from text instead
         const textSymbols = extractWatchlistSymbols(`${title} ${summary ?? ""}`, []);
 
         if (!publisherDomain || !RAW_NEWS_CONTRACT.trustedDomains.has(publisherDomain)) {
@@ -677,7 +680,6 @@ export async function runFinnhubRawIngest(request: Request) {
           continue;
         }
 
-        // Pre-score on title+summary to decide if body extraction is worth it
         const preScoreTopicHits = topicCodes.some((tc) => {
           const topic = topicFromCode(tc);
           return matchedKeywords(title, summary ?? "", topic.keywords).length > 0;
@@ -686,7 +688,6 @@ export async function runFinnhubRawIngest(request: Request) {
           continue;
         }
 
-        // Body extraction only for direct URLs (not finnhub.io redirects or Google News)
         const canExtractBody = !isFinnhubRedirectUrl(sourceUrl) && publisherDomain !== "news.google.com";
         let extraction = {
           extractionStatus: "FAILED" as string,
@@ -711,7 +712,6 @@ export async function runFinnhubRawIngest(request: Request) {
         const articleKey = buildArticleKey(String(finnhubId), sourceUrl, title, publishedAt);
         const matchedSymbols = textSymbols.length > 0 ? textSymbols : [];
 
-        // Score across topics, apply quality gate
         let bestFitScore = 0;
         let matchedAnyTopic = false;
         for (const topicCode of topicCodes) {
@@ -825,7 +825,6 @@ export async function runFinnhubRawIngest(request: Request) {
           continue;
         }
 
-        // Company-news `related` contains the requested symbol
         const relatedSymbols = String(item.related ?? "")
           .split(",")
           .map((v) => normalizeText(v).toUpperCase())
@@ -834,12 +833,9 @@ export async function runFinnhubRawIngest(request: Request) {
           ? relatedSymbols.filter((s) => RAW_NEWS_CONTRACT.watchlistSymbols.includes(s) || s === symbol)
           : [symbol];
 
-        // Publisher domain filter: company-news URLs are finnhub.io redirects,
-        // so use the `source` field name to filter instead
         const effectiveDomain = isFinnhubRedirectUrl(sourceUrl)
           ? publisherName.toLowerCase().replace(/\s+/g, "")
           : publisherDomain ?? "";
-        // Block known junk sources from company-news
         const blockedCompanySources = new Set(["benzinga", "chartmill"]);
         if (blockedCompanySources.has(effectiveDomain)) {
           continue;
@@ -861,7 +857,6 @@ export async function runFinnhubRawIngest(request: Request) {
           continue;
         }
 
-        // Company-news URLs are broken finnhub.io redirects — no body extraction
         let matchedAnyTopic = false;
         let bestFitScore = 0;
         for (const topicCode of topicCodes) {
@@ -951,7 +946,7 @@ export async function runFinnhubRawIngest(request: Request) {
     }
 
     if (dryRun) {
-      return NextResponse.json({
+      return jsonResponse({
         success: true,
         dry_run: true,
         fetched_articles: fetchedRows,
@@ -976,7 +971,7 @@ export async function runFinnhubRawIngest(request: Request) {
         duration_ms: Date.now() - startTime,
         error_message: errors.length > 0 ? errors.join(" | ") : "no_articles",
       });
-      return NextResponse.json({
+      return jsonResponse({
         success: true,
         skipped: true,
         reason: "no_articles",
@@ -1013,7 +1008,7 @@ export async function runFinnhubRawIngest(request: Request) {
           : null,
     });
 
-    return NextResponse.json({
+    return jsonResponse({
       success: true,
       fetched_articles: fetchedRows,
       unique_articles: articleIdByDedupe.size,
@@ -1038,6 +1033,6 @@ export async function runFinnhubRawIngest(request: Request) {
     } catch {
       // ignore log failure in error path
     }
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonResponse({ error: message }, 500);
   }
 }

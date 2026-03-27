@@ -1,0 +1,28 @@
+project_id = "qhwgrzqjcdtdqppvhhme"
+
+[functions.mes-1m]
+verify_jwt = false
+
+[functions.mes-hourly]
+verify_jwt = false
+
+[functions.cross-asset]
+verify_jwt = false
+
+[functions.fred]
+verify_jwt = false
+
+[functions.massive-inflation]
+verify_jwt = false
+
+[functions.massive-inflation-expectations]
+verify_jwt = false
+
+[functions.finnhub-news]
+verify_jwt = false
+
+[functions.gpr]
+verify_jwt = false
+
+[functions.trump-effect]
+verify_jwt = false

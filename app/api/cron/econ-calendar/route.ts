@@ -27,7 +27,7 @@ async function writeJobLog(
   }
 }
 
-type TeEvent = {
+type CalendarEvent = {
   ts: string;
   event_name: string;
   importance: number;
@@ -36,36 +36,9 @@ type TeEvent = {
   previous: number | null;
 };
 
-function parseTeApiResponse(json: unknown[]): TeEvent[] {
-  return json.map((item) => {
-    const rec = item as Record<string, unknown>;
-    const actual = rec.Actual !== "" ? parseFloat(rec.Actual as string) : null;
-    const forecast = rec.Forecast !== "" ? parseFloat(rec.Forecast as string) : null;
-    return {
-      ts: String(rec.Date),
-      event_name: String(rec.Event).slice(0, 500),
-      importance: rec.Importance === "High" ? 3 : rec.Importance === "Medium" ? 2 : 1,
-      actual: Number.isFinite(actual) ? actual : null,
-      forecast: Number.isFinite(forecast) ? forecast : null,
-      previous: rec.Previous !== "" ? parseFloat(rec.Previous as string) || null : null,
-    };
-  });
-}
-
-async function fetchTeCalendar(): Promise<TeEvent[]> {
-  const apiKey = process.env.TRADINGECONOMICS_API_KEY;
-
-  if (apiKey) {
-    const url = `https://api.tradingeconomics.com/calendar?c=${apiKey}&country=united states`;
-    const resp = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(30_000) });
-    if (!resp.ok) throw new Error(`TE API error: ${resp.status}`);
-    const json = await resp.json();
-    return parseTeApiResponse(json);
-  }
-
-  // Fallback to FRED releases if no TE key
+async function fetchFredCalendar(): Promise<CalendarEvent[]> {
   const fredKey = process.env.FRED_API_KEY;
-  if (!fredKey) throw new Error("No TRADINGECONOMICS_API_KEY or FRED_API_KEY set");
+  if (!fredKey) throw new Error("No FRED_API_KEY set");
 
   const now = new Date();
   const future = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
@@ -124,7 +97,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const events = await fetchTeCalendar();
+    const events = await fetchFredCalendar();
 
     const rows = Array.from(
       new Map(

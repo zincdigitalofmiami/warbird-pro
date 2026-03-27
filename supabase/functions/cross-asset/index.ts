@@ -1,54 +1,35 @@
-import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { validateCronRequest } from "@/lib/cron-auth";
-import { isMarketOpen, isWeekendBar } from "@/lib/market-hours";
-import { fetchOhlcv } from "@/lib/ingestion/databento";
+// Edge Function: cross-asset
+// Ported from app/api/cron/cross-asset/route.ts
+// Triggered on a 15m cadence by Supabase pg_cron (warbird_cross_asset_s0..s3).
+// Auth: x-cron-secret header validated against EDGE_CRON_SECRET env var.
 
-export const maxDuration = 60;
-
-type JobLogStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "SKIPPED";
+import { createAdminClient } from "../_shared/admin.ts";
+import { validateCronRequest } from "../_shared/cron-auth.ts";
+import { isMarketOpen, isWeekendBar } from "../_shared/market-hours.ts";
+import { fetchOhlcv } from "../_shared/databento.ts";
 
 const DEFAULT_SHARD_COUNT = 4;
 const SHARD_INTERVAL_MINUTES = 15;
 const INITIAL_LOOKBACK_HOURS = 6;
 
-async function writeJobLog(
-  supabase: ReturnType<typeof createAdminClient>,
-  params: {
-    job_name: string;
-    status: JobLogStatus;
-    rows_affected: number;
-    duration_ms: number;
-    error_message?: string | null;
-  },
-) {
-  const { error } = await supabase.from("job_log").insert({
-    ...params,
-    error_message: params.error_message ?? null,
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" },
   });
-
-  if (error) {
-    throw new Error(`job_log insert failed: ${error.message}`);
-  }
 }
 
-// Runs on a 15m cadence and processes one deterministic shard per run.
-// Fetches 1h OHLCV for active DATABENTO non-MES symbols in that shard and
-// aggregates to daily bars.
-
-export async function GET(request: Request) {
-  const authError = validateCronRequest(request);
-  if (authError) {
-    return authError;
-  }
+Deno.serve(async (req: Request) => {
+  const authError = validateCronRequest(req);
+  if (authError) return authError;
 
   const startTime = Date.now();
   const supabase = createAdminClient();
-  const url = new URL(request.url);
+  const url = new URL(req.url);
 
   if (!isMarketOpen()) {
     try {
-      await writeJobLog(supabase, {
+      await supabase.from("job_log").insert({
         job_name: "cross-asset",
         status: "SKIPPED",
         rows_affected: 0,
@@ -58,11 +39,11 @@ export async function GET(request: Request) {
     } catch {
       // Ignore logging failure to preserve skip response.
     }
-    return NextResponse.json({ skipped: true, reason: "market_closed", duration_ms: Date.now() - startTime });
+    return jsonResponse({ skipped: true, reason: "market_closed", duration_ms: Date.now() - startTime });
   }
 
   try {
-    const configuredShardCount = Number(process.env.CROSS_ASSET_SHARD_COUNT ?? DEFAULT_SHARD_COUNT);
+    const configuredShardCount = Number(Deno.env.get("CROSS_ASSET_SHARD_COUNT") ?? DEFAULT_SHARD_COUNT);
     const shardCount = Number.isInteger(configuredShardCount) && configuredShardCount > 0
       ? configuredShardCount
       : DEFAULT_SHARD_COUNT;
@@ -78,16 +59,16 @@ export async function GET(request: Request) {
 
     if (shardIndex < 0 || shardIndex >= shardCount) {
       const durationMs = Date.now() - startTime;
-      await writeJobLog(supabase, {
+      await supabase.from("job_log").insert({
         job_name: "cross-asset",
         status: "FAILED",
         rows_affected: 0,
         duration_ms: durationMs,
         error_message: `invalid_shard_index shard=${shardIndex} shard_count=${shardCount}`,
       });
-      return NextResponse.json(
+      return jsonResponse(
         { error: "invalid_shard_index", shard_index: shardIndex, shard_count: shardCount },
-        { status: 400 },
+        400,
       );
     }
 
@@ -108,26 +89,26 @@ export async function GET(request: Request) {
 
     if (orderedSymbols.length === 0) {
       const durationMs = Date.now() - startTime;
-      await writeJobLog(supabase, {
+      await supabase.from("job_log").insert({
         job_name: "cross-asset",
         status: "SKIPPED",
         rows_affected: 0,
         duration_ms: durationMs,
         error_message: "no_symbols",
       });
-      return NextResponse.json({ success: true, symbols_processed: 0, reason: "no_symbols", duration_ms: durationMs });
+      return jsonResponse({ success: true, symbols_processed: 0, reason: "no_symbols", duration_ms: durationMs });
     }
 
     if (symbolsForShard.length === 0) {
       const durationMs = Date.now() - startTime;
-      await writeJobLog(supabase, {
+      await supabase.from("job_log").insert({
         job_name: "cross-asset",
         status: "SKIPPED",
         rows_affected: 0,
         duration_ms: durationMs,
         error_message: `empty_shard shard=${shardIndex}/${shardCount}`,
       });
-      return NextResponse.json({
+      return jsonResponse({
         success: true,
         symbols_processed: 0,
         total_symbols: orderedSymbols.length,
@@ -248,7 +229,7 @@ export async function GET(request: Request) {
     }
 
     const durationMs = Date.now() - startTime;
-    await writeJobLog(supabase, {
+    await supabase.from("job_log").insert({
       job_name: "cross-asset",
       status: errors.length > 0 ? "PARTIAL" : totalRows1h + totalRows1d > 0 ? "SUCCESS" : "SKIPPED",
       rows_affected: totalRows1h + totalRows1d,
@@ -260,7 +241,7 @@ export async function GET(request: Request) {
           : null,
     });
 
-    return NextResponse.json({
+    return jsonResponse({
       success: true,
       symbols_processed: symbolsForShard.length,
       total_symbols: orderedSymbols.length,
@@ -276,7 +257,7 @@ export async function GET(request: Request) {
     const message = e instanceof Error ? e.message : "Internal error";
     let finalMessage = message;
     try {
-      await writeJobLog(supabase, {
+      await supabase.from("job_log").insert({
         job_name: "cross-asset",
         status: "FAILED",
         rows_affected: 0,
@@ -286,6 +267,6 @@ export async function GET(request: Request) {
     } catch (logError) {
       finalMessage = `${message}; ${logError instanceof Error ? logError.message : String(logError)}`;
     }
-    return NextResponse.json({ error: finalMessage }, { status: 500 });
+    return jsonResponse({ error: finalMessage }, 500);
   }
-}
+});

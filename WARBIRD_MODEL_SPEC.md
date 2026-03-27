@@ -21,11 +21,12 @@ This document is a subordinate reference for the model contract. It must not ove
 9. `news_signals` is a derived `BULLISH` / `BEARISH` market-impact surface. It is not a `LONG` / `SHORT` trade-direction table.
 10. News may influence the model only when paired with contemporaneous price action, session timing, volatility state, and cross-asset reaction.
 11. AG and offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close, not repaint-prone live chart reads.
-12. The fib engine must preserve lookback/confluence intelligence; a simple zigzag-only anchor path is insufficient for Warbird.
-13. Pivot distance and pivot-state are critical trigger/reversal inputs, but not the sole final decision maker.
-14. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
-15. Overlapping MA / volume / trend features across base logic and admitted harnesses must be de-duplicated by feature family.
-16. The minimal Pine export surface for training capture is fib lines/state, pivot state/distance, and admitted indicator/harness outputs from the canonical indicator surface.
+12. The retained core historical window for training/support data starts at `2024-01-01T00:00:00Z`. Pre-2024 core rows are out of scope and must not be reintroduced into the canonical dataset.
+13. The fib engine must preserve lookback/confluence intelligence; a simple zigzag-only anchor path is insufficient for Warbird.
+14. Pivot distance and pivot-state are critical trigger/reversal inputs, but not the sole final decision maker.
+15. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
+16. Overlapping MA / volume / trend features across base logic and admitted harnesses must be de-duplicated by feature family.
+17. The minimal Pine export surface for training capture is fib lines/state, pivot state/distance, and admitted indicator/harness outputs from the canonical indicator surface.
 
 ---
 

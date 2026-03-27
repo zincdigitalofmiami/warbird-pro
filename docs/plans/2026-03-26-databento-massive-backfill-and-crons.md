@@ -1,19 +1,25 @@
 # Databento + Economy Backfill & pg_cron Scheduling Plan
 
 **Created:** 2026-03-26
-**Updated:** 2026-03-26 (v2 — post-audit rewrite)
-**Status:** AUDITED — READY FOR IMPLEMENTATION
-**Scope:** MES 1h/1d backfill, cross-asset backfill, economy data expansion (FRED + Massive), overnight pg_cron scheduling
+**Updated:** 2026-03-27 (v3 — Jan 1 2024 retention-floor lock)
+**Status:** REFERENCE CHECKPOINT — retain and backfill core data only from `2024-01-01` forward
+**Scope:** MES 1h/1d backfill, cross-asset backfill, economy data expansion (FRED + Massive), overnight pg_cron scheduling, all constrained to the Jan 1 2024 floor
 
 ---
 
 ## Goal
 
-1. Backfill MES 1H, 4H, 1D data from Jan 1, 2024 → present
-2. Backfill cross-asset 1H + 1D for ALL 15 active non-MES DATABENTO symbols from Jan 1, 2024
+1. Retain and backfill MES 1H, 4H, 1D data from Jan 1, 2024 → present only
+2. Retain and backfill cross-asset 1H + 1D for ALL 15 active non-MES DATABENTO symbols from Jan 1, 2024 only
 3. Cover ALL Massive Economy endpoint fields: 13 via FRED (direct source), 6 via Massive inflation route (includes unique `cpi_year_over_year`)
 4. Schedule ALL data ingestion crons via Supabase pg_cron, spread overnight
 5. Add MES hourly aggregation to keep 1h/4h/1d tables current going forward
+
+## Retention Floor
+
+- The canonical core data floor is `2024-01-01T00:00:00Z`.
+- Pre-2024 core rows are out of scope and were surgically trimmed live on `2026-03-27` by `supabase/migrations/20260327000024_trim_pre_2024_core_history.sql`.
+- Remaining work in this document is only the unfinished `2024-01-01` forward backfill/freshness gap, not restoration of older history.
 
 ---
 
@@ -55,6 +61,7 @@
 - `backfill-cross-asset.py` covers 12 of 15 symbols (missing SI, NG, SOX)
 - Script does NOT write `cross_asset_1d` (only `cross_asset_1h`)
 - Live route already writes both 1h and 1d with shard logic
+- `cross_asset_1d` remains the main retained-history gap; the required floor is `2024-01-01`
 
 ### Massive Economy — coverage plan
 All 4 Massive Economy endpoints and every field accounted for:
@@ -315,7 +322,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
   "https://${SUPABASE_FUNCTIONS_BASE_URL}/api/cron/massive/inflation?start_date=2024-01-01"
 ```
 
-**FRED backfill:** The FRED cron routes fetch the last 100 observations by default. For a full backfill from 2024, each category route can be called manually. FRED's `observation_start` param is used when there's no existing data — first run will pull all available history.
+**FRED backfill:** The FRED cron routes fetch the last 100 observations by default. For a full retained backfill, manual history loading must be constrained to `2024-01-01` forward. Do not treat any pull that leaves pre-2024 rows in place as complete.
 
 ---
 
@@ -353,6 +360,14 @@ curl -H "Authorization: Bearer $CRON_SECRET" \
 9. Phase 1: Run MES backfill (local Python) — manual, user-initiated
 10. Phase 2: Run cross-asset backfill (local Python) — manual, user-initiated
 11. Phase 7: Run Massive inflation backfill via curl — manual, user-initiated
+
+## Current Post-Trim Truth
+
+- MES retained history already starts at `2024-01-01`
+- `cross_asset_1h` retained history already starts at `2024-01-01`
+- `cross_asset_1d` still needs Jan 1 2024 forward backfill completion
+- core econ tables were trimmed to the Jan 1 2024 floor on `2026-03-27`
+- `econ_inflation_1d` still needs freshness work inside the Jan 1 2024 forward window
 
 ---
 
