@@ -41,7 +41,6 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3",
     "@modelcontextprotocol/server-sequential-thinking": "^2025.12.18",
     "@tailwindcss/postcss": "^4.2.1",
     "@types/node": "^20",
