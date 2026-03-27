@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 
 export default function Home() {
@@ -9,8 +10,7 @@ export default function Home() {
       {/* Nav */}
       <nav className="w-full flex justify-center h-20" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
         <div className="w-full max-w-6xl flex justify-between items-center px-6">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/warbird-logo.svg" alt="Warbird Pro" className="h-10 w-auto" />
+          <Image src="/warbird-logo.svg" alt="Warbird Pro" className="h-10 w-auto" width={120} height={40} />
           <Link
             href="/auth/login"
             className="text-sm text-white/70 hover:text-white transition-colors duration-200"
@@ -27,8 +27,7 @@ export default function Home() {
           className="absolute inset-0 flex items-center justify-center pointer-events-none"
           style={{ opacity: 0.5 }}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/chart_watermark.svg" alt="" className="w-[600px] h-[600px]" />
+          <Image src="/chart_watermark.svg" alt="" className="w-[600px] h-[600px]" width={600} height={600} />
         </div>
         <div className="relative z-10 w-full max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-16 items-center py-20">
           {/* Left — Text */}
@@ -42,9 +41,8 @@ export default function Home() {
               <span className="text-white/60">Intelligence</span>
             </h1>
             <p className="text-white/50 text-lg leading-relaxed max-w-lg" style={{ fontWeight: 300 }}>
-              ML-powered Fibonacci confluence engine for S&amp;P 500 futures.
-              Backtested signals, high-frequency setup detection, and machine learning
-              forecasting — built on real market data.
+              Fibonacci confluence engine for MES micro S&amp;P 500 futures.
+              Backtested 15-minute setup detection with quantitative entry classification — built on real market data.
             </p>
             <p className="text-white/25 text-sm mt-2">
               Designed and architected by Kirk Musick, MS, MBA
@@ -52,7 +50,7 @@ export default function Home() {
             <div className="flex gap-4 mt-2">
               <Link
                 href="/auth/sign-up"
-                className="px-6 py-3 text-sm font-medium rounded-lg transition-all duration-200"
+                className="px-6 py-3 text-sm font-medium rounded-lg transition-colors duration-200"
                 style={{
                   background: "rgba(255,255,255,0.1)",
                   color: "white",
@@ -71,8 +69,8 @@ export default function Home() {
 
             {/* Stats */}
             <div className="grid grid-cols-3 gap-8 mt-8 pt-8" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-              <StatBlock value="< 2s" label="Data Latency" />
-              <StatBlock value="19" label="Data Pipelines" />
+              <StatBlock value="15m" label="Signal Resolution" />
+              <StatBlock value="5" label="Fib Lookbacks" />
               <StatBlock value="24/5" label="Market Coverage" />
             </div>
           </div>
@@ -123,7 +121,7 @@ export default function Home() {
         <div className="w-full max-w-6xl">
           <h2 className="text-white/80 text-2xl font-semibold mb-3 tracking-tight">Intelligence Layers</h2>
           <p className="text-white/30 text-sm mb-12 max-w-lg">
-            Backtested and ML-driven. Every signal built on real market data.
+            Backtested and rule-driven. Every signal built on real market data.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <IntelCard
@@ -142,8 +140,8 @@ export default function Home() {
               accent={false}
             />
             <IntelCard
-              title="ML Forecasting"
-              description="AutoGluon 1H core forecaster. Price levels, MAE bands, and target zones."
+              title="Setup Classification"
+              description="15-minute fib-outcome engine. TP1/TP2 measured-move targets with mechanical stop-loss."
               accent={false}
             />
           </div>
@@ -157,11 +155,11 @@ export default function Home() {
             Real data. Real signals.
           </h2>
           <p className="text-white/40 mb-8">
-            Machine learning meets Fibonacci confluence. Backtested on real S&amp;P 500 futures data.
+            Fibonacci confluence meets quantitative setup classification. Backtested on real MES futures data.
           </p>
           <Link
             href="/auth/sign-up"
-            className="inline-block px-8 py-3 text-sm font-medium rounded-lg transition-all duration-200"
+            className="inline-block px-8 py-3 text-sm font-medium rounded-lg transition-colors duration-200"
             style={{
               background: "white",
               color: "black",
