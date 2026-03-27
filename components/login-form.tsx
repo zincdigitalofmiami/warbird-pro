@@ -63,7 +63,9 @@ export function LoginForm({
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
                   placeholder="m@example.com"
                   required
                   value={email}
@@ -82,15 +84,17 @@ export function LoginForm({
                 </div>
                 <Input
                   id="password"
+                  name="password"
                   type="password"
+                  autoComplete="current-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </div>
-              {error && <p className="text-sm text-red-500">{error}</p>}
+              {error && <p className="text-sm text-red-500" role="alert" aria-live="polite">{error}</p>}
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Logging in..." : "Login"}
+                {isLoading ? "Logging in\u2026" : "Login"}
               </Button>
             </div>
             <div className="mt-4 text-center text-sm">

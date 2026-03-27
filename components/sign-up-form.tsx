@@ -70,7 +70,9 @@ export function SignUpForm({
                 <Label htmlFor="email">Email</Label>
                 <Input
                   id="email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
                   placeholder="m@example.com"
                   required
                   value={email}
@@ -83,7 +85,9 @@ export function SignUpForm({
                 </div>
                 <Input
                   id="password"
+                  name="password"
                   type="password"
+                  autoComplete="new-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -95,15 +99,17 @@ export function SignUpForm({
                 </div>
                 <Input
                   id="repeat-password"
+                  name="repeat-password"
                   type="password"
+                  autoComplete="new-password"
                   required
                   value={repeatPassword}
                   onChange={(e) => setRepeatPassword(e.target.value)}
                 />
               </div>
-              {error && <p className="text-sm text-red-500">{error}</p>}
+              {error && <p className="text-sm text-red-500" role="alert" aria-live="polite">{error}</p>}
               <Button type="submit" className="w-full" disabled={isLoading}>
-                {isLoading ? "Creating an account..." : "Sign up"}
+                {isLoading ? "Creating an account\u2026" : "Sign up"}
               </Button>
             </div>
             <div className="mt-4 text-center text-sm">
