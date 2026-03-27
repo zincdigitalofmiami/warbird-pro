@@ -13,9 +13,9 @@ This document is a subordinate reference for the model contract. It must not ove
 1. The canonical trade object is the **MES 15m fib setup**.
 2. The canonical key is the MES 15m **bar-close timestamp** in `America/Chicago`.
 3. Pine is the canonical live signal surface.
-4. The Next.js dashboard is the mirrored operator surface using the same MES 15m fib contract; it is not a separate decision engine.
+4. The Next.js dashboard is the richer mirrored operator surface using the same MES 15m fib contract; it is not a separate decision engine and must not recompute fib geometry locally.
 5. AutoGluon is offline only. It trains, calibrates, and emits a Pine-ready packet.
-6. The model does **not** invent raw entries from scratch. The Pine fib engine creates the candidate setup first.
+6. The adaptive fib engine snapshot is the canonical base object. The model does **not** invent raw entries from scratch. The Pine fib engine creates the candidate setup first.
 7. The model output is MES 15m setup-outcome state: TP1 probability, TP2 probability, reversal risk, and bounded stop-family selection. It is **not** a predicted-price forecast surface.
 8. News is not a separate setup engine. It is part of the event-response block that can suppress, delay, confirm, or reclassify a valid 15m fib setup.
 9. `news_signals` is a derived `BULLISH` / `BEARISH` market-impact surface. It is not a `LONG` / `SHORT` trade-direction table.
@@ -27,6 +27,10 @@ This document is a subordinate reference for the model contract. It must not ove
 15. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
 16. Overlapping MA / volume / trend features across base logic and admitted harnesses must be de-duplicated by feature family.
 17. The minimal Pine export surface for training capture is fib lines/state, pivot state/distance, and admitted indicator/harness outputs from the canonical indicator surface.
+18. The canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`.
+19. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
+20. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
+21. Cloud core support data remains `2024-01-01T00:00:00Z` forward. By explicit user direction, local offline training research may use up to five years of comparable electronic futures data, but that does not reopen pre-2024 cloud core retention.
 
 ---
 
@@ -49,11 +53,26 @@ The model also selects from a **bounded stop family**. It does not emit an uncon
 
 ---
 
-## 3. Candidate Setup Definition
+## 3. Fib Engine Snapshot And Candidate Definition
+
+Every training row and live decision must trace back to a frozen MES 15m fib engine snapshot taken at bar close.
+
+The snapshot must carry the resolved adaptive engine state, including the chosen anchor result plus the adaptive decisions that produced it. At minimum, the snapshot family must preserve:
+
+- anchor high / low and anchor timestamps
+- direction state and reversal mode
+- resolved left / right pivot lookback values
+- resolved anchor lookback / spacing policy
+- target-eligibility state
+- fib / pivot / zone interaction state
+- exhaustion precursor state
+- engine version and packet version
+
+The exact table/enum contract for these fields is the next schema checkpoint in the active plan.
 
 A setup candidate exists only when all of the following are true:
 
-1. A valid 15m fib anchor exists with a non-degenerate range.
+1. A valid 15m fib engine snapshot exists with a non-degenerate range.
 2. A structural leg direction exists and is not midpoint-flip logic.
 3. Price touches or crosses one of the tracked retracement levels on the 15m bar.
 4. The candidate still has a `20pt+` path to TP1.
@@ -67,8 +86,10 @@ The setup engine must expose, at minimum:
 - stop-family candidate
 - confidence score
 - event-response state
+- exhaustion precursor state
 - EMA context (distance + direction)
-- entry trigger state for long/short plus TP hit events
+- decision-support state for `TAKE_TRADE` / `WAIT` / `PASS`
+- entry trigger state plus TP hit events
 
 Target viability remains a required internal gate in Pine trigger logic, but it is not a required exported `ml_*` field.
 
@@ -82,6 +103,14 @@ The live indicator trigger predicate may only fire when the shared setup archety
 Setup archetype `4` is reversal context only. It must not authorize a same-direction continuation entry.
 
 The candidate setup must come from a snapshot-stable fib state that would have existed at that bar close. Historical anchors may not be retro-rewritten for training.
+
+Each candidate must later receive:
+
+- a realized outcome label
+- MAE / MFE measurements
+- a decision code (`TAKE_TRADE` / `WAIT` / `PASS`)
+
+The model learns from the candidate/outcome truth. The policy layer maps those model outputs into the decision code.
 
 ---
 
@@ -279,7 +308,8 @@ The packet must include:
 7. bucket-level TP1 / TP2 / reversal statistics
 8. event-response thresholds and suppression rules
 9. fib snapshot / lookback-family decisions when they are part of the admitted contract
-10. run metadata and sample counts
+10. decision-policy thresholds for `TAKE_TRADE` / `WAIT` / `PASS`
+11. run metadata and sample counts
 
 Packet promotion rule:
 

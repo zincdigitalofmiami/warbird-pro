@@ -14,10 +14,13 @@ Historical note: any remaining references below to the paired strategy, parity-o
 
 Historical retention note: the canonical core data window is `2024-01-01T00:00:00Z` forward only. Pre-2024 core rows are out of scope for live support data and offline training.
 
+Binding note: the 2026-03-27 update-log entry supersedes older references below to right-side TradingView tables, `LONG READY` / `SHORT READY` action labels, and dashboard-local fib computation.
+
 ---
 
 ## Update Log
 
+- 2026-03-27: Locked the architecture reset after a live repo audit. Current repo truth is `NO-GO`: `indicators/v6-warbird-complete.pine` is not TradingView-loadable (`isValid` / `atr` undeclared in the active file and downstream `log.info` type failures), the dashboard still recomputes fib geometry through the legacy `scripts/warbird/fib-engine.ts` helper instead of rendering a shared packet, `/admin` still leans on stale `measured_moves`, and the live `warbird_*` decision/outcome tables are empty. Binding delta: the adaptive fib engine snapshot is now the canonical base object; the canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`; decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, `PASS`; TradingView keeps execution-facing visuals/alerts plus the exhaustion precursor diamond while operator tables move to the dashboard; five years of comparable electronic futures data is approved for offline training research only, while cloud core support tables remain `2024-01-01T00:00:00Z` forward. Next blocker: lock the exact snapshot/candidate/outcome schema and cut the dashboard over to render-only consumption of the canonical fib engine state.
 - 2026-03-27: Applied live retention-floor trim migration `supabase/migrations/20260327000024_trim_pre_2024_core_history.sql` to keep core historical data at `2024-01-01T00:00:00Z` forward only. Validation confirmed zero pre-2024 rows remain in `econ_rates_1d`, `econ_yields_1d`, `econ_fx_1d`, `econ_vol_1d`, `econ_inflation_1d`, `econ_labor_1d`, `econ_activity_1d`, `econ_money_1d`, `econ_commodities_1d`, `econ_indexes_1d`, `geopolitical_risk_1d`, and legacy `econ_news_1d`; MES and cross-asset intraday tables were already clean. Next blocker: finish the remaining Jan 1 2024 forward-only core backfill gaps, especially `cross_asset_1d` and stale `econ_inflation_1d` freshness.
 - 2026-03-26: Locked the Supabase Edge cron cutover guardrails. Runtime truth for recurring ingestion is `pg_cron -> pg_net -> Supabase Edge Functions -> Supabase DB`; Vercel/`npm run build` remains only the frontend app deploy gate and is not evidence that Edge Functions package, deploy, or run. Required cutover order is now: fix Supabase-function-only packaging/runtime issues, deploy each function with the Supabase toolchain, invoke each function directly with `x-cron-secret`, then apply the pg_cron cutover migration. Hard stop: do not call the cutover complete while any live pg_cron helper still targets a Vercel URL or while Edge runtime correctness is inferred from the Vercel build instead of direct function deploy/invoke proof.
 - 2026-03-26: Restored `app/api/cron/google-news/route.ts` and `scripts/poll-google-news.py` as dormant research assets for later evaluation. They are intentionally unscheduled and not part of the active ingestion contract.
@@ -120,7 +123,8 @@ Deliver the best possible **fib continuation/reversal entry indicator** on Tradi
 
 - actionable entries on chart
 - TP1 (1.236 extension) and TP2 (1.618 extension) path visualization
-- probability, win rate, and trade stats visible in a right-side chart table
+- an early-warning exhaustion diamond that can lead a later trigger by a few bars
+- a mirrored dashboard operator surface that renders the same fib engine state with probabilities, audit stats, and richer cross-asset visuals than Pine can support
 - AG used aggressively to improve it offline
 - manual chart validation plus point-in-time dataset checks used to prove it
 
@@ -128,24 +132,35 @@ The goal is canonical. Whatever it takes to get there is what we do.
 
 ---
 
-## Canonical Outputs (must appear on chart)
+## Canonical Outputs (split by surface)
 
-These are the required chart outputs. Each must map to a defined calculation. Each must come from real data.
+These are the required outputs. Each must map to a defined calculation. Each must come from real data.
+
+### TradingView / Pine
 
 | Output | Definition |
 |--------|-----------|
-| **Entry marker** | Exact bar where the indicator signals entry at a fib pullback level |
-| **TP1 probability** | Probability the current setup reaches the 1.236 fib extension. Must be defensible and calibrated — when it says 70%, it should be right ~70% of the time. |
-| **TP2 probability** | Probability the current setup reaches the 1.618 fib extension. Same calibration standard. |
-| **Reversal risk** | Probability that the continuation fails into a reversal |
-| **Win rate** | Historical hit rate for the current setup bucket (fib level, regime, session, direction). Based on real backtested data, not a guess. |
-| **Stats window** | What history/regime/sample the displayed numbers are based on |
-| **Action state** | `LONG READY`, `SHORT READY`, `NO TRADE`, `CONFLICT` |
+| **Entry marker** | Exact bar where the indicator publishes a trade signal at a fib pullback level |
+| **Decision state** | `TAKE_TRADE`, `WAIT`, or `PASS` for the current candidate. This is a policy decision, not a realized outcome. |
 | **Target eligibility** | 20pt+ pass/fail |
-| **Regime** | Intermarket regime, volatility state, macro posture |
 | **Stop level** | From a bounded, deterministic stop family — not a per-trade model output |
 | **TP1 / TP2 levels** | The 1.236 and 1.618 fib extension prices |
+| **Fib / pivot / zone lines** | The operator-visible execution geometry from the canonical fib engine |
+| **Exhaustion diamond** | A precursor visual that can warn ahead of a later trigger when exhaustion context is active at a fib or pivot interaction |
 | **Re-entry signal** | When a pullback after TP1 is a continuation opportunity |
+
+### Dashboard / Operator Surface
+
+| Output | Definition |
+|--------|-----------|
+| **TP1 probability** | Probability the current setup reaches the 1.236 fib extension. Must be defensible and calibrated — when it says 70%, it should be right about 70% of the time. |
+| **TP2 probability** | Probability the current setup reaches the 1.618 fib extension. Same calibration standard. |
+| **Reversal risk** | Probability that the continuation fails into a reversal or shock-failure path. |
+| **Win rate** | Historical hit rate for the current setup bucket (fib level, regime, session, direction). Based on real backtested data, not a guess. |
+| **Stats window** | What history/regime/sample the displayed numbers are based on |
+| **MAE / MFE context** | Expected and bounded excursion context used to support the displayed probabilities |
+| **Decision reasons** | Why the policy is currently `TAKE_TRADE`, `WAIT`, or `PASS` |
+| **Cross-asset visuals** | Time-synced operator charts and regime state that Pine cannot carry as chart tables |
 
 ---
 
@@ -153,12 +168,13 @@ These are the required chart outputs. Each must map to a defined calculation. Ea
 
 1. Every stat on the chart must come from real data — never mocked, never fabricated.
 2. Every probability/win rate must be defensible and calibrated.
-3. Whatever appears in the table must map to a defined calculation.
+3. Whatever appears in TradingView or the dashboard must map to a defined calculation.
 4. Pine must remain the visible production surface.
 5. AG is offline only — never in the live signal path.
-6. Visual chart validation and local point-in-time dataset checks must agree closely enough before a fib or trigger mechanic is trusted.
-7. Deep Backtesting and paired-strategy parity are optional research tools only; they are not active blockers for the indicator path unless explicitly reopened.
-8. **NEVER hand-roll code when a working implementation exists.** Copy the exact working code. Adapt the interface, not the internals. If you can't explain why your version differs line-by-line, you don't understand it well enough to rewrite it. Hand-rolled library integrations produce broken signals that poison AG training data.
+6. The dashboard may be visually richer than Pine, but it must render the same canonical fib engine state rather than compute a second fib engine locally.
+7. Visual chart validation and local point-in-time dataset checks must agree closely enough before a fib or trigger mechanic is trusted.
+8. Deep Backtesting and paired-strategy parity are optional research tools only; they are not active blockers for the indicator path unless explicitly reopened.
+9. **NEVER hand-roll code when a working implementation exists.** Copy the exact working code. Adapt the interface, not the internals. If you can't explain why your version differs line-by-line, you don't understand it well enough to rewrite it. Hand-rolled library integrations produce broken signals that poison AG training data.
 
 ---
 
@@ -170,18 +186,25 @@ The chart-output surface is canonical. The v1 mechanism for producing those outp
 
 Use a **hybrid Pine + AG packet** architecture:
 
-1. Pine computes all live features, states, and the deterministic `confidence_score` from current bar context.
-2. AG trains offline, calibrates the score, and produces a Pine-ready packet of:
+1. Pine computes the canonical adaptive fib engine snapshot, candidate state, precursor visuals, and the deterministic `confidence_score` from current bar context.
+2. AG trains offline on point-in-time fib engine snapshots, calibrates the score, and produces a Pine-ready packet of:
    - score-to-probability mappings
    - win-rate tables
    - reversal-risk tables
    - stop-family decisions
    - module keep/remove calls
    - exact Pine input values
-3. Pine renders the right-side table by:
+3. Pine renders only the execution-facing chart surface:
+   - fib / pivot / zone lines
+   - entry markers
+   - bounded stop and target levels
+   - exhaustion precursor diamond
+   - alertconditions
+4. The dashboard renders the operator-facing stats and visuals by:
    - identifying the current setup bucket
    - identifying the current confidence bin
    - looking up the calibrated TP1 / TP2 / reversal / win-rate stats from the latest promoted packet
+   - rendering cross-asset and sentiment views from the same MES 15m contract
 
 This is the primary v1 path.
 
@@ -204,7 +227,7 @@ The packet update cadence for v1 is:
 
 No intraday live model serving.
 
-### Locked table-stat formulas
+### Locked dashboard-stat formulas
 
 These definitions are canonical for v1:
 
@@ -333,7 +356,7 @@ That indicator must:
 - calculate all live signal logic inside Pine
 - pull all permitted live external series through TradingView-supported `request.*()` calls
 - draw the fib structure and entry context on the chart
-- render a side-panel table like the reference image
+- keep dense operator tables off-chart and emit only the execution-facing TradingView surface
 - fire alerts from Pine only
 
 ### Validation
@@ -735,22 +758,44 @@ The strategy will compare at least these structure archetypes:
 - continuation after one clean pullback
 - reversal after regime-aligned failed move
 
-### Output States
+### Decision States
 
-The indicator should output one clear action state:
+The policy layer should output one clear decision state:
 
-- `LONG READY`
-- `SHORT READY`
-- `NO TRADE`
-- `CONFLICT`
+- `TAKE_TRADE`
+- `WAIT`
+- `PASS`
+
+These are decision codes only. Realized outcome labels remain separate.
 
 ---
 
 ## Shared Pine Architecture
 
-Two Pine artifacts will exist:
+One Pine artifact is active on the live path:
 
-### 1. Validation Strategy
+### 1. Live Indicator
+
+Purpose:
+
+- chart visualization
+- live entry markers
+- exhaustion precursor diamond
+- alerts
+- hidden export packet
+
+Required outputs:
+
+- 0 / 1 / pivot / zone / target lines
+- entry markers
+- stop
+- target 1
+- target 2
+- exhaustion precursor diamond
+- alertconditions
+- hidden export packet
+
+### 2. Research Strategy Surface (legacy unless explicitly reopened)
 
 Purpose:
 
@@ -758,34 +803,11 @@ Purpose:
 - historical parameter comparison
 - trade outcome measurement
 
-Required outputs:
-
-- entry
-- stop
-- target 1
-- target 2
-- trade stats in Strategy Tester
-
-### 2. Live Indicator
-
-Purpose:
-
-- chart visualization
-- live entry markers
-- side-panel table
-- alerts
-
-Required outputs:
-
-- 0 / 1 / pivot / zone / target lines
-- entry markers
-- stop / target guide lines
-- right-side table panel
-- alertconditions
+This surface is reference-only unless a newer update-log entry explicitly reactivates it.
 
 ### Shared Core
 
-These must be identical between strategy and indicator:
+These must remain identical between any research strategy and the live indicator whenever the strategy path is reopened:
 
 - fib anchor selection
 - external series pulls
@@ -795,27 +817,28 @@ These must be identical between strategy and indicator:
 
 ---
 
-## Right-Side Table Plan
+## Dashboard Operator Surface Plan
 
-The indicator will include a table area on the chart edge inspired by the reference image.
+TradingView chart tables are retired from the active path. The dashboard is the operator-facing surface for dense state, stats, and cross-asset visuals, but it must render the same MES 15m fib engine state rather than recompute fib geometry locally.
 
-### Table Contents v1
+### Dashboard Contents v1
 
 Top block:
 
 - symbol
 - timeframe
-- active fib period
+- active fib engine version
 - direction
 
 Signal block:
 
-- action state
+- decision state
 - target eligibility (`20pt+` pass/fail)
 - entry price
 - stop level
 - target 1
 - target 2
+- exhaustion precursor state
 
 Regime block:
 
@@ -836,21 +859,21 @@ Component block:
 
 Structure block:
 
-- break / accept / reject / conflict state
+- break / accept / reject state
 - bars since event
 - active score
 
 ### Visual Direction
 
-The table should feel dense and intentional, not like default Pine debug output:
+The dashboard should feel dense and intentional, not like default Pine debug output:
 
 - compact
-- right aligned
+- synchronized around the main MES chart
 - readable at trading size
 - color-coded state bars
 - minimal wasted text
 
-Arc gauges are optional. The table and state bars are the priority.
+Mini charts for correlation symbols and richer sentiment/regime visuals are explicitly allowed here. Arc gauges are optional. Decision reasons, state bars, and synchronized context are the priority.
 
 ---
 
@@ -2084,17 +2107,16 @@ Phase 4 exact cloud publish-up entities:
 
 ### Phase 5: Indicator UI Build
 
-1. Build the right-side table.
-2. Add entry markers and level lines.
-3. Add concise alertconditions.
-4. Ensure the indicator remains within Pine limits.
-5. Keep pivots, required harness intelligence, and candidate bolt-on intelligence hidden unless explicitly promoted to the visible surface.
+1. Build the execution-facing TradingView surface only: entry markers, level lines, exhaustion precursor diamond, and concise alertconditions.
+2. Keep operator tables and rich diagnostics in the dashboard.
+3. Ensure the indicator remains within Pine limits.
+4. Keep pivots, required harness intelligence, and candidate bolt-on intelligence hidden unless explicitly promoted to the visible surface.
 
 Phase 5 must not begin until Phase 4 has produced at least one packet candidate with stable bucket outputs and documented sample counts.
 
-The visible table must map exactly to:
+The mirrored dashboard operator surface must map exactly to:
 
-- action state
+- decision state
 - TP1 probability
 - TP2 probability
 - reversal risk
@@ -2208,9 +2230,10 @@ Before AG is fully useful, the indicator needs a defined contract:
 
 - Inputs (all tunable parameters)
 - Internal computed states
-- Output states (LONG READY, SHORT READY, NO TRADE, CONFLICT)
+- Decision states (`TAKE_TRADE`, `WAIT`, `PASS`)
+- Realized outcome states kept separate from the decision codes
 - Alerts
-- Visualization / table fields
+- Visualization / dashboard fields
 
 Then AG can output things like:
 
@@ -2223,7 +2246,7 @@ Then AG can output things like:
 - news proxy hold = 8 bars
 - credit filter improves shorts only
 - re-entry mode adds noise, remove from v1
-- the table must show: action state, target eligibility, regime, conflict, stop family, TP1/TP2 path
+- the operator surface must show: decision state, target eligibility, regime context, stop family, TP1/TP2 path
 
 ---
 
