@@ -144,6 +144,7 @@ These semantics are now binding for the next schema rewrite:
   - reversal when the locked reversal rule is satisfied
 - unresolved rows at the edge of observation are censored rather than labeled as economic failures
 - `EXPIRED` and `NO_REACTION` are not canonical economic outcome labels for model truth
+- legacy `hit_*_first` / `prob_hit_*` names in `scripts/warbird/*` are deletion-only local-script debt and must not appear in shared TypeScript types, active APIs, Admin surfaces, packet payloads, or new schema work
 - signal lifecycle and UI state are separate from economic truth and may use different vocabulary
 
 Existing `GO` / `NO_GO` vocabulary is legacy and must not drive the next schema.
@@ -238,6 +239,11 @@ Each training row is keyed to one MES 15m bar-close setup event and must produce
 | `is_censored` | Binary | path unresolved at the edge of observation |
 | `mae_pts` | Continuous | max adverse excursion in points |
 | `mfe_pts` | Continuous | max favorable excursion in points |
+
+Legacy note:
+
+- the old local-only `hit_sl_first`, `hit_pt1_first`, and `hit_pt2_after_pt1` names are scheduled for deletion during the AG workbench rebuild
+- no fallback aliasing of those names is allowed in active shared types, API responses, packets, or dashboard/Admin contracts
 | `path_outcome` | Categorical | resolved economic outcome only; censoring is tracked separately |
 
 The stop family is bounded to:

@@ -89,6 +89,7 @@ Follow the active architecture plan only.
 - Production ingestion, crons, and chart-serving must not depend on local machines.
 - No new predicted-price or `warbird_forecasts_1h`-style surfaces. Live model state is TP1/TP2/reversal outcome state on the MES 15m contract.
 - `EXPIRED` / `NO_REACTION` are not canonical economic outcome labels for model truth. Unresolved rows at the edge of observation are censored rather than mislabeled as failures.
+- Legacy `hit_*_first` / `prob_hit_*` names are scheduled for deletion. They must not appear in shared TypeScript types, active API responses, Admin/dashboard surfaces, packet payloads, or new schema work. No fallback aliases are permitted on new surfaces.
 - The Admin page should render structured candidate rows, full training metrics, packet metrics, feature drivers, setting hypotheses, and AI-generated recommendations. Do not use Markdown report blobs as the dashboard contract.
 - Decision vocabulary is `TAKE_TRADE`, `WAIT`, and `PASS`. Those are policy decisions, not realized trade outcomes.
 - `news_signals` is a derived `BULLISH` / `BEARISH` event-response surface that must be paired with price action before it can influence live logic.

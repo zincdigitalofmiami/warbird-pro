@@ -76,10 +76,6 @@ export function composeWarbirdSignal(params: {
       tp2_before_sl_probability: risk?.tp2_probability ?? null,
       sl_before_tp1_probability: null,
       setup_score: setupScore,
-      // Deprecated legacy aliases. Remove after the remaining legacy readers/writers are retired.
-      prob_hit_sl_first: null,
-      prob_hit_pt1_first: risk?.tp1_probability ?? null,
-      prob_hit_pt2_after_pt1: risk?.tp2_probability ?? null,
       reversal_risk: risk?.reversal_risk ?? null,
       confidence: risk?.confidence_score ?? trigger?.trigger_quality_ratio ?? null,
     },

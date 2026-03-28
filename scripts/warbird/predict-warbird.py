@@ -4,6 +4,11 @@ Canonical Warbird inference pipeline.
 
 Loads the trained Warbird model bundle, scores the latest dataset row, and
 writes compatibility-safe output rows to warbird_forecasts_1h and warbird_risk.
+
+Legacy `hit_*_first` target names still exist inside this old local
+training/predictor workflow, but they are scheduled for deletion during the
+training workbench rebuild and must not appear in new API, packet, or dashboard
+contracts.
 """
 
 from __future__ import annotations
@@ -127,16 +132,18 @@ def main() -> None:
         regression_preds[target] = max(0.0, float(pred.iloc[0]))
 
     if mode == "primary":
-        prob_hit_sl_first = binary_probs["hit_sl_first"]
-        prob_hit_pt1_first = binary_probs["hit_pt1_first"]
-        prob_hit_pt2_after_pt1 = binary_probs["hit_pt2_after_pt1"]
+        sl_before_tp1_probability = binary_probs["hit_sl_first"]
+        tp1_before_sl_probability = binary_probs["hit_pt1_first"]
+        tp2_given_tp1_probability = binary_probs["hit_pt2_after_pt1"]
     else:
         prob_reached_tp1 = binary_probs["reached_tp1"]
         prob_reached_tp2 = binary_probs["reached_tp2"]
-        prob_hit_sl_first = binary_probs["setup_stopped"]
-        prob_hit_pt1_first = prob_reached_tp1 * (1.0 - prob_hit_sl_first)
-        prob_hit_pt2_after_pt1 = prob_reached_tp2 / max(prob_reached_tp1, 1e-6)
-        prob_hit_pt2_after_pt1 = max(0.0, min(1.0, prob_hit_pt2_after_pt1))
+        sl_before_tp1_probability = binary_probs["setup_stopped"]
+        tp1_before_sl_probability = prob_reached_tp1 * (1.0 - sl_before_tp1_probability)
+        tp2_given_tp1_probability = prob_reached_tp2 / max(prob_reached_tp1, 1e-6)
+        tp2_given_tp1_probability = max(0.0, min(1.0, tp2_given_tp1_probability))
+
+    tp2_before_sl_probability = tp1_before_sl_probability * tp2_given_tp1_probability
 
     direction_raw = str(latest_row.get("direction", "LONG")).upper()
     direction = "SHORT" if direction_raw == "SHORT" else "LONG"
@@ -161,9 +168,9 @@ def main() -> None:
             100.0,
             100.0
             * (
-                0.40 * prob_hit_pt1_first
-                + 0.35 * (prob_hit_pt1_first * prob_hit_pt2_after_pt1)
-                + 0.25 * (1.0 - prob_hit_sl_first)
+                0.40 * tp1_before_sl_probability
+                + 0.35 * tp2_before_sl_probability
+                + 0.25 * (1.0 - sl_before_tp1_probability)
             ),
         ),
     )
@@ -185,13 +192,9 @@ def main() -> None:
         "stop_loss": stop_loss,
         "tp1_price": tp1_price,
         "tp2_price": tp2_price,
-        "tp1_before_sl_probability": prob_hit_pt1_first,
-        "tp2_before_sl_probability": prob_hit_pt1_first * prob_hit_pt2_after_pt1,
-        "sl_before_tp1_probability": prob_hit_sl_first,
-        # Deprecated legacy aliases. Remove when the remaining legacy forecast consumers are retired.
-        "prob_hit_sl_first": prob_hit_sl_first,
-        "prob_hit_pt1_first": prob_hit_pt1_first,
-        "prob_hit_pt2_after_pt1": prob_hit_pt2_after_pt1,
+        "tp1_before_sl_probability": tp1_before_sl_probability,
+        "tp2_before_sl_probability": tp2_before_sl_probability,
+        "sl_before_tp1_probability": sl_before_tp1_probability,
         "expected_max_extension": expected_extension,
         "setup_score": setup_score,
         "predicted_mfe": pred_mfe,
@@ -209,9 +212,32 @@ def main() -> None:
         "target_mae_4h": target_mae_4h,
         "target_mfe_1h": pred_mfe,
         "target_mfe_4h": target_mfe_4h,
-        "prob_hit_sl_first": prob_hit_sl_first,
-        "prob_hit_pt1_first": prob_hit_pt1_first,
-        "prob_hit_pt2_after_pt1": prob_hit_pt2_after_pt1,
+        "sl_before_tp1_probability": sl_before_tp1_probability,
+        "tp1_before_sl_probability": tp1_before_sl_probability,
+        "tp2_before_sl_probability": tp2_before_sl_probability,
+        "expected_max_extension": expected_extension,
+        "setup_score": setup_score,
+        "confidence": confidence,
+        "mfe_mae_ratio_1h": pred_mfe / max(target_mae_1h, 0.25),
+        "current_price": current_price,
+        "model_version": "warbird-v1.1-trigger-prob",
+        "feature_snapshot": feature_snapshot,
+    }
+
+    # Legacy table scrub only. Deprecated hit-first columns are intentionally nulled.
+    forecast_write_row = {
+        "ts": ts_value,
+        "symbol_code": symbol_code,
+        "bias_1h": bias_1h,
+        "target_price_1h": target_price_1h,
+        "target_price_4h": target_price_4h,
+        "target_mae_1h": target_mae_1h,
+        "target_mae_4h": target_mae_4h,
+        "target_mfe_1h": pred_mfe,
+        "target_mfe_4h": target_mfe_4h,
+        "prob_hit_sl_first": None,
+        "prob_hit_pt1_first": None,
+        "prob_hit_pt2_after_pt1": None,
         "expected_max_extension": expected_extension,
         "setup_score": setup_score,
         "confidence": confidence,
@@ -261,7 +287,7 @@ def main() -> None:
 
         forecast_result = (
             supabase.table("warbird_forecasts_1h")
-            .upsert(forecast_row, on_conflict="symbol_code,ts")
+            .upsert(forecast_write_row, on_conflict="symbol_code,ts")
             .execute()
         )
         forecast_data = forecast_result.data if isinstance(forecast_result.data, list) else []

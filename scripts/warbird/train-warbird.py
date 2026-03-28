@@ -12,7 +12,12 @@ Primary target set (current):
   - max_favorable_excursion
   - max_adverse_excursion
 
-Legacy target set remains supported for backward compatibility.
+These primary binary target names are legacy local-workbench labels scheduled
+for deletion during the training rebuild. They must not leak into new shared
+TypeScript types, API responses, Admin surfaces, or packet contracts.
+
+Legacy target set remains supported for backward compatibility inside this
+local-only script family.
 """
 
 from __future__ import annotations

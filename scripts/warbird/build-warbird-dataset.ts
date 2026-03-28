@@ -215,6 +215,7 @@ function computeTargets(
   reached_tp1: number;
   reached_tp2: number;
   setup_stopped: number;
+  // Legacy local-workbench labels scheduled for deletion during the AG rebuild.
   hit_sl_first: number;
   hit_pt1_first: number;
   hit_pt2_after_pt1: number;

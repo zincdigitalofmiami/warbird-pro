@@ -171,13 +171,6 @@ export interface WarbirdSignal {
     tp2_before_sl_probability: number | null;
     sl_before_tp1_probability: number | null;
     setup_score: number | null;
-    // Deprecated legacy aliases kept only until the remaining legacy readers/writers are retired.
-    /** @deprecated TO BE REMOVED. Replaced by sl_before_tp1_probability. */
-    prob_hit_sl_first: number | null;
-    /** @deprecated TO BE REMOVED. Replaced by tp1_before_sl_probability. */
-    prob_hit_pt1_first: number | null;
-    /** @deprecated TO BE REMOVED. Replaced by tp2_before_sl_probability. */
-    prob_hit_pt2_after_pt1: number | null;
     reversal_risk: number | null;
     confidence: number | null;
   };
