@@ -188,7 +188,7 @@ def main() -> None:
         "tp1_before_sl_probability": prob_hit_pt1_first,
         "tp2_before_sl_probability": prob_hit_pt1_first * prob_hit_pt2_after_pt1,
         "sl_before_tp1_probability": prob_hit_sl_first,
-        "selector_score": setup_score,
+        # Deprecated legacy aliases. Remove when the remaining legacy forecast consumers are retired.
         "prob_hit_sl_first": prob_hit_sl_first,
         "prob_hit_pt1_first": prob_hit_pt1_first,
         "prob_hit_pt2_after_pt1": prob_hit_pt2_after_pt1,
