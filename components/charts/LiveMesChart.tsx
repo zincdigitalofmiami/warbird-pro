@@ -23,7 +23,7 @@ import {
   UTCTimestamp,
 } from "lightweight-charts";
 import { createClient } from "@/lib/supabase/client";
-import type { CandleData, FibResult } from "@/lib/types";
+import type { FibResult } from "@/lib/types";
 import { ForecastTargetsPrimitive } from "@/lib/charts/ForecastTargetsPrimitive";
 import { SetupMarkersPrimitive } from "@/lib/charts/SetupMarkersPrimitive";
 import { FibLinesPrimitive } from "@/lib/charts/FibLinesPrimitive";
@@ -35,7 +35,6 @@ import { REGIME_LABEL, REGIME_START_ISO } from "@/lib/warbird/constants";
 import { warbirdSignalToTargets } from "@/lib/warbird/projection";
 import type { WarbirdSignal } from "@/lib/warbird/types";
 import TV from "@/lib/colors";
-import { buildFibGeometry } from "@/scripts/warbird/fib-engine";
 
 type MesPoint = {
   time: number;
@@ -56,6 +55,9 @@ const DEFAULT_BAR_SPACING = 10;
 const MIN_BAR_SPACING = 8;
 const MAX_TOUCH_MARKERS = 1;
 const MAX_HOOK_MARKERS = 1;
+const FIB_TARGET_1_RATIO = 1.236;
+const FIB_TARGET_2_RATIO = 1.618;
+const FIB_NUMERIC_EPSILON = 1e-9;
 // Keep bar rendering aligned with the V15 daily chart styling.
 const THEME = {
   upColor: "#26C6DA",
@@ -150,17 +152,6 @@ function toChartPoint(point: MesPoint) {
   };
 }
 
-function toCandle(point: MesPoint): CandleData {
-  return {
-    time: point.time,
-    open: point.open,
-    high: point.high,
-    low: point.low,
-    close: point.close,
-    volume: point.volume,
-  };
-}
-
 function setupSortTime(setup: SetupCandidate): number {
   return setup.goTime ?? setup.hookTime ?? setup.touchTime ?? setup.createdAt;
 }
@@ -232,6 +223,69 @@ function selectSetupsForChart(
   return [...selectedGo, ...selectedHooks, ...selectedTouches];
 }
 
+type FibSeed = {
+  direction: "LONG" | "SHORT" | "BULLISH" | "BEARISH";
+  fibLevel: number | null | undefined;
+  fibRatio: number | null | undefined;
+  tp1: number | null | undefined;
+  tp2: number | null | undefined;
+};
+
+function asFiniteNumber(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function deriveFibRange(seed: FibSeed, fibLevel: number, fibRatio: number): number | null {
+  const tp1 = asFiniteNumber(seed.tp1);
+  const tp2 = asFiniteNumber(seed.tp2);
+
+  if (tp1 != null && Math.abs(FIB_TARGET_1_RATIO - fibRatio) > FIB_NUMERIC_EPSILON) {
+    const range = Math.abs((tp1 - fibLevel) / (FIB_TARGET_1_RATIO - fibRatio));
+    if (range > FIB_NUMERIC_EPSILON) return range;
+  }
+
+  if (tp2 != null && Math.abs(FIB_TARGET_2_RATIO - fibRatio) > FIB_NUMERIC_EPSILON) {
+    const range = Math.abs((tp2 - fibLevel) / (FIB_TARGET_2_RATIO - fibRatio));
+    if (range > FIB_NUMERIC_EPSILON) return range;
+  }
+
+  return null;
+}
+
+function buildFibResultFromSeed(seed: FibSeed | null | undefined): FibResult | null {
+  if (!seed) return null;
+
+  const fibLevel = asFiniteNumber(seed.fibLevel);
+  const fibRatio = asFiniteNumber(seed.fibRatio);
+  if (fibLevel == null || fibRatio == null) return null;
+
+  const range = deriveFibRange(seed, fibLevel, fibRatio);
+  if (range == null) return null;
+
+  const isBullish = seed.direction === "LONG" || seed.direction === "BULLISH";
+  const direction = isBullish ? 1 : -1;
+  const base = fibLevel - direction * range * fibRatio;
+  const anchorLow = isBullish ? base : base - range;
+  const anchorHigh = isBullish ? base + range : base;
+
+  if (
+    !Number.isFinite(anchorLow) ||
+    !Number.isFinite(anchorHigh) ||
+    anchorHigh - anchorLow <= FIB_NUMERIC_EPSILON
+  ) {
+    return null;
+  }
+
+  return {
+    levels: [],
+    anchorHigh,
+    anchorLow,
+    isBullish,
+    anchorHighBarIndex: 0,
+    anchorLowBarIndex: 0,
+  };
+}
+
 export interface LiveMesChartHandle {
   captureScreenshot: () => string | null;
 }
@@ -253,14 +307,12 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
     const setupPrimitiveRef = useRef<SetupMarkersPrimitive | null>(null);
     const fibPrimitiveRef = useRef<FibLinesPrimitive | null>(null);
     const regimePrimitiveRef = useRef<RegimeAnchorPrimitive | null>(null);
-    // Structural break locking — persist fib anchor across ticks
-    const lockedFibRef = useRef<FibResult | null>(null);
     const initialViewportAppliedRef = useRef(false);
     const displayEventPhase = getEventDisplayPhase(eventPhase);
 
     // Gap-free points (sequential times for chart rendering)
     const pointsRef = useRef<MesPoint[]>([]);
-    // Original real-time points (for fib calc, session stats, setup time lookup)
+    // Original real-time points (session stats and setup time lookup)
     const realPointsRef = useRef<MesPoint[]>([]);
     // Bidirectional time mapping: real ↔ gap-free
     const timeMapRef = useRef<TimeMap>({
@@ -865,70 +917,43 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       });
     }, [chartSetups, lastPrice]);
 
-    // --- Compute and wire fibonacci levels from candle data (with structural break locking) ---
+    // --- Render fib levels from backend signal/setup contract (no local fib engine) ---
+    // No fallback: if signal.setup fib fields are missing, render nothing.
     useEffect(() => {
       if (!fibPrimitiveRef.current) return;
 
-      const realPoints = realPointsRef.current;
-      if (realPoints.length < 55) {
+      const seed: FibSeed | null = signal?.setup
+        ? {
+            direction: signal.setup.direction,
+            fibLevel: signal.setup.fibLevel,
+            fibRatio: signal.setup.fibRatio,
+            tp1: signal.setup.tp1,
+            tp2: signal.setup.tp2,
+          }
+        : null;
+
+      const fibResult = buildFibResultFromSeed(seed);
+      if (!fibResult) {
         fibPrimitiveRef.current.setFibResult(null);
-        lockedFibRef.current = null;
         return;
       }
 
-      const currentPrice = realPoints[realPoints.length - 1].close;
-      const locked = lockedFibRef.current;
-      const bias15m = signal?.directional.bias_15m ?? "NEUTRAL";
-      const lockedDirectionConflictsBias =
-        bias15m === "BULL"
-          ? locked?.isBullish === false
-          : bias15m === "BEAR"
-            ? locked?.isBullish === true
-            : false;
+      const anchorRealTime =
+        signal?.generatedAt != null
+          ? Math.floor(new Date(signal.generatedAt).getTime() / 1000)
+          : null;
 
-      // Structural break locking: if current price is within the locked anchor
-      // range, keep the existing fib (don't recompute to a narrower range)
-      if (
-        locked &&
-        !lockedDirectionConflictsBias &&
-        currentPrice <= locked.anchorHigh &&
-        currentPrice >= locked.anchorLow
-      ) {
-        const anchorIdx = Math.min(locked.anchorHighBarIndex, locked.anchorLowBarIndex);
-        const anchorGfTime = pointsRef.current.length > anchorIdx
-          ? pointsRef.current[anchorIdx].time
-          : undefined;
-        fibPrimitiveRef.current.setFibResult(locked, anchorGfTime);
-        return;
-      }
-
-      // Structural break OR first computation — recompute
-      const candles = realPoints.map(toCandle);
-      const geometry = buildFibGeometry(candles, bias15m);
-      if (!geometry) {
-        fibPrimitiveRef.current.setFibResult(null);
-        lockedFibRef.current = null;
-        return;
-      }
-      const fibResult: FibResult = {
-        ...geometry.fibResult,
-        isBullish: geometry.direction === "LONG",
-      };
-
-      // Lock the new anchor
-      lockedFibRef.current = fibResult;
-
-      const anchorIdx = Math.min(
-        fibResult.anchorHighBarIndex,
-        fibResult.anchorLowBarIndex,
-      );
       const anchorGfTime =
-        pointsRef.current.length > anchorIdx
-          ? pointsRef.current[anchorIdx].time
+        anchorRealTime != null
+          ? timeMapRef.current.realToGf.get(anchorRealTime) ??
+            timeMapRef.current.realToGf.get(
+              Math.round(anchorRealTime / BAR_INTERVAL_SEC) * BAR_INTERVAL_SEC,
+            ) ??
+            anchorRealTime
           : undefined;
 
       fibPrimitiveRef.current.setFibResult(fibResult, anchorGfTime);
-    }, [lastPrice, signal?.directional.bias_15m]);
+    }, [lastPrice, signal]);
 
     useEffect(() => {
       if (!regimePrimitiveRef.current) return;
