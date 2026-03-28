@@ -12,7 +12,7 @@ Read and follow AGENTS.md at the repository root.
 ### What Works
 - MES chart pipeline end-to-end (Databento → cron → Supabase → Realtime → chart)
 - Lightweight MES minute path: Edge Function `mes-1m` pulls incremental `ohlcv-1m` and rolls up only touched 15m buckets
-- All cron/scheduled work runs via Supabase pg_cron → Edge Functions (zero Vercel crons)
+- All active recurring ingestion schedules run via Supabase pg_cron → Edge Functions. The remaining App Router routes `detect-setups` and `score-trades` are unscheduled legacy bridge code, not active pg_cron-owned production writers.
 - Supabase-owned minute schedule support for MES via `supabase/migrations/20260326000015_mes_1m_supabase_cron.sql` (pg_cron + pg_net + vault secrets)
 - Live core retention floor is now locked to `2024-01-01T00:00:00Z` forward only. `supabase/migrations/20260327000024_trim_pre_2024_core_history.sql` was applied live to surgically remove older rows from affected econ/geopolitical/legacy econ-news tables; MES and cross-asset intraday tables were already clean.
 - Finnhub Edge Function (`supabase/functions/finnhub-news/`) produces scored, body-extracted news articles into `econ_news_finnhub_articles` + `econ_news_article_assessments`. pg_cron schedule: every 15 min during market hours. Pending: Kirk must set `FINNHUB_API_KEY` as Edge Function secret to unblock.
@@ -57,10 +57,13 @@ Read and follow AGENTS.md at the repository root.
 - DB-side aggregation (all TypeScript, zero Postgres functions)
 - Type generation (manual types, no supabase gen types)
 - No active `pinescript-server`, TradingView chart MCP, or TradingView CLI is configured in the current Codex profile, so live-chart read / install / edit / deep-test flows described in older docs are not available from this terminal session
-- Cloud publish-up tables for packet / SHAP / report lifecycle (not built)
+- Cloud publish-up tables for packet lineage, training metrics, and Admin explainability (not built): `warbird_training_runs`, `warbird_training_run_metrics`, `warbird_packets`, `warbird_packet_activations`, `warbird_packet_metrics`, `warbird_packet_feature_importance`, `warbird_packet_setting_hypotheses`, `warbird_packet_recommendations`
+- The canonical normalized live schema is now locked in docs, but the new base tables are not built yet: `warbird_fib_engine_snapshots_15m`, `warbird_fib_candidates_15m`, `warbird_candidate_outcomes_15m`, `warbird_signals_15m`, `warbird_signal_events`, and `warbird_packets`.
+- The current 2026-03-30 draft migrations and local warehouse draft are now reconciled against the 2026-03-28 hierarchy/outcome-contract lock and validate in a disposable Postgres 17 instance, but they remain unapplied draft assets until remote ledger drift is resolved and the writer/API cutover is approved: `20260330000037_canonical_warbird_tables.sql`, `20260330000038_canonical_warbird_compat_views.sql`, and `scripts/ag/local_warehouse_schema.sql`.
+- `detect-setups` and `score-trades` are Vercel routes with NO pg_cron schedule and NO Edge Function port. The legacy warbird_* decision tables they write to are empty in production. These must be ported to Edge Functions writing to the canonical tables before the setup engine is operational.
 - `indicators/v6-warbird-complete.pine` does not currently compile in TradingView: `isValid` and `atr` are undeclared in the active file, and the downstream `log.info` call fails type resolution. Local repo guards did not catch this.
 - `components/charts/LiveMesChart.tsx` still recomputes fib geometry through the legacy `scripts/warbird/fib-engine.ts` helper, so the dashboard is not yet a render-only mirror of the canonical engine state.
-- `/admin` still presents stale `measured_moves` while the live `warbird_triggers_15m`, `warbird_conviction`, `warbird_setups`, `warbird_setup_events`, and `warbird_risk` tables are empty.
+- `/admin` still presents stale `measured_moves` while the live legacy `warbird_triggers_15m`, `warbird_conviction`, `warbird_setups`, `warbird_setup_events`, and `warbird_risk` tables are empty. These are legacy/operational tables, not the canonical AG training surface.
 - `scripts/warbird/fib-engine.ts` still reflects a legacy 1H helper path and is not the target point-in-time fib snapshot surface for AG training
 - Legacy `warbird_forecasts_1h` table still exists in DB (forecast route deleted but table remains)
 - Remote Supabase migration ledger only records through `20260326000017` — live DB has later schema changes applied directly. `supabase db push` is unsafe until drift is reconciled.
@@ -75,6 +78,8 @@ Follow the active architecture plan only.
 - Any `1H` wording outside archived docs is legacy and must not drive new work.
 - Pine is the canonical signal surface; the Next.js dashboard is the mirrored operator surface on the same contract, not a separate decision engine.
 - The adaptive fib engine snapshot is the canonical base object. It is not a simple zigzag-only anchor path.
+- The architecture hierarchy is now locked: objective -> candidate/outcome contract -> canonical schema -> research feature layer -> model stack -> deployment packet.
+- Warbird is split into `Generator` (Pine + exact-copy harnesses), `Selector` (offline models scoring frozen candidates), and `Diagnostician` (research explaining wins, losses, and improvement paths).
 - Cloud Supabase is the production system of record; the local warehouse is explicit-snapshot training/research only.
 - AG/offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close; repaint-prone live chart reads are not acceptable dataset truth.
 - Retained core historical data starts at `2024-01-01T00:00:00Z`. Pre-2024 core rows are out of scope for live support data and offline training.
@@ -82,6 +87,8 @@ Follow the active architecture plan only.
 - Local machines are for training/calculations/research only.
 - Production ingestion, crons, and chart-serving must not depend on local machines.
 - No new predicted-price or `warbird_forecasts_1h`-style surfaces. Live model state is TP1/TP2/reversal outcome state on the MES 15m contract.
+- `EXPIRED` / `NO_REACTION` are not canonical economic outcome labels for model truth. Unresolved rows at the edge of observation are censored rather than mislabeled as failures.
+- The Admin page should render structured candidate rows, full training metrics, packet metrics, feature drivers, setting hypotheses, and AI-generated recommendations. Do not use Markdown report blobs as the dashboard contract.
 - Decision vocabulary is `TAKE_TRADE`, `WAIT`, and `PASS`. Those are policy decisions, not realized trade outcomes.
 - `news_signals` is a derived `BULLISH` / `BEARISH` event-response surface that must be paired with price action before it can influence live logic.
 - Pivot distance/state is a critical trigger and reversal input, but not the sole decision maker. Intermarket trigger quality must respect each symbol's correlative path with aligned 15m / 1H / 4H state.
@@ -90,6 +97,7 @@ Follow the active architecture plan only.
 - Minimal Pine export surface for training capture: fib lines/state, pivot state/distance, and admitted indicator/harness outputs from the canonical indicator surface.
 - TradingView enforces a hard maximum of 64 plot counts per script. Hidden `display.none` plots still count, so local parity or schema completeness never overrides the live plot budget.
 - TradingView keeps execution-facing visuals, alerts, and the exhaustion precursor diamond. Dense operator tables, mini charts, and decision diagnostics belong on the dashboard, which must render the same stored engine state instead of recomputing fibs.
+- The current blocking sequence is: canonical writer cutover -> dashboard/admin/API reader cutover -> Pine recovery -> training workbench buildout -> legacy retirement.
 - BigBeluga, `Market Structure Break & OB Probability Toolkit`, and `Luminance Breakout Engine` are required exact-copy harnesses. No hand-rolled substitutes.
 
 ## Documentation Discipline

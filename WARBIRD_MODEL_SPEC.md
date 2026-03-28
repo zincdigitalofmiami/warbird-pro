@@ -1,6 +1,6 @@
 # WARBIRD MODEL SPEC — v3
 
-**Date:** 2026-03-26
+**Date:** 2026-03-28
 **Status:** Reference-Only, aligned to the active plan
 **Governing source:** `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
 
@@ -31,6 +31,7 @@ This document is a subordinate reference for the model contract. It must not ove
 19. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
 20. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
 21. Cloud core support data remains `2024-01-01T00:00:00Z` forward. By explicit user direction, local offline training research may use up to five years of comparable electronic futures data, but that does not reopen pre-2024 cloud core retention.
+22. The operator-approved fib visual spec is a contract. Colors, line widths, line styles, and visible level-label presentation must be reproduced exactly across Pine and dashboard renderers unless explicitly reapproved.
 
 ---
 
@@ -42,14 +43,29 @@ It does **not** forecast a future MES price level or produce a standalone `1H` p
 
 For each candidate setup, the model estimates:
 
-- `hit_pt1_first`
-- `hit_pt2_after_pt1`
-- `hit_sl_first`
+- `tp1_before_sl`
+- `tp2_before_sl`
+- `sl_before_tp1`
 - expected `mae_pts`
 - expected `mfe_pts`
 - reversal risk
 
 The model also selects from a **bounded stop family**. It does not emit an unconstrained stop price.
+
+The model does **not** define the schema. The outcome contract defines the schema; the model stack is chosen to answer that contract.
+
+### 2.1 System Roles
+
+Warbird is split into three separate engines:
+
+1. **Generator**
+   - Pine and admitted exact-copy harnesses define the candidate entry object
+2. **Selector**
+   - offline models score whether a frozen candidate is worth taking
+3. **Diagnostician**
+   - local research explains why trades won/lost and what should change in features, settings, or entry definition
+
+The same model must not be treated as all three at once.
 
 ---
 
@@ -112,6 +128,102 @@ Each candidate must later receive:
 
 The model learns from the candidate/outcome truth. The policy layer maps those model outputs into the decision code.
 
+### 3.1 Locked Truth Semantics
+
+These semantics are now binding for the next schema rewrite:
+
+- `warbird_decision_code`
+  - `TAKE_TRADE`
+  - `WAIT`
+  - `PASS`
+- realized economic truth must distinguish:
+  - TP2 reached before stop
+  - TP1 reached before stop while TP2 is not yet realized
+  - stop before TP1
+  - stop after TP1 but before TP2
+  - reversal when the locked reversal rule is satisfied
+- unresolved rows at the edge of observation are censored rather than labeled as economic failures
+- `EXPIRED` and `NO_REACTION` are not canonical economic outcome labels for model truth
+- signal lifecycle and UI state are separate from economic truth and may use different vocabulary
+
+Existing `GO` / `NO_GO` vocabulary is legacy and must not drive the next schema.
+
+### 3.2 Locked Canonical Table Families
+
+The canonical operational base remains:
+
+1. `warbird_fib_engine_snapshots_15m`
+   - one row per `symbol_code + timeframe + bar_close_ts + fib_engine_version`
+   - stores the frozen adaptive fib engine state that existed at the MES 15m bar close
+2. `warbird_fib_candidates_15m`
+   - one row per tradable candidate derived from a snapshot
+   - carries candidate geometry, deterministic Pine score, packet-linked model outputs, and the policy decision code
+3. `warbird_candidate_outcomes_15m`
+   - one row per candidate, regardless of whether the candidate was published as a signal
+   - stores realized path truth, event timestamps, excursion measurements, and censoring metadata
+4. `warbird_signals_15m`
+   - one row per published signal where `decision_code = TAKE_TRADE`
+5. `warbird_signal_events`
+   - lifecycle events for published signals only
+6. `warbird_packets`
+   - AG scoring/model packet registry
+7. `warbird_packet_activations`
+   - immutable activation and rollback log for packet promotion
+8. `warbird_training_runs`
+   - published run registry for packet lineage and Admin-page metrics
+9. `warbird_training_run_metrics`
+   - full training/evaluation metric rows for Admin and model review
+10. `warbird_packet_metrics`
+   - structured packet KPIs rendered on the Admin page
+11. `warbird_packet_feature_importance`
+   - published top drivers for the active packet
+12. `warbird_packet_setting_hypotheses`
+   - structured indicator / entry-definition suggestions for review
+13. `warbird_packet_recommendations`
+   - structured AI-generated Admin guidance, rendered in UI rather than stored as Markdown
+
+Draft status:
+
+1. `supabase/migrations/20260330000037_canonical_warbird_tables.sql`
+2. `supabase/migrations/20260330000038_canonical_warbird_compat_views.sql`
+
+These drafts are now reconciled against the locked 2026-03-28 truth semantics and validated in a disposable Postgres 17 instance, but remain draft/unapplied assets until remote ledger drift is resolved and the canonical writer/API cutover is approved.
+
+Raw research explainability remains local-only:
+
+- `warbird_shap_results`
+- `warbird_shap_indicator_settings`
+
+The dashboard/Admin page may read only the distilled cloud publish-up surfaces above, not raw SHAP matrices or Markdown report blobs.
+
+### 3.3 Non-Canonical Surfaces
+
+The following tables exist and may receive writes from legacy bridge code, but they are **not** the canonical AG training truth and must not drive new architecture:
+
+- `warbird_triggers_15m`
+- `warbird_conviction`
+- `warbird_risk`
+- `warbird_setups`
+- `warbird_setup_events`
+- `measured_moves`
+- `warbird_daily_bias`
+- `warbird_structure_4h`
+- `warbird_forecasts_1h`
+
+These will be retired once the canonical tables above have active writers and all dashboard/API consumers are migrated.
+
+Dashboard/Admin compatibility surfaces such as `warbird_active_signals_v`, `warbird_admin_candidate_rows_v`, `warbird_active_training_run_metrics_v`, `warbird_active_packet_metrics_v`, `warbird_active_packet_feature_importance_v`, `warbird_active_packet_setting_hypotheses_v`, and `warbird_active_packet_recommendations_v` should be derived views over these canonical and publish-up tables, not independent writer-owned base tables.
+
+The following local-only families are research surfaces, not canonical cloud schema:
+
+- `warbird_snapshot_pine_features`
+- `warbird_candidate_macro_context`
+- `warbird_candidate_microstructure`
+- stop-out attribution tables
+- feature ablation tables
+- entry-definition experiment tables
+- SHAP and report artifacts
+
 ---
 
 ## 4. Target Labels
@@ -120,12 +232,13 @@ Each training row is keyed to one MES 15m bar-close setup event and must produce
 
 | Label | Type | Meaning |
 |------|------|---------|
-| `hit_pt1_first` | Binary | TP1 reached before stop |
-| `hit_pt2_after_pt1` | Binary | TP2 reached after TP1 |
-| `hit_sl_first` | Binary | stop hit before TP1 |
+| `tp1_before_sl` | Binary | TP1 reached before stop |
+| `tp2_before_sl` | Binary | TP2 reached before stop |
+| `sl_before_tp1` | Binary | stop hit before TP1 |
+| `is_censored` | Binary | path unresolved at the edge of observation |
 | `mae_pts` | Continuous | max adverse excursion in points |
 | `mfe_pts` | Continuous | max favorable excursion in points |
-| `outcome` | Categorical | `TP1_ONLY`, `TP2_HIT`, `STOPPED`, `REVERSAL`, `NO_TRADE` |
+| `path_outcome` | Categorical | resolved economic outcome only; censoring is tracked separately |
 
 The stop family is bounded to:
 
@@ -134,7 +247,9 @@ The stop family is bounded to:
 3. `structure`
 4. `fixed_atr`
 
-If the expected stop heat required to survive the setup is too wide relative to the expected TP1 / TP2 edge, the correct output is `NO_TRADE`.
+If the expected stop heat required to survive the setup is too wide relative to the expected TP1 / TP2 edge, the correct decision is `PASS`.
+
+The first selector baseline may exclude censored rows if needed for a clean resolved-only classification pass. Later survival / competing-risk work may use censored rows explicitly.
 
 ---
 
@@ -164,6 +279,21 @@ These are local-research features used by AG for discovery:
 - any other macro or event context without an exact Pine analogue
 
 Tier 2 can influence the research conclusion, but it cannot enter the live Pine path unless Phase 4 proves an exact Pine analogue.
+
+### Model Family Responsibilities
+
+- **AutoGluon tabular**
+  - first selector layer for resolved candidate quality
+- **SHAP**
+  - diagnostics and promotion gate for feature families and indicator-setting changes
+- **Quantile / pinball models**
+  - excursion and uncertainty-band modeling such as `mae_pts` and `mfe_pts`
+- **Monte Carlo**
+  - downstream policy and threshold simulation after calibrated probabilities exist
+- **Volatility sidecars such as GARCH**
+  - optional feature families that must prove additive value
+- **Sequence / PyTorch models**
+  - later-phase options only if tabular baselines and path diagnostics show clear unmet value
 
 ---
 

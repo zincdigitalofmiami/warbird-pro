@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-20
 **Status:** Active Plan — Single Source of Truth
-**Scope:** One indicator only: `AutoFib Structure + Intermarket Alerts`
+**Scope:** MES 15m fib-outcome contract: indicator + dashboard operator surface + AG training pipeline
 
 **THIS IS THE ONLY PLAN TO UPDATE.**
 
@@ -14,13 +14,23 @@ Historical note: any remaining references below to the paired strategy, parity-o
 
 Historical retention note: the canonical core data window is `2024-01-01T00:00:00Z` forward only. Pre-2024 core rows are out of scope for live support data and offline training.
 
-Binding note: the 2026-03-27 update-log entry supersedes older references below to right-side TradingView tables, `LONG READY` / `SHORT READY` action labels, and dashboard-local fib computation.
+Binding note: the 2026-03-28 update-log entries supersede older references below to right-side TradingView tables, `LONG READY` / `SHORT READY` action labels, dashboard-local fib computation, Markdown report blobs, and any schema language that still treats `EXPIRED` / `NO_REACTION` as canonical economic model truth.
+
+### Next Blocking Order (2026-03-28 post-schema checkpoint)
+
+1. **Canonical writer checkpoint** — port or replace the legacy `detect-setups` / `score-trades` Vercel routes as Supabase Edge Functions that write to the reconciled canonical tables. Fix continuity handling before calling the setup engine live.
+2. **Dashboard/admin/API reader cutover** — cut `/admin`, `/api/admin/status`, and dashboard consumers off legacy tables and onto the canonical snapshot/candidate surfaces plus the new Admin packet views.
+3. **Pine indicator recovery** — fix `isValid` / `atr` undeclared variables, resolve the `<=64` plot-count budget, and restore TradingView loadability.
+4. **Local warehouse / selector buildout** — stand up the AG workbench (`scripts/ag/*`), local PostgreSQL snapshot mirror, diagnostic tables, and packet publish-up lifecycle on the locked hierarchy.
+5. **Legacy table retirement** — drop `warbird_triggers_15m`, `warbird_conviction`, `warbird_risk`, `warbird_setups`, `warbird_setup_events`, `measured_moves`, `warbird_forecasts_1h` only after all readers/writers are migrated.
 
 ---
 
 ## Update Log
 
-- 2026-03-27: Locked the architecture reset after a live repo audit. Current repo truth is `NO-GO`: `indicators/v6-warbird-complete.pine` is not TradingView-loadable (`isValid` / `atr` undeclared in the active file and downstream `log.info` type failures), the dashboard still recomputes fib geometry through the legacy `scripts/warbird/fib-engine.ts` helper instead of rendering a shared packet, `/admin` still leans on stale `measured_moves`, and the live `warbird_*` decision/outcome tables are empty. Binding delta: the adaptive fib engine snapshot is now the canonical base object; the canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`; decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, `PASS`; TradingView keeps execution-facing visuals/alerts plus the exhaustion precursor diamond while operator tables move to the dashboard; five years of comparable electronic futures data is approved for offline training research only, while cloud core support tables remain `2024-01-01T00:00:00Z` forward. Next blocker: lock the exact snapshot/candidate/outcome schema and cut the dashboard over to render-only consumption of the canonical fib engine state.
+- 2026-03-28: Completed the schema/admin contract reconciliation checkpoint. The draft schema package now matches the locked hierarchy, censoring semantics, and cloud-vs-local boundary, and was syntax-validated in a disposable Postgres 17 instance. Cloud publish-up is now structured around `warbird_training_runs`, `warbird_training_run_metrics`, `warbird_packets`, `warbird_packet_activations`, `warbird_packet_metrics`, `warbird_packet_feature_importance`, `warbird_packet_setting_hypotheses`, and `warbird_packet_recommendations`; raw SHAP remains local-only in `warbird_shap_results` and `warbird_shap_indicator_settings`. Admin requirements are now locked to two explicit surfaces: screenshot-style candidate/signal rows via `warbird_admin_candidate_rows_v` and full model/training metrics via `warbird_active_training_run_metrics_v`, alongside the packet KPI/explanation/recommendation views. Next blocker: implement the canonical writer checkpoint, then cut `/api/admin/status` and dashboard readers off legacy `warbird_setups` / `measured_moves`.
+- 2026-03-28: Locked the hierarchy-first architecture checkpoint. Binding direction: the outcome contract now drives the platform, not the current model family; Warbird is split into `Generator` (Pine + admitted harnesses), `Selector` (offline model stack scoring frozen MES 15m fib candidates), and `Diagnostician` (research stack explaining wins, losses, and improvement paths). Canonical cloud tables exist to preserve point-in-time setup truth, realized path truth, and published decision/signal lineage only; explanatory features, SHAP outputs, ablation results, stop-out attribution, and entry-definition experiments belong in local research tables. `EXPIRED` / `NO_REACTION` are no longer treated as canonical economic model outcomes, and unresolved rows at the edge of observation are treated as censored rather than failed. The current 2026-03-30 schema drafts (`037`, `038`, and the local warehouse draft) are retained as design inputs only and are not deployable truth until rewritten against this lock. Next blocker: rewrite the schema drafts to match the locked hierarchy and truth semantics before any remote apply or reader/writer cutover.
+- 2026-03-27: Locked the architecture reset after a live repo audit. Current repo truth is `NO-GO`: `indicators/v6-warbird-complete.pine` is not TradingView-loadable (`isValid` / `atr` undeclared in the active file and downstream `log.info` type failures), the dashboard still recomputes fib geometry through the legacy `scripts/warbird/fib-engine.ts` helper instead of rendering a shared packet, `/admin` still leans on stale `measured_moves`, and the live `warbird_*` decision/outcome tables are empty. Binding delta: the adaptive fib engine snapshot is now the canonical base object; the canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`; decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, `PASS`; TradingView keeps execution-facing visuals/alerts plus the exhaustion precursor diamond while operator tables move to the dashboard; five years of comparable electronic futures data is approved for offline training research only, while cloud core support tables remain `2024-01-01T00:00:00Z` forward. The exact snapshot/candidate/outcome schema is now locked in this plan and `WARBIRD_MODEL_SPEC.md`. Next blocker: implement the migration, cut dashboard consumers off local fib computation, and replace the legacy `warbird_triggers_15m` / `warbird_conviction` / `warbird_risk` / `warbird_setups` path with the canonical normalized tables.
 - 2026-03-27: Applied live retention-floor trim migration `supabase/migrations/20260327000024_trim_pre_2024_core_history.sql` to keep core historical data at `2024-01-01T00:00:00Z` forward only. Validation confirmed zero pre-2024 rows remain in `econ_rates_1d`, `econ_yields_1d`, `econ_fx_1d`, `econ_vol_1d`, `econ_inflation_1d`, `econ_labor_1d`, `econ_activity_1d`, `econ_money_1d`, `econ_commodities_1d`, `econ_indexes_1d`, `geopolitical_risk_1d`, and legacy `econ_news_1d`; MES and cross-asset intraday tables were already clean. Next blocker: finish the remaining Jan 1 2024 forward-only core backfill gaps, especially `cross_asset_1d` and stale `econ_inflation_1d` freshness.
 - 2026-03-26: Locked the Supabase Edge cron cutover guardrails. Runtime truth for recurring ingestion is `pg_cron -> pg_net -> Supabase Edge Functions -> Supabase DB`; Vercel/`npm run build` remains only the frontend app deploy gate and is not evidence that Edge Functions package, deploy, or run. Required cutover order is now: fix Supabase-function-only packaging/runtime issues, deploy each function with the Supabase toolchain, invoke each function directly with `x-cron-secret`, then apply the pg_cron cutover migration. Hard stop: do not call the cutover complete while any live pg_cron helper still targets a Vercel URL or while Edge runtime correctness is inferred from the Vercel build instead of direct function deploy/invoke proof.
 - 2026-03-26: Restored `app/api/cron/google-news/route.ts` and `scripts/poll-google-news.py` as dormant research assets for later evaluation. They are intentionally unscheduled and not part of the active ingestion contract.
@@ -145,7 +155,7 @@ These are the required outputs. Each must map to a defined calculation. Each mus
 | **Target eligibility** | 20pt+ pass/fail |
 | **Stop level** | From a bounded, deterministic stop family — not a per-trade model output |
 | **TP1 / TP2 levels** | The 1.236 and 1.618 fib extension prices |
-| **Fib / pivot / zone lines** | The operator-visible execution geometry from the canonical fib engine |
+| **Fib / pivot / zone lines** | The operator-visible execution geometry from the canonical fib engine, rendered with the operator-approved colors, line widths, line styles, and level labeling contract |
 | **Exhaustion diamond** | A precursor visual that can warn ahead of a later trigger when exhaustion context is active at a fib or pivot interaction |
 | **Re-entry signal** | When a pullback after TP1 is a continuation opportunity |
 
@@ -173,8 +183,47 @@ These are the required outputs. Each must map to a defined calculation. Each mus
 5. AG is offline only — never in the live signal path.
 6. The dashboard may be visually richer than Pine, but it must render the same canonical fib engine state rather than compute a second fib engine locally.
 7. Visual chart validation and local point-in-time dataset checks must agree closely enough before a fib or trigger mechanic is trusted.
-8. Deep Backtesting and paired-strategy parity are optional research tools only; they are not active blockers for the indicator path unless explicitly reopened.
-9. **NEVER hand-roll code when a working implementation exists.** Copy the exact working code. Adapt the interface, not the internals. If you can't explain why your version differs line-by-line, you don't understand it well enough to rewrite it. Hand-rolled library integrations produce broken signals that poison AG training data.
+8. The operator-approved fib presentation is a visual contract. Colors, line thicknesses, line styles, and level-label presentation may not change without explicit approval.
+9. Deep Backtesting and paired-strategy parity are optional research tools only; they are not active blockers for the indicator path unless explicitly reopened.
+10. **NEVER hand-roll code when a working implementation exists.** Copy the exact working code. Adapt the interface, not the internals. If you can't explain why your version differs line-by-line, you don't understand it well enough to rewrite it. Hand-rolled library integrations produce broken signals that poison AG training data.
+
+---
+
+## Hierarchy Lock (2026-03-28)
+
+This hierarchy is now binding for the active path:
+
+1. **Trading objective**
+   - improve MES 15m fib-based entries so more valid setups reach TP1 / TP2 and fewer low-quality entries stop out
+2. **Canonical trade object**
+   - one frozen MES 15m fib candidate at bar close
+3. **Truth contract**
+   - the primary economic questions are extension attainment versus stop failure on that frozen candidate
+   - unresolved rows at the edge of observation are censored, not failed
+4. **Canonical schema**
+   - stores point-in-time setup truth, realized path truth, and published signal lineage
+5. **Feature / research layer**
+   - stores explanatory and experimental context that may change over time
+6. **Model stack**
+   - selected to answer the truth contract, not to redefine it
+
+Warbird is split into three engines:
+
+- **Generator**
+  - Pine and admitted exact-copy harnesses define the candidate entry object
+- **Selector**
+  - offline models score whether a candidate is worth taking
+- **Diagnostician**
+  - local research explains why trades won/lost and what should change in features, settings, or entry definition
+
+Boundary rules:
+
+1. Canonical cloud tables must not become feature soup.
+2. SHAP outputs, ablation results, stop-out attribution, and parameter-search artifacts are research-only until explicitly promoted.
+3. AutoGluon is the first selector layer. It is not the owner of the canonical schema.
+4. Quantile/pinball models are for excursions and uncertainty bands, not primary extension-hit truth.
+5. Monte Carlo is downstream policy simulation, not label definition.
+6. Volatility sidecars such as GARCH are optional feature families that must earn inclusion through lift and stability evidence.
 
 ---
 
@@ -321,25 +370,23 @@ AG's job: evaluate which stop family member works best for which fib level / reg
 
 ---
 
-## Scope Freeze
+## Scope (updated 2026-03-27)
 
-This plan is only for the indicator below:
+This plan covers the full MES 15m fib-outcome contract:
 
-- `AutoFib Structure + Intermarket Alerts`
-
-This plan includes:
-
-- the live indicator
-- the offline AG optimization loop that tunes the indicator
+- the live Pine indicator (`indicators/v6-warbird-complete.pine`)
+- the mirrored dashboard operator surface (render-only consumer of the canonical fib engine state)
+- the canonical Supabase schema for snapshots, candidates, outcomes, signals, and packets
+- the Edge Function writers that produce canonical rows
+- the offline AG optimization loop that tunes the indicator and produces packets
+- the local training warehouse and publish-up lifecycle
 
 This plan does not include:
 
-- the paired Pine strategy
+- the paired Pine strategy (research-only unless explicitly reopened)
 - Deep Backtesting as an active delivery blocker
-- dashboards
 - FastAPI
 - Cloudflare Tunnel
-- Supabase as a live decision dependency
 - live AG inference
 - browser extensions that inject TradingView inputs
 
@@ -874,6 +921,41 @@ The dashboard should feel dense and intentional, not like default Pine debug out
 - minimal wasted text
 
 Mini charts for correlation symbols and richer sentiment/regime visuals are explicitly allowed here. Arc gauges are optional. Decision reasons, state bars, and synchronized context are the priority.
+
+### Locked Fib Visual Inventory (TV Settings Capture 2026-03-27)
+
+The screenshots captured on 2026-03-27 are now the operator-approved level inventory for the visible fib surface. The rebuild must preserve these active levels, labels, and color families unless explicitly reapproved.
+
+| Level | Role | Label / Text | Color family | Default visibility |
+| --- | --- | --- | --- | --- |
+| `0.382` | retracement | `.382` | orange | active |
+| `0.500` | midpoint | custom midpoint text | white | active |
+| `0.618` | retracement | `618` | orange | active |
+| `0.786` | retracement | `0.786` | gray | active |
+| `1.000` | anchor completion | `1` | white | active |
+| `1.236` | target 1 | `TARGET 1` | neon green | active |
+| `1.382` | target waypoint | unlabeled | gray | active |
+| `1.500` | target waypoint | `1.50` | gray | active |
+| `1.618` | target 2 | `TARGET 2` | neon green | active |
+| `1.786` | target waypoint / extension | `1.786` | gray | active |
+| `2.000` | target 3 | `TARGET 3` | neon green | active |
+| `2.382` | target extension | unlabeled | neon green | active |
+| `2.618` | target 4 | `TARGET 4` | neon green | active |
+| `3.618` | target 5 | `TARGET 5` | neon green | active |
+| `4.236` | target extension | unlabeled | light blue | active |
+| `-0.236` | stop level 1 | `SL1` | red | active |
+| `-0.618` | stop extension | `-0.618` | dark red | active |
+
+Visible-but-not-fully-captured note:
+
+- the chart reference also shows an upper `.236` line; do not change or drop it without a direct full settings capture
+
+Unchecked levels from the same settings capture are out of scope and must be omitted completely from the rebuild. They are not part of the locked visible fib inventory unless explicitly reapproved in a later checkpoint.
+
+Implementation note:
+
+- the exact line thicknesses, dash styles, and label placement must still be inventoried directly from the approved live TradingView settings before implementation
+- the intermediate extension waypoints (`1.382`, `1.500`, `1.786`, and similar survivors) are operator-approved visuals and research candidates, but they do not force extra base-table columns unless waypoint-touch telemetry proves useful
 
 ---
 
@@ -2085,32 +2167,46 @@ Phase 4 exact local warehouse entities:
   - `econ_news_finnhub_article_segments`
   - `econ_news_newsfilter_articles`
   - `econ_news_newsfilter_article_segments`
-- `training_runs`
-- `features_catalog`
-- `shap_results`
-- `shap_indicator_settings`
-- `inference_results`
+- `warbird_training_runs`
+- `warbird_training_run_metrics`
+- `warbird_shap_results`
+- `warbird_shap_indicator_settings`
+- `warbird_snapshot_pine_features`
+- `warbird_candidate_macro_context`
+- `warbird_candidate_microstructure`
+- `warbird_candidate_path_diagnostics`
+- `warbird_candidate_stopout_attribution`
+- `warbird_feature_ablation_runs`
+- `warbird_entry_definition_experiments`
 
 Phase 4 exact cloud publish-up entities:
 
-- `training_runs`
-- `model_packets`
-- `packet_activations`
-- `shap_results`
-- `training_reports`
-- realtime dashboard surfaces:
+- `warbird_training_runs`
+- `warbird_training_run_metrics`
+- `warbird_packets`
+- `warbird_packet_activations`
+- `warbird_packet_metrics`
+- `warbird_packet_feature_importance`
+- `warbird_packet_setting_hypotheses`
+- `warbird_packet_recommendations`
+- realtime dashboard/Admin surfaces:
   - `mes_1m`
   - `mes_15m`
-  - `fib_state_live`
-  - `indicator_state_live`
-  - `live_predictions`
+  - `warbird_active_signals_v`
+  - `warbird_admin_candidate_rows_v`
+  - `warbird_active_training_run_metrics_v`
+  - `warbird_active_packet_metrics_v`
+  - `warbird_active_packet_feature_importance_v`
+  - `warbird_active_packet_setting_hypotheses_v`
+  - `warbird_active_packet_recommendations_v`
 
 ### Phase 5: Indicator UI Build
 
-1. Build the execution-facing TradingView surface only: entry markers, level lines, exhaustion precursor diamond, and concise alertconditions.
-2. Keep operator tables and rich diagnostics in the dashboard.
-3. Ensure the indicator remains within Pine limits.
-4. Keep pivots, required harness intelligence, and candidate bolt-on intelligence hidden unless explicitly promoted to the visible surface.
+1. Inventory and lock the exact operator-approved fib visual spec first: colors, line widths, line styles, level labels, and exhaustion-diamond presentation.
+2. Build the execution-facing TradingView surface only: entry markers, level lines, exhaustion precursor diamond, and concise alertconditions.
+3. Keep operator tables and rich diagnostics in the dashboard.
+4. Ensure the indicator remains within Pine limits.
+5. Keep pivots, required harness intelligence, and candidate bolt-on intelligence hidden unless explicitly promoted to the visible surface.
 
 Phase 5 must not begin until Phase 4 has produced at least one packet candidate with stable bucket outputs and documented sample counts.
 
@@ -2311,6 +2407,48 @@ Rules:
 2. The snapshot builder must emit one row per MES 15m bar close, keyed by the canonical bar timestamp.
 3. Each snapshot may use only data available at or before that bar close, including pivot confirmation/right-bar rules.
 4. Once a snapshot row is written for a bar, later anchor discoveries may not rewrite that historical row.
+
+#### Locked normalized operational tables
+
+The next migration must normalize the live decision surface around these tables:
+
+1. `warbird_fib_engine_snapshots_15m`
+   - one row per `symbol_code + timeframe + bar_close_ts + fib_engine_version`
+   - the canonical frozen fib engine snapshot at MES 15m bar close
+2. `warbird_fib_candidates_15m`
+   - one row per candidate derived from a snapshot
+   - canonical candidate key is `symbol_code + timeframe + bar_close_ts + candidate_seq`
+   - carries the policy decision code `TAKE_TRADE` / `WAIT` / `PASS`
+3. `warbird_candidate_outcomes_15m`
+   - one row per candidate, regardless of decision
+   - carries realized outcome truth plus MAE / MFE
+4. `warbird_signals_15m`
+   - one row per published TradingView signal where the candidate decision is `TAKE_TRADE`
+5. `warbird_signal_events`
+   - lifecycle events for published signals only
+
+Rules:
+
+1. Decision codes and realized outcomes must remain separate.
+2. Missed winners and correct skips become visible only if every candidate receives an outcome row, not only published signals.
+3. The dashboard must render from these canonical tables or compatibility views over them; it must not recompute fib geometry locally.
+4. Compatibility views may exist during cutover, but the normalized tables above are the new source of truth.
+5. Accuracy beats feature count. Example context fields such as retrace-depth variants, volume state, EMA distance, daily 200d distance, or other candidate-side signals are admitted only if they are point-in-time clean, exactly defined, and worth the added complexity.
+
+Locked truth semantics for the next schema rewrite:
+
+- `warbird_decision_code`
+  - `TAKE_TRADE`
+  - `WAIT`
+  - `PASS`
+- realized economic truth must distinguish:
+  - TP2 reached before stop
+  - TP1 reached before stop while TP2 is not yet realized
+  - stop before TP1
+  - stop after TP1 but before TP2
+  - reversal when the locked reversal rule is satisfied
+- unresolved rows at the edge of observation are censored rather than labeled as economic failures
+- exact enum names and exact column names for these semantics are part of the next schema rewrite checkpoint, not this lock
 5. Snapshot rows must record, at minimum:
    - active anchor high / low
    - anchor timestamps / bar indexes
@@ -2949,7 +3087,7 @@ Target Supabase-owned recurring function inventory:
 | `detect-setups` | `/api/cron/detect-setups` | canonical setup tables + dashboard live state + `job_log` |
 | `measured-moves` | `/api/cron/measured-moves` | `measured_moves`, `job_log` |
 | `score-trades` | `/api/cron/score-trades` | trade outcomes + `job_log` |
-| `setup-outcome-publish` (legacy `/api/cron/forecast` route name until cutover) | `/api/cron/forecast` | `indicator_state_live`, `live_predictions`, `job_log` |
+| `setup-outcome-publish` (legacy `/api/cron/forecast` route name until cutover) | `/api/cron/forecast` | `warbird_active_signals_v`, `warbird_active_packet_metrics_v`, `warbird_active_packet_recommendations_v`, `job_log` |
 
 #### Runtime rules
 
@@ -3118,11 +3256,17 @@ Every snapshot table or extract must record:
 
 | Table | Purpose | Minimum key columns |
 | --- | --- | --- |
-| `training_runs` | one row per AG run | `run_id`, `created_at`, `contract_version`, `dataset_date_range`, `feature_count`, `packet_status`, `tp1_auc`, `tp2_auc`, `calibration_error` |
-| `features_catalog` | registry of model features | `feature_id`, `feature_name`, `data_source`, `tier`, `timeframe`, `is_active` |
-| `shap_results` | feature-level explainability per run | `run_id`, `feature_id`, `mean_abs_shap`, `rank_in_run`, `golden_zone_min`, `golden_zone_max` |
-| `shap_indicator_settings` | SHAP-derived Pine setting candidates | `run_id`, `indicator_type`, `optimal_length`, `optimal_timeframe`, `stable_threshold_value` |
-| `inference_results` | local run outputs for analysis only | `bar_close_ts`, `run_id`, `direction`, `confidence_score`, `tp1_probability`, `tp2_probability`, `reversal_risk`, `published_to_cloud` |
+| `warbird_training_runs` | one row per AG run | `run_id`, `created_at`, `contract_version`, `dataset_date_range`, `feature_count`, `packet_status`, `tp1_auc`, `tp2_auc`, `calibration_error` |
+| `warbird_training_run_metrics` | local full metric rows per run/target/split | `run_id`, `target_name`, `split_code`, `metric_family`, `metric_name`, `metric_value`, `is_primary` |
+| `warbird_shap_results` | local feature-level explainability per run | `run_id`, `feature_name`, `feature_family`, `tier`, `mean_abs_shap`, `rank_in_run` |
+| `warbird_shap_indicator_settings` | local SHAP-derived indicator-setting candidates | `run_id`, `indicator_family`, `parameter_name`, `suggested_numeric_value`, `stability_score` |
+| `warbird_snapshot_pine_features` | point-in-time Pine hidden exports per snapshot | `snapshot_id`, `feature_contract_version`, `ml_confidence_score`, `ml_direction_code`, `ml_setup_archetype_code` |
+| `warbird_candidate_macro_context` | local Tier 2 macro/news context | `candidate_id`, `bar_date`, `macro_window_active`, `news_signal_direction`, `gpr_level` |
+| `warbird_candidate_microstructure` | local OHLCV-derived 1m context | `candidate_id`, `window_bars`, `window_start_ts`, `window_end_ts`, `vol_ratio_at_entry`, `atr_14_at_touch` |
+| `warbird_candidate_path_diagnostics` | local path-first-touch diagnostics | `candidate_id`, `first_touch_code`, `bars_to_tp1`, `bars_to_tp2`, `bars_to_stop` |
+| `warbird_candidate_stopout_attribution` | local stop-out attribution surface | `candidate_id`, `stop_driver_code`, `stop_driver_confidence`, `notes_json` |
+| `warbird_feature_ablation_runs` | local feature-family add/remove experiments | `ablation_run_id`, `baseline_run_id`, `candidate_run_id`, `feature_family`, `metric_name`, `delta_metric_value` |
+| `warbird_entry_definition_experiments` | local entry-definition experiment results | `experiment_id`, `experiment_code`, `anchor_policy_code`, `retrace_rule_code`, `tp1_before_sl_rate`, `tp2_before_sl_rate` |
 
 #### Required local implementation files
 
@@ -3161,22 +3305,28 @@ Cloud is the display, realtime, and operator-facing operations surface. It is no
 2. `public.models` exists but is empty and is not the right packet / activation lifecycle table.
 3. `trade_scores` exists but is empty and reflects the older predicted-price / MAE / MFE path.
 4. No cloud tables currently exist for:
-   - `training_runs`
-   - `model_packets`
-   - `packet_activations`
-   - `shap_results`
-   - `training_reports`
+   - `warbird_training_runs`
+   - `warbird_training_run_metrics`
+   - `warbird_packets`
+   - `warbird_packet_activations`
+   - `warbird_packet_metrics`
+   - `warbird_packet_feature_importance`
+   - `warbird_packet_setting_hypotheses`
+   - `warbird_packet_recommendations`
 5. No cloud storage buckets are in active use for model/report artifacts.
 
 #### Required cloud publish-up entities
 
 | Table | Purpose | Minimum key columns |
 | --- | --- | --- |
-| `training_runs` | published run registry | `run_id`, `created_at`, `contract_version`, `symbol_code`, `timeframe`, `dataset_date_range`, `feature_count`, `tp1_auc`, `tp2_auc`, `calibration_error`, `packet_status` |
-| `model_packets` | packet registry | `packet_id`, `run_id`, `created_at`, `contract_version`, `symbol_code`, `timeframe`, `status`, `packet_json`, `sample_count`, `promoted_at`, `superseded_at` |
-| `packet_activations` | immutable activation log | `activation_id`, `packet_id`, `activated_at`, `deactivated_at`, `activation_reason`, `rollback_reason`, `is_current` |
-| `shap_results` | published explainability | `run_id`, `feature_name`, `tier`, `mean_abs_shap`, `rank_in_run`, `golden_zone_min`, `golden_zone_max` |
-| `training_reports` | operator-facing summaries | `report_id`, `run_id`, `created_at`, `report_kind`, `summary_md`, `metrics_json`, `artifact_paths_json` |
+| `warbird_training_runs` | published run registry | `run_id`, `created_at`, `contract_version`, `symbol_code`, `timeframe`, `dataset_date_range`, `feature_count`, `tp1_auc`, `tp2_auc`, `calibration_error`, `packet_status` |
+| `warbird_training_run_metrics` | full training/evaluation metrics for Admin and model review | `run_id`, `target_name`, `split_code`, `fold_code`, `metric_family`, `metric_name`, `metric_value`, `is_primary` |
+| `warbird_packets` | AG scoring/model packet registry | `packet_id`, `run_id`, `created_at`, `contract_version`, `symbol_code`, `timeframe`, `status`, `packet_json`, `sample_count`, `promoted_at`, `superseded_at` |
+| `warbird_packet_activations` | immutable activation log | `activation_id`, `packet_id`, `activated_at`, `deactivated_at`, `activation_reason`, `rollback_reason`, `is_current` |
+| `warbird_packet_metrics` | structured Admin KPIs per packet target/split | `packet_id`, `target_name`, `split_code`, `auc`, `log_loss`, `brier_score`, `calibration_error`, `resolved_count`, `censored_count` |
+| `warbird_packet_feature_importance` | published top drivers for active packet review | `packet_id`, `target_name`, `feature_family`, `feature_name`, `importance_source_code`, `importance_rank`, `mean_abs_importance` |
+| `warbird_packet_setting_hypotheses` | structured indicator and entry-definition suggestions | `packet_id`, `target_name`, `indicator_family`, `parameter_name`, `action_code`, `stability_score`, `support_summary_json` |
+| `warbird_packet_recommendations` | structured AI-generated Admin guidance | `packet_id`, `section_code`, `priority`, `recommendation_code`, `title`, `summary_text`, `rationale_json`, `action_json` |
 
 #### Required cloud realtime dashboard entities
 
@@ -3184,18 +3334,32 @@ Current dashboard consumers already expect `mes_1m` and `mes_15m`. Keep those. T
 
 | Table | Purpose | Minimum key columns |
 | --- | --- | --- |
-| `fib_state_live` | mirrored fib object per MES 15m bar | `bar_close_ts`, `symbol_code`, `timeframe`, `fib_zero`, `fib_one`, `fib_236`, `fib_618`, `direction_code`, `eligible_20pt`, `stop_family_code`, `packet_id` |
-| `indicator_state_live` | mirrored 15m fib setup outcome state per MES 15m bar | `bar_close_ts`, `symbol_code`, `timeframe`, `event_mode_code`, `confidence_score`, `reversal_risk`, `tp1_probability`, `tp2_probability`, `regime_bucket_code`, `session_bucket_code`, `packet_id` |
-| `live_predictions` | operator-facing setup action state, not a predicted-price surface | `bar_close_ts`, `symbol_code`, `timeframe`, `action_state`, `signal_direction`, `activation_id`, `packet_id`, `reason_code`, `emitted_at`, `alert_ready` |
+| `warbird_fib_engine_snapshots_15m` | canonical frozen fib engine state per MES 15m bar close (provenance is `fib_engine_version`, not packet) | `snapshot_id`, `bar_close_ts`, `symbol_code`, `timeframe`, `fib_engine_version`, `anchor_hash`, `direction`, `anchor_high`, `anchor_low`, `resolved_left_bars`, `resolved_right_bars`, `target_eligible_20pt` |
+| `warbird_fib_candidates_15m` | canonical candidate + decision state per MES 15m bar close | `candidate_id`, `snapshot_id`, `bar_close_ts`, `symbol_code`, `timeframe`, `candidate_seq`, `setup_archetype_code`, `fib_level_touched`, `entry_price`, `stop_loss`, `tp1_price`, `tp2_price`, `decision_code`, `reason_code`, `packet_id` |
+| `warbird_candidate_outcomes_15m` | candidate-level realized truth for both taken and skipped trades | `outcome_id`, `candidate_id`, `bar_close_ts`, `symbol_code`, `timeframe`, `outcome_code`, `mae_pts`, `mfe_pts`, `scorer_version`, `scored_at` |
+| `warbird_signals_15m` | published TradingView signals only | `signal_id`, `candidate_id`, `bar_close_ts`, `symbol_code`, `timeframe`, `status`, `emitted_at`, `tv_alert_ready`, `packet_id` |
+| `warbird_signal_events` | lifecycle events for published signals only | `signal_event_id`, `signal_id`, `ts`, `event_type`, `price` |
+
+The dashboard compatibility/live views should then be derived from those canonical tables:
+
+| View | Purpose | Minimum source contract |
+| --- | --- | --- |
+| `warbird_active_signals_v` | mirrored current signal and candidate state for chart/dashboard rendering | latest joined row from `warbird_signals_15m` + `warbird_fib_candidates_15m` + `warbird_candidate_outcomes_15m` |
+| `warbird_admin_candidate_rows_v` | screenshot-style Admin row surface with anchor/target/retrace/fib/outcome/status | current rows from `warbird_fib_candidates_15m` + `warbird_fib_engine_snapshots_15m` + `warbird_signals_15m` + `warbird_candidate_outcomes_15m` |
+| `warbird_active_training_run_metrics_v` | Admin full-metric surface for the active packet run | current row from `warbird_packet_activations` + `warbird_packets` + `warbird_training_run_metrics` |
+| `warbird_active_packet_metrics_v` | Admin packet KPI surface | current row from `warbird_packet_activations` + `warbird_packets` + `warbird_packet_metrics` |
+| `warbird_active_packet_feature_importance_v` | Admin feature-driver surface | current row from `warbird_packet_activations` + `warbird_packets` + `warbird_packet_feature_importance` |
+| `warbird_active_packet_setting_hypotheses_v` | Admin indicator-setting suggestion surface | current row from `warbird_packet_activations` + `warbird_packets` + `warbird_packet_setting_hypotheses` |
+| `warbird_active_packet_recommendations_v` | formatted Admin AI-guidance surface | current row from `warbird_packet_activations` + `warbird_packets` + `warbird_packet_recommendations` |
 
 #### Locked replacement semantics for the legacy forecast surface
 
 1. `warbird_forecasts_1h` is a legacy misnamed surface from the pre-15m architecture and must not drive new work.
 2. Its replacement contract is the MES 15m setup outcome surface:
-   - `indicator_state_live.tp1_probability`
-   - `indicator_state_live.tp2_probability`
-   - `indicator_state_live.reversal_risk`
-   - `live_predictions.action_state`
+   - `warbird_fib_candidates_15m.tp1_probability`
+   - `warbird_fib_candidates_15m.tp2_probability`
+   - `warbird_fib_candidates_15m.reversal_risk`
+   - `warbird_fib_candidates_15m.decision_code`
 3. No new publish-up contract may use predicted-price tables as the primary model output.
 
 #### Cloud rules
@@ -3207,6 +3371,7 @@ Current dashboard consumers already expect `mes_1m` and `mes_15m`. Keep those. T
 5. Do not create new predicted-price or `1H forecast` tables; the live model surface is MES 15m setup-outcome state keyed by `bar_close_ts`.
 6. Every publish-up write must be idempotent on its natural key.
 7. Cloud Realtime is the dashboard transport; Databento is not a dashboard-direct contract.
+8. `warbird_triggers_15m`, `warbird_conviction`, `warbird_risk`, `warbird_setups`, `warbird_setup_events`, and `measured_moves` are **legacy/operational only**. They are not the canonical AG training truth, must not drive new architecture, and will be retired once the canonical tables above exist and all readers have migrated. The legacy `detect-setups` and `score-trades` routes that write to these tables are unscheduled bridge code pending the canonical Edge Function writer.
 
 #### Cloud pruning sequence
 
@@ -3264,7 +3429,7 @@ Packet status values must include at least:
 2. Every packet candidate must reference its source training run.
 3. Only one packet may be active for a given `symbol_code + timeframe + contract_version`.
 4. Promotion and rollback must be reversible state transitions, not destructive rewrites.
-5. Use `packet_activations` for the activation log rather than mutating packet history in place.
+5. Use `warbird_packet_activations` for the activation log rather than mutating packet history in place.
 
 #### Exact rollback trigger
 
@@ -3275,7 +3440,7 @@ The hard rollback / review trigger is:
 Interpretation rules:
 
 1. Count only initiated trades from the active packet.
-2. `NO_TRADE` is not a miss.
+2. `WAIT` and `PASS` are not misses.
 3. A single miss does not trigger rollback.
 4. The second consecutive PT1 miss opens the rollback/retrain path immediately.
 
@@ -3283,7 +3448,7 @@ Interpretation rules:
 
 When the 2-consecutive-PT1-miss rule is hit:
 
-1. write the failure event and packet context to `packet_activations` and the current report/log surface
+1. write the failure event and packet context to `warbird_packet_activations`, `warbird_packet_metrics`, and `warbird_packet_recommendations`
 2. mark the current packet under review
 3. retrain the affected model path with fresh data
 4. review the packet logs and failure samples before a new promotion
@@ -3574,14 +3739,21 @@ Remaining blocker after this checkpoint:
    - parameter admission
    - joint configuration
 10. **Add cloud publish-up and realtime dashboard tables**:
-   - `training_runs`
-   - `model_packets`
-   - `packet_activations`
-   - `shap_results`
-   - `training_reports`
-   - `fib_state_live`
-   - `indicator_state_live`
-   - `live_predictions`
+    - `warbird_training_runs`
+    - `warbird_training_run_metrics`
+    - `warbird_packets`
+    - `warbird_packet_activations`
+    - `warbird_packet_metrics`
+    - `warbird_packet_feature_importance`
+    - `warbird_packet_setting_hypotheses`
+    - `warbird_packet_recommendations`
+    - `warbird_active_signals_v`
+    - `warbird_admin_candidate_rows_v`
+    - `warbird_active_training_run_metrics_v`
+    - `warbird_active_packet_metrics_v`
+    - `warbird_active_packet_feature_importance_v`
+    - `warbird_active_packet_setting_hypotheses_v`
+    - `warbird_active_packet_recommendations_v`
 11. **Define packet activation and rollback transitions in code before the first promoted packet goes operational**, including the 2-consecutive-PT1-miss rule.
 12. **Migrate dashboard and admin/status consumers** to the new publish-up and live-state surface.
 13. **Supabase owns all recurring job scheduling** — Supabase pg_cron schedules removed. App Router routes remain as callable handlers for pg_cron via pg_net.
