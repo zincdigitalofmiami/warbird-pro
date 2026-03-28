@@ -51,6 +51,10 @@ export function composeWarbirdSignal(params: {
       : setup?.direction === "SHORT"
         ? "BEAR"
         : "NEUTRAL");
+  const selectorScore =
+    trigger?.trigger_quality_ratio != null
+      ? trigger.trigger_quality_ratio * 100
+      : null;
 
   return {
     version: WARBIRD_SIGNAL_VERSION,
@@ -68,11 +72,15 @@ export function composeWarbirdSignal(params: {
     },
     directional: {
       bias_15m: directionalBias,
+      tp1_before_sl_probability: risk?.tp1_probability ?? null,
+      tp2_before_sl_probability: risk?.tp2_probability ?? null,
+      sl_before_tp1_probability: null,
+      selector_score: selectorScore,
       prob_hit_sl_first: null,
       prob_hit_pt1_first: risk?.tp1_probability ?? null,
       prob_hit_pt2_after_pt1: risk?.tp2_probability ?? null,
       reversal_risk: risk?.reversal_risk ?? null,
-      setup_score: trigger?.trigger_quality_ratio != null ? trigger.trigger_quality_ratio * 100 : null,
+      setup_score: selectorScore,
       confidence: risk?.confidence_score ?? trigger?.trigger_quality_ratio ?? null,
     },
     conviction: {

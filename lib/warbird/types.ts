@@ -166,6 +166,12 @@ export interface WarbirdSignal {
   };
   directional: {
     bias_15m: WarbirdBias;
+    // Canonical names aligned to the locked MES 15m candidate/outcome contract.
+    tp1_before_sl_probability: number | null;
+    tp2_before_sl_probability: number | null;
+    sl_before_tp1_probability: number | null;
+    selector_score: number | null;
+    // Legacy aliases kept until all readers are cut over.
     prob_hit_sl_first: number | null;
     prob_hit_pt1_first: number | null;
     prob_hit_pt2_after_pt1: number | null;
