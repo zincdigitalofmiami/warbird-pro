@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-Canonical Warbird inference pipeline.
+LEGACY local inference script. Not an active canonical destination.
 
 Loads the trained Warbird model bundle, scores the latest dataset row, and
-writes compatibility-safe output rows to warbird_forecasts_1h and warbird_risk.
+writes to warbird_forecasts_1h (retirement debt — forecast route deleted) and
+warbird_risk (legacy surface). These destinations are not the canonical
+writer path; they will be retired with the legacy tables during
+drift reconciliation and the canonical writer cutover.
 
 Legacy `hit_*_first` target names still exist inside this old local
 training/predictor workflow, but they are scheduled for deletion during the
@@ -285,6 +288,9 @@ def main() -> None:
             raise SystemExit("Missing Supabase credentials")
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+        # Legacy write to retirement-debt table. warbird_forecasts_1h forecast
+        # route is deleted; this write path will be removed with the legacy
+        # table during canonical writer cutover.
         forecast_result = (
             supabase.table("warbird_forecasts_1h")
             .upsert(forecast_write_row, on_conflict="symbol_code,ts")

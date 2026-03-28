@@ -209,7 +209,7 @@ The following tables exist and may receive writes from legacy bridge code, but t
 - `measured_moves`
 - `warbird_daily_bias`
 - `warbird_structure_4h`
-- `warbird_forecasts_1h`
+- `warbird_forecasts_1h` — forecast route deleted; this is explicit retirement debt, not future architecture; the table may still exist remotely until drift reconciliation and final retirement, but must not drive any new work
 
 These will be retired once the canonical tables above have active writers and all dashboard/API consumers are migrated.
 
