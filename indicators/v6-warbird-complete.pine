@@ -244,11 +244,11 @@ fibZzUpdate() =>
             pivotHighPrice := math.max(startP, endP)
             pivotLowPrice  := math.min(startP, endP)
             if startP >= endP
-                pivotHighBar := lastPvt.start.barIndex
-                pivotLowBar  := lastPvt.end.barIndex
+                pivotHighBar := lastPvt.start.index
+                pivotLowBar  := lastPvt.end.index
             else
-                pivotHighBar := lastPvt.end.barIndex
-                pivotLowBar  := lastPvt.start.barIndex
+                pivotHighBar := lastPvt.end.index
+                pivotLowBar  := lastPvt.start.index
     [newPivot, pivotHighPrice, pivotLowPrice, pivotHighBar, pivotLowBar]
 
 [zzNewPivot, zzHighPrice, zzLowPrice, zzHighBar, zzLowBar] = fibZzUpdate()
