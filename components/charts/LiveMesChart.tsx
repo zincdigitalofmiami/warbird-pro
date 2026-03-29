@@ -707,7 +707,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         try {
           // Initial snapshot from API
           const snapshotRes = await fetch(
-            "/api/live/mes15m?snapshot=1&backfill=1000",
+            "/api/live/mes15m?snapshot=1&backfill=5000",
             { cache: "no-store" },
           );
           const snapshotData = (await snapshotRes.json()) as

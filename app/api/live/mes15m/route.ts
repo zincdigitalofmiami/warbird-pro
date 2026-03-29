@@ -9,7 +9,7 @@ import { createClient } from "@/lib/supabase/server";
  * After initial load, the chart receives updates via Supabase Realtime.
  *
  * Query params:
- *   ?snapshot=1&backfill=1000 — full snapshot (default 1000 bars)
+ *   ?snapshot=1&backfill=5000 — full snapshot
  */
 
 export async function GET(request: Request) {
@@ -22,10 +22,7 @@ export async function GET(request: Request) {
     }
 
     const url = new URL(request.url);
-    const backfill = Math.min(
-      parseInt(url.searchParams.get("backfill") || "1000", 10),
-      2000,
-    );
+    const backfill = parseInt(url.searchParams.get("backfill") || "5000", 10);
 
     const { data, error } = await supabase
       .from("mes_15m")
