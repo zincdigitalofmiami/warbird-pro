@@ -59,7 +59,7 @@ The model does **not** define the schema. The outcome contract defines the schem
 Warbird is split into three separate engines:
 
 1. **Generator**
-   - Pine and admitted exact-copy harnesses define the candidate entry object
+   - Pine defines the candidate entry object using the embedded TA core pack
 2. **Selector**
    - offline models score whether a frozen candidate is worth taking
 3. **Diagnostician**
@@ -332,24 +332,29 @@ It must not become a separate trade engine detached from the fib contract.
 
 ---
 
-## 7. Required Third-Party Harnesses
+## 7. TA Core Pack (Replaces Third-Party Harnesses)
 
-Three standalone exact-copy harnesses are required:
+The three standalone harnesses (BigBeluga Pivot Levels, LuxAlgo MSB/OB Toolkit, LuxAlgo Luminance Engine) have been retired. The decision surface now uses a deterministic 15-metric TA core pack embedded directly in `v6-warbird-complete.pine`:
 
-1. `Pivot Levels [BigBeluga]`
-2. `Market Structure Break & OB Probability Toolkit [LuxAlgo]`
-3. `Luminance Breakout Engine [LuxAlgo]`
+| Export Name | Metric |
+|---|---|
+| `ml_ema_21` | EMA(close, 21) |
+| `ml_ema_50` | EMA(close, 50) |
+| `ml_ema_100` | EMA(close, 100) |
+| `ml_ema_200` | EMA(close, 200) |
+| `ml_macd_hist` | MACD histogram (12, 26, 9) |
+| `ml_rsi_14` | RSI(close, 14) |
+| `ml_atr_14` | ATR(14) |
+| `ml_adx_14` | ADX(14) |
+| `ml_volume_raw` | Raw bar volume |
+| `ml_vol_sma_20` | SMA(volume, 20) |
+| `ml_vol_ratio` | volume / SMA(volume, 20) |
+| `ml_vol_acceleration` | Change in vol_ratio bar-over-bar |
+| `ml_bar_spread_x_vol` | (high - low) × volume |
+| `ml_obv` | On-Balance Volume (cumulative) |
+| `ml_mfi_14` | Money Flow Index(hlc3, 14) |
 
-Rules:
-
-1. Use the original open-source Pine internals exactly.
-2. Allow only interface-layer edits:
-   - input grouping
-   - visuals off by default
-   - hidden `plot()` exports
-   - alert payload wiring
-   - wrapper glue
-3. If exact-copy harnessing is blocked, stop. Do not build a substitute.
+All metrics are deterministic, point-in-time safe, and require no external dependencies.
 
 ---
 
@@ -390,40 +395,23 @@ Minimum required hidden fields:
 - `ml_entry_short_trigger`
 - `ml_tp1_hit_event`
 - `ml_tp2_hit_event`
-- `ml_pivot_distance_nearest`
-- `ml_pivot_cluster_count`
-- `ml_pivot_active_zone_code`
-- `ml_pivot_layer_length`
-- `ml_pivot_volume_nearest`
-- `ml_pivot_volume_distribution_pct`
-- `ml_msb_direction_code`
-- `ml_msb_momentum_zscore`
-- `ml_ob_active_count`
-- `ml_ob_hpz_active_count`
-- `ml_ob_nearest_distance`
-- `ml_ob_nearest_quality_score`
-- `ml_ob_nearest_poc`
-- `ml_ob_nearest_direction_code`
-- `ml_ob_nearest_mitigated_code`
-- `ml_ob_reliability_pct`
-- `ml_luminance_signal`
-- `ml_luminance_upper_threshold`
-- `ml_luminance_lower_threshold`
-- `ml_luminance_intensity`
-- `ml_luminance_direction_code`
-- `ml_luminance_breakout_code`
-- `ml_luminance_bull_ob_active_count`
-- `ml_luminance_bear_ob_active_count`
-- `ml_luminance_bull_ob_mitigated_count`
-- `ml_luminance_bear_ob_mitigated_count`
-- `ml_luminance_bull_ob_nearest_distance`
-- `ml_luminance_bear_ob_nearest_distance`
-- `ml_luminance_bull_ob_nearest_intensity`
-- `ml_luminance_bear_ob_nearest_intensity`
+- `ml_ema_21`
+- `ml_ema_50`
+- `ml_ema_100`
+- `ml_ema_200`
+- `ml_macd_hist`
+- `ml_rsi_14`
+- `ml_atr_14`
+- `ml_adx_14`
+- `ml_volume_raw`
+- `ml_vol_sma_20`
+- `ml_vol_ratio`
+- `ml_vol_acceleration`
+- `ml_bar_spread_x_vol`
+- `ml_obv`
+- `ml_mfi_14`
 
 The live `v6` indicator exports the minimum subset above. Research-only diagnostics outside this list stay out of the live Pine packet until a later checkpoint re-admits them without breaking the TradingView plot budget.
-
-BigBeluga, MSB/OB, and Luminance harness-family exports are now part of the minimum contract via the `ml_pivot_*`, `ml_msb_*`, `ml_ob_*`, and `ml_luminance_*` fields above.
 
 The export contract must remain always-on and schema-stable for training capture.
 
@@ -470,7 +458,8 @@ The following are legacy and must not drive any new implementation:
 - 5-minute cron as the model contract driver
 - cloud-to-local sync as a standing subsystem
 - unconstrained model-generated stop prices
-- hand-rolled replacements for required third-party harnesses
+- BigBeluga, LuxAlgo MSB/OB, and LuxAlgo Luminance standalone harness files
+- `ml_pivot_*`, `ml_msb_*`, `ml_ob_*`, and `ml_luminance_*` export families
 
 ---
 
