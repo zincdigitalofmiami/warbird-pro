@@ -262,15 +262,31 @@ if zzNewPivot
     anchorLowBar  := zzLowBar
     lastBreakBar  := na
 
+// Pre-compute rolling high/low at each confluence period at global scope.
+// ta.highest/ta.lowest require a compile-time-constant length — they cannot
+// be called inside a loop with a variable length argument.
+float _cqH8  = ta.highest(high, 8)
+float _cqL8  = ta.lowest(low,  8)
+float _cqH13 = ta.highest(high, 13)
+float _cqL13 = ta.lowest(low,  13)
+float _cqH21 = ta.highest(high, 21)
+float _cqL21 = ta.lowest(low,  21)
+float _cqH34 = ta.highest(high, 34)
+float _cqL34 = ta.lowest(low,  34)
+float _cqH55 = ta.highest(high, 55)
+float _cqL55 = ta.lowest(low,  55)
+
 float confluenceQuality = na
 if not na(fibAnchorHigh) and not na(fibAnchorLow)
     float anchorRange = fibAnchorHigh - fibAnchorLow
     if anchorRange > 0
         float tol = anchorRange * fibConfluenceTolPct * 0.01
         int confHits = 0
-        for period in array.from(8, 13, 21, 34, 55)
-            float rollingH = ta.highest(high, period)
-            float rollingL = ta.lowest(low, period)
+        // Iterate over the five pre-computed period pairs
+        array<float> _cqPairs = array.from(_cqH8, _cqL8, _cqH13, _cqL13, _cqH21, _cqL21, _cqH34, _cqL34, _cqH55, _cqL55)
+        for pairIdx = 0 to 4
+            float rollingH = array.get(_cqPairs, pairIdx * 2)
+            float rollingL = array.get(_cqPairs, pairIdx * 2 + 1)
             float rollingRange = rollingH - rollingL
             if rollingRange > 0
                 for ratioIdx = 0 to 2
