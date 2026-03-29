@@ -16,22 +16,31 @@ Historical retention note: the canonical core data window is `2024-01-01T00:00:0
 
 Binding note: the 2026-03-28 update-log entries supersede older references below to right-side TradingView tables, `LONG READY` / `SHORT READY` action labels, dashboard-local fib computation, Markdown report blobs, and any schema language that still treats `EXPIRED` / `NO_REACTION` as canonical economic model truth.
 
-### Next Blocking Order (2026-03-28 post-schema checkpoint)
+### Next Blocking Order (2026-03-29 updated — Pine recovery complete)
 
-1. **Canonical writer checkpoint** — port or replace the legacy `detect-setups` / `score-trades` Vercel routes as Supabase Edge Functions that write to the reconciled canonical tables. Fix continuity handling before calling the setup engine live.
-2. **Dashboard/admin/API reader cutover** — cut `/admin`, `/api/admin/status`, and dashboard consumers off legacy tables and onto the canonical snapshot/candidate surfaces plus the new Admin packet views.
-3. **Pine indicator recovery** — fix `isValid` / `atr` undeclared variables, resolve the `<=64` plot-count budget, and restore TradingView loadability.
-4. **Local warehouse / selector buildout** — stand up the AG workbench (`scripts/ag/*`), local PostgreSQL snapshot mirror, diagnostic tables, and packet publish-up lifecycle on the locked hierarchy.
-5. **Legacy table retirement** — drop `warbird_triggers_15m`, `warbird_conviction`, `warbird_risk`, `warbird_setups`, `warbird_setup_events`, `measured_moves`, `warbird_forecasts_1h` only after all readers/writers are migrated.
+1. ~~**Pine indicator recovery**~~ — **DONE.** `isValid`/`atr` fixed (commit `c506c48`), output budget fixed at 63/64 (cut 8 alerts + 2 plot exports + bgcolor), TradingView paste-and-load validated with all 15 TA Core Pack exports visible in Style tab. Three standalone harnesses retired and replaced by embedded TA core pack.
+2. **Fib engine hardening** — anchor quality drives everything; confirm left/right bar space, direction logic, multi-timeframe alignment (15m fibs + 1H/4H structure must agree in direction for trigger), exhaustion signal preservation, anchor-span visual gap (lines should extend to full swing area), and intermediate waypoint lines (1.382, 1.50, 1.786) as drawing objects.
+3. **Canonical writer checkpoint** — port or replace the legacy `detect-setups` / `score-trades` Vercel routes as Supabase Edge Functions that write to the reconciled canonical tables. Fix CME continuity-gap handling before calling the writer live.
+4. **Dashboard/admin/API reader cutover** — cut `/admin`, `/api/admin/status`, and dashboard consumers off legacy tables and onto the canonical snapshot/candidate surfaces plus the new Admin packet views. TradingView webhook alerts (entry long, entry short, pivot break reversal) can drive real-time dashboard state via Supabase Edge Function webhook receiver.
+5. **Local warehouse / selector buildout** — stand up the AG workbench (`scripts/ag/*`), local PostgreSQL snapshot mirror, diagnostic tables, and packet publish-up lifecycle. AG config is locked: `best_quality`, 5 bag folds, 2 stack levels, `log_loss`, walk-forward with purge/embargo, SHAP 5-step pipeline, Admin dashboard reporting for noise/golden-zones/indicator-settings discovery.
+6. **Legacy table retirement** — drop `warbird_triggers_15m`, `warbird_conviction`, `warbird_risk`, `warbird_setups`, `warbird_setup_events`, `measured_moves`, `warbird_forecasts_1h` only after all readers/writers are migrated.
 
 ---
 
 ## Update Log
 
-- 2026-03-28: Removed the legacy `prob_hit_*` aliases from the active shared signal/API contract. Binding rule: `hit_*_first` and `prob_hit_*` names are now deletion-only debt inside the old local `scripts/warbird/*` workbench and must not be reintroduced as fallback fields in new API, dashboard/Admin, packet, or schema surfaces. Next blocker is unchanged: canonical writer cutover first, then reader cutover.
-- 2026-03-28: Completed the schema/admin contract reconciliation checkpoint. The draft schema package now matches the locked hierarchy, censoring semantics, and cloud-vs-local boundary, and was syntax-validated in a disposable Postgres 17 instance. Cloud publish-up is now structured around `warbird_training_runs`, `warbird_training_run_metrics`, `warbird_packets`, `warbird_packet_activations`, `warbird_packet_metrics`, `warbird_packet_feature_importance`, `warbird_packet_setting_hypotheses`, and `warbird_packet_recommendations`; raw SHAP remains local-only in `warbird_shap_results` and `warbird_shap_indicator_settings`. Admin requirements are now locked to two explicit surfaces: screenshot-style candidate/signal rows via `warbird_admin_candidate_rows_v` and full model/training metrics via `warbird_active_training_run_metrics_v`, alongside the packet KPI/explanation/recommendation views. Next blocker: implement the canonical writer checkpoint, then cut `/api/admin/status` and dashboard readers off legacy `warbird_setups` / `measured_moves`.
+- 2026-03-29: Locked Admin candidate table staple columns per user directive. The table that replaces legacy "Measured Moves" on `/admin` MUST include Dir, Target, TP1 Hit, TP2 Hit, SL Hit, Status as non-negotiable staple columns. The existing `target_hit_state` column in `warbird_admin_candidate_rows_v` (migration 038) is ambiguous — it must be split into three explicit computed columns: `tp1_hit`, `tp2_hit`, `sl_hit` (each emitting HIT/MISS/OPEN). Full locked column set: Time, Dir, Entry, Target, TP1 Hit, TP2 Hit, SL Hit, Status (non-negotiable), plus SL Price, TP2 Price, Fib Level, Outcome, Decision (recommended operator context). See locked spec section below view table definition.
+- 2026-03-29: Added TradingView → Dashboard webhook architecture section. The 3 kept Pine alertconditions (entry long, entry short, pivot break .50 reversal) are the live event bridge from Pine to the dashboard command center via TradingView webhook → Supabase Edge Function (`tv-alert-webhook`) → canonical tables → Supabase Realtime → dashboard. The 8 cut alerts are reconstituted as dashboard-side derived state from stored fib engine + intermarket data. Fixed CLAUDE.md: budget corrected to 63/64 (bgcolor removed), blocking order updated (Pine recovery DONE), fib recompute claim removed (cut in commit 77ec03e).
+- 2026-03-29: Plan deep cleanup — removed ~600 lines of accumulated noise. Collapsed Phase 2 checkpoint locks (5 checkpoints, 280 lines → 6-line summary). Collapsed Phase 3 retired section (220 lines → 3-line summary). Marked Required Harness Modules as SUPERSEDED by TA core pack (commit `c506c48`). Updated Phase 4 training order to remove harness admission steps. Updated Feature-Family De-Duplication Rule to reference TA core pack. Rewrote Section 20 Immediate Next Steps with current reality (struck completed items, removed harness references). Fixed packet format alert line (now 3 alerts: entry long, entry short, pivot break reversal). Audited Pine export contract lists against current Pine file and marked cut exports. Marked completed items in Forensic Review / What Must Change. Fixed March 23 Delta harness references. Fixed line 3040 contradiction (said "Supabase does not own any cron schedules" — corrected to "Vercel"). Updated Blocking Order #1 to DONE with TV-validated 63/64 budget.
+- 2026-03-29: Fib visual gap identified vs Auto Fib GOLDEN TARGET reference. Two improvements needed: (1) anchor span — fib lines should extend left to cover the full anchor high/low swing area, not just the pivot bar (purely visual for operator geometry). (2) Intermediate waypoint lines — the locked fib inventory already includes `1.382`, `1.500`, `1.786` as gray waypoints but WB v6 does not draw them yet. Price reacts to these levels and the model may benefit from waypoint-touch features. Both improvements apply to Pine and dashboard fib renderers. No output budget impact — these are `line.new()` / `label.new()` drawing objects, not `plot()` calls. Also removed `bgcolor()` regime tint and `showBg` input (never used) — budget now 63/64 with 1 slot headroom.
+- 2026-03-29: Pine output budget fix — TradingView-validated blocker. Manual TradingView paste-and-load confirmed the indicator loads but TradingView silently drops all outputs after position 64. `alertcondition()` counts toward the 64-output hard cap — `pine-lint.sh` had a bug claiming they do not (line 96 explicitly excluded them). Actual budget was 74/64 (62 plot + 1 bgcolor + 11 alertcondition), not the 63/64 the lint script reported. `ml_tp2_hit_event` and the entire 15-metric TA Core Pack (lines 816–830) were invisible to TradingView — never exported. Agreed cut plan: (1) Remove 8 `alertcondition()` calls, keeping only `WARBIRD ENTRY LONG`, `WARBIRD ENTRY SHORT`, and `PIVOT BREAK (against) + Regime Opposed` (the .50 reversal warning — fires when price breaks pivot against fib direction with intermarket regime confirmation, maps to `setupFailedMoveReversal` archetype, contributes 45 pts to `eventReversalScore`). (2) Remove 2 plot exports: `er_20` (AG computes from `mes_15m` OHLCV trivially) and `vix_pct_252d` (AG computes from FRED VIX data). (3) Remove dead helper bools `riskOnFlip`/`riskOffFlip` (only the cut RISK-ON/RISK-OFF alerts consumed them). (4) Fix `pine-lint.sh` to count `alertcondition()` toward the 64-output budget. Budget after cuts: 60 plot + 1 bgcolor + 3 alertcondition = 64/64 exact cap. All non-essential alerts move to the Next.js dashboard. All hidden `display=display.none` `plot()` calls must remain — that is the only Pine data-export mechanism for AG training. Next: TradingView re-validate to confirm all 15 TA Core Pack exports now appear in Style tab.
+- 2026-03-29: Outcome contract reset checkpoint. Canonical economic outcomes are now locked to `TP2_HIT` / `TP1_ONLY` / `STOPPED` / `REVERSAL` with `OPEN` as operational-only (excluded from training labels). Removed censored/timed-out wording from the active plan and model-spec alignment sections, and aligned draft canonical schema surfaces (`037`, `038`) plus TypeScript canonical payload types to the same contract. Legacy `score-trades` no longer writes `EXPIRED`; setups remain open until TP/SL resolution. Admin/dashboard outcome presentation now emits `TP2_HIT` / `TP1_ONLY` / `STOPPED` / `REVERSAL` / `OPEN` instead of `WIN` / `LOSS` / `EXPIRED`. Validation: `./scripts/guards/pine-lint.sh` (pass with known warning), `npm run lint` (pass), `npm run build` (pass). Next blocker: finalize the TA-only indicator simplification checkpoint (remove the three custom harness dependencies) and keep trade/admin surfaces intact during that feature swap.
+- 2026-03-28: Pine type-safety hardening — added explicit type annotations (`float`, `bool`, `int`, `string`, `color`) to every global-scope variable declaration in `indicators/v6-warbird-complete.pine`. Prior state had 80+ implicitly-typed globals — a known Pine v6 compile-failure vector. Every `input.*()`, fib constant, color/width constant, computed series, intermarket flag, structure condition, event bool, and drawing variable now carries an explicit type. Also fixed output budget (removed 2 duplicate exports: `adx_14`/`ml_adx_14` and `fib_direction`/`ml_direction_code` — now 63/64) and fixed 2 `log.info()` calls that exceeded Pine v6's 5-arg format limit. Updated `scripts/guards/pine-lint.sh` to count `bgcolor()`/`fill()`/`hline()` in the output budget and fixed method-call false positives and grep `|| echo 0` bugs. Pine-lint passes: 63/64 outputs, 6/40 `request.security()` calls, 0 errors. `npm run build` passes. Status: NOT yet TradingView-validated. Pine recovery is not complete until manual paste-and-load in TradingView confirms the indicator compiles and loads without error.
+- 2026-03-28: Locked the corrected mental model for the full system. This entry supersedes any prior confusion about what AG decides vs what price action/structure decides. Binding rules confirmed: (1) Fib anchor placement is determined by price action and swing structure — AG does NOT place anchors, it tunes fib engine settings (left/right bar space, anchor spacing, direction logic) through SHAP discovery. (2) Multi-timeframe direction alignment is structural — 15m fibs plus 1H/4H market structure must all agree in direction for a valid trigger; this is not a model-decided gate. (3) Entry trigger is the hardest and most important problem — AG optimizes the conditions but the difficulty is real; the crown jewel is entry, not confirmation. (4) Exhaustion signal is preserved — it found tops and bottoms through pivots, candlestick formations, and volume, tied to the REVERSAL outcome label; exhaustion is not noise. (5) Outcome labels are exactly: `TP2_HIT` / `TP1_ONLY` / `STOPPED` / `REVERSAL` / `OPEN` (OPEN is operational-only, not a training label). (6) Original locked AG configuration is confirmed from plan line 2817–2838 and `train-warbird.py`: `best_quality` preset, 5 bag folds, 2 stack levels, `log_loss` eval metric, `["KNN","FASTAI"]` excluded, 7200s time limit, walk-forward with 40-bar purge and 80-bar embargo, IC ranking → cluster dedup → 15–25 features per fold, features in ≥4/5 folds = robust (keep in Pine), <2/5 = fragile (remove). (7) Promotion thresholds are confirmed: mean OOS TP1 AUC-ROC ≥ 0.65, TP2 ≥ 0.60, TP1 calibration error ≤ 10%, worst fold TP1 AUC ≥ 0.55, stop rate on high-confidence ≤ 30%, high-confidence signals/week 3–25, AUC stability across folds ≤ 0.15. (8) SHAP pipeline is confirmed 5-step: TreeExplainer on best tree model → golden zone extraction via quantile binning → surrogate decision tree (max_depth=4) for rule extraction → rolling median across 4 weekly retrains for stability → encode as Pine inputs. (9) SHAP reporting to Admin dashboard must include: which model in the zoo made it, all settings for Pine, what was noise, what data was noise and what needs more data, feature importance rankings, golden zones per feature, indicator settings discovery (RSI 8 vs 14, EMA 21 vs 50, etc.). (10) AG trains on ALL MISSED trades — learning why setups were missed; `label_origin` field distinguishes `forward_scan` (synthetic) vs `setup_event` (real outcome); scored outcomes feed back into training labels. (11) Lateral crons keep running — they feed the AG training warehouse; nothing is paused for this mental model correction. (12) Volume and liquidity are the most important feature families — VWAP, all volume types, liquidity metrics; AG classifies which correlation pairs matter (may be different from current NQ/VIX/DXY/US10Y/HYG/LQD/BANK set). (13) Local AG warehouse gets up to 5 years of comparable electronic futures data for training depth; cloud core stays 2024-01-01 forward. No invented terminology, no premature infrastructure — Pine compiles first, fib engine is the focus, schema follows the core. Next blocker order updated below.
+- 2026-03-28: Removed the legacy `prob_hit_*` aliases from the active shared signal/API contract. Binding rule: `hit_*_first` and `prob_hit_*` names are now deletion-only debt inside the old local `scripts/warbird/*` workbench and must not be reintroduced as fallback fields in new API, dashboard/Admin, packet, or schema surfaces. *(Blocker order superseded: the corrected blocking order above moves Pine recovery to #1 and fib engine hardening to #2, ahead of the canonical writer cutover.)*
+- 2026-03-28: Completed the schema/admin contract reconciliation checkpoint. The draft schema package now matches the locked hierarchy, outcome semantics, and cloud-vs-local boundary, and was syntax-validated in a disposable Postgres 17 instance. Cloud publish-up is now structured around `warbird_training_runs`, `warbird_training_run_metrics`, `warbird_packets`, `warbird_packet_activations`, `warbird_packet_metrics`, `warbird_packet_feature_importance`, `warbird_packet_setting_hypotheses`, and `warbird_packet_recommendations`; raw SHAP remains local-only in `warbird_shap_results` and `warbird_shap_indicator_settings`. Admin requirements are now locked to two explicit surfaces: screenshot-style candidate/signal rows via `warbird_admin_candidate_rows_v` and full model/training metrics via `warbird_active_training_run_metrics_v`, alongside the packet KPI/explanation/recommendation views. *(Blocker order superseded: see corrected blocking order above — Pine recovery is #1.)*
 - 2026-03-28: Saved a restart-safe checkpoint handoff at `docs/decisions/2026-03-28-schema-admin-contract-handoff.md` capturing the repo audit, external research conclusions, locked architecture/schema decisions, validation results, excluded dirty files, and the exact next blocking sequence for a new chat.
-- 2026-03-28: Locked the hierarchy-first architecture checkpoint. Binding direction: the outcome contract now drives the platform, not the current model family; Warbird is split into `Generator` (Pine + admitted harnesses), `Selector` (offline model stack scoring frozen MES 15m fib candidates), and `Diagnostician` (research stack explaining wins, losses, and improvement paths). Canonical cloud tables exist to preserve point-in-time setup truth, realized path truth, and published decision/signal lineage only; explanatory features, SHAP outputs, ablation results, stop-out attribution, and entry-definition experiments belong in local research tables. `EXPIRED` / `NO_REACTION` are no longer treated as canonical economic model outcomes, and unresolved rows at the edge of observation are treated as censored rather than failed. The current 2026-03-30 schema drafts (`037`, `038`, and the local warehouse draft) are retained as design inputs only and are not deployable truth until rewritten against this lock. Next blocker: rewrite the schema drafts to match the locked hierarchy and truth semantics before any remote apply or reader/writer cutover.
+- 2026-03-28: Locked the hierarchy-first architecture checkpoint. Binding direction: the outcome contract now drives the platform, not the current model family; Warbird is split into `Generator` (Pine + admitted harnesses), `Selector` (offline model stack scoring frozen MES 15m fib candidates), and `Diagnostician` (research stack explaining wins, losses, and improvement paths). Canonical cloud tables exist to preserve point-in-time setup truth, realized path truth, and published decision/signal lineage only; explanatory features, SHAP outputs, ablation results, stop-out attribution, and entry-definition experiments belong in local research tables. `EXPIRED` / `NO_REACTION` are no longer treated as canonical economic model outcomes, and unresolved rows remain `OPEN` until they resolve to an economic outcome. The current 2026-03-30 schema drafts (`037`, `038`, and the local warehouse draft) are retained as design inputs only and are not deployable truth until rewritten against this lock. Next blocker: rewrite the schema drafts to match the locked hierarchy and truth semantics before any remote apply or reader/writer cutover.
 - 2026-03-27: Locked the architecture reset after a live repo audit. Current repo truth is `NO-GO`: `indicators/v6-warbird-complete.pine` is not TradingView-loadable (`isValid` / `atr` undeclared in the active file and downstream `log.info` type failures), the dashboard still recomputes fib geometry through the legacy `scripts/warbird/fib-engine.ts` helper instead of rendering a shared packet, `/admin` still leans on stale `measured_moves`, and the live `warbird_*` decision/outcome tables are empty. Binding delta: the adaptive fib engine snapshot is now the canonical base object; the canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`; decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, `PASS`; TradingView keeps execution-facing visuals/alerts plus the exhaustion precursor diamond while operator tables move to the dashboard; five years of comparable electronic futures data is approved for offline training research only, while cloud core support tables remain `2024-01-01T00:00:00Z` forward. The exact snapshot/candidate/outcome schema is now locked in this plan and `WARBIRD_MODEL_SPEC.md`. Next blocker: implement the migration, cut dashboard consumers off local fib computation, and replace the legacy `warbird_triggers_15m` / `warbird_conviction` / `warbird_risk` / `warbird_setups` path with the canonical normalized tables.
 - 2026-03-27: Applied live retention-floor trim migration `supabase/migrations/20260327000024_trim_pre_2024_core_history.sql` to keep core historical data at `2024-01-01T00:00:00Z` forward only. Validation confirmed zero pre-2024 rows remain in `econ_rates_1d`, `econ_yields_1d`, `econ_fx_1d`, `econ_vol_1d`, `econ_inflation_1d`, `econ_labor_1d`, `econ_activity_1d`, `econ_money_1d`, `econ_commodities_1d`, `econ_indexes_1d`, `geopolitical_risk_1d`, and legacy `econ_news_1d`; MES and cross-asset intraday tables were already clean. Next blocker: finish the remaining Jan 1 2024 forward-only core backfill gaps, especially `cross_asset_1d` and stale `econ_inflation_1d` freshness.
 - 2026-03-26: Locked the Supabase Edge cron cutover guardrails. Runtime truth for recurring ingestion is `pg_cron -> pg_net -> Supabase Edge Functions -> Supabase DB`; Vercel/`npm run build` remains only the frontend app deploy gate and is not evidence that Edge Functions package, deploy, or run. Required cutover order is now: fix Supabase-function-only packaging/runtime issues, deploy each function with the Supabase toolchain, invoke each function directly with `x-cron-secret`, then apply the pg_cron cutover migration. Hard stop: do not call the cutover complete while any live pg_cron helper still targets a Vercel URL or while Edge runtime correctness is inferred from the Vercel build instead of direct function deploy/invoke proof.
@@ -201,7 +210,7 @@ This hierarchy is now binding for the active path:
    - one frozen MES 15m fib candidate at bar close
 3. **Truth contract**
    - the primary economic questions are extension attainment versus stop failure on that frozen candidate
-   - unresolved rows at the edge of observation are censored, not failed
+   - unresolved rows remain `OPEN` until they resolve; `OPEN` is operational-only and excluded from training labels
 4. **Canonical schema**
    - stores point-in-time setup truth, realized path truth, and published signal lineage
 5. **Feature / research layer**
@@ -452,25 +461,20 @@ The live chart never waits on AG.
 
 ### Required Functional Changes
 
-1. Add explicit **0 fib line**.
-2. Add explicit **1 fib line**.
-3. Promote the script from a structure/regime overlay into a true **entry engine**.
-4. Separate the code into:
-   - fib engine
-   - intermarket engine
-   - macro/credit/volatility engine
-   - entry predicate
-   - visuals/table
-5. Add a side table area on the chart edge modeled after the reference image.
-6. Add entry markers that show exactly where the trade is actionable.
-7. Add a strict 20-point minimum target gate.
+1. ~~Add explicit **0 fib line**.~~ DONE.
+2. ~~Add explicit **1 fib line**.~~ DONE.
+3. ~~Promote the script from a structure/regime overlay into a true **entry engine**.~~ DONE.
+4. ~~Separate the code into fib engine, intermarket engine, entry predicate, visuals.~~ DONE.
+5. ~~Add a side table area on the chart edge.~~ Moved to dashboard — TradingView chart tables retired from active path.
+6. ~~Add entry markers that show exactly where the trade is actionable.~~ DONE.
+7. ~~Add a strict 20-point minimum target gate.~~ DONE.
 
 ### Required Design Changes
 
-1. Stop treating intermarket as just confirmation color.
-2. Turn every external series into a scored feature or explicit gate.
-3. Reduce duplicated logic and repeated `request.*()` calls.
-4. Build one shared rule block for both the indicator and the strategy.
+1. ~~Stop treating intermarket as just confirmation color.~~ DONE — weighted scored regime with hysteresis.
+2. ~~Turn every external series into a scored feature or explicit gate.~~ DONE.
+3. ~~Reduce duplicated logic and repeated `request.*()` calls.~~ DONE — 6 of 40 budget used.
+4. ~~Build one shared rule block for both the indicator and the strategy.~~ Retired — strategy path retired 2026-03-26.
 
 ---
 
@@ -590,16 +594,13 @@ No module should move into AG training or Deep Backtesting just because it “lo
 
 ### Must Be Built Before Deep Backtesting And AG
 
-1. Rebuild intermarket EMA/slope so requested-timeframe logic is computed correctly.
-2. Replace midpoint-based fib direction with a true ordered swing-leg direction model.
-3. Add explicit `0` and `1` fib lines.
-4. Add a deterministic stop family:
-   - fib invalidation
-   - fib invalidation plus ATR buffer
-   - structure breach
-5. Add the strict `+20` eligibility gate.
-6. Expose key fib and state values as exportable Pine series.
-7. Build the paired Pine strategy using the same shared predicate as the indicator.
+1. ~~Rebuild intermarket EMA/slope so requested-timeframe logic is computed correctly.~~ DONE.
+2. ~~Replace midpoint-based fib direction with a true ordered swing-leg direction model.~~ DONE.
+3. ~~Add explicit `0` and `1` fib lines.~~ DONE.
+4. ~~Add a deterministic stop family.~~ DONE — bounded family with fib invalidation, fib+ATR, structure breach, fixed ATR.
+5. ~~Add the strict `+20` eligibility gate.~~ DONE.
+6. ~~Expose key fib and state values as exportable Pine series.~~ DONE — 60 hidden exports.
+7. ~~Build the paired Pine strategy.~~ Retired — strategy path retired 2026-03-26.
 
 ### Preferred Directional Replacements
 
@@ -959,6 +960,62 @@ Implementation note:
 - the exact line thicknesses, dash styles, and label placement must still be inventoried directly from the approved live TradingView settings before implementation
 - the intermediate extension waypoints (`1.382`, `1.500`, `1.786`, and similar survivors) are operator-approved visuals and research candidates, but they do not force extra base-table columns unless waypoint-touch telemetry proves useful
 
+Visual gap vs Auto Fib GOLDEN TARGET reference (observed 2026-03-29):
+
+- **Anchor span**: the Auto Fib GOLDEN TARGET lines extend left from the anchor high/low area covering all bars in the swing, giving better visual geometry of the fib structure. WB v6 lines currently start from a narrower anchor point. The left edge of fib lines should reach the full anchor bar area, not just the pivot bar. This is purely visual for the trader.
+- **Intermediate waypoint lines**: price reacts to the intermediate extension levels (1.382, 1.50, 1.786) between targets. These faint gray lines are in the locked inventory above but are NOT yet drawn by WB v6. They need to be added as faint/dotted lines in Pine. The model may also benefit from waypoint-touch features — evaluate during AG feature selection.
+- **Both surfaces**: implement the anchor-span and waypoint visuals in Pine (WB v6 indicator) AND on the dashboard fib renderer so both operator views match.
+- **No budget concern**: these are `line.new()` / `label.new()` drawing objects, NOT `plot()` calls — they do not count toward the 64-output cap.
+
+### TradingView → Dashboard Webhook Architecture
+
+The dashboard is the command center. TradingView webhook alerts are the live event bridge from Pine to the dashboard. This replaces the need for a server-side setup detection cron.
+
+#### Flow
+
+```
+Pine alertcondition() fires
+  → TradingView sends POST to webhook URL
+    → Supabase Edge Function (tv-alert-webhook) receives POST
+      → validates payload + shared secret
+      → writes to canonical tables (warbird_fib_candidates_15m, warbird_signals_15m, etc.)
+        → Supabase Realtime pushes change to dashboard
+          → dashboard renders live state
+```
+
+#### Alert payload contract
+
+TradingView webhook alerts send JSON in the POST body. The `message` field in `alertcondition()` supports `{{close}}`, `{{time}}`, `{{exchange}}`, `{{ticker}}`, and other placeholders. The 3 kept alerts and their payloads:
+
+| Alert | Pine trigger | Webhook payload purpose |
+|-------|-------------|------------------------|
+| `WARBIRD ENTRY LONG` | `entryLongTrigger` | Create candidate + signal row with direction=LONG, entry/stop/TP levels from current fib state |
+| `WARBIRD ENTRY SHORT` | `entryShortTrigger` | Create candidate + signal row with direction=SHORT, entry/stop/TP levels from current fib state |
+| `PIVOT BREAK (against) + Regime Opposed` | `breakAgainstEvent` | Write reversal warning event to signal_events, update candidate decision state |
+
+#### Edge Function: `tv-alert-webhook`
+
+Required implementation:
+
+1. Validate webhook secret (TradingView supports custom headers or URL-embedded tokens)
+2. Parse alert name and `{{close}}` / `{{time}}` from payload
+3. For entry alerts: snapshot current fib engine state from the latest `warbird_fib_engine_snapshots_15m` row, create `warbird_fib_candidates_15m` + `warbird_signals_15m` rows
+4. For pivot break alert: find the active signal, write a `REVERSAL_DETECTED` event to `warbird_signal_events`
+5. Log to `job_log`
+
+#### Dashboard consumption
+
+- Supabase Realtime subscription on `warbird_signals_15m` and `warbird_signal_events`
+- Dashboard receives INSERT/UPDATE events in real-time — no polling
+- The 8 alerts cut from Pine (ACCEPT, REJECT, TARGET HITs, CONFLICT, RISK-ON/OFF flips) can be reconstituted as dashboard-side derived state from the stored fib engine snapshot + intermarket regime data — no Pine budget cost
+
+#### Rules
+
+1. The webhook Edge Function writes to canonical tables (037 schema), not legacy tables
+2. Pine is the signal source — the dashboard renders, it does not re-derive entry decisions
+3. The webhook secret must be stored in Supabase Vault, not hardcoded
+4. Webhook delivery is best-effort (TradingView retries but does not guarantee exactly-once) — the writer must be idempotent on natural key
+
 ---
 
 ## AutoGluon Optimization Loop
@@ -973,7 +1030,7 @@ Primary labels:
 
 - reached TP1
 - reached TP2
-- categorical outcome (`TP2_HIT`, `TP1_ONLY`, `STOPPED`, `REVERSAL`, `TIMED_OUT`)
+- categorical outcome (`TP2_HIT`, `TP1_ONLY`, `STOPPED`, `REVERSAL`, `OPEN`)
 - max favorable excursion
 - max adverse excursion
 
@@ -1289,14 +1346,14 @@ This section is execution guidance for all agents working the active plan. It do
 
 The March 23 execution delta is binding execution order for all Phase 2+ work:
 
-1. Freeze the MES 15m contract across Pine, strategy, dataset, and AG packet surfaces before module expansion.
+1. Freeze the MES 15m contract across Pine, dataset, and AG packet surfaces before module expansion.
 2. Harden the shared fib core and hidden export contract before admitting bolt-on modules.
 3. Build the always-on hidden event-response block before decorative bolt-ons.
-4. Bolt in the required exact-copy BigBeluga standalone harness.
-5. Bolt in the required exact-copy LuxAlgo Market Structure Break & OB Probability Toolkit standalone harness.
-6. Bolt in the required exact-copy LuxAlgo Luminance Breakout Engine standalone harness.
-7. Export real TradingView data with the fib contract plus harness outputs loaded.
-8. Run module admission in stages: fib baseline, event-response, BigBeluga, Market Structure Break & OB Probability Toolkit, Luminance, then parameter and joint configuration.
+4. Embed the TA core pack (15 deterministic metrics) as the canonical ML export surface.
+5. Export real TradingView data with the fib contract plus TA core pack outputs loaded.
+6. Run module admission in stages: fib + event-response + TA core pack baseline, then parameter and joint configuration.
+
+Historical note: steps 4-8 originally referenced three standalone harness bolt-ins (BigBeluga, LuxAlgo MSB/OB, LuxAlgo Luminance). Those harnesses were retired on 2026-03-28 and replaced by the embedded TA core pack.
 
 #### 2026-03-26 Execution Correction
 
@@ -1362,33 +1419,9 @@ Third-party scripts are allowed only through this gate:
 6. Only modules that survive out-of-sample admission may be folded into the main indicator / strategy pair.
 7. If exact-copy harnessing is not possible, stop the work. Do not substitute a hand-rolled internal copy.
 
-#### Required Harness Modules
+#### Required Harness Modules — SUPERSEDED (2026-03-28)
 
-These modules are required harness paths.
-
-1. **Pivot Levels [BigBeluga]**
-   - Required harness module.
-   - Replace the current hand-rolled pivot path.
-   - Use as hidden structure intelligence, not default chart clutter.
-   - Primary exported concepts:
-     - nearest pivot distance
-     - pivot cluster count
-     - pivot layer hit by length
-     - pivot support / resistance / active-zone state
-     - pivot-volume / importance context when exposed by the source script
-   - Hard stop:
-     - if exact-copy use is blocked, do not build a substitute pivot engine
-   - Source page: [Pivot Levels [BigBeluga]](https://www.tradingview.com/script/h5TO1j8H-Pivot-Levels-BigBeluga/)
-2. **LuxAlgo Market Structure Break & OB Probability Toolkit**
-   - Required harness module.
-   - Must enter through the standalone feature-harness path first.
-   - Hard stop:
-     - if exact-copy use is blocked, do not build a substitute structure / OB engine
-   - Source page: [Market Structure Break & OB Probability Toolkit](https://www.luxalgo.com/library/indicator/market-structure-break-ob-probability-toolkit/)
-3. **LuxAlgo Luminance Breakout Engine**
-   - Required harness module.
-   - Must enter through the standalone feature-harness path first.
-   - Source page: [Luminance Breakout Engine](https://www.luxalgo.com/library/indicator/luminance-breakout-engine/)
+The three standalone harnesses (BigBeluga Pivot Levels, LuxAlgo MSB/OB Toolkit, LuxAlgo Luminance Engine) were retired on 2026-03-28 (commit `c506c48`) and replaced by the embedded 15-metric TA core pack. The harness files were deleted from the repo (`indicators/harnesses/` directory removed). The TA core pack provides: EMAs (21/50/100/200), MACD histogram, RSI(14), ATR(14), ADX(14), volume raw, vol SMA(20), vol ratio, vol acceleration, bar spread × vol, OBV, MFI(14). All 15 are exported as `ml_*` hidden plots. Zero downstream consumers in TypeScript, API routes, or DB used the harness exports — the TA core pack covers the same feature space more efficiently within the 64-output budget.
 
 #### Third-Party Source Acquisition Guide
 
@@ -1452,8 +1485,8 @@ Required Phase 2 event-response export interface:
 | `ml_event_mode_code` | current event regime | `0=none`, `1=shock_continuation`, `2=shock_failure`, `3=deescalation_squeeze`, `4=inflation_scare`, `5=rates_relief`, `6=headline_conflict` |
 | `ml_event_shock_score` | normalized shock intensity | `0-100` deterministic Pine score |
 | `ml_event_reversal_score` | reversal risk after impulse | `0-100` deterministic Pine score |
-| `ml_event_volume_shock` | lower-timeframe volume shock state | `0/1` or deterministic score, but schema must remain stable |
-| `ml_event_macro_window_code` | scheduled macro window state | `0=none`, `1=pre_release`, `2=release_window`, `3=post_release` |
+| ~~`ml_event_volume_shock`~~ | lower-timeframe volume shock state | cut from Pine exports during budget reduction — AG computes from `ml_vol_ratio` + `ml_vol_acceleration` server-side |
+| ~~`ml_event_macro_window_code`~~ | scheduled macro window state | cut from Pine exports during budget reduction — AG computes from `econ_calendar` data server-side |
 | `ml_event_nq_state` | NQ reaction state | `-1`, `0`, `1` |
 | `ml_event_dxy_state` | dollar-state proxy (`DXY` in Pine if validated; otherwise approved dollar proxy) | `-1`, `0`, `1` |
 | `ml_event_zn_state` | ZN or `US10Y` reaction state | `-1`, `0`, `1` |
@@ -1552,18 +1585,15 @@ Phase 2 target files:
 - `indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine`
 - `indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine`
 
-Phase 2 required hidden export contract:
+Phase 2 required hidden export contract (current actual exports):
 
-- `ml_confidence_score`
-- `ml_direction_code`
-- `ml_setup_archetype_code`
-- `ml_fib_level_touched`
-- `ml_target_eligible_20pt`
-- `ml_stop_family_code`
-- `ml_regime_bucket_code`
-- `ml_session_bucket_code`
-- every event-response export listed above
-- required BigBeluga, MSB / OB, and Luminance harness exports once those harnesses exist
+- `ml_confidence_score`, `ml_direction_code`, `ml_setup_archetype_code`, `ml_fib_level_touched`, `ml_stop_family_code`
+- `ml_event_mode_code`, `ml_event_shock_score`, `ml_event_reversal_score`, `ml_event_nq_state`, `ml_event_dxy_state`, `ml_event_zn_state`, `ml_event_vix_state`, `ml_event_pivot_interaction_code`
+- `ml_ema21_dir`, `ml_ema50_dir`, `ml_ema200_dir`, `ml_ema21_dist_pct`, `ml_ema50_dist_pct`, `ml_ema200_dist_pct`
+- `ml_entry_long_trigger`, `ml_entry_short_trigger`, `ml_tp1_hit_event`, `ml_tp2_hit_event`
+- TA Core Pack: `ml_ema_21`, `ml_ema_50`, `ml_ema_100`, `ml_ema_200`, `ml_macd_hist`, `ml_rsi_14`, `ml_atr_14`, `ml_adx_14`, `ml_volume_raw`, `ml_vol_sma_20`, `ml_vol_ratio`, `ml_vol_acceleration`, `ml_bar_spread_x_vol`, `ml_obv`, `ml_mfi_14`
+
+Note: `ml_target_eligible_20pt`, `ml_regime_bucket_code`, `ml_session_bucket_code`, `ml_event_volume_shock`, `ml_event_macro_window_code` were in the original Phase 2 contract but are not currently exported. They were cut during the output budget reduction. AG can compute these server-side from the existing exports + Supabase data.
 
 Live-surface constraint:
 
@@ -1589,510 +1619,13 @@ Phase 2 required audit outputs:
 3. source-access confirmation for each harness
 4. explicit note of any still-missing export fields
 
-#### Phase 2 Kickoff Audit Snapshot (2026-03-23, target: `indicators/v6-warbird-complete.pine`)
+#### Phase 2 Completion Summary
 
-Phase target in one sentence: harden the fib core and hidden export surface in the active indicator, then land the always-on hidden event-response block before any bolt-on admission.
+Phase 2 was completed across 5 checkpoints on 2026-03-24. All checkpoints passed validation gates. On 2026-03-28 (commit `c506c48`), the three standalone harnesses (BigBeluga Pivot Levels, LuxAlgo MSB/OB Toolkit, LuxAlgo Luminance Engine) were retired and replaced by the embedded 15-metric TA core pack. The harness files were deleted from the repo. The current Pine export surface is the TA core pack (15 metrics) plus the pre-ML feature exports and event-response block. See the update log entries for 2026-03-24 through 2026-03-29 for the full execution history.
 
-Audit inventory:
+### Phase 3: Strategy Path — RETIRED (2026-03-26)
 
-- Pine surface: `indicators/v6-warbird-complete.pine` (active working script), `indicators/v2-warbird-unified.pine` (tracked baseline), and `indicators/v3-warbird-scope-fib.pine` + `indicators/v4-warbird-scope-fib-ml.pine` + `indicators/v5-warbird-scope-fib-visuals.pine` (untracked intermediate builds).
-- Reference math surfaces: `lib/fibonacci.ts`, `lib/pivots.ts`, `lib/swing-detection.ts`.
-- Validation gates: `./scripts/guards/pine-lint.sh`, `./scripts/guards/check-contamination.sh`, `npm run build`.
-- Routes/tables touched in this kickoff: none. This kickoff is Pine-only.
-
-Current findings and blockers before edits:
-
-1. Fib core is not contract-clean yet.
-   - Direction remains midpoint-driven (`regime := close > fibMid ? 1 : -1`) instead of a structural leg-direction contract.
-   - The script does not yet encode the canonical MES 15m setup object, explicit +20-point eligibility gate, or a bounded stop-family selector.
-2. Hidden export surface exists but is incomplete for the active contract.
-   - `ml_*` exports are present, but required contract fields are missing (`confidence_score`, setup archetype, bucket keys, event-response states, pivot-harness states).
-   - Export visibility is tied to `showMLData`; the hidden export contract must remain always-on and schema-stable for training capture.
-3. Always-on event-response block is missing.
-   - No dedicated MES/NQ/DXY/ZN/VIX reaction-state block, no macro release-window logic, and no explicit pivot-interaction state machine.
-   - Existing consensus/correlation/exhaustion logic is not a substitute for the required event-response module.
-4. Pivot path is still hand-rolled.
-   - `ta.pivothigh/ta.pivotlow` are still the active pivot path; no BigBeluga standalone harness exists yet.
-5. Required third-party harnesses are not staged yet.
-   - No standalone exact-copy harness files exist for BigBeluga, the required Market Structure Break & OB Probability Toolkit module, or the required Luminance module.
-
-Baseline gate status:
-
-- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass with warning (`W4` visible plots).
-- `./scripts/guards/check-contamination.sh` => pass.
-- `npm run build` => pass.
-
-Next blocking item at kickoff time (resolved in the checkpoint below):
-
-- Implement the Phase 2 fib-core hardening pass in `indicators/v6-warbird-complete.pine`, then define and wire the always-on hidden event-response interface before starting the required BigBeluga and Market Structure Break & OB Probability Toolkit harness work. (Resolved 2026-03-24)
-
-#### Phase 2 Checkpoint 1 Lock (2026-03-24, target: `indicators/v6-warbird-complete.pine`)
-
-Checkpoint target in one sentence: complete the first implementation hardening block by replacing midpoint-direction semantics, freezing the required hidden export interface, and shipping an always-on event-response module before any third-party harness admission.
-
-Files touched:
-
-- `indicators/v6-warbird-complete.pine`
-
-Exact line references for replaced midpoint and local pivot path usage:
-
-1. Midpoint direction replacement:
-   - previous midpoint-driven direction path removed
-   - active structural-leg direction now at `indicators/v6-warbird-complete.pine:144-154` (`regime := lowIdx > highIdx ? 1 : -1`, directional `l_zero` / `l_one`).
-2. Directional fib contract and stop/target gate now at:
-   - `indicators/v6-warbird-complete.pine:156-178` (directional fib levels, bounded stop-family interface, `targetEligible20pt`).
-3. Event-response and gating path now at:
-   - `indicators/v6-warbird-complete.pine:284-344` (cross-asset states, macro window coding, event mode coding, suppression gating, confidence scoring).
-4. Pivot interaction coding for event-response interface now at:
-   - `indicators/v6-warbird-complete.pine:200-209` (cluster count, interaction code, nearest-pivot distance).
-
-Export-field inventory before/after:
-
-- Before (required contract gaps): `ml_confidence_score`, `ml_direction_code`, `ml_setup_archetype_code`, `ml_fib_level_touched`, `ml_target_eligible_20pt`, `ml_stop_family_code`, `ml_regime_bucket_code`, `ml_session_bucket_code`, and all required `ml_event_*` fields were missing.
-- After (now present as always-on hidden exports): `ml_confidence_score`, `ml_direction_code`, `ml_setup_archetype_code`, `ml_fib_level_touched`, `ml_target_eligible_20pt`, `ml_stop_family_code`, `ml_regime_bucket_code`, `ml_session_bucket_code`, `ml_event_mode_code`, `ml_event_shock_score`, `ml_event_reversal_score`, `ml_event_volume_shock`, `ml_event_macro_window_code`, `ml_event_nq_state`, `ml_event_dxy_state`, `ml_event_zn_state`, `ml_event_vix_state`, `ml_event_pivot_interaction_code`, plus pivot contract placeholders (`ml_pivot_distance_nearest`, `ml_pivot_cluster_count`, `ml_pivot_active_zone_code`).
-
-Harness source-access confirmation:
-
-- BigBeluga pivot harness: not started in this checkpoint (source access pending).
-- Market Structure Break & OB Probability Toolkit harness: not started in this checkpoint (source access pending).
-- Luminance harness: not started in this checkpoint (status at checkpoint time; later reclassified as required on 2026-03-24).
-
-Still-missing export fields:
-
-- Required third-party harness-family exports (BigBeluga + MSB/OB internals) are still missing because harness admission has not started yet.
-
-Validation gates run:
-
-- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass (warning only: visible plots)
-- `./scripts/guards/check-contamination.sh` => pass
-- `npm run build` => pass
-
-Next blocking item:
-
-- Start the required exact-copy `Pivot Levels [BigBeluga]` standalone harness admission path (source access confirmation + harness file creation + hidden export contract wiring) before touching the required MSB / OB harness.
-
-#### Phase 2 Checkpoint 2 Lock (2026-03-24, target: `indicators/harnesses/bigbeluga-pivot-levels-harness.pine`)
-
-Checkpoint target in one sentence: land the required BigBeluga module as a standalone exact-copy harness with a stable hidden export surface before starting the required MSB / OB harness path.
-
-Files touched:
-
-- `indicators/harnesses/bigbeluga-pivot-levels-harness.pine`
-
-Harness source-access confirmation:
-
-- Source page: [Pivot Levels [BigBeluga]](https://www.tradingview.com/script/h5TO1j8H-Pivot-Levels-BigBeluga/)
-- `OPEN-SOURCE SCRIPT`: confirmed on the TradingView script page.
-- `Source code`: confirmed available on the TradingView script page.
-- Retrieved source body used for this checkpoint came from the script page source path and was then staged as a private local harness copy before interface wiring.
-
-Exact-copy scope confirmation:
-
-- Original BigBeluga internals are preserved in `indicators/harnesses/bigbeluga-pivot-levels-harness.pine:1-128`.
-- Interface-only harness wiring is appended in `indicators/harnesses/bigbeluga-pivot-levels-harness.pine:131-177` and does not rewrite source internals.
-
-Hidden export inventory for the BigBeluga harness:
-
-- `ml_pivot_distance_nearest`
-- `ml_pivot_cluster_count`
-- `ml_pivot_active_zone_code` (`1=support`, `2=resistance`, `3=active`; `0` fallback when no display layer is available)
-- `ml_pivot_layer_length` (active nearest layer length)
-- `ml_pivot_volume_nearest` (nearest layer-side volume)
-- `ml_pivot_volume_distribution_pct` (nearest layer-side share of displayed pivot volume)
-
-Still-missing fields / integration work after this checkpoint:
-
-- Main indicator pivot path replacement is still pending; `indicators/v6-warbird-complete.pine` remains on the interim local pivot logic until the integration checkpoint.
-- Required MSB / OB harness exports remain missing because that required harness has not started yet.
-
-Validation gates run:
-
-- `./scripts/guards/pine-lint.sh indicators/harnesses/bigbeluga-pivot-levels-harness.pine` => pass (warning only: visible plots)
-- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass (warning only: visible plots)
-- `./scripts/guards/check-contamination.sh` => pass
-- `npm run build` => pass
-
-Next blocking item:
-
-- Start required exact-copy source-access confirmation and standalone harness admission for `Market Structure Break & OB Probability Toolkit [LuxAlgo]` before any BigBeluga-to-main-indicator integration or Luminance harness work.
-
-#### Phase 2 Checkpoint 3 Lock (2026-03-24, target: `indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine`)
-
-Checkpoint target in one sentence: land the required LuxAlgo MSB/OB module as a standalone exact-copy harness with a stable hidden export surface before the required Luminance harness work.
-
-Files touched:
-
-- `indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine`
-
-Harness source-access confirmation:
-
-- Source page: [TradingView open-source page](https://www.tradingview.com/script/ObcbP092-Market-Structure-Break-OB-Probability-Toolkit-LuxAlgo/)
-- Library page: [LuxAlgo library page](https://www.luxalgo.com/library/indicator/market-structure-break-ob-probability-toolkit/)
-- `OPEN-SOURCE SCRIPT`: confirmed on the TradingView script page.
-- `Source code`: confirmed available on the TradingView script page.
-- Retrieved source body for this checkpoint was staged from the open-source script path and locked as the standalone harness body before interface wiring.
-
-Exact-copy scope confirmation:
-
-- Original LuxAlgo internals are preserved in `indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine:1-330`.
-- Interface-only harness wiring is appended in `indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine:332-380` and does not rewrite source internals.
-
-Hidden export inventory for the LuxAlgo harness:
-
-- `ml_msb_direction_code` (`1=bull`, `-1=bear`, `0=none`)
-- `ml_msb_momentum_zscore`
-- `ml_msb_bull_break`
-- `ml_msb_bear_break`
-- `ml_ob_active_count`
-- `ml_ob_hpz_active_count`
-- `ml_ob_nearest_distance`
-- `ml_ob_nearest_quality_score`
-- `ml_ob_nearest_poc`
-- `ml_ob_nearest_direction_code`
-- `ml_ob_nearest_mitigated_code`
-- `ml_ob_reliability_pct`
-
-Still-missing fields / integration work after this checkpoint:
-
-- Main indicator integration is still pending; `indicators/v6-warbird-complete.pine` does not yet consume the standalone BigBeluga and LuxAlgo harness exports.
-- Pivot-path replacement in the main indicator remains pending until the integration checkpoint.
-
-Validation gates run:
-
-- `./scripts/guards/pine-lint.sh indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine` => pass (warning only: visible plots)
-- `./scripts/guards/pine-lint.sh indicators/harnesses/bigbeluga-pivot-levels-harness.pine` => pass (warning only: visible plots)
-- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass (warning only: visible plots)
-- `./scripts/guards/check-contamination.sh` => pass
-- `npm run build` => pass
-
-Next blocking item (superseded by plan delta on 2026-03-24):
-
-- Start the Phase 2 main-indicator integration checkpoint to replace the interim local pivot path with the admitted BigBeluga harness signals and wire the admitted LuxAlgo MSB/OB harness-family exports into the canonical hidden export contract in `indicators/v6-warbird-complete.pine`. (Superseded by required Luminance harness admission)
-
-#### Phase 2 Checkpoint 4 Lock (2026-03-24, target: `indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine`)
-
-Checkpoint target in one sentence: land the required LuxAlgo Luminance module as a standalone exact-copy harness with a stable hidden export surface before main-indicator integration.
-
-Files touched:
-
-- `indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine`
-
-Harness source-access confirmation:
-
-- Source page: [TradingView open-source page](https://www.tradingview.com/script/FIWesyBd-Luminance-Breakout-Engine-LuxAlgo/)
-- Library page: [LuxAlgo library page](https://www.luxalgo.com/library/indicator/luminance-breakout-engine/)
-- `OPEN-SOURCE SCRIPT`: confirmed on the TradingView script page.
-- `Source code`: confirmed available on the TradingView script page.
-- Retrieved source body for this checkpoint was staged from the open-source script path and locked as the standalone harness body before interface wiring.
-
-Exact-copy scope confirmation:
-
-- Original LuxAlgo Luminance internals are preserved in `indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine:1-306`.
-- Interface-only harness wiring is appended in `indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine:308-360` and does not rewrite source internals.
-
-Hidden export inventory for the Luminance harness:
-
-- `ml_luminance_signal`
-- `ml_luminance_upper_threshold`
-- `ml_luminance_lower_threshold`
-- `ml_luminance_intensity`
-- `ml_luminance_direction_code`
-- `ml_luminance_breakout_code`
-- `ml_luminance_over_upper`
-- `ml_luminance_over_lower`
-- `ml_luminance_bull_ob_active_count`
-- `ml_luminance_bear_ob_active_count`
-- `ml_luminance_bull_ob_mitigated_count`
-- `ml_luminance_bear_ob_mitigated_count`
-- `ml_luminance_bull_ob_nearest_distance`
-- `ml_luminance_bear_ob_nearest_distance`
-- `ml_luminance_bull_ob_nearest_intensity`
-- `ml_luminance_bear_ob_nearest_intensity`
-
-Still-missing fields / integration work after this checkpoint:
-
-- Main indicator integration is still pending; `indicators/v6-warbird-complete.pine` does not yet consume the standalone BigBeluga, LuxAlgo MSB/OB, and LuxAlgo Luminance harness exports.
-- Pivot-path replacement in the main indicator remains pending until the integration checkpoint.
-
-Validation gates run:
-
-- `./scripts/guards/pine-lint.sh indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine` => pass (warning only: visible plots)
-- `./scripts/guards/pine-lint.sh indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine` => pass (warning only: visible plots)
-- `./scripts/guards/pine-lint.sh indicators/harnesses/bigbeluga-pivot-levels-harness.pine` => pass (warning only: visible plots)
-- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass (warning only: visible plots)
-- `./scripts/guards/check-contamination.sh` => pass
-- `npm run build` => pass
-
-Next blocking item:
-
-- Start the Phase 2 main-indicator integration checkpoint to replace the interim local pivot path with the admitted BigBeluga harness signals and wire the admitted LuxAlgo MSB/OB and LuxAlgo Luminance harness-family exports into the canonical hidden export contract in `indicators/v6-warbird-complete.pine`.
-
-#### Phase 2 Checkpoint 5 Lock (2026-03-24, target: `indicators/v6-warbird-complete.pine`)
-
-Checkpoint target in one sentence: replace the interim local pivot-event path with admitted harness-backed signals and complete the canonical hidden export contract inside the live main indicator.
-
-Files touched:
-
-- `indicators/v6-warbird-complete.pine`
-
-Integration scope completed in this checkpoint:
-
-- Replaced the interim local pivot-event wiring with admitted BigBeluga-derived pivot state (`ml_pivot_*` family) for interaction code, nearest distance, cluster count, and active-zone state.
-- Wired admitted LuxAlgo MSB/OB feature family into the main indicator hidden contract:
-  - `ml_msb_*`
-  - `ml_ob_*`
-- Wired admitted LuxAlgo Luminance feature family into the main indicator hidden contract:
-  - `ml_luminance_signal`
-  - `ml_luminance_upper_threshold`
-  - `ml_luminance_lower_threshold`
-  - `ml_luminance_intensity`
-  - `ml_luminance_direction_code`
-  - `ml_luminance_breakout_code`
-  - `ml_luminance_over_upper`
-  - `ml_luminance_over_lower`
-  - `ml_luminance_bull_ob_active_count`
-  - `ml_luminance_bear_ob_active_count`
-  - `ml_luminance_bull_ob_mitigated_count`
-  - `ml_luminance_bear_ob_mitigated_count`
-  - `ml_luminance_bull_ob_nearest_distance`
-  - `ml_luminance_bear_ob_nearest_distance`
-  - `ml_luminance_bull_ob_nearest_intensity`
-  - `ml_luminance_bear_ob_nearest_intensity`
-- Added remaining BigBeluga export fields to the main indicator contract:
-  - `ml_pivot_layer_length`
-  - `ml_pivot_volume_nearest`
-  - `ml_pivot_volume_distribution_pct`
-
-Validation gates run:
-
-- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass (warning only: visible plots)
-- `./scripts/guards/check-contamination.sh` => pass
-- `npm run build` => pass
-
-Next blocking item:
-
-- Restore the active indicator-only contract and operator-approved visuals in `indicators/v6-warbird-complete.pine` without strategy dependencies or Deep Backtesting requirements.
-
-### Phase 3: Strategy Path (retired from active scope on 2026-03-26)
-
-Historical record only. The paired strategy, parity guard, and Deep Backtesting protocol below are no longer active blockers for the indicator unless the user explicitly reopens them.
-
-1. Port the shared logic into a Pine strategy.
-2. Implement stop / target mechanics.
-3. Add 20-point minimum target gate.
-4. Run Deep Backtesting over the longest reliable MES history.
-5. Keep required harness modules and any additional bolt-ons isolated behind shared feature flags until they survive training admission.
-
-Phase 3 target file:
-
-- `indicators/v6-warbird-complete-strategy.pine`
-
-Phase 3 must prove:
-
-1. same entry predicate as the indicator
-2. same hidden event-response interface
-3. same bucket keys
-4. same stop-family encoding
-5. same `20pt+` gate
-
-Phase 3 validation checklist must compare indicator and strategy outputs for the same historical bars before Phase 4 begins.
-
-#### Phase 3 Checkpoint 1 Lock (2026-03-24, target: `indicators/v6-warbird-complete-strategy.pine`)
-
-Checkpoint target in one sentence: convert the planned strategy surface from placeholder to executable Pine strategy while preserving indicator parity for setup predicate and hidden export contract.
-
-Files touched:
-
-- `indicators/v6-warbird-complete-strategy.pine`
-
-Implementation completed in this checkpoint:
-
-- Converted top-level declaration from `indicator(...)` to `strategy(...)` with bar-close-safe execution (`process_orders_on_close = true`) and no pyramiding.
-- Preserved the same core entry predicates as the indicator:
-  - `longSignal`
-  - `shortSignal`
-  - same `targetEligible20pt` gating
-  - same event-suppression path
-- Added deterministic strategy execution layer:
-  - snapshot stop and target levels on signal
-  - long/short flip handling
-  - `strategy.exit` with split TP1/TP2 logic and shared stop
-- Preserved full hidden export contract parity with the indicator (`ml_*` family) at the time of the checkpoint. The current canonical contract is re-hardened in Phase 3 checkpoint 3 and includes the required `ml_pivot_*`, `ml_msb_*`, `ml_ob_*`, and `ml_luminance_*` fields without the retired legacy session-activity exports.
-
-Validation gates run:
-
-- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete-strategy.pine` => pass (warning only: visible plots)
-- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass (warning only: visible plots)
-- hidden export parity check (`ml_*` names): indicator count `107`, strategy count `107`, no diff
-- `./scripts/guards/check-contamination.sh` => pass
-- `npm run build` => pass
-
-Next blocking item:
-
-- Run the Phase 3 indicator-vs-strategy parity checklist across the same historical bars, then execute Deep Backtesting and document any predicate/exit drift before opening Phase 4.
-
-#### Phase 3 Checkpoint 2 Lock (2026-03-24, target: strategy-indicator parity preflight)
-
-Checkpoint target in one sentence: execute repeatable local parity gates that verify indicator/strategy contract and signal encoding alignment before manual TradingView validation.
-
-Files touched:
-
-- `scripts/guards/check-indicator-strategy-parity.sh`
-
-Local parity preflight completed in this checkpoint:
-
-- Added a dedicated parity guard script that fails on:
-  - hidden export contract drift (`ml_*` names)
-  - core predicate drift for:
-    - `longSignal`
-    - `shortSignal`
-    - `setupArchetypeCode`
-    - `eventModeCode`
-    - `eventPivotInteractionCode`
-    - stop-family and `20pt+` gate encodings
-  - missing strategy execution primitives (`strategy.entry` / `strategy.exit` split TP handling)
-- Verified the strategy still passes Pine lint and project build gates after parity guard admission.
-
-Validation gates run:
-
-- `bash scripts/guards/check-indicator-strategy-parity.sh` => pass
-- `./scripts/guards/pine-lint.sh indicators/v6-warbird-complete-strategy.pine` => pass (warning only: visible plots)
-- `./scripts/guards/check-contamination.sh` => pass
-- `npm run build` => pass
-
-Manual constraint acknowledged in this checkpoint:
-
-- Deep Backtesting and same-bar visual/pnl parity cannot be completed from the terminal-only path in this repo and must be run in TradingView Strategy Tester / Deep Backtesting UI.
-
-Next blocking item:
-
-- Run manual TradingView Strategy Tester + Deep Backtesting parity validation for `indicators/v6-warbird-complete-strategy.pine` against `indicators/v6-warbird-complete.pine` on the same MES 15m history window, then document drift findings before Phase 4.
-
-#### Phase 3 Checkpoint 3 Lock (2026-03-26, target: predicate hardening + contract re-parity)
-
-Checkpoint target in one sentence: re-harden the shared indicator/strategy live predicate around the already-computed setup archetypes and remove strategy-side hidden-export drift that reintroduced retired legacy ML fields.
-
-Files touched:
-
-- `indicators/v6-warbird-complete.pine`
-- `indicators/v6-warbird-complete-strategy.pine`
-- `WARBIRD_MODEL_SPEC.md`
-
-Implementation completed in this checkpoint:
-
-- Tightened the shared live signal predicate in both Pine surfaces so `longSignal` / `shortSignal` now require a direction-aligned setup archetype in addition to the existing velocity cross, MTF alignment, regime, midpoint, `20pt+`, and event-suppression gates.
-- Locked signal-eligible setup archetypes to:
-  - `1` = accept continuation
-  - `2` = zone rejection
-  - `3` = pivot continuation
-  - `5` = reentry after TP1
-- Left setup archetype `4` (`failed move reversal`) as reversal context only; it does not authorize a same-direction continuation entry.
-- Removed strategy-only hidden-export drift that had broken parity:
-  - deleted the `showMLData` input/gating path
-  - retired legacy `ml_session_*` activity flags from the strategy export surface
-  - retired legacy `ml_fib_regime`
-  - retired legacy `.786` and `1.0` export families
-- Re-hardened local indicator/strategy parity and unified the hidden export surface, but manual TradingView validation then proved the combined live plot budget is still invalid because the current export surface exceeds TradingView's hard `64` plot-count cap.
-- Follow-up Pine checkpoint completed after that validation: reduced the live indicator/strategy hidden export packet to the `52`-field minimum contract so the scripts now fit inside TradingView's plot budget (`53` total plot-style calls in the indicator, `56` in the strategy).
-
-Validation gates run:
-
-- `scripts/guards/check-indicator-strategy-parity.sh` => pass before plot-budget validation was added; this proved parity only, not TradingView loadability
-- `scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine` => pass before plot-budget validation was added
-- `scripts/guards/pine-lint.sh indicators/v6-warbird-complete-strategy.pine` => pass before plot-budget validation was added
-
-Backend checkpoint implemented in this follow-up:
-
-- Added `supabase/migrations/20260326000021_admin_coverage_15m_fix.sql` to rewrite `get_admin_table_coverage()` so it no longer references retired `warbird_forecasts_1h`, tolerates missing tables, and uses `bar_close_ts` when present instead of assuming every table exposes `ts`.
-- Updated `app/api/cron/mes-1m/route.ts` so the `market_closed` and `no_gap` early-return paths now write `job_log` rows with `SKIPPED` status before returning.
-- Reworked `supabase/migrations/20260326000018_15m_canonical_cutover.sql` so the five live execution tables are preserved through cutover rather than hard-dropped:
-  - one-time backup copies are created as `*_legacy_20260326`
-  - new 15m-canonical tables are created under the production names
-  - existing trigger / conviction / setup / setup-event / risk rows are copied forward into the new schema with preserved primary keys and sequence reset
-- Reduced the live Pine hidden export surface to the minimum `52`-field contract in both `indicators/v6-warbird-complete.pine` and `indicators/v6-warbird-complete-strategy.pine`, which brings the live scripts back under TradingView's `64`-plot hard cap.
-
-Validation gates run:
-
-- `scripts/guards/check-indicator-strategy-parity.sh` => pass after plot-budget reduction; hidden export names remain equal and total plot-style counts now fit under TradingView's hard cap.
-- `npm run build` => pass after the admin coverage RPC repair, cutover preservation patch, and `mes-1m` skip-path logging changes.
-
-Next blocking item:
-
-- Rerun manual Phase 3 TradingView validation on the hardened shared predicate now that the scripts fit inside the live plot budget, then close Phase 3 or capture any remaining live-chart defects.
-
-#### Phase 3 Manual TradingView Validation Protocol (required before Phase 4)
-
-Use this exact protocol to close the remaining Phase 3 blocker.
-
-Manual execution scope:
-
-1. TradingView chart symbol and timeframe:
-   - symbol: canonical MES continuous contract used in live workflow
-   - timeframe: `15m`
-2. Load both scripts on the same chart:
-   - `indicators/v6-warbird-complete.pine`
-   - `indicators/v6-warbird-complete-strategy.pine`
-3. Ensure both scripts use identical inputs for:
-   - stop-family selection
-   - `20pt+` eligibility gate
-   - event-response and harness-related settings
-4. Run Strategy Tester baseline on the chosen history window.
-5. Run Deep Backtesting on the same history window.
-
-Deep Backtesting stance for this protocol:
-
-1. Use Deep Backtesting for long-history metrics and date-range stress tests.
-2. Do not use Deep Backtesting as the sole bar-level truth source.
-3. TradingView documents that Deep Backtesting can differ from regular mode because calculation starts earlier or at the custom range start, which changes stateful calculations such as EMA/RMA, and Deep Backtesting results are not drawn on the chart itself.
-4. On MES `15m`, Bar Magnifier should be enabled during serious validation because TradingView uses lower-timeframe data for more realistic intrabar fills when available.
-5. If regular Strategy Tester, Deep Backtesting, and chart inspection disagree materially, treat that as a blocker to investigate rather than as proof that one surface is automatically correct.
-
-Required parity checks:
-
-1. Entry predicate parity:
-   - every strategy long entry aligns to a visible indicator long signal on the same bar
-   - every strategy short entry aligns to a visible indicator short signal on the same bar
-2. Event-response parity:
-   - no strategy entries during obvious indicator suppress states (`eventModeCode` suppress set)
-3. Stop/target parity:
-   - strategy exits occur only through configured stop + TP path (TP1/TP2 split model)
-4. Contract parity:
-   - hidden export names remain equal (`ml_*` contract parity already gate-checked locally)
-
-Required evidence capture (record in this plan checkpoint before opening Phase 4):
-
-1. Chart metadata:
-   - symbol
-   - timeframe
-   - history window start/end
-2. Strategy Tester summary metrics:
-   - net profit
-   - profit factor
-   - percent profitable
-   - max drawdown
-   - total closed trades
-3. Deep Backtesting summary metrics:
-   - net profit
-   - profit factor
-   - percent profitable
-   - max drawdown
-   - total closed trades
-4. Bar Magnifier notes:
-   - whether Bar Magnifier was enabled
-   - whether fill-path behavior changed materially with it on
-5. Drift notes:
-   - count of observed entry-bar mismatches (if any)
-   - count of observed exit-path mismatches (if any)
-   - root-cause notes for any mismatch
-
-Phase 3 close criteria:
-
-1. Manual Strategy Tester and Deep Backtesting runs completed on MES `15m`.
-2. Bar Magnifier impact reviewed and recorded.
-3. No unresolved entry predicate mismatches.
-4. No unresolved stop-family / `20pt+` gate mismatches.
-5. Drift notes and metrics are written into this active plan.
-6. Next blocking item updated to Phase 4 dataset + AG loop kickoff.
+The paired strategy, parity guard, and Deep Backtesting protocol were retired from the active blocking path on 2026-03-26. `indicators/v6-warbird-complete-strategy.pine` and `scripts/guards/check-indicator-strategy-parity.sh` remain as legacy scratch/reference surfaces. They do not block indicator work unless explicitly reopened. See update log entries for 2026-03-24 through 2026-03-26 for checkpoint history.
 
 ### Phase 4: Dataset + AG Loop
 
@@ -2130,12 +1663,11 @@ Phase 4 exact local targets:
 
 Phase 4 exact training order:
 
-1. fib + event-response baseline only
-2. BigBeluga admission
-3. Market Structure Break & OB Probability Toolkit admission
-4. Luminance Breakout Engine admission
-5. parameter admission inside surviving modules
-6. joint configuration on surviving modules only
+1. fib + event-response + TA core pack baseline
+2. parameter admission inside surviving feature families
+3. joint configuration on surviving feature families only
+
+Historical note: the original order included 3 standalone harness admission steps (BigBeluga, MSB/OB, Luminance) — those harnesses were retired on 2026-03-28 and replaced by the embedded TA core pack.
 
 Phase 4 exact local warehouse entities:
 
@@ -2449,7 +1981,7 @@ Locked truth semantics for the next schema rewrite:
   - stop before TP1
   - stop after TP1 but before TP2
   - reversal when the locked reversal rule is satisfied
-- unresolved rows at the edge of observation are censored rather than labeled as economic failures
+- unresolved rows remain `OPEN` until they resolve to an economic outcome
 - exact enum names and exact column names for these semantics are part of the next schema rewrite checkpoint, not this lock
 5. Snapshot rows must record, at minimum:
    - active anchor high / low
@@ -2473,14 +2005,14 @@ Locked truth semantics for the next schema rewrite:
 
 #### Feature-Family De-Duplication Rule
 
-The three installed harnesses are signal sources, not permission to flood the model with redundant variants of the same concept.
+The TA core pack and pre-ML exports together form the production feature surface. Do not add redundant variants of the same concept.
 
 Rules:
 
-1. Do not keep overlapping MA / trend / volume features from multiple surfaces unless they encode materially different information.
-2. If a harness already exports the canonical state for a concept family, a separate hand-built copy of that same family is research-only until it proves additive value.
-3. Prefer harness-native volume / structure / order-block / breakout states over generic duplicated proxies when the harness is exact-copy and admitted.
-4. AG admission should compare feature families, not reward the same idea repeated in different columns.
+1. Do not keep overlapping MA / trend / volume features from multiple export blocks unless they encode materially different information.
+2. If the TA core pack already exports the canonical state for a concept family (e.g., volume via `ml_vol_ratio` + `ml_vol_acceleration`), a separate hand-built copy is research-only until it proves additive value.
+3. AG admission should compare feature families, not reward the same idea repeated in different columns.
+4. Any future third-party harness re-admission must go through the Third-Party Pine Admission Gate and prove additive value over the TA core pack baseline.
 
 Neural-layer policy (research-only unless promoted):
 
@@ -2681,7 +2213,7 @@ All labels are computed from future price action. Targets are the 1.236 and 1.61
 |-------|------|------------|
 | `reached_tp1` | binary | Price reached the 1.236 fib extension in trade direction within horizon |
 | `reached_tp2` | binary | Price reached the 1.618 fib extension in trade direction within horizon |
-| `outcome` | categorical | `TP2_HIT`, `TP1_ONLY`, `STOPPED`, `REVERSAL`, `TIMED_OUT` |
+| `outcome` | categorical | `TP2_HIT`, `TP1_ONLY`, `STOPPED`, `REVERSAL`, `OPEN` |
 
 #### Outcome Logic
 
@@ -2708,12 +2240,12 @@ for each future bar j in [i+1, i+1+max_horizon]:
 
 if timed out:
     if tp1 hit: outcome = TP1_ONLY
-    else: outcome = TIMED_OUT
+    else: outcome = OPEN
 ```
 
 Maximum horizon: 40 bars (10 hours of 15m bars).
 
-Stopped trades get **higher penalty weight** during training (weight = 2.0) so AG learns what causes failures. Timed-out trades get weight 0.5 (ambiguous).
+Stopped trades get **higher penalty weight** during training (weight = 2.0) so AG learns what causes failures. `OPEN` rows are operational-only and excluded from training targets.
 
 #### Secondary Labels
 
@@ -2989,7 +2521,7 @@ PINE IMPLEMENTATION NOTES
 - total `request.security()` + `request.economic()` calls used vs v1 budget
 - exact Pine functions/modules required for packet compatibility
 - table fields required: action, TP1 probability, TP2 probability, reversal risk, win rate, stats window, regime, conflict, stop family, TP1/TP2 path
-- alerts required: entry, re-entry, reversal warning, TP1 hit, TP2 hit
+- alerts kept: entry long, entry short, pivot break reversal (.50 warning). All other alerts moved to dashboard.
 ```
 
 ---
@@ -3022,7 +2554,7 @@ This snapshot is based on the linked Supabase project, the repo runtime surfaces
 
 #### Current runtime ownership: Supabase pg_cron is the sole schedule producer
 
-Supabase pg_cron owns all recurring job scheduling. Supabase hosts the Next.js App Router route handlers that pg_cron calls via pg_net. Supabase does not own any cron schedules.
+Supabase pg_cron owns all recurring job scheduling. Supabase hosts the Next.js App Router route handlers that pg_cron calls via pg_net. Vercel does not own any cron schedules.
 
 1. All recurring jobs are triggered by Supabase pg_cron via pg_net HTTP POST to the App Router route.
 2. Supabase is retained only for dashboard delivery and read-oriented API/UI surfaces.
@@ -3325,7 +2857,7 @@ Cloud is the display, realtime, and operator-facing operations surface. It is no
 | `warbird_training_run_metrics` | full training/evaluation metrics for Admin and model review | `run_id`, `target_name`, `split_code`, `fold_code`, `metric_family`, `metric_name`, `metric_value`, `is_primary` |
 | `warbird_packets` | AG scoring/model packet registry | `packet_id`, `run_id`, `created_at`, `contract_version`, `symbol_code`, `timeframe`, `status`, `packet_json`, `sample_count`, `promoted_at`, `superseded_at` |
 | `warbird_packet_activations` | immutable activation log | `activation_id`, `packet_id`, `activated_at`, `deactivated_at`, `activation_reason`, `rollback_reason`, `is_current` |
-| `warbird_packet_metrics` | structured Admin KPIs per packet target/split | `packet_id`, `target_name`, `split_code`, `auc`, `log_loss`, `brier_score`, `calibration_error`, `resolved_count`, `censored_count` |
+| `warbird_packet_metrics` | structured Admin KPIs per packet target/split | `packet_id`, `target_name`, `split_code`, `auc`, `log_loss`, `brier_score`, `calibration_error`, `resolved_count`, `open_count` |
 | `warbird_packet_feature_importance` | published top drivers for active packet review | `packet_id`, `target_name`, `feature_family`, `feature_name`, `importance_source_code`, `importance_rank`, `mean_abs_importance` |
 | `warbird_packet_setting_hypotheses` | structured indicator and entry-definition suggestions | `packet_id`, `target_name`, `indicator_family`, `parameter_name`, `action_code`, `stability_score`, `support_summary_json` |
 | `warbird_packet_recommendations` | structured AI-generated Admin guidance | `packet_id`, `section_code`, `priority`, `recommendation_code`, `title`, `summary_text`, `rationale_json`, `action_json` |
@@ -3347,12 +2879,50 @@ The dashboard compatibility/live views should then be derived from those canonic
 | View | Purpose | Minimum source contract |
 | --- | --- | --- |
 | `warbird_active_signals_v` | mirrored current signal and candidate state for chart/dashboard rendering | latest joined row from `warbird_signals_15m` + `warbird_fib_candidates_15m` + `warbird_candidate_outcomes_15m` |
-| `warbird_admin_candidate_rows_v` | screenshot-style Admin row surface with anchor/target/retrace/fib/outcome/status | current rows from `warbird_fib_candidates_15m` + `warbird_fib_engine_snapshots_15m` + `warbird_signals_15m` + `warbird_candidate_outcomes_15m` |
+| `warbird_admin_candidate_rows_v` | Admin candidate row surface — **locked staple columns: Dir, Target, TP1 Hit, TP2 Hit, SL Hit, Status** (plus Time, Entry, SL Price, TP2 Price, Fib Level, Outcome, Decision). Replaces legacy "Measured Moves". View must expose explicit `tp1_hit`, `tp2_hit`, `sl_hit` computed columns — not the ambiguous single `target_hit_state`. | current rows from `warbird_fib_candidates_15m` + `warbird_fib_engine_snapshots_15m` + `warbird_signals_15m` + `warbird_candidate_outcomes_15m` |
 | `warbird_active_training_run_metrics_v` | Admin full-metric surface for the active packet run | current row from `warbird_packet_activations` + `warbird_packets` + `warbird_training_run_metrics` |
 | `warbird_active_packet_metrics_v` | Admin packet KPI surface | current row from `warbird_packet_activations` + `warbird_packets` + `warbird_packet_metrics` |
 | `warbird_active_packet_feature_importance_v` | Admin feature-driver surface | current row from `warbird_packet_activations` + `warbird_packets` + `warbird_packet_feature_importance` |
 | `warbird_active_packet_setting_hypotheses_v` | Admin indicator-setting suggestion surface | current row from `warbird_packet_activations` + `warbird_packets` + `warbird_packet_setting_hypotheses` |
 | `warbird_active_packet_recommendations_v` | formatted Admin AI-guidance surface | current row from `warbird_packet_activations` + `warbird_packets` + `warbird_packet_recommendations` |
+
+#### Locked Admin candidate table staple columns (2026-03-29)
+
+The Admin candidate table (replacing legacy "Measured Moves") MUST include these columns. The first 8 are non-negotiable staples; the remaining 5 are recommended operator context.
+
+| # | Column | View field | Values | Notes |
+|---|--------|-----------|--------|-------|
+| 1 | **Time** | `bar_close_ts` | timestamp | Row identity, sort descending |
+| 2 | **Dir** | `direction` | LONG / SHORT | Color-coded badge |
+| 3 | **Entry** | `entry_price` | numeric | Entry price level |
+| 4 | **Target** | `tp1_price` | numeric | TP1 target price (canonical target) |
+| 5 | **TP1 Hit** | `tp1_hit` | HIT / MISS / OPEN | Explicit derived state — replaces `target_hit_state` |
+| 6 | **TP2 Hit** | `tp2_hit` | HIT / MISS / OPEN | Explicit derived state — new column |
+| 7 | **SL Hit** | `sl_hit` | HIT / MISS / OPEN | Explicit derived state — new column |
+| 8 | **Status** | `status` | ACTIVE / TP1_HIT / TP2_HIT / STOPPED / CANCELLED | Signal lifecycle state |
+| 9 | SL Price | `stop_loss` | numeric | Mechanical stop level |
+| 10 | TP2 Price | `tp2_price` | numeric | Full extension target |
+| 11 | Fib Level | `fib_level_touched` | enum | Which fib level triggered |
+| 12 | Outcome | `outcome_state` | TP2_HIT / TP1_ONLY / STOPPED / REVERSAL / OPEN | Final resolved state |
+| 13 | Decision | `decision_code` | TAKE_TRADE / WAIT / PASS | Model policy decision |
+
+**Required view changes to migration 038 before Admin cutover:**
+
+Replace the single ambiguous `target_hit_state` column in `warbird_admin_candidate_rows_v` with three explicit columns:
+
+```sql
+case when o.tp1_before_sl then 'HIT'
+     when o.sl_before_tp1 or o.sl_after_tp1_before_tp2 then 'MISS'
+     else 'OPEN' end                                            as tp1_hit,
+
+case when o.tp2_before_sl then 'HIT'
+     when o.outcome_code in ('TP1_ONLY','STOPPED','REVERSAL') then 'MISS'
+     else 'OPEN' end                                            as tp2_hit,
+
+case when o.sl_before_tp1 or o.sl_after_tp1_before_tp2 then 'HIT'
+     when o.outcome_code in ('TP2_HIT','TP1_ONLY') then 'MISS'
+     else 'OPEN' end                                            as sl_hit,
+```
 
 #### Locked replacement semantics for the legacy forecast surface
 
@@ -3707,56 +3277,21 @@ Remaining blocker after this checkpoint:
 
 ---
 
-### 20. Immediate Next Steps
+### 20. Immediate Next Steps (updated 2026-03-29)
 
-1. **Keep this plan as the single source of truth** and route all new agent work through it.
-2. **Stand up the local AG workbench completely**:
-   - create the project venv
-   - build `scripts/ag/load-source-snapshots.py`
-   - build `scripts/ag/compute-features.py`
-   - build `scripts/ag/build-fib-dataset.py`
-   - build `scripts/ag/train-fib-model.py`
-   - build `scripts/ag/evaluate-configs.py`
-   - build `scripts/ag/generate-packet.py`
-   - build `scripts/ag/publish-artifacts.py`
-3. **Finish the provider-secret cutover and keep it raw** — `econ_news_finnhub_*` and `econ_news_newsfilter_*` are live in cloud now; the next blocker is setting `warbird_newsfilter_api_key` and `warbird_finnhub_api_key` in Vault, then proving dry-run and retained sample pulls before any later promotion work.
-4. **Supabase pg_cron is the sole schedule producer** — MES minute path live, `score-trades` stopped. Remaining App Router routes are called by pg_cron via pg_net. No Supabase-owned schedules.
-5. **Map the current Pine indicator input and hidden export schema** — every `input.*()`, every gate, every hidden export, every external dependency.
-6. **Execute Phase 2 hardening in `indicators/v6-warbird-complete.pine`**:
-   - fix fib direction
-   - add `0` / `1` lines
-   - add `20pt+` eligibility
-   - add bounded stop-family interface
-   - freeze hidden export names
-   - wire the always-on event-response block
-7. **Only after the Phase 2 interface is stable, start the required harnesses**:
-   - `Pivot Levels [BigBeluga]`
-   - `Market Structure Break & OB Probability Toolkit`
-8. **Export 12+ months of TradingView MES 15m data** with the canonical fib contract plus event-response exports and any admitted harness outputs loaded.
-9. **Train the staged baseline in order**:
-   - fib + event-response baseline
-   - BigBeluga admission
-   - Market Structure Break & OB Probability Toolkit admission
-   - later-phase candidates only after required modules
-   - parameter admission
-   - joint configuration
-10. **Add cloud publish-up and realtime dashboard tables**:
-    - `warbird_training_runs`
-    - `warbird_training_run_metrics`
-    - `warbird_packets`
-    - `warbird_packet_activations`
-    - `warbird_packet_metrics`
-    - `warbird_packet_feature_importance`
-    - `warbird_packet_setting_hypotheses`
-    - `warbird_packet_recommendations`
-    - `warbird_active_signals_v`
-    - `warbird_admin_candidate_rows_v`
-    - `warbird_active_training_run_metrics_v`
-    - `warbird_active_packet_metrics_v`
-    - `warbird_active_packet_feature_importance_v`
-    - `warbird_active_packet_setting_hypotheses_v`
-    - `warbird_active_packet_recommendations_v`
-11. **Define packet activation and rollback transitions in code before the first promoted packet goes operational**, including the 2-consecutive-PT1-miss rule.
-12. **Migrate dashboard and admin/status consumers** to the new publish-up and live-state surface.
-13. **Supabase owns all recurring job scheduling** — Supabase pg_cron schedules removed. App Router routes remain as callable handlers for pg_cron via pg_net.
-14. **Only after reader/writer cutover is complete, remove dormant or superseded cloud tables.**
+Completed items are struck through. Current blocking order is at the top of this plan.
+
+1. ~~**Pine indicator recovery**~~ — DONE. Output budget 63/64, TradingView-validated, TA core pack visible, 3 alerts kept.
+2. ~~**Phase 2 hardening**~~ — DONE. Fib direction, 0/1 lines, 20pt+ gate, stop-family, event-response, hidden exports.
+3. ~~**Supabase pg_cron sole schedule producer**~~ — DONE. MES minute path live, `score-trades` stopped, all schedules in pg_cron.
+4. **Fib engine hardening** — anchor-span visual gap, intermediate waypoint lines (1.382, 1.50, 1.786), direction logic, MTF alignment.
+5. **Canonical writer checkpoint** — port `detect-setups` / `score-trades` to Supabase Edge Functions writing canonical tables.
+6. **Dashboard/admin reader cutover** — cut off legacy tables, webhook alerts from TradingView → Edge Function → Supabase Realtime → dashboard.
+7. **Finish provider-secret cutover** — set `warbird_newsfilter_api_key` and `warbird_finnhub_api_key` in Vault, prove dry-run pulls.
+8. **Stand up the local AG workbench** — venv, `scripts/ag/*.py` (load-source-snapshots, compute-features, build-fib-dataset, train-fib-model, evaluate-configs, generate-packet, publish-artifacts).
+9. **Export 12+ months of TradingView MES 15m data** with canonical fib contract + TA core pack exports loaded.
+10. **Train the staged baseline** — fib + event-response + TA core pack baseline → parameter admission → joint configuration.
+11. **Add cloud publish-up tables** — `warbird_training_runs`, `warbird_packets`, `warbird_packet_activations`, `warbird_packet_metrics`, `warbird_packet_feature_importance`, `warbird_packet_setting_hypotheses`, `warbird_packet_recommendations`, plus dashboard views.
+12. **Define packet activation and rollback transitions** including the 2-consecutive-PT1-miss rule.
+13. **Migrate dashboard and admin/status consumers** to the new publish-up and live-state surface.
+14. **Only after reader/writer cutover is complete, drop dormant or superseded cloud tables.**

@@ -19,7 +19,7 @@ This handoff captures the current checkpoint truth so a new chat can resume from
 4. Canonical cloud tables store setup truth, realized path truth, and published decision/signal lineage.
 5. Local research tables store raw SHAP, stop-out attribution, ablations, and entry-definition experiments.
 6. `EXPIRED` and `NO_REACTION` are not canonical economic truth labels.
-7. Unresolved rows at the edge of observation are censored.
+7. Unresolved rows at the edge of observation remain `OPEN` until resolution.
 8. Admin must render structured data, not Markdown blobs.
 
 ### Major drift findings from the repo audit
@@ -41,7 +41,7 @@ This handoff captures the current checkpoint truth so a new chat can resume from
    - `tp1_before_sl`
    - `tp2_before_sl`
    - `sl_before_tp1`
-4. If there is no trade expiry, unresolved rows must be treated as censored rather than mislabeled as failures.
+4. If there is no trade expiry, unresolved rows should remain `OPEN` rather than being mislabeled as failures.
 5. AutoGluon is the first selector layer, not the architecture owner.
 6. SHAP is diagnostic/promotional, not schema-defining.
 7. Quantile/pinball models are for excursions and uncertainty bands, not the core extension-hit truth.

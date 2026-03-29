@@ -14,7 +14,7 @@ interface DashboardSetupCounts {
   tp1Hit: number;
   tp2Hit: number;
   stopped: number;
-  expired: number;
+  open: number;
 }
 
 interface DashboardPayload {

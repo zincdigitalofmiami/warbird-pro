@@ -25,10 +25,10 @@ create type warbird_decision_code as enum (
 
 create type warbird_outcome_code as enum (
   'TP2_HIT',
-  'STOPPED_PRE_TP1',
-  'STOPPED_POST_TP1',
-  'CENSORED_PRE_TP1',
-  'CENSORED_POST_TP1'
+  'TP1_ONLY',
+  'STOPPED',
+  'REVERSAL',
+  'OPEN'
 );
 
 create type warbird_signal_status as enum (
@@ -255,7 +255,7 @@ create table warbird_packet_metrics (
   brier_score                    numeric,
   calibration_error              numeric,
   resolved_count                 integer     not null,
-  censored_count                 integer     not null default 0,
+  open_count                     integer     not null default 0,
   tp1_before_sl_rate             numeric,
   tp2_before_sl_rate             numeric,
   sl_before_tp1_rate             numeric,
@@ -273,8 +273,8 @@ create table warbird_packet_metrics (
     check (calibration_error is null or calibration_error >= 0),
   constraint ck_warbird_packet_metrics_resolved
     check (resolved_count >= 0),
-  constraint ck_warbird_packet_metrics_censored
-    check (censored_count >= 0),
+  constraint ck_warbird_packet_metrics_open
+    check (open_count >= 0),
   constraint ck_warbird_packet_metrics_tp1_rate
     check (tp1_before_sl_rate is null or tp1_before_sl_rate between 0 and 1),
   constraint ck_warbird_packet_metrics_tp2_rate
@@ -580,12 +580,10 @@ create table warbird_candidate_outcomes_15m (
   sl_before_tp1             boolean              not null default false,
   sl_after_tp1_before_tp2   boolean              not null default false,
   reversal_detected         boolean              not null default false,
-  is_censored               boolean              not null default false,
   tp1_hit_ts                timestamptz,
   tp2_hit_ts                timestamptz,
   stopped_ts                timestamptz,
   reversal_ts               timestamptz,
-  censored_at_ts            timestamptz,
   mae_pts                   numeric              not null,
   mfe_pts                   numeric              not null,
   scorer_version            text                 not null,
@@ -609,8 +607,6 @@ create table warbird_candidate_outcomes_15m (
     check (not (sl_before_tp1 and sl_after_tp1_before_tp2)),
   constraint ck_warbird_outcomes_stop_pre_conflict
     check (not (sl_before_tp1 and tp1_before_sl)),
-  constraint ck_warbird_outcomes_censor_conflict
-    check (not (is_censored and (sl_before_tp1 or sl_after_tp1_before_tp2 or tp2_before_sl))),
   constraint ck_warbird_outcomes_tp1_ts
     check (not tp1_before_sl or tp1_hit_ts is not null),
   constraint ck_warbird_outcomes_tp2_ts
@@ -623,21 +619,17 @@ create table warbird_candidate_outcomes_15m (
     check (not sl_after_tp1_before_tp2 or tp1_hit_ts is not null and stopped_ts >= tp1_hit_ts),
   constraint ck_warbird_outcomes_reversal_ts
     check (not reversal_detected or reversal_ts is not null),
-  constraint ck_warbird_outcomes_censored_ts
-    check (not is_censored or censored_at_ts is not null),
-  constraint ck_warbird_outcomes_censored_post_tp1_order
-    check (not (is_censored and tp1_before_sl) or tp1_hit_ts is not null and censored_at_ts >= tp1_hit_ts),
   constraint ck_warbird_outcomes_code_mapping
     check (
-      (outcome_code = 'TP2_HIT' and tp1_before_sl and tp2_before_sl and not sl_before_tp1 and not sl_after_tp1_before_tp2 and not is_censored)
+      (outcome_code = 'TP2_HIT' and tp1_before_sl and tp2_before_sl and not sl_before_tp1 and not sl_after_tp1_before_tp2 and not reversal_detected)
       or
-      (outcome_code = 'STOPPED_PRE_TP1' and sl_before_tp1 and not tp1_before_sl and not tp2_before_sl and not sl_after_tp1_before_tp2 and not is_censored)
+      (outcome_code = 'TP1_ONLY' and tp1_before_sl and not tp2_before_sl and not sl_before_tp1 and not sl_after_tp1_before_tp2 and not reversal_detected)
       or
-      (outcome_code = 'STOPPED_POST_TP1' and tp1_before_sl and sl_after_tp1_before_tp2 and not tp2_before_sl and not is_censored)
+      (outcome_code = 'STOPPED' and not tp2_before_sl and (sl_before_tp1 or sl_after_tp1_before_tp2) and not reversal_detected)
       or
-      (outcome_code = 'CENSORED_PRE_TP1' and is_censored and not tp1_before_sl and not tp2_before_sl and not sl_before_tp1 and not sl_after_tp1_before_tp2)
+      (outcome_code = 'REVERSAL' and reversal_detected and not tp2_before_sl and not sl_before_tp1 and not sl_after_tp1_before_tp2)
       or
-      (outcome_code = 'CENSORED_POST_TP1' and is_censored and tp1_before_sl and not tp2_before_sl and not sl_before_tp1 and not sl_after_tp1_before_tp2)
+      (outcome_code = 'OPEN' and not tp1_before_sl and not tp2_before_sl and not sl_before_tp1 and not sl_after_tp1_before_tp2 and not reversal_detected)
     )
 );
 
@@ -647,7 +639,7 @@ create index idx_warbird_outcomes_scored_at
   on warbird_candidate_outcomes_15m (scored_at desc);
 create index idx_warbird_outcomes_resolved
   on warbird_candidate_outcomes_15m (bar_close_ts desc)
-  where not is_censored;
+  where outcome_code <> 'OPEN';
 
 alter table warbird_candidate_outcomes_15m enable row level security;
 create policy "Authenticated read warbird_candidate_outcomes_15m"

@@ -233,6 +233,6 @@ export function buildSetupEventSummary(events: WarbirdSetupEventRow[]) {
     tp1Hit: events.filter((event) => event.event_type === "TP1_HIT").length,
     tp2Hit: events.filter((event) => event.event_type === "TP2_HIT").length,
     stopped: events.filter((event) => event.event_type === "STOPPED").length,
-    expired: events.filter((event) => event.event_type === "EXPIRED").length,
+    open: events.filter((event) => event.event_type === "EXPIRED").length,
   };
 }

@@ -9,7 +9,6 @@
  * Do not use:
  *   - GO, NO_GO, EXPIRED, NO_REACTION
  *   - prob_hit_*, hit_*_first
- *   - collapsed STOPPED state (use STOPPED_PRE_TP1 or STOPPED_POST_TP1)
  *   - types from lib/warbird/types.ts
  */
 
@@ -34,15 +33,14 @@ export type CanonicalDecisionCode = "TAKE_TRADE" | "WAIT" | "PASS";
 
 /**
  * Realized outcome codes for a scored fib candidate.
- * EXPIRED and NO_REACTION are prohibited — unresolved rows are CENSORED.
- * The pre/post distinction on STOPPED encodes where in the trade leg the stop fired.
+ * EXPIRED and NO_REACTION are prohibited.
  */
 export type CanonicalOutcomeCode =
   | "TP2_HIT"
-  | "STOPPED_PRE_TP1"
-  | "STOPPED_POST_TP1"
-  | "CENSORED_PRE_TP1"
-  | "CENSORED_POST_TP1";
+  | "TP1_ONLY"
+  | "STOPPED"
+  | "REVERSAL"
+  | "OPEN";
 
 /** Live signal tracking status for warbird_signals_15m. */
 export type CanonicalSignalStatus =
@@ -292,46 +290,54 @@ type CandidateOutcomeInsertBase = {
 };
 
 /**
- * Encodes the DDL reversal invariant:
- *   reversal_detected = true  => reversal_ts must be non-null (ck_warbird_outcomes_reversal_ts)
- *   reversal_detected = false => reversal_ts must be null
- */
-type ReversalDetected = { reversal_detected: true; reversal_ts: string };
-type ReversalNotDetected = { reversal_detected: false; reversal_ts: null };
-type ReversalState = ReversalDetected | ReversalNotDetected;
-
-/**
  * TP1 and TP2 both hit before stop.
  * tp1_hit_ts and tp2_hit_ts are required.
  */
-type Tp2HitOutcomeInsert = CandidateOutcomeInsertBase & ReversalState & {
+type Tp2HitOutcomeInsert = CandidateOutcomeInsertBase & {
   outcome_code: "TP2_HIT";
   tp1_before_sl: true;
   tp2_before_sl: true;
   sl_before_tp1: false;
   sl_after_tp1_before_tp2: false;
-  is_censored: false;
+  reversal_detected: false;
   tp1_hit_ts: string;
   tp2_hit_ts: string;
   stopped_ts: null;
-  censored_at_ts: null;
+  reversal_ts: null;
+};
+
+/**
+ * TP1 was hit, TP2 was not hit, and no stop or reversal occurred.
+ * tp1_hit_ts is required.
+ */
+type Tp1OnlyOutcomeInsert = CandidateOutcomeInsertBase & {
+  outcome_code: "TP1_ONLY";
+  tp1_before_sl: true;
+  tp2_before_sl: false;
+  sl_before_tp1: false;
+  sl_after_tp1_before_tp2: false;
+  reversal_detected: false;
+  tp1_hit_ts: string;
+  tp2_hit_ts: null;
+  stopped_ts: null;
+  reversal_ts: null;
 };
 
 /**
  * Stop hit before TP1 was reached.
  * stopped_ts is required.
  */
-type StoppedPreTp1OutcomeInsert = CandidateOutcomeInsertBase & ReversalState & {
-  outcome_code: "STOPPED_PRE_TP1";
+type StoppedPreTp1OutcomeInsert = CandidateOutcomeInsertBase & {
+  outcome_code: "STOPPED";
   sl_before_tp1: true;
   tp1_before_sl: false;
   tp2_before_sl: false;
   sl_after_tp1_before_tp2: false;
-  is_censored: false;
+  reversal_detected: false;
   stopped_ts: string;
   tp1_hit_ts: null;
   tp2_hit_ts: null;
-  censored_at_ts: null;
+  reversal_ts: null;
 };
 
 /**
@@ -339,51 +345,49 @@ type StoppedPreTp1OutcomeInsert = CandidateOutcomeInsertBase & ReversalState & {
  * Both tp1_hit_ts and stopped_ts are required.
  * The DDL enforces stopped_ts >= tp1_hit_ts.
  */
-type StoppedPostTp1OutcomeInsert = CandidateOutcomeInsertBase & ReversalState & {
-  outcome_code: "STOPPED_POST_TP1";
+type StoppedPostTp1OutcomeInsert = CandidateOutcomeInsertBase & {
+  outcome_code: "STOPPED";
   tp1_before_sl: true;
   sl_after_tp1_before_tp2: true;
   tp2_before_sl: false;
   sl_before_tp1: false;
-  is_censored: false;
+  reversal_detected: false;
   tp1_hit_ts: string;
   stopped_ts: string;
   tp2_hit_ts: null;
-  censored_at_ts: null;
+  reversal_ts: null;
 };
 
 /**
- * Observation window closed before TP1 or stop was reached.
- * Not a failure — row is censored for training purposes.
- * censored_at_ts is required.
+ * Reversal rule fired before TP2 or stop was reached.
+ * reversal_ts is required.
  */
-type CensoredPreTp1OutcomeInsert = CandidateOutcomeInsertBase & ReversalState & {
-  outcome_code: "CENSORED_PRE_TP1";
-  is_censored: true;
+type ReversalOutcomeInsert = CandidateOutcomeInsertBase & {
+  outcome_code: "REVERSAL";
+  reversal_detected: true;
+  reversal_ts: string;
   tp1_before_sl: false;
   tp2_before_sl: false;
   sl_before_tp1: false;
   sl_after_tp1_before_tp2: false;
-  censored_at_ts: string;
   tp1_hit_ts: null;
   tp2_hit_ts: null;
   stopped_ts: null;
 };
 
 /**
- * TP1 was hit, then observation window closed before TP2 or second stop.
- * Both tp1_hit_ts and censored_at_ts are required.
- * The DDL enforces censored_at_ts >= tp1_hit_ts.
+ * Setup remains unresolved at scoring time.
+ * OPEN is an operational state and may be excluded from training targets.
  */
-type CensoredPostTp1OutcomeInsert = CandidateOutcomeInsertBase & ReversalState & {
-  outcome_code: "CENSORED_POST_TP1";
-  is_censored: true;
-  tp1_before_sl: true;
+type OpenOutcomeInsert = CandidateOutcomeInsertBase & {
+  outcome_code: "OPEN";
+  tp1_before_sl: false;
   tp2_before_sl: false;
   sl_before_tp1: false;
   sl_after_tp1_before_tp2: false;
-  tp1_hit_ts: string;
-  censored_at_ts: string;
+  reversal_detected: false;
+  reversal_ts: null;
+  tp1_hit_ts: null;
   tp2_hit_ts: null;
   stopped_ts: null;
 };
@@ -395,10 +399,11 @@ type CensoredPostTp1OutcomeInsert = CandidateOutcomeInsertBase & ReversalState &
  */
 export type CandidateOutcomeInsert =
   | Tp2HitOutcomeInsert
+  | Tp1OnlyOutcomeInsert
   | StoppedPreTp1OutcomeInsert
   | StoppedPostTp1OutcomeInsert
-  | CensoredPreTp1OutcomeInsert
-  | CensoredPostTp1OutcomeInsert;
+  | ReversalOutcomeInsert
+  | OpenOutcomeInsert;
 
 // ============================================================
 // SignalInsert

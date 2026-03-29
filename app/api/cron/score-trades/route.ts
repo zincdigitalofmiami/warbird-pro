@@ -54,7 +54,7 @@ async function recordEvent(
 async function syncMeasuredMoveStatus(
   supabase: ReturnType<typeof createAdminClient>,
   setupId: number,
-  status: "TP1_HIT" | "TP2_HIT" | "STOPPED" | "EXPIRED",
+  status: "TP1_HIT" | "TP2_HIT" | "STOPPED",
 ) {
   const { error } = await supabase
     .from("measured_moves")
@@ -134,7 +134,6 @@ export async function GET(request: Request) {
     let updated = 0;
     for (const setup of monitoredSetups) {
       const direction = setup.direction;
-      const entry = Number(setup.entry_price);
       const stopLoss = Number(setup.stop_loss);
       const tp1 = Number(setup.tp1);
       const tp2 = Number(setup.tp2);
@@ -149,8 +148,6 @@ export async function GET(request: Request) {
       const hitTp1 =
         (direction === "LONG" && currentHigh >= tp1) ||
         (direction === "SHORT" && currentLow <= tp1);
-      const expired =
-        setup.expires_at != null && new Date(setup.expires_at).getTime() <= Date.now();
 
       // Conservative conflict rule: if stop and target touch in the same bar, stop wins.
       if (stopped) {
@@ -202,18 +199,6 @@ export async function GET(request: Request) {
         continue;
       }
 
-      if (expired) {
-        await supabase
-          .from("warbird_setups")
-          .update({
-            status: "EXPIRED",
-            current_event: "EXPIRED",
-          })
-          .eq("id", setup.id);
-        await syncMeasuredMoveStatus(supabase, setup.id, "EXPIRED");
-        await recordEvent(supabase, setup.id, "EXPIRED", nowIso, entry, "Setup expired");
-        updated += 1;
-      }
     }
 
     await writeJobLog(supabase, {

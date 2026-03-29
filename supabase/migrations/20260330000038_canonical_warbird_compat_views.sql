@@ -46,7 +46,6 @@ select
   o.sl_before_tp1,
   o.sl_after_tp1_before_tp2,
   o.reversal_detected,
-  o.is_censored,
   o.mae_pts,
   o.mfe_pts
 from warbird_signals_15m                  s
@@ -93,7 +92,6 @@ select
   case
     when o.tp1_before_sl then 'HIT'
     when o.sl_before_tp1 or o.sl_after_tp1_before_tp2 then 'MISS'
-    when o.is_censored then 'CENSORED'
     else 'OPEN'
   end                                                   as target_hit_state,
   case
@@ -106,8 +104,7 @@ select
   s.packet_id,
   o.tp1_hit_ts,
   o.tp2_hit_ts,
-  o.stopped_ts,
-  o.censored_at_ts
+  o.stopped_ts
 from warbird_fib_candidates_15m         c
 join warbird_fib_engine_snapshots_15m   snap on snap.snapshot_id = c.snapshot_id
 left join warbird_signals_15m           s    on s.candidate_id = c.candidate_id
@@ -120,7 +117,7 @@ comment on view warbird_admin_candidate_rows_v is
 -- ============================================================
 -- warbird_candidate_stats_by_bucket_v
 -- Aggregated empirical rates by the locked bucket key.
--- Resolved-only rates exclude censored rows from both numerator and denominator.
+-- Resolved-only rates exclude OPEN rows from both numerator and denominator.
 -- ============================================================
 create or replace view warbird_candidate_stats_by_bucket_v
   with (security_invoker = true)
@@ -131,42 +128,42 @@ select
   c.fib_level_touched,
   c.regime_bucket,
   c.session_bucket,
-  count(*) filter (where not o.is_censored)                                    as resolved_count,
-  count(*) filter (where o.is_censored)                                        as censored_count,
-  count(*) filter (where o.tp1_before_sl and not o.is_censored)                as tp1_before_sl_count,
-  count(*) filter (where o.tp2_before_sl and not o.is_censored)                as tp2_before_sl_count,
-  count(*) filter (where o.sl_before_tp1 and not o.is_censored)                as stopped_pre_tp1_count,
-  count(*) filter (where o.sl_after_tp1_before_tp2 and not o.is_censored)      as stopped_post_tp1_count,
-  count(*) filter (where o.reversal_detected and not o.is_censored)            as reversal_detected_count,
+  count(*) filter (where o.outcome_code <> 'OPEN')                             as resolved_count,
+  count(*) filter (where o.outcome_code = 'OPEN')                              as open_count,
+  count(*) filter (where o.tp1_before_sl and o.outcome_code <> 'OPEN')         as tp1_before_sl_count,
+  count(*) filter (where o.tp2_before_sl and o.outcome_code <> 'OPEN')         as tp2_before_sl_count,
+  count(*) filter (where o.sl_before_tp1 and o.outcome_code <> 'OPEN')         as stopped_pre_tp1_count,
+  count(*) filter (where o.sl_after_tp1_before_tp2 and o.outcome_code <> 'OPEN') as stopped_post_tp1_count,
+  count(*) filter (where o.reversal_detected and o.outcome_code <> 'OPEN')     as reversal_detected_count,
   round(
     (avg(case when o.tp1_before_sl then 1.0 else 0.0 end)
-      filter (where not o.is_censored))::numeric,
+      filter (where o.outcome_code <> 'OPEN'))::numeric,
     4
   )                                                                            as tp1_before_sl_rate,
   round(
     (avg(case when o.tp2_before_sl then 1.0 else 0.0 end)
-      filter (where not o.is_censored))::numeric,
+      filter (where o.outcome_code <> 'OPEN'))::numeric,
     4
   )                                                                            as tp2_before_sl_rate,
   round(
     (avg(case when o.sl_before_tp1 then 1.0 else 0.0 end)
-      filter (where not o.is_censored))::numeric,
+      filter (where o.outcome_code <> 'OPEN'))::numeric,
     4
   )                                                                            as sl_before_tp1_rate,
   round(
-    (avg(o.mae_pts) filter (where not o.is_censored))::numeric,
+    (avg(o.mae_pts) filter (where o.outcome_code <> 'OPEN'))::numeric,
     2
   )                                                                            as avg_mae_pts,
   round(
-    (avg(o.mfe_pts) filter (where not o.is_censored))::numeric,
+    (avg(o.mfe_pts) filter (where o.outcome_code <> 'OPEN'))::numeric,
     2
   )                                                                            as avg_mfe_pts,
   round(
-    (stddev(o.mae_pts) filter (where not o.is_censored))::numeric,
+    (stddev(o.mae_pts) filter (where o.outcome_code <> 'OPEN'))::numeric,
     2
   )                                                                            as stddev_mae_pts,
   round(
-    (stddev(o.mfe_pts) filter (where not o.is_censored))::numeric,
+    (stddev(o.mfe_pts) filter (where o.outcome_code <> 'OPEN'))::numeric,
     2
   )                                                                            as stddev_mfe_pts,
   min(c.bar_close_ts)                                                          as earliest_bar,
@@ -179,11 +176,11 @@ group by
   c.fib_level_touched,
   c.regime_bucket,
   c.session_bucket
-having count(*) filter (where not o.is_censored) > 0;
+having count(*) filter (where o.outcome_code <> 'OPEN') > 0;
 
 comment on view warbird_candidate_stats_by_bucket_v is
   'Empirical resolved-only extension and stop rates by setup bucket. '
-  'Censored rows are tracked separately and excluded from the rate denominator. '
+  'OPEN rows are tracked separately and excluded from the rate denominator. '
   'Provides the calibrated stat surface for dashboard display post-cutover.';
 
 -- ============================================================
@@ -205,7 +202,7 @@ select
   m.brier_score,
   m.calibration_error,
   m.resolved_count,
-  m.censored_count,
+  m.open_count,
   m.tp1_before_sl_rate,
   m.tp2_before_sl_rate,
   m.sl_before_tp1_rate,
@@ -218,7 +215,7 @@ where pa.is_current;
 
 comment on view warbird_active_packet_metrics_v is
   'Structured metrics for the currently active packet. '
-  'Admin-page surface for selector quality, calibration, and resolved versus censored coverage.';
+  'Admin-page surface for selector quality, calibration, and resolved versus OPEN coverage.';
 
 -- ============================================================
 -- warbird_active_training_run_metrics_v

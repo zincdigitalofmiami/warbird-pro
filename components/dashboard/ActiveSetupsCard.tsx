@@ -6,7 +6,7 @@ interface SetupCounts {
   tp1Hit: number;
   tp2Hit: number;
   stopped: number;
-  expired: number;
+  open: number;
 }
 
 export default function ActiveSetupsCard({
@@ -43,7 +43,7 @@ export default function ActiveSetupsCard({
             <span>TP1 <span className="text-white/50">{counts.tp1Hit}</span></span>
             <span>TP2 <span className="text-white/50">{counts.tp2Hit}</span></span>
             <span>Stopped <span className="text-white/50">{counts.stopped}</span></span>
-            <span>Expired <span className="text-white/50">{counts.expired}</span></span>
+            <span>Open <span className="text-white/50">{counts.open}</span></span>
           </div>
         </div>
       )}

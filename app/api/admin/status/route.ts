@@ -15,7 +15,7 @@ interface TableCoverage {
 }
 
 type TargetResult = "HIT" | "MISS" | "OPEN";
-type OutcomeResult = "WIN" | "LOSS" | "EXPIRED" | "OPEN";
+type OutcomeResult = "TP2_HIT" | "TP1_ONLY" | "STOPPED" | "REVERSAL" | "OPEN";
 type SetupEventAuditRow = {
   setup_id: number;
   event_type: WarbirdSetupEventType;
@@ -48,22 +48,24 @@ function classifySetupResults(evidence: SetupOutcomeEvidence): {
     Boolean(evidence.tp2_hit_at) || eventTypes.has("TP2_HIT") || status === "TP2_HIT";
 
   const stopped = eventTypes.has("STOPPED") || status === "STOPPED";
-  const expired = eventTypes.has("EXPIRED") || status === "EXPIRED";
+  const reversal = status === "REVERSAL" || status === "PULLBACK_REVERSAL";
   const tp1Closed = status === "TP1_HIT" || eventTypes.has("TP1_HIT");
 
-  const pt1_result: TargetResult = pt1Hit ? "HIT" : stopped || expired ? "MISS" : "OPEN";
+  const pt1_result: TargetResult = pt1Hit ? "HIT" : stopped ? "MISS" : "OPEN";
   const pt2_result: TargetResult = pt2Hit
     ? "HIT"
-    : stopped || expired || tp1Closed
+    : stopped || tp1Closed
       ? "MISS"
       : "OPEN";
 
-  const outcome_result: OutcomeResult = pt2Hit || tp1Closed
-    ? "WIN"
+  const outcome_result: OutcomeResult = pt2Hit
+    ? "TP2_HIT"
     : stopped
-      ? "LOSS"
-      : expired
-        ? "EXPIRED"
+      ? "STOPPED"
+      : tp1Closed
+        ? "TP1_ONLY"
+        : reversal
+          ? "REVERSAL"
         : "OPEN";
 
   return { pt1_result, pt2_result, outcome_result };
@@ -73,14 +75,17 @@ function classifyMeasuredMoveResults(status: string): {
   target_result: TargetResult;
   outcome_result: OutcomeResult;
 } {
-  if (status === "TP1_HIT" || status === "TP2_HIT") {
-    return { target_result: "HIT", outcome_result: "WIN" };
+  if (status === "TP2_HIT") {
+    return { target_result: "HIT", outcome_result: "TP2_HIT" };
+  }
+  if (status === "TP1_HIT") {
+    return { target_result: "HIT", outcome_result: "TP1_ONLY" };
   }
   if (status === "STOPPED") {
-    return { target_result: "MISS", outcome_result: "LOSS" };
+    return { target_result: "MISS", outcome_result: "STOPPED" };
   }
-  if (status === "EXPIRED") {
-    return { target_result: "MISS", outcome_result: "EXPIRED" };
+  if (status === "REVERSAL" || status === "PULLBACK_REVERSAL") {
+    return { target_result: "MISS", outcome_result: "REVERSAL" };
   }
   return { target_result: "OPEN", outcome_result: "OPEN" };
 }

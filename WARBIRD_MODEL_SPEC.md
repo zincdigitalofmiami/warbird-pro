@@ -136,13 +136,12 @@ These semantics are now binding for the next schema rewrite:
   - `TAKE_TRADE`
   - `WAIT`
   - `PASS`
-- realized economic truth must distinguish:
-  - TP2 reached before stop
-  - TP1 reached before stop while TP2 is not yet realized
-  - stop before TP1
-  - stop after TP1 but before TP2
-  - reversal when the locked reversal rule is satisfied
-- unresolved rows at the edge of observation are censored rather than labeled as economic failures
+- realized economic truth is locked to:
+  - `TP2_HIT`
+  - `TP1_ONLY`
+  - `STOPPED`
+  - `REVERSAL`
+  - `OPEN` (operational-only; exclude from training targets)
 - `EXPIRED` and `NO_REACTION` are not canonical economic outcome labels for model truth
 - legacy `hit_*_first` / `prob_hit_*` names in `scripts/warbird/*` are deletion-only local-script debt and must not appear in shared TypeScript types, active APIs, Admin surfaces, packet payloads, or new schema work
 - signal lifecycle and UI state are separate from economic truth and may use different vocabulary
@@ -161,7 +160,7 @@ The canonical operational base remains:
    - carries candidate geometry, deterministic Pine score, packet-linked model outputs, and the policy decision code
 3. `warbird_candidate_outcomes_15m`
    - one row per candidate, regardless of whether the candidate was published as a signal
-   - stores realized path truth, event timestamps, excursion measurements, and censoring metadata
+   - stores realized path truth, event timestamps, and excursion measurements
 4. `warbird_signals_15m`
    - one row per published signal where `decision_code = TAKE_TRADE`
 5. `warbird_signal_events`
@@ -236,7 +235,7 @@ Each training row is keyed to one MES 15m bar-close setup event and must produce
 | `tp1_before_sl` | Binary | TP1 reached before stop |
 | `tp2_before_sl` | Binary | TP2 reached before stop |
 | `sl_before_tp1` | Binary | stop hit before TP1 |
-| `is_censored` | Binary | path unresolved at the edge of observation |
+| `path_outcome` | Categorical | one of `TP2_HIT`, `TP1_ONLY`, `STOPPED`, `REVERSAL`, `OPEN` |
 | `mae_pts` | Continuous | max adverse excursion in points |
 | `mfe_pts` | Continuous | max favorable excursion in points |
 
@@ -244,7 +243,6 @@ Legacy note:
 
 - the old local-only `hit_sl_first`, `hit_pt1_first`, and `hit_pt2_after_pt1` names are scheduled for deletion during the AG workbench rebuild
 - no fallback aliasing of those names is allowed in active shared types, API responses, packets, or dashboard/Admin contracts
-| `path_outcome` | Categorical | resolved economic outcome only; censoring is tracked separately |
 
 The stop family is bounded to:
 
@@ -255,7 +253,7 @@ The stop family is bounded to:
 
 If the expected stop heat required to survive the setup is too wide relative to the expected TP1 / TP2 edge, the correct decision is `PASS`.
 
-The first selector baseline may exclude censored rows if needed for a clean resolved-only classification pass. Later survival / competing-risk work may use censored rows explicitly.
+The first selector baseline should train on resolved rows only (`TP2_HIT`, `TP1_ONLY`, `STOPPED`, `REVERSAL`) and exclude `OPEN`.
 
 ---
 

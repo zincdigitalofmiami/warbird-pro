@@ -40,7 +40,9 @@ export async function GET(request: Request) {
         tp1Hit: history.events.filter((event) => event.event_type === "TP1_HIT").length,
         tp2Hit: history.events.filter((event) => event.event_type === "TP2_HIT").length,
         stopped: history.events.filter((event) => event.event_type === "STOPPED").length,
-        expired: history.events.filter((event) => event.event_type === "EXPIRED").length,
+        open: history.setups.filter(
+          (setup) => setup.status === "ACTIVE" || setup.status === "EXPIRED",
+        ).length,
       },
       generatedAt: new Date().toISOString(),
     });

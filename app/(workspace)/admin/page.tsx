@@ -40,7 +40,7 @@ interface JobLogEntry {
 }
 
 type TargetResult = "HIT" | "MISS" | "OPEN";
-type OutcomeResult = "WIN" | "LOSS" | "EXPIRED" | "OPEN";
+type OutcomeResult = "TP2_HIT" | "TP1_ONLY" | "STOPPED" | "REVERSAL" | "OPEN";
 
 interface SetupEntry {
   id: number;
@@ -157,9 +157,10 @@ function targetBadgeColor(state: TargetResult): string {
 }
 
 function outcomeBadgeColor(state: OutcomeResult): string {
-  if (state === "WIN") return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
-  if (state === "LOSS") return "bg-red-500/20 text-red-400 border-red-500/30";
-  if (state === "EXPIRED") return "bg-amber-500/20 text-amber-300 border-amber-500/30";
+  if (state === "TP2_HIT") return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+  if (state === "TP1_ONLY") return "bg-blue-500/20 text-blue-300 border-blue-500/30";
+  if (state === "STOPPED") return "bg-red-500/20 text-red-400 border-red-500/30";
+  if (state === "REVERSAL") return "bg-amber-500/20 text-amber-300 border-amber-500/30";
   return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
 }
 

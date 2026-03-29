@@ -37,7 +37,7 @@ Read and follow AGENTS.md at the repository root.
 - Warbird v1 8-table normalized schema (migration 010 + 011 + 012)
 - Auth flow, API surface (/warbird/signal, /warbird/history, /live/mes15m, /pivots/mes)
 - `indicators/v6-warbird-complete.pine` compiles clean: `isValid` and `atr` blockers fixed
-- 15-metric TA core pack embedded in `indicators/v6-warbird-complete.pine` as `ml_*` exports: EMAs (21/50/100/200), MACD hist (12/26/9), RSI(14), ATR(14), ADX(14), volume raw, vol SMA(20), vol ratio, vol acceleration, bar spread × vol, OBV, MFI(14). Plot count: 64/64.
+- 15-metric TA core pack embedded in `indicators/v6-warbird-complete.pine` as `ml_*` exports: EMAs (21/50/100/200), MACD hist (12/26/9), RSI(14), ATR(14), ADX(14), volume raw, vol SMA(20), vol ratio, vol acceleration, bar spread × vol, OBV, MFI(14). Output budget: 63/64 (60 plot + 3 alertcondition). TradingView paste-and-load validated — all exports visible in Style tab.
 - Three standalone harnesses retired (BigBeluga Pivot Levels, LuxAlgo MSB/OB, LuxAlgo Luminance) — they had zero downstream consumers in TypeScript, API routes, or DB
 - `indicators/v6-warbird-complete.pine` is the only active Pine work surface; the paired strategy and parity guard are now legacy scratch/reference only and do not block indicator work
 - The active architecture lock is now engine-first: `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`, with TradingView kept execution-facing and the dashboard owning operator tables/mini charts from the same contract
@@ -62,7 +62,7 @@ Read and follow AGENTS.md at the repository root.
 - The canonical normalized live schema is now locked in docs, but the new base tables are not built yet: `warbird_fib_engine_snapshots_15m`, `warbird_fib_candidates_15m`, `warbird_candidate_outcomes_15m`, `warbird_signals_15m`, `warbird_signal_events`, and `warbird_packets`.
 - The current 2026-03-30 draft migrations and local warehouse draft are now reconciled against the 2026-03-28 hierarchy/outcome-contract lock and validate in a disposable Postgres 17 instance, but they remain unapplied draft assets until remote ledger drift is resolved and the writer/API cutover is approved: `20260330000037_canonical_warbird_tables.sql`, `20260330000038_canonical_warbird_compat_views.sql`, and `scripts/ag/local_warehouse_schema.sql`.
 - `detect-setups` and `score-trades` are Vercel routes with NO pg_cron schedule and NO Edge Function port. The legacy warbird_* decision tables they write to are empty in production. These must be ported to Edge Functions writing to the canonical tables before the setup engine is operational.
-- `components/charts/LiveMesChart.tsx` still recomputes fib geometry through the legacy `scripts/warbird/fib-engine.ts` helper, so the dashboard is not yet a render-only mirror of the canonical engine state.
+- Dashboard fib recompute was cut (commit `77ec03e`). `LiveMesChart.tsx` no longer calls the legacy fib-engine helper. Dashboard is not yet wired to canonical engine state — that's blocking order #4.
 - `/admin` still presents stale `measured_moves` while the live legacy `warbird_triggers_15m`, `warbird_conviction`, `warbird_setups`, `warbird_setup_events`, and `warbird_risk` tables are empty. These are legacy/operational tables, not the canonical AG training surface.
 - `scripts/warbird/fib-engine.ts` still reflects a legacy 1H helper path and is not the target point-in-time fib snapshot surface for AG training
 - Legacy `warbird_forecasts_1h` table still exists in DB (forecast route deleted but table remains)
@@ -87,7 +87,7 @@ Follow the active architecture plan only.
 - Local machines are for training/calculations/research only.
 - Production ingestion, crons, and chart-serving must not depend on local machines.
 - No new predicted-price or `warbird_forecasts_1h`-style surfaces. Live model state is TP1/TP2/reversal outcome state on the MES 15m contract.
-- `EXPIRED` / `NO_REACTION` are not canonical economic outcome labels for model truth. Unresolved rows at the edge of observation are censored rather than mislabeled as failures.
+- `EXPIRED` / `NO_REACTION` are not canonical economic outcome labels for model truth. Unresolved rows remain `OPEN` until they resolve to `TP2_HIT` / `TP1_ONLY` / `STOPPED` / `REVERSAL`.
 - Legacy `hit_*_first` / `prob_hit_*` names are scheduled for deletion. They must not appear in shared TypeScript types, active API responses, Admin/dashboard surfaces, packet payloads, or new schema work. No fallback aliases are permitted on new surfaces.
 - The Admin page should render structured candidate rows, full training metrics, packet metrics, feature drivers, setting hypotheses, and AI-generated recommendations. Do not use Markdown report blobs as the dashboard contract.
 - Decision vocabulary is `TAKE_TRADE`, `WAIT`, and `PASS`. Those are policy decisions, not realized trade outcomes.
@@ -95,9 +95,9 @@ Follow the active architecture plan only.
 - Pivot distance/state is a critical trigger and reversal input, but not the sole decision maker. Intermarket trigger quality must respect each symbol's correlative path with aligned 15m / 1H / 4H state.
 - Do not add more indicator settings, assets, or “zoo” modules ahead of training evidence. Build the minimal exportable core first, then let SHAP and feature-admission evidence decide what survives.
 - Minimal Pine export surface for training capture: fib lines/state, TA core pack (EMAs/MACD/RSI/ATR/ADX/volume family/OBV/MFI), and event/regime state from the canonical indicator surface.
-- TradingView enforces a hard maximum of 64 plot counts per script. Hidden `display.none` plots still count, so local parity or schema completeness never overrides the live plot budget.
-- TradingView keeps execution-facing visuals, alerts, and the exhaustion precursor diamond. Dense operator tables, mini charts, and decision diagnostics belong on the dashboard, which must render the same stored engine state instead of recomputing fibs.
-- The current blocking sequence is: canonical writer cutover -> dashboard/admin/API reader cutover -> Pine recovery -> training workbench buildout -> legacy retirement.
+- TradingView enforces a hard maximum of 64 output calls per script. Hidden `display.none` plots AND `alertcondition()` calls both count toward the cap. The lint script (`pine-lint.sh`) previously excluded `alertcondition()` — this was a bug and has been fixed. Current budget: 60 plot + 0 bgcolor + 3 alertcondition = 63/64 (1 slot headroom).
+- TradingView keeps execution-facing visuals and alerts. Only 3 `alertcondition()` calls are kept: `WARBIRD ENTRY LONG`, `WARBIRD ENTRY SHORT`, and `PIVOT BREAK (against) + Regime Opposed` (the .50 reversal warning). All other alerts move to the dashboard. Dense operator tables, mini charts, and decision diagnostics belong on the dashboard, which must render the same stored engine state instead of recomputing fibs.
+- The current blocking sequence is: ~~Pine indicator recovery~~ (DONE, 63/64, TV-validated) -> fib engine hardening (anchor span, waypoint lines) -> canonical writer cutover -> dashboard/admin reader cutover -> training workbench buildout -> legacy retirement.
 - The 15-metric TA core pack is the canonical ML export surface. Do not re-introduce standalone third-party harnesses (BigBeluga, LuxAlgo MSB/OB, LuxAlgo Luminance are retired).
 
 ## Documentation Discipline

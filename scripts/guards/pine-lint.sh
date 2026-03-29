@@ -89,17 +89,34 @@ if [ -n "$VISIBLE_PLOTS" ]; then
     WARNINGS=$((WARNINGS + 1))
 fi
 
-# W9/E9: TradingView plot-count budget
-# Official TradingView hard cap is 64 plot counts per script, and hidden plots still count.
-PLOT_RAW=$(grep -E -c 'plot(shape|char|arrow|bar|candle)?\(' "$FILE" 2>/dev/null || echo 0)
-PLOT_COMMENT=$(grep -E 'plot(shape|char|arrow|bar|candle)?\(' "$FILE" 2>/dev/null | grep '^\s*//' | wc -l | tr -d ' ')
+# W9/E9: TradingView output-count budget
+# Official TradingView hard cap is 64 outputs per script. Outputs include:
+# plot(), plotshape(), plotchar(), plotarrow(), plotbar(), plotcandle(),
+# bgcolor(), fill(), hline(), AND alertcondition().
+# Hidden display.none plots still count. All alertcondition() calls count.
+# Note: bgcolor/fill/hline regexes exclude method calls like .set_bgcolor()
+PLOT_RAW=$(grep -E -c 'plot(shape|char|arrow|bar|candle)?\(' "$FILE" 2>/dev/null) || PLOT_RAW=0
+PLOT_COMMENT=$(grep -E 'plot(shape|char|arrow|bar|candle)?\(' "$FILE" 2>/dev/null | grep -c '^\s*//' 2>/dev/null) || PLOT_COMMENT=0
 PLOT_ACTUAL=$((PLOT_RAW - PLOT_COMMENT))
-echo "INFO: plot-style calls: $PLOT_ACTUAL (TradingView hard cap: 64)"
-if [ "$PLOT_ACTUAL" -gt 64 ]; then
-    echo "ERROR [E9]: plot-style call count exceeds TradingView hard cap ($PLOT_ACTUAL/64)"
+BG_RAW=$(grep -E -c '(^|[[:space:]])bgcolor\(' "$FILE" 2>/dev/null) || BG_RAW=0
+BG_COMMENT=$(grep -E '(^|[[:space:]])bgcolor\(' "$FILE" 2>/dev/null | grep -c '^\s*//' 2>/dev/null) || BG_COMMENT=0
+BG_ACTUAL=$((BG_RAW - BG_COMMENT))
+FILL_RAW=$(grep -E -c '(^|[[:space:]])fill\(' "$FILE" 2>/dev/null) || FILL_RAW=0
+FILL_COMMENT=$(grep -E '(^|[[:space:]])fill\(' "$FILE" 2>/dev/null | grep -c '^\s*//' 2>/dev/null) || FILL_COMMENT=0
+FILL_ACTUAL=$((FILL_RAW - FILL_COMMENT))
+HLINE_RAW=$(grep -E -c '(^|[[:space:]])hline\(' "$FILE" 2>/dev/null) || HLINE_RAW=0
+HLINE_COMMENT=$(grep -E '(^|[[:space:]])hline\(' "$FILE" 2>/dev/null | grep -c '^\s*//' 2>/dev/null) || HLINE_COMMENT=0
+HLINE_ACTUAL=$((HLINE_RAW - HLINE_COMMENT))
+ALERT_RAW=$(grep -E -c 'alertcondition\(' "$FILE" 2>/dev/null) || ALERT_RAW=0
+ALERT_COMMENT=$(grep -E 'alertcondition\(' "$FILE" 2>/dev/null | grep -c '^\s*//' 2>/dev/null) || ALERT_COMMENT=0
+ALERT_ACTUAL=$((ALERT_RAW - ALERT_COMMENT))
+OUTPUT_TOTAL=$((PLOT_ACTUAL + BG_ACTUAL + FILL_ACTUAL + HLINE_ACTUAL + ALERT_ACTUAL))
+echo "INFO: output calls: $OUTPUT_TOTAL (plot=$PLOT_ACTUAL bg=$BG_ACTUAL fill=$FILL_ACTUAL hline=$HLINE_ACTUAL alert=$ALERT_ACTUAL) (TradingView hard cap: 64)"
+if [ "$OUTPUT_TOTAL" -gt 64 ]; then
+    echo "ERROR [E9]: output count exceeds TradingView hard cap ($OUTPUT_TOTAL/64)"
     ERRORS=$((ERRORS + 1))
-elif [ "$PLOT_ACTUAL" -gt 48 ]; then
-    echo "WARNING [W9]: plot-style call count above 75% of TradingView hard cap ($PLOT_ACTUAL/64)"
+elif [ "$OUTPUT_TOTAL" -gt 48 ]; then
+    echo "WARNING [W9]: output count above 75% of TradingView hard cap ($OUTPUT_TOTAL/64)"
     WARNINGS=$((WARNINGS + 1))
 fi
 
