@@ -938,19 +938,29 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         return;
       }
 
-      const anchorRealTime =
-        signal?.generatedAt != null
-          ? Math.floor(new Date(signal.generatedAt).getTime() / 1000)
-          : null;
-
-      const anchorGfTime =
-        anchorRealTime != null
-          ? timeMapRef.current.realToGf.get(anchorRealTime) ??
-            timeMapRef.current.realToGf.get(
-              Math.round(anchorRealTime / BAR_INTERVAL_SEC) * BAR_INTERVAL_SEC,
-            ) ??
-            anchorRealTime
-          : undefined;
+      // Find the anchor bar by scanning candle history for the bar whose
+      // low (LONG) or high (SHORT) matches the reconstructed anchor price.
+      // This starts fib lines at the definitive swing high/low bar, matching
+      // TradingView's "Extend Right" behavior exactly.
+      let anchorGfTime: number | undefined = undefined;
+      const points = realPointsRef.current;
+      if (points.length > 0) {
+        const lookback = points.length > 100 ? points.slice(-100) : points;
+        const targetPrice = fibResult.isBullish ? fibResult.anchorLow : fibResult.anchorHigh;
+        const priceKey = fibResult.isBullish ? "low" : "high";
+        let bestDiff = Infinity;
+        let bestRealTime: number | null = null;
+        for (const pt of lookback) {
+          const diff = Math.abs(pt[priceKey] - targetPrice);
+          if (diff < bestDiff) {
+            bestDiff = diff;
+            bestRealTime = pt.time;
+          }
+        }
+        if (bestRealTime != null) {
+          anchorGfTime = timeMapRef.current.realToGf.get(bestRealTime) ?? bestRealTime;
+        }
+      }
 
       fibPrimitiveRef.current.setFibResult(fibResult, anchorGfTime);
     }, [lastPrice, signal]);

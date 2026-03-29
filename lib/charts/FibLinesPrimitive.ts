@@ -1,26 +1,31 @@
 /**
  * Lightweight Charts Series Primitive: Auto Fib Retracement
  *
- * Matches Kirk's TradingView Auto Fib Retracement EXACTLY.
+ * Matches Kirk's TradingView Auto Fib GOLDEN TARGET EXACTLY.
  * Settings: Depth=10, Deviation=3, Reverse=checked
  *
- * 10 levels total:
- *   ZERO (0)       — white, width 2
- *   .236           — cyan, width 1
- *   .382           — cyan, width 1
- *   Pivot (.5)     — orange, width 2, zone fill
- *   .618           — cyan, width 1
- *   .786           — cyan, width 1
- *   1              — white, width 2
- *   TARGET 1 (1.236) — green, width 1
- *   TARGET 2 (1.618) — green, width 1
- *   TARGET 3 (2.0)   — green, width 1
+ * 13 levels total:
+ *   ZERO (0)         — white, width 1
+ *   .236             — gray, width 1
+ *   .382             — dark orange, width 1
+ *   Pivot (.5)       — white, width 2, zone fill
+ *   .618             — dark orange, width 1
+ *   .786             — gray, width 1
+ *   1                — white, width 1
+ *   TARGET 1 (1.236) — green, width 2
+ *   1.382            — gray, width 1  (intermediate waypoint)
+ *   1.50             — gray, width 1  (intermediate waypoint)
+ *   TARGET 2 (1.618) — green, width 2
+ *   1.786            — gray, width 1  (intermediate waypoint)
+ *   TARGET 3 (2.0)   — green, width 2
  *
- * Colors from Kirk's TradingView:
- *   Anchors (0, 1) = white
- *   Retracements (.236, .382, .618, .786) = cyan
- *   Pivot (.5) = orange
+ * Colors:
+ *   Anchors (0, .5, 1) = white
+ *   Retracements (.236, .786) = mid-gray
+ *   Key retracements (.382, .618) = dark orange
+ *   Waypoints (1.382, 1.50, 1.786) = mid-gray
  *   Targets (1.236, 1.618, 2.0) = green
+ *   Zone fill between .382 and .618 = bright orange, 14% opacity
  */
 
 import type {
@@ -37,29 +42,33 @@ import type {
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import type { FibResult } from "@/lib/types";
 
-// --- Colors matching Kirk's TradingView Auto Fib ---
+// --- Colors matching Kirk's TradingView Auto Fib GOLDEN TARGET ---
 const COLORS = {
-  anchor: "#FFFFFF",      // white — 0 and 1 levels
-  retracement: "#808080", // 50% white — .236, .382, .618, .786
-  pivot: "#FF9800",       // orange — .5 level
-  target: "#4CAF50",      // green — TARGET 1, 2, 3
+  anchor: "#FFFFFF",             // white — 0, .5, 1 levels
+  retracement: "#808080",        // mid-gray — .236, .786, intermediate waypoints
+  retracement_orange: "#E65100", // dark orange — .382, .618
+  zone: "#FF9800",               // bright orange — zone fill between .382 and .618
+  target: "#4CAF50",             // green — TARGET 1, 2, 3
 } as const;
 
-// --- All 10 fib ratios ---
+// --- All 13 fib levels ---
 const ALL_LEVELS: { ratio: number; label: string; color: string; width: number }[] = [
-  { ratio: 0,     label: "ZERO",     color: COLORS.anchor,      width: 1 },
-  { ratio: 0.236, label: ".236",     color: COLORS.retracement, width: 1 },
-  { ratio: 0.382, label: ".382",     color: COLORS.retracement, width: 1 },
-  { ratio: 0.5,   label: "Pivot",    color: COLORS.pivot,       width: 2 },
-  { ratio: 0.618, label: ".618",     color: COLORS.retracement, width: 1 },
-  { ratio: 0.786, label: ".786",     color: COLORS.retracement, width: 1 },
-  { ratio: 1.0,   label: "1",        color: COLORS.anchor,      width: 1 },
-  { ratio: 1.236, label: "TARGET 1", color: COLORS.target,      width: 2 },
-  { ratio: 1.618, label: "TARGET 2", color: COLORS.target,      width: 2 },
-  { ratio: 2.0,   label: "TARGET 3", color: COLORS.target,      width: 2 },
+  { ratio: 0,     label: "ZERO",     color: COLORS.anchor,              width: 1 },
+  { ratio: 0.236, label: ".236",     color: COLORS.retracement,         width: 1 },
+  { ratio: 0.382, label: ".382",     color: COLORS.retracement_orange,  width: 1 },
+  { ratio: 0.5,   label: "Pivot",    color: COLORS.anchor,              width: 2 },
+  { ratio: 0.618, label: ".618",     color: COLORS.retracement_orange,  width: 1 },
+  { ratio: 0.786, label: ".786",     color: COLORS.retracement,         width: 1 },
+  { ratio: 1.0,   label: "1",        color: COLORS.anchor,              width: 1 },
+  { ratio: 1.236, label: "TARGET 1", color: COLORS.target,              width: 2 },
+  { ratio: 1.382, label: "1.382",    color: COLORS.retracement,         width: 1 },
+  { ratio: 1.5,   label: "1.50",     color: COLORS.retracement,         width: 1 },
+  { ratio: 1.618, label: "TARGET 2", color: COLORS.target,              width: 2 },
+  { ratio: 1.786, label: "1.786",    color: COLORS.retracement,         width: 1 },
+  { ratio: 2.0,   label: "TARGET 3", color: COLORS.target,              width: 2 },
 ];
 
-const PIVOT_FILL_OPACITY = 0.08; // Subtle orange zone around pivot
+const PIVOT_FILL_OPACITY = 0.14; // Orange zone between .382 and .618
 
 // --- Visual element for rendering ---
 
@@ -267,7 +276,7 @@ export class FibLinesPrimitive implements ISeriesPrimitive<Time> {
     const zoneBand: ZoneBand = {
       topPrice: Math.max(priceAt(0.382), priceAt(0.618)),
       botPrice: Math.min(priceAt(0.382), priceAt(0.618)),
-      color: COLORS.pivot,
+      color: COLORS.zone,
     };
 
     this._paneView.update(elements, zoneBand, priceToY, anchorStartX);
