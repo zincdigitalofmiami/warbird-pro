@@ -17,6 +17,11 @@
       "type": "stdio",
       "command": "npx",
       "args": ["pinescript-mcp-server"]
+    },
+    "tradingview": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["/Volumes/Satechi Hub/warbird-pro/.tradingview-mcp/src/server.js"]
     }
   }
 }

@@ -51,3 +51,7 @@ __pycache__/
 # claude code
 .claude/
 .tmp/
+
+# tradingview mcp (local tool, not project code)
+.tradingview-mcp/
+.playwright-mcp/

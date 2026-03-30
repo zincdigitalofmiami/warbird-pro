@@ -463,9 +463,6 @@ float minTargetPoints = 20.0
 float targetPathPoints = isValid ? math.abs(pT1 - close) : na
 bool targetEligible20pt = isValid and targetPathPoints >= minTargetPoints
 
-// Fixed stop family code for v6 baseline (fib invalidation path).
-int stopFamilyCode = 1
-
 float zoneUpper = math.max(p618, p786)
 float zoneLower = math.min(p618, p786)
 
@@ -631,17 +628,10 @@ int eventZnState = y10RiskOn ? 1 : y10RiskOff ? -1 : 0
 int eventVvixState = vvxRiskOff ? 1 : vvxRiskOn ? -1 : 0
 int eventSmhState = smhBull ? 1 : smhBear ? -1 : 0
 
-// ── Intermarket bitmask: 6 symbols × 2 bits each = 12-bit integer ──
-// Each symbol: 0b10 = bullish/risk-on, 0b01 = bearish/risk-off, 0b00 = neutral
-// Bit layout (MSB→LSB): SMH[11:10] | VVIX[9:8] | 10Y[7:6] | DXY[5:4] | BANK[3:2] | NQ[1:0]
-int imBitmask = (
-    (nqBull ? 2 : nqBear ? 1 : 0) +
-    (bkBull ? 8 : bkBear ? 4 : 0) +
-    (dxRiskOn ? 32 : dxRiskOff ? 16 : 0) +
-    (y10RiskOn ? 128 : y10RiskOff ? 64 : 0) +
-    (vvxRiskOn ? 512 : vvxRiskOff ? 256 : 0) +
-    (smhBull ? 2048 : smhBear ? 1024 : 0)
-)
+// NOTE: imBitmask removed — was 12-bit integer packed as float.
+// AG cannot split bitmasks on tree nodes correctly (treats as continuous).
+// The 6 atomic intermarket state columns (ml_event_nq_state etc.) are fully equivalent
+// and already exported individually below. No information is lost.
 
 if enableDebugLogs and barstate.isconfirmed
     bool stateFlip = riskOn != riskOn[1] or riskOff != riskOff[1] or regime != regime[1]
@@ -758,8 +748,12 @@ var float tp2Price = na
 var int setupBar = na
 var int entryBar = na
 var int lastExitBar = na
-var int lastExitDir = 0  // direction (1=bull, -1=bear) of last completed trade — for contrarian CHoCH
-int cooldownLen = 4 // bars to wait after exit before re-entering
+var int lastExitDir = 0       // direction of last completed trade — for contrarian CHoCH
+var int tradeDir = 0          // direction captured at SETUP→ACTIVE (safe: not affected by anchor updates at exit)
+// AG LABEL SOURCE: 0=none, 1=TP1_HIT, 2=TP2_HIT, 3=STOPPED, 4=EXPIRED
+// This is the only reliable label export — trade_state collapses to NONE on the same bar as exit.
+var int lastExitOutcome = 0
+int cooldownLen = 8 // bars to wait after exit (8 × 15m = 2h minimum; 4 was too short — consecutive entries corrupt AG samples)
 int barsSinceExit = not na(lastExitBar) ? bar_index - lastExitBar : 999
 bool cooldownActive = barsSinceExit < cooldownLen
 
@@ -788,6 +782,7 @@ if barstate.isconfirmed
         slPrice := slLevel
         tp1Price := tp1Level
         tp2Price := tp2Level
+        tradeDir  := dir      // lock direction here — anchor may shift by exit bar
         tradeState := TRADE_ACTIVE
         entryBar := bar_index
 
@@ -808,10 +803,13 @@ if barstate.isconfirmed
                 tradeState := TRADE_HIT_TP1
 
     if tradeState == TRADE_SETUP and not na(setupBar) and bar_index - setupBar > 12
+        lastExitOutcome := 4  // EXPIRED — setup timed out, no fill
         tradeState := TRADE_EXPIRED
 
     if tradeState >= TRADE_HIT_TP1
-        lastExitDir := dir  // capture direction before reset — used by contrarian CHoCH
+        // Resolve outcome BEFORE resetting state — trade_state collapses to NONE same bar
+        lastExitOutcome := tradeState == TRADE_HIT_TP2 ? 2 : tradeState == TRADE_STOPPED ? 3 : tradeState == TRADE_EXPIRED ? 4 : 1
+        lastExitDir := tradeDir  // use direction locked at entry, not current dir (anchor may have shifted)
         lastExitBar := bar_index
         tradeState := TRADE_NONE
         entryPrice := na
@@ -941,9 +939,8 @@ else
 
 // bgcolor regime tint removed — never used, frees 1 output slot (now 63/64)
 
-float trendStr = math.min(adxVal / 60.0 * 100.0, 100.0)
-float maxIMScore = float(totalWeight)
-float corrStr = maxIMScore > 0 ? math.max(float(scoreOn), float(scoreOff)) / maxIMScore * 100.0 : 0.0
+// trendStr / corrStr removed — monotonic rescalings of adxVal and im_score_on/off.
+// Collinear with existing ADX and IM score exports. Zero new information for AG.
 
 float ema21 = ta.ema(close, 21)
 float ema50 = ta.ema(close, 50)
@@ -988,55 +985,79 @@ plot(nz(confluenceQuality), "confluence_quality", display=display.none)
 plot(float(tradeState), "trade_state", display=display.none)
 plot(tradeState == TRADE_ACTIVE and not na(entryBar) ? float(bar_index - entryBar) : 0.0, "bars_in_trade", display=display.none)
 
-plot(trendStr, "trend_strength", display=display.none)
-plot(corrStr, "correlation_strength", display=display.none)
+// trend_strength / correlation_strength removed — collinear with adx/IM score exports, zero new signal for AG
 
 // v6 minimum model contract + simplified trigger contract
+// ── REGIME / STRUCTURE / MODEL CONTRACT ──
 plot(confidenceScore, "ml_confidence_score", display=display.none)
 plot(float(dir), "ml_direction_code", display=display.none)
 plot(float(setupArchetypeCode), "ml_setup_archetype_code", display=display.none)
 plot(float(fibLevelTouched), "ml_fib_level_touched", display=display.none)
-plot(float(stopFamilyCode), "ml_stop_family_code", display=display.none)
+// ml_stop_family_code removed — was hardcoded constant 1 everywhere, zero variance for AG
 plot(float(eventModeCode), "ml_event_mode_code", display=display.none)
 plot(eventShockScore, "ml_event_shock_score", display=display.none)
 plot(eventReversalScore, "ml_event_reversal_score", display=display.none)
+
+// ── INTERMARKET ATOMIC STATES (6 signals, signed: 1=risk-on/bull, -1=risk-off/bear, 0=neutral) ──
+// ml_im_bitmask removed — 12-bit packed int mishandled by AG tree splits (treated as continuous).
+// These 6 atomic columns are the correct representation for tabular ML.
 plot(float(eventNqState), "ml_event_nq_state", display=display.none)
 plot(float(eventDxyState), "ml_event_dxy_state", display=display.none)
 plot(float(eventZnState), "ml_event_zn_state", display=display.none)
 plot(float(eventVvixState), "ml_event_vvix_state", display=display.none)
 plot(float(eventSmhState), "ml_event_smh_state", display=display.none)
-plot(float(imBitmask), "ml_im_bitmask", display=display.none)
 plot(float(eventPivotInteractionCode), "ml_event_pivot_interaction_code", display=display.none)
-plot(float(ema21Dir), "ml_ema21_dir", display=display.none)
-plot(float(ema50Dir), "ml_ema50_dir", display=display.none)
-plot(float(ema200Dir), "ml_ema200_dir", display=display.none)
+
+// ── EMA DISTANCE (3 magnitudes — direction codes dropped, collinear with IM regime) ──
+// ml_ema21_dir / ml_ema50_dir / ml_ema200_dir removed — collinear with IM regime and dist_pct.
+// Distance % carries both sign and magnitude; direction codes are a strict subset.
 plot(ema21DistPct, "ml_ema21_dist_pct", display=display.none)
 plot(ema50DistPct, "ml_ema50_dist_pct", display=display.none)
 plot(ema200DistPct, "ml_ema200_dist_pct", display=display.none)
+
+// ── VOLUME / ENTRY QUALITY ──
 plot(volRatio, "ml_rvol", display=display.none)
 plot(float(orState), "ml_or_state", display=display.none)
 plot(orDistNorm, "ml_or_dist_norm", display=display.none)
-plot(liqSweepBull ? 1.0 : 0.0, "ml_liq_sweep_bull", display=display.none)
-plot(liqSweepBear ? 1.0 : 0.0, "ml_liq_sweep_bear", display=display.none)
+// ml_liq_sweep_bull + ml_liq_sweep_bear merged into single signed feature (saves 1 slot, no info loss)
+plot(liqSweepBull ? 1.0 : liqSweepBear ? -1.0 : 0.0, "ml_liq_sweep", display=display.none)
 plot(chochBull ? 1.0 : chochBear ? -1.0 : 0.0, "ml_choch", display=display.none)
+// PIT NOTE: chochBull/chochBear fire at bar N+5 (ta.pivothigh rightbars=5).
+// AG pipeline MUST timestamp these at the emit bar, not the pivot bar, to avoid 5-bar forward shift.
 plot(fvgBullDist, "ml_fvg_bull_dist", display=display.none)
 plot(fvgBearDist, "ml_fvg_bear_dist", display=display.none)
 plot(cooldownActive ? 1.0 : 0.0, "ml_cooldown_active", display=display.none)
 plot(math.min(float(barsSinceExit), 999.0), "ml_bars_since_exit", display=display.none)
 plot(slDistAtr, "ml_sl_dist_atr", display=display.none)
 plot(exhaustionScore, "ml_exhaustion_score", display=display.none)
-plot(entryLongTrigger ? 1.0 : 0.0, "ml_entry_long_trigger", display=display.none)
-plot(entryShortTrigger ? 1.0 : 0.0, "ml_entry_short_trigger", display=display.none)
+// ml_entry_long/short_trigger removed — all constituent features already exported separately.
+// Within the AG training set (rows = entry bars), these are constant=1, zero predictive variance.
+
+// ── AG LABEL SURFACE ──
+// ml_last_exit_outcome: 0=none, 1=TP1_HIT, 2=TP2_HIT, 3=STOPPED, 4=EXPIRED
+// This is the PRIMARY AG label source. trade_state collapses to NONE on the same bar as exit —
+// it cannot be used to reconstruct outcome. This plot holds the outcome for exactly 1 bar at exit.
+plot(float(lastExitOutcome), "ml_last_exit_outcome", display=display.none)
+// ml_tp1_hit_event / ml_tp2_hit_event: price-tag events (fire regardless of trade state).
+// Use ml_last_exit_outcome for label construction; use these as secondary confirmation.
 plot(tagT1Event ? 1.0 : 0.0, "ml_tp1_hit_event", display=display.none)
 plot(tagT2Event ? 1.0 : 0.0, "ml_tp2_hit_event", display=display.none)
-// ── 3 additions (64/64 — at limit) ──
-plot(isEventDay ? 1.0 : 0.0, "ml_event_day", display=display.none)      // NFP/FOMC/CPI proxy
-plot(adSlopeNorm, "ml_adline_slope", display=display.none)               // NYSE A-D breadth slope (normalized)
-plot(contrChoch ? 1.0 : 0.0, "ml_contrarian_choch", display=display.none) // post-exit CHoCH reversal flag
+
+// ── MACRO CONTEXT ──
+// ml_event_day: calendar heuristic (~80% accuracy). Use FRED server-side join for AG training labels.
+// This plot is correct for live alerting; for AG training, prefer the exact server-side calendar.
+plot(isEventDay ? 1.0 : 0.0, "ml_event_day", display=display.none)
+// ml_adline_slope: NYSE A-D daily slope, same value for all 15m bars within a day.
+// PIT NOTE: Lag by 1 day in AG preprocessing — current-day A-D is not available at bar open.
+// Feature is cross-day breadth divergence context, not intra-day signal.
+plot(adSlopeNorm, "ml_adline_slope", display=display.none)
+plot(contrChoch ? 1.0 : 0.0, "ml_contrarian_choch", display=display.none)
 
 // ── TA Core Pack: computation stays (used by AG packet gates), plot exports
 // ── offloaded to server-side (AG computes from Databento OHLCV) ──
-// ── PLOT BUDGET: 61 plots + 3 alertconditions = 64/64 (AT LIMIT) ──
+// ── PLOT BUDGET: 52 plots + 3 alertconditions = 55/64 (9 slots headroom) ──
+// ── Removed: stop_family_code(constant), im_bitmask(mis-typed for AG), trend_strength(collinear), ──
+// ── correlation_strength(collinear), ema_dir×3(collinear), entry_long/short_trigger(zero variance) ──
 
 //=====================
 // ALERTS

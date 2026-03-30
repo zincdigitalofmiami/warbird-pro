@@ -104,14 +104,31 @@ After each locked phase or checkpoint:
 Before committing ANY change to `indicators/*.pine`, run ALL of these in order:
 
 ```bash
-./scripts/guards/pine-lint.sh          # Static analysis (errors block commit)
-./scripts/guards/check-contamination.sh # Cross-project leak detection
-npm run build                           # TypeScript build gate
+# 1. Real TradingView compiler — same as the web editor, returns line/column errors
+pine_code=$(cat "indicators/<file>.pine")
+curl -s -X POST "https://pine-facade.tradingview.com/pine-facade/translate_light?user_name=admin&v=3" \
+  -H 'Referer: https://www.tradingview.com/' \
+  -F "source=$pine_code" | python3 -c "
+import json,sys; d=json.load(sys.stdin)
+errs=d.get('result',{}).get('errors',[])
+warns=d.get('result',{}).get('warnings',[])
+print('success:',d.get('success'),'errors:',len(errs),'warnings:',len(warns))
+[print('ERR:',e) for e in errs]; [print('WARN:',w) for w in warns]
+"
+
+# 2. Static analysis (errors block commit)
+./scripts/guards/pine-lint.sh
+
+# 3. Cross-project leak detection
+./scripts/guards/check-contamination.sh
+
+# 4. TypeScript build gate
+npm run build
 ```
 
-For major Pine refactors, use the installed Pine skills plus the repo guard scripts below. Do not assume any additional Pine validation agent exists unless it is explicitly configured in the active Codex profile.
+The pine-facade curl IS the authoritative compiler check. Run it first. `pine-lint.sh` catches budget/pattern issues the compiler doesn't flag. Both must pass.
 
-Only rely on Pine / TradingView MCP or CLI tooling after confirming it is actually configured in the active Codex profile. In the current profile, no `pinescript-server` or TradingView chart CLI/MCP is configured.
+For function signatures and syntax lookup, use the `pinescript-server` MCP if configured. What the compiler cannot do: load onto a live chart, show visual output, or run backtests — that's still manual in the TV editor.
 
 ## Absolute Rules
 
