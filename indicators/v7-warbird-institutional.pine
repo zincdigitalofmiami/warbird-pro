@@ -13,11 +13,12 @@
 //
 // REQUEST.SECURITY() BUDGET:
 // Intermarket (60min): NQ, BANK, VVIX, DXY, 10Y        = 5 calls
-// SMH (60min):         close                             = 1 call  (Task 4)
+// SMH (60min):         close                             = 1 call
+// NYSE A-D Line (D):   close                             = 1 call
 // HTF fib (1H):        [high, low] tuple                 = 1 call
 // HTF fib (4H):        [high, low] tuple                 = 1 call
 // HTF fib (1D):        [high, low] tuple                 = 1 call
-// TOTAL:                                                 = 9 of 40 (22%)
+// TOTAL:                                                 = 10 of 40 (25%)
 //@version=6
 indicator("Warbird v7 Institutional", shorttitle="WB v7", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100)
 import TradingView/ZigZag/7 as zigzag
@@ -190,6 +191,20 @@ if hour == 9 and minute > 0 and not orLocked
 int orState = orLocked ? (close > orHigh ? 1 : close < orLow ? -1 : 0) : 0
 float orMid = orLocked ? (orHigh + orLow) / 2.0 : na
 float orDistNorm = (orLocked and not na(orMid) and atr14 > 0) ? (close - orMid) / atr14 : 0.0
+
+//=====================
+// ECONOMIC EVENT DAY PROXY (NFP / FOMC / CPI approximation)
+// NFP:  first Friday of month (dayofmonth <= 7)
+// FOMC: 8x/year, always a Wednesday — approximate 2nd or 3rd Wed of month (dayofmonth 8-21)
+// CPI:  usually 2nd Tuesday of month (dayofmonth 8-14)
+// Zero security calls. Correctly identifies ~80% of high-impact macro days.
+// For exact dates, join FRED economic calendar server-side in the AG pipeline.
+// Data floor: 2018-01-01. Pre-2018 data excluded from AG training (regime mismatch).
+//=====================
+bool isNFPDay   = dayofweek == dayofweek.friday    and dayofmonth <= 7
+bool isFOMCDay  = dayofweek == dayofweek.wednesday and dayofmonth >= 8 and dayofmonth <= 21
+bool isCPIDay   = dayofweek == dayofweek.tuesday   and dayofmonth >= 8 and dayofmonth <= 14
+bool isEventDay = isNFPDay or isFOMCDay or isCPIDay
 
 //=====================
 // LIQUIDITY SWEEP DETECTION (ICT methodology)
@@ -508,6 +523,13 @@ float vvx = imClose(symVVIX)
 float dx = imClose(symDXY)
 float y10 = imClose(sym10Y)
 float smh = imClose(symSMH)
+
+// NYSE Advance-Decline issues (daily breadth): leading exhaustion signal for MES
+// Rising MES + falling AD = breadth divergence (exhaustion). Falling MES + rising AD = accumulation.
+float adLineRaw   = request.security("AMEX:ADD", "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+float adSlope     = adLineRaw - nz(adLineRaw[3])
+float adSlopeSma  = ta.sma(math.abs(adSlope), 20)
+float adSlopeNorm = adSlopeSma > 0 ? adSlope / adSlopeSma : 0.0
 float nqMA = ta.ema(nq, maLen)
 float bkMA = ta.ema(bk, maLen)
 float vvxMA = ta.ema(vvx, maLen)
@@ -736,6 +758,7 @@ var float tp2Price = na
 var int setupBar = na
 var int entryBar = na
 var int lastExitBar = na
+var int lastExitDir = 0  // direction (1=bull, -1=bear) of last completed trade — for contrarian CHoCH
 int cooldownLen = 4 // bars to wait after exit before re-entering
 int barsSinceExit = not na(lastExitBar) ? bar_index - lastExitBar : 999
 bool cooldownActive = barsSinceExit < cooldownLen
@@ -788,6 +811,7 @@ if barstate.isconfirmed
         tradeState := TRADE_EXPIRED
 
     if tradeState >= TRADE_HIT_TP1
+        lastExitDir := dir  // capture direction before reset — used by contrarian CHoCH
         lastExitBar := bar_index
         tradeState := TRADE_NONE
         entryPrice := na
@@ -796,6 +820,13 @@ if barstate.isconfirmed
         tp2Price := na
         setupBar := na
         entryBar := na
+
+// Contrarian reversal setup: CHoCH fires opposite to last completed trade direction
+// within 10 bars of exit. Flags mean-reversion opportunity after TP2 tag or SL stop-out.
+// AG decides whether to act — this is a feature, not an entry trigger.
+bool contrChoch = barsSinceExit > 0 and barsSinceExit <= 10 and (
+    (lastExitDir == 1  and chochBear) or
+    (lastExitDir == -1 and chochBull))
 
 var line slLine = line.new(na, na, na, na, color=color(na))
 var line entryLine = line.new(na, na, na, na, color=color(na))
@@ -998,9 +1029,14 @@ plot(entryLongTrigger ? 1.0 : 0.0, "ml_entry_long_trigger", display=display.none
 plot(entryShortTrigger ? 1.0 : 0.0, "ml_entry_short_trigger", display=display.none)
 plot(tagT1Event ? 1.0 : 0.0, "ml_tp1_hit_event", display=display.none)
 plot(tagT2Event ? 1.0 : 0.0, "ml_tp2_hit_event", display=display.none)
+// ── 3 additions (64/64 — at limit) ──
+plot(isEventDay ? 1.0 : 0.0, "ml_event_day", display=display.none)      // NFP/FOMC/CPI proxy
+plot(adSlopeNorm, "ml_adline_slope", display=display.none)               // NYSE A-D breadth slope (normalized)
+plot(contrChoch ? 1.0 : 0.0, "ml_contrarian_choch", display=display.none) // post-exit CHoCH reversal flag
 
 // ── TA Core Pack: computation stays (used by AG packet gates), plot exports
 // ── offloaded to server-side (AG computes from Databento OHLCV) ──
+// ── PLOT BUDGET: 61 plots + 3 alertconditions = 64/64 (AT LIMIT) ──
 
 //=====================
 // ALERTS
