@@ -4,6 +4,10 @@
  * Renders traditional pivot levels (P, R1-R5, S1-S5) as solid horizontal
  * lines with text labels at the left edge. NO axis boxes. NO dotted lines.
  *
+ * Colors:
+ *   D/M (primary): Bright White #FFFFFF
+ *   W/Y (tier-two): Faint Gray #404040 (appears ~rgba(255,255,255,0.15) at alpha)
+ *
  * Follows the same ISeriesPrimitive pattern as ForecastTargetsPrimitive.
  */
 
@@ -28,7 +32,6 @@ const STYLES = {
   labelFont: '10px -apple-system, BlinkMacSystemFont, "Inter", sans-serif',
   labelPaddingX: 6,
   labelPaddingY: 3,
-  labelBgAlpha: 0.7,
   lineAlpha: 0.6,
   pivotLineAlpha: 0.8,
 } as const;
@@ -39,7 +42,7 @@ interface ResolvedPivot {
   price: number;
   label: string;
   level: string;
-  startTime?: number;
+  startTime?: Time | number;
   color: string;
   isPivotPoint: boolean;
 }
@@ -47,67 +50,67 @@ interface ResolvedPivot {
 // --- Renderer: draws pivot lines + labels on the main pane ---
 
 class PivotLinesRenderer implements IPrimitivePaneRenderer {
-  private _pivots: ResolvedPivot[] = [];
-  private _priceToY: ((price: number) => Coordinate | null) | null = null;
-  private _timeToX: ((time: Time) => Coordinate | null) | null = null;
+  private pivots: ResolvedPivot[] = [];
+  private priceToY: ((price: number) => Coordinate | null) | null = null;
+  private timeToX: ((time: Time) => Coordinate | null) | null = null;
 
   update(
     pivots: ResolvedPivot[],
     priceToY: (price: number) => Coordinate | null,
-    timeToX: (time: Time) => Coordinate | null
+    timeToX: (time: Time) => Coordinate | null,
   ) {
-    this._pivots = pivots;
-    this._priceToY = priceToY;
-    this._timeToX = timeToX;
+    this.pivots = pivots;
+    this.priceToY = priceToY;
+    this.timeToX = timeToX;
   }
 
   draw(target: CanvasRenderingTarget2D): void {
-    target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
-      if (!this._priceToY || !this._timeToX) return;
+    target.useMediaCoordinateSpace(({ context, mediaSize }) => {
+      if (!this.priceToY || !this.timeToX) return;
 
-      for (const p of this._pivots) {
-        const y = this._priceToY(p.price);
+      for (const pivot of this.pivots) {
+        const y = this.priceToY(pivot.price);
         if (y == null) continue;
 
         // Skip lines outside the visible vertical range (with padding)
         if (y < -20 || y > mediaSize.height + 20) continue;
 
-        const alpha = p.isPivotPoint ? STYLES.pivotLineAlpha : STYLES.lineAlpha;
-        const lineWidth = p.isPivotPoint
+        const alpha = pivot.isPivotPoint
+          ? STYLES.pivotLineAlpha
+          : STYLES.lineAlpha;
+        const lineWidth = pivot.isPivotPoint
           ? STYLES.pivotLineWidth
           : STYLES.levelLineWidth;
 
         const startXRaw =
-          p.startTime != null
-            ? this._timeToX(p.startTime as unknown as Time)
-            : 0;
-        const x0 = startXRaw == null ? 0 : Math.max(0, startXRaw);
-        if (x0 >= mediaSize.width) continue;
+          pivot.startTime != null ? this.timeToX(pivot.startTime as Time) : 0;
+        const startX = startXRaw == null ? 0 : Math.max(0, startXRaw);
+        if (startX >= mediaSize.width) continue;
 
         // --- Draw solid horizontal segment (timeframe start → right edge) ---
-        ctx.strokeStyle = hexToRgba(p.color, alpha);
-        ctx.lineWidth = lineWidth;
-        ctx.setLineDash([]); // SOLID — no dashing ever
-        ctx.beginPath();
-        ctx.moveTo(x0, y);
-        ctx.lineTo(mediaSize.width, y);
-        ctx.stroke();
+        context.strokeStyle = hexToRgba(pivot.color, alpha);
+        context.lineWidth = lineWidth;
+        context.setLineDash([]); // SOLID — no dashing ever
+        context.beginPath();
+        context.moveTo(startX, y);
+        context.lineTo(mediaSize.width, y);
+        context.stroke();
 
         // --- Draw text label near segment start ---
-        ctx.font = STYLES.labelFont;
-        ctx.fillStyle = hexToRgba(p.color, 0.9);
-        ctx.textBaseline = "bottom";
+        context.font = STYLES.labelFont;
+        context.fillStyle = hexToRgba(pivot.color, 0.9);
+        context.textBaseline = "bottom";
         const labelY = y - STYLES.labelPaddingY + 1;
-        if (x0 > 56) {
+        if (startX > 56) {
           // Match TradingView pivot style: label just to the left of segment
-          ctx.textAlign = "right";
-          ctx.fillText(p.label, x0 - 6, labelY);
+          context.textAlign = "right";
+          context.fillText(pivot.label, startX - 6, labelY);
         } else {
           // Fallback when segment starts near far-left boundary
-          ctx.textAlign = "left";
-          ctx.fillText(p.label, x0 + STYLES.labelPaddingX, labelY);
+          context.textAlign = "left";
+          context.fillText(pivot.label, startX + STYLES.labelPaddingX, labelY);
         }
-        ctx.textAlign = "left";
+        context.textAlign = "left";
       }
     });
   }
@@ -116,14 +119,14 @@ class PivotLinesRenderer implements IPrimitivePaneRenderer {
 // --- Pane View: bridges renderer to LC ---
 
 class PivotLinesPaneView implements IPrimitivePaneView {
-  private _renderer = new PivotLinesRenderer();
+  private rendererInstance = new PivotLinesRenderer();
 
   update(
     pivots: ResolvedPivot[],
     priceToY: (price: number) => Coordinate | null,
-    timeToX: (time: Time) => Coordinate | null
+    timeToX: (time: Time) => Coordinate | null,
   ) {
-    this._renderer.update(pivots, priceToY, timeToX);
+    this.rendererInstance.update(pivots, priceToY, timeToX);
   }
 
   zOrder(): "top" {
@@ -131,7 +134,7 @@ class PivotLinesPaneView implements IPrimitivePaneView {
   }
 
   renderer(): IPrimitivePaneRenderer {
-    return this._renderer;
+    return this.rendererInstance;
   }
 }
 
@@ -140,57 +143,48 @@ class PivotLinesPaneView implements IPrimitivePaneView {
 export class PivotLinesPrimitive implements ISeriesPrimitive<Time> {
   private _pivots: PivotLine[] = [];
   private _colors: Record<PivotTimeframe, string> = {
-    D: "#FFFFFF",
-    W: "#F23645",
-    M: "#F23645",
-    Y: "#F23645",
+    D: "#FFFFFF",   // Primary: Bright White
+    M: "#FFFFFF",   // Primary: Bright White
+    W: "#404040",   // Tier-two: Faint Gray
+    Y: "#404040",   // Tier-two: Faint Gray
   };
-  private _paneView = new PivotLinesPaneView();
-  private _attachedParams: SeriesAttachedParameter<Time, SeriesType> | null =
+  private paneView = new PivotLinesPaneView();
+  private attachedParams: SeriesAttachedParameter<Time, SeriesType> | null =
     null;
 
-  setPivots(
-    pivots: PivotLine[],
-    colors?: Record<PivotTimeframe, string>
-  ) {
+  setPivots(pivots: PivotLine[], colors?: Record<PivotTimeframe, string>) {
     this._pivots = pivots;
     if (colors) this._colors = colors;
-    if (this._attachedParams) {
-      this._attachedParams.requestUpdate();
-    }
+    this.attachedParams?.requestUpdate();
   }
 
   attached(param: SeriesAttachedParameter<Time, SeriesType>) {
-    this._attachedParams = param;
+    this.attachedParams = param;
   }
 
   detached() {
-    this._attachedParams = null;
+    this.attachedParams = null;
   }
 
   updateAllViews() {
-    if (!this._attachedParams) return;
+    if (!this.attachedParams) return;
 
-    const { series, chart } = this._attachedParams;
-    const priceToY = (price: number) => series.priceToCoordinate(price);
-    const timeScale = chart.timeScale();
-    const timeToX = (time: Time) => timeScale.timeToCoordinate(time);
-
-    // Resolve colors and build internal representation
-    const resolved: ResolvedPivot[] = this._pivots.map((p) => ({
-      price: p.price,
-      label: p.label,
-      level: p.level,
-      startTime: p.startTime,
-      color: this._colors[p.timeframe] ?? "#F23645",
-      isPivotPoint: p.level === "P",
+    const { chart, series } = this.attachedParams;
+    const resolved = this._pivots.map((pivot) => ({
+      ...pivot,
+      color: this._colors[pivot.timeframe] ?? "#F23645",
+      isPivotPoint: pivot.level === "P",
     }));
 
-    this._paneView.update(resolved, priceToY, timeToX);
+    this.paneView.update(
+      resolved,
+      (price: number) => series.priceToCoordinate(price),
+      (time: Time) => chart.timeScale().timeToCoordinate(time),
+    );
   }
 
   paneViews(): readonly IPrimitivePaneView[] {
-    return [this._paneView];
+    return [this.paneView];
   }
 
   // NO priceAxisViews — no colored boxes on the price axis

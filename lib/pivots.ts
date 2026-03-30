@@ -56,8 +56,8 @@ export interface PivotLine {
   level: string; // "P", "R1", "S1", etc.
   label: string; // "D(P)", "W(R1)", etc.
   price: number;
-  /** Unix seconds (UTC) where this pivot segment starts on chart. */
-  startTime?: number;
+  /** Unix seconds (UTC) or date-key string where this pivot segment starts on chart. */
+  startTime?: number | string;
 }
 
 /** All levels as an ordered array for chart rendering */

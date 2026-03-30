@@ -477,6 +477,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       const fibPrimitive = new FibLinesPrimitive();
       series.attachPrimitive(fibPrimitive);
 
+
       const regimePrimitive = new RegimeAnchorPrimitive();
       series.attachPrimitive(regimePrimitive);
 
@@ -705,9 +706,9 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
 
       async function startRealtimeFeed() {
         try {
-          // Initial snapshot from API
+          // Cache busting: cacheComponents=true in next.config
           const snapshotRes = await fetch(
-            "/api/live/mes15m?snapshot=1&backfill=5000",
+            `/api/live/mes15m?snapshot=1&backfill=5000&cb=${Date.now()}`,
             { cache: "no-store" },
           );
           const snapshotData = (await snapshotRes.json()) as
@@ -796,12 +797,13 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
             // Floor to 15m bucket
             const barTime = Math.floor(tickTime / BAR_INTERVAL_SEC) * BAR_INTERVAL_SEC;
 
-            // If this 15m bar already exists as a completed bar, skip
-            // (the mes_15m channel already handles completed bars)
-            const existsAsCompleted = realPointsRef.current.some(
-              (p) => p.time === barTime,
-            );
-            if (existsAsCompleted) return;
+            // FIX: Use Date.now() bucket comparison instead of existsAsCompleted.
+            // The old check `realPointsRef.current.some(p => p.time === barTime)`
+            // would skip ticks if the bar existed in the snapshot, even if it was
+            // still the current forming bar. Compare against the current wall-clock
+            // 15m bucket to determine if this is a forming bar.
+            const nowBucket = Math.floor(Date.now() / 1000 / BAR_INTERVAL_SEC) * BAR_INTERVAL_SEC;
+            if (barTime < nowBucket) return; // This bar is in the past — already completed
 
             const open = Number(row.open);
             const high = Number(row.high);
@@ -965,6 +967,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       fibPrimitiveRef.current.setFibResult(fibResult, anchorGfTime);
     }, [lastPrice, signal]);
 
+
     useEffect(() => {
       if (!regimePrimitiveRef.current) return;
       const regimeTime = realToGapFree(
@@ -986,13 +989,13 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
 
     return (
       <div
-        className="relative w-full rounded-xl overflow-hidden border border-white/5"
+        className="relative w-full h-full flex flex-col overflow-hidden"
         style={{
           background: "linear-gradient(180deg, #131722 0%, #0d1117 100%)",
         }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5">
+        <div className="flex items-center justify-between px-6 py-3 border-b border-white/5 flex-shrink-0">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <div
@@ -1015,7 +1018,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
             <span className="text-xs text-white/30 font-medium">
               Micro E-mini S&P 500 &bull; 15m
             </span>
-            {eventPhase && eventPhase !== "CLEAR" && (
+            {eventPhase && eventPhase !== "CLEAR" ? (
               <span
                 title={eventLabel ?? undefined}
                 className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border ${
@@ -1030,11 +1033,11 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
               >
                 {displayEventPhase}
               </span>
-            )}
+            ) : null}
           </div>
 
           <div className="flex items-center gap-6">
-            {sessionHigh != null && sessionLow != null && (
+            {sessionHigh != null && sessionLow != null ? (
               <div className="flex items-center gap-4 text-xs">
                 <div className="flex items-center gap-1.5">
                   <span className="text-white/30">H</span>
@@ -1049,11 +1052,11 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
                   </span>
                 </div>
               </div>
-            )}
+            ) : null}
 
-            {sessionHigh != null && <div className="h-4 w-px bg-white/10" />}
+            {sessionHigh != null ? <div className="h-4 w-px bg-white/10" /> : null}
 
-            {lastPrice != null && (
+            {lastPrice != null ? (
               <div className="flex items-center gap-3">
                 <span className="text-2xl font-semibold text-white tabular-nums">
                   {lastPrice.toFixed(2)}
@@ -1066,7 +1069,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
                   {priceChange.toFixed(2)}%
                 </span>
               </div>
-            )}
+            ) : null}
 
             <span
               className="text-[10px] font-bold uppercase tracking-wider"
@@ -1084,8 +1087,8 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
           </div>
         </div>
 
-        {/* Chart */}
-        <div className="relative w-full" style={{ height: "80vh" }}>
+        {/* Chart — flex-1 fills remaining space, min-h prevents collapse */}
+        <div className="relative flex-1 min-h-[400px]">
           <div className="absolute bottom-12 left-3 z-20 rounded-md border border-orange-500/25 bg-black/35 px-3 py-1.5">
             <div className="text-[10px] uppercase tracking-[0.18em] text-orange-300/80">
               Regime Anchor
@@ -1109,7 +1112,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         </div>
 
         {/* Legend Footer */}
-        <div className="flex items-center justify-center gap-8 px-6 py-3 border-t border-white/5 bg-black/20">
+        <div className="flex items-center justify-center gap-8 px-6 py-2 border-t border-white/5 bg-black/20 flex-shrink-0">
           <div className="flex items-center gap-2">
             <div
               className="w-3 h-4 rounded-sm"
@@ -1142,38 +1145,30 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
             </span>
           </div>
           <div className="flex items-center gap-1.5">
-            <div className="w-3 h-px" style={{ backgroundColor: "#FF9800" }} />
-            <span className="text-[10px] text-white/40 uppercase tracking-wider">
-              Pivot
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5">
             <div className="w-3 h-px" style={{ backgroundColor: "#4CAF50" }} />
             <span className="text-[10px] text-white/40 uppercase tracking-wider">
               Target
             </span>
           </div>
-          {setups && setups.length > 0 && (
-            <>
-              <div className="flex items-center gap-2">
-                <div
-                  className="w-2.5 h-2.5 rotate-45"
-                  style={{ backgroundColor: "#26C6DA" }}
-                />
-                <span className="text-[10px] text-white/40 uppercase tracking-wider">
-                  Setup
-                </span>
-              </div>
-            </>
-          )}
+          {setups && setups.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <div
+                className="w-2.5 h-2.5 rotate-45"
+                style={{ backgroundColor: "#26C6DA" }}
+              />
+              <span className="text-[10px] text-white/40 uppercase tracking-wider">
+                Setup
+              </span>
+            </div>
+          ) : null}
         </div>
 
         {/* Error banner */}
-        {error && (
-          <div className="px-6 py-2 border-t border-white/5">
+        {error ? (
+          <div className="px-6 py-2 border-t border-white/5 flex-shrink-0">
             <p className="text-xs text-red-400">{error}</p>
           </div>
-        )}
+        ) : null}
       </div>
     );
   },

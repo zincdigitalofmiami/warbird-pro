@@ -1,12 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import MesChartWrapper from "@/components/charts/MesChartWrapper";
-import MarketSummaryCard from "@/components/dashboard/MarketSummaryCard";
-import ActiveSetupsCard from "@/components/dashboard/ActiveSetupsCard";
-import SessionStatsCard from "@/components/dashboard/SessionStatsCard";
+import dynamic from "next/dynamic";
+import CorrelationsRow from "@/components/dashboard/CorrelationsRow";
+import AlertFeedPanel from "@/components/dashboard/AlertFeedPanel";
+import DataTablesPanel from "@/components/dashboard/DataTablesPanel";
 import { fromWarbirdSetup, type SetupCandidate } from "@/lib/setup-candidates";
 import type { WarbirdSignal, WarbirdSetupEventRow, WarbirdSetupRow } from "@/lib/warbird/types";
+
+// bundle-dynamic-imports: heavy chart component loaded client-side only
+const LiveMesChart = dynamic(
+  () => import("@/components/charts/LiveMesChart"),
+  { ssr: false },
+);
 
 interface DashboardSetupCounts {
   active: number;
@@ -17,10 +23,21 @@ interface DashboardSetupCounts {
   open: number;
 }
 
+interface SignalEvent {
+  signal_event_id: string;
+  signal_id: string;
+  ts: string;
+  event_type: string;
+  price: number | null;
+  note: string | null;
+}
+
 interface DashboardPayload {
   signal: WarbirdSignal | null;
   setups: WarbirdSetupRow[];
   events: WarbirdSetupEventRow[];
+  signalEvents: SignalEvent[];
+  correlations: Record<string, { close: number; prevClose: number }>;
   counts: DashboardSetupCounts;
   generatedAt: string;
 }
@@ -34,9 +51,11 @@ export default function DashboardLiveClient() {
 
     async function fetchData() {
       try {
-        const response = await fetch("/api/warbird/dashboard?days=7&limit=100", {
-          cache: "no-store",
-        });
+        // Cache busting: cacheComponents=true in next.config, so add cb param
+        const response = await fetch(
+          `/api/warbird/dashboard?days=7&limit=100&cb=${Date.now()}`,
+          { cache: "no-store" },
+        );
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
@@ -70,13 +89,27 @@ export default function DashboardLiveClient() {
   }, [data?.setups]);
 
   return (
-    <>
-      <MesChartWrapper signal={data?.signal ?? null} setups={setups} />
-      <div className="w-full px-4 pb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <MarketSummaryCard />
-        <ActiveSetupsCard counts={data?.counts ?? null} loading={loading} />
-        <SessionStatsCard />
+    <div className="flex flex-col w-full h-full" style={{ background: "#131722" }}>
+      {/* Top: Correlations Row */}
+      <CorrelationsRow correlations={data?.correlations ?? null} />
+
+      {/* Middle: Chart (80%) + Alert Feed (20%) */}
+      <div className="flex flex-1 min-h-0">
+        {/* Chart */}
+        <div className="flex-[4] min-w-0 min-h-0">
+          <LiveMesChart signal={data?.signal ?? null} setups={setups} />
+        </div>
+        {/* Alert Feed */}
+        <div className="w-[280px] flex-shrink-0 min-h-0">
+          <AlertFeedPanel events={data?.signalEvents ?? []} />
+        </div>
       </div>
-    </>
+
+      {/* Bottom: Data Tables */}
+      <DataTablesPanel
+        signal={data?.signal ?? null}
+        setups={data?.setups ?? []}
+      />
+    </div>
   );
 }

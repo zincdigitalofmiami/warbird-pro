@@ -20,10 +20,40 @@ export async function GET(request: Request) {
     const days = Math.max(1, Math.min(30, Number(url.searchParams.get("days") ?? 7)));
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 100)));
 
-    const [state, history] = await Promise.all([
+    // Parallel fetch: state + history + signal events + cross-asset correlations
+    const correlationSymbols = ["NQ", "DX", "US10Y", "SOX"];
+
+    const [state, history, signalEventsResult, ...crossAssetResults] = await Promise.all([
       fetchLatestWarbirdState(supabase, symbolCode),
       fetchWarbirdSetupHistory(supabase, { symbolCode, days, limit }),
+      supabase
+        .from("warbird_signal_events")
+        .select("signal_event_id, signal_id, ts, event_type, price, note")
+        .order("ts", { ascending: false })
+        .limit(50),
+      ...correlationSymbols.map((sym) =>
+        supabase
+          .from("cross_asset_1d")
+          .select("ts, close")
+          .eq("symbol_code", sym)
+          .order("ts", { ascending: false })
+          .limit(2),
+      ),
     ]);
+
+    // Build signal events array (may not exist yet — table is in migration 037)
+    const signalEvents = signalEventsResult.error ? [] : (signalEventsResult.data ?? []);
+
+    // Build correlations map: { symbolCode: { close, prevClose } }
+    const correlations: Record<string, { close: number; prevClose: number }> = {};
+    correlationSymbols.forEach((sym, i) => {
+      const result = crossAssetResults[i];
+      if (result.error || !result.data || result.data.length < 2) return;
+      correlations[sym] = {
+        close: Number(result.data[0].close),
+        prevClose: Number(result.data[1].close),
+      };
+    });
 
     const activeWindow = history.setups.filter((setup) =>
       setup.status === "ACTIVE" || setup.status === "TP1_HIT",
@@ -34,6 +64,8 @@ export async function GET(request: Request) {
       setup: state.setup,
       setups: history.setups,
       events: history.events,
+      signalEvents,
+      correlations,
       counts: {
         active: activeWindow.filter((setup) => setup.status === "ACTIVE").length,
         counterTrend: activeWindow.filter((setup) => setup.counter_trend).length,
