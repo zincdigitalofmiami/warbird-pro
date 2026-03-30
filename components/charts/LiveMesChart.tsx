@@ -51,7 +51,7 @@ const GO_RECENT_BARS = 32; // ~8 hours of 15m bars
 const INITIAL_VISIBLE_BARS = 120;
 const RIGHT_PADDING_BARS = 16;
 const DEFAULT_BAR_SPACING = 10;
-const MIN_BAR_SPACING = 8;
+const MIN_BAR_SPACING = 0.5;
 const MAX_TOUCH_MARKERS = 1;
 const MAX_HOOK_MARKERS = 1;
 const FIB_TARGET_1_RATIO = 1.236;
@@ -1083,57 +1083,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
           <div ref={containerRef} className="absolute inset-0 z-10" />
         </div>
 
-        {/* Legend Footer */}
-        <div className="flex items-center justify-center gap-6 px-3 py-1 border-t border-white/5 bg-black/20 flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <div
-              className="w-3 h-4 rounded-sm"
-              style={{ backgroundColor: "#26C6DA" }}
-            />
-            <span className="text-[10px] text-white/40 uppercase tracking-wider">
-              Bullish
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div
-              className="w-3 h-4 rounded-sm"
-              style={{ backgroundColor: "#FF0000" }}
-            />
-            <span className="text-[10px] text-white/40 uppercase tracking-wider">
-              Bearish
-            </span>
-          </div>
-          <div className="h-3 w-px bg-white/10" />
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-px" style={{ backgroundColor: "#FFFFFF" }} />
-            <span className="text-[10px] text-white/40 uppercase tracking-wider">
-              Anchor
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-px" style={{ backgroundColor: "#00BCD4" }} />
-            <span className="text-[10px] text-white/40 uppercase tracking-wider">
-              Fib
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-px" style={{ backgroundColor: "#4CAF50" }} />
-            <span className="text-[10px] text-white/40 uppercase tracking-wider">
-              Target
-            </span>
-          </div>
-          {setups && setups.length > 0 ? (
-            <div className="flex items-center gap-2">
-              <div
-                className="w-2.5 h-2.5 rotate-45"
-                style={{ backgroundColor: "#26C6DA" }}
-              />
-              <span className="text-[10px] text-white/40 uppercase tracking-wider">
-                Setup
-              </span>
-            </div>
-          ) : null}
-        </div>
+
 
         {/* Error banner */}
         {error ? (

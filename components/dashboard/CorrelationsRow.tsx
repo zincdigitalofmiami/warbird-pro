@@ -47,7 +47,7 @@ export default function CorrelationsRow({ correlations }: CorrelationsRowProps) 
         return (
           <div
             key={ticker.label}
-            className="flex-1 min-w-[120px] px-4 py-3 flex flex-col gap-0.5"
+            className="flex-1 min-w-[120px] px-3 py-1 flex flex-col gap-0"
             style={{
               borderRight: "1px solid rgba(255,255,255,0.04)",
             }}
