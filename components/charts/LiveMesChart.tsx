@@ -48,10 +48,10 @@ type StreamStatus = "connecting" | "live" | "stale" | "error";
 
 const BAR_INTERVAL_SEC = 900; // 15m
 const GO_RECENT_BARS = 32; // ~8 hours of 15m bars
-const INITIAL_VISIBLE_BARS = 672; // ~1 week of 15m bars
-const RIGHT_PADDING_BARS = 8;
-const DEFAULT_BAR_SPACING = 4;
-const MIN_BAR_SPACING = 2;
+const INITIAL_VISIBLE_BARS = 120;
+const RIGHT_PADDING_BARS = 16;
+const DEFAULT_BAR_SPACING = 10;
+const MIN_BAR_SPACING = 8;
 const MAX_TOUCH_MARKERS = 1;
 const MAX_HOOK_MARKERS = 1;
 const FIB_TARGET_1_RATIO = 1.236;
