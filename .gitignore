@@ -55,3 +55,14 @@ __pycache__/
 # tradingview mcp (local tool, not project code)
 .tradingview-mcp/
 .playwright-mcp/
+
+# archived/stale plans (history preserved in git, not tracked going forward)
+docs/plans/archive/
+docs/plans/2026-03-22-*.md
+docs/plans/2026-03-29-v7-implementation-plan.md
+
+# legacy indicators (v7 is the active surface)
+indicators/v1-*.pine
+indicators/v2-*.pine
+indicators/v6-*.pine
+indicators/harnesses/

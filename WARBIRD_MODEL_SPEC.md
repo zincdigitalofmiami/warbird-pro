@@ -305,14 +305,18 @@ The event-response block is mandatory.
 It must score or gate at least these families:
 
 1. MES impulse / reversal state
-2. NQ confirmation or divergence
-3. DXY impulse-and-fade state
-4. ZN or `TVC:US10Y` flight-to-safety / reversal state
-5. VIX shock / fade state
-6. lower-timeframe volume shock / expansion state
-7. scheduled macro proximity / release window state
-8. breaking-news / narrative shock state paired with MES price reaction
-9. pivot interaction state
+2. TICK institutional flow state (`USI:TICK` — positive/negative threshold, not EMA trend)
+3. VOLD money flow state (`USI:VOLD` — positive/negative threshold, confirms TICK)
+4. VVIX vol-of-vol state (`CBOE:VVIX` — level threshold, leads VIX by 1-3 bars)
+5. VIX/VIX3M term structure ratio (`CBOE:VIX` / `CBOE:VIX3M` — < 0.92 contango = calm, > 1.0 backwardation = stress)
+6. HYG credit state (`AMEX:HYG` — EMA trend, credit leads equity)
+7. RTY small-cap state (`CME_MINI:RTY1!` — EMA trend, breaks down/recovers first)
+8. SKEW tail-risk state (`CBOE:SKEW` — daily level threshold, institutions hedge before selling)
+9. NYSE A/D breadth (`USI:ADD` — daily, divergence = exhaustion warning)
+10. lower-timeframe volume shock / expansion state
+11. scheduled macro proximity / release window state
+12. breaking-news / narrative shock state paired with MES price reaction
+13. pivot interaction state
 
 The purpose of the event-response block is to:
 
@@ -329,7 +333,7 @@ It must not become a separate trade engine detached from the fib contract.
 
 ## 7. TA Core Pack (Replaces Third-Party Harnesses)
 
-The three standalone harnesses (BigBeluga Pivot Levels, LuxAlgo MSB/OB Toolkit, LuxAlgo Luminance Engine) have been retired. The decision surface now uses a deterministic 15-metric TA core pack embedded directly in `v6-warbird-complete.pine`:
+The three standalone harnesses (BigBeluga Pivot Levels, LuxAlgo MSB/OB Toolkit, LuxAlgo Luminance Engine) have been retired. The decision surface now uses a deterministic 15-metric TA core pack embedded directly in the active indicator (`v7-warbird-institutional.pine`; v6 is legacy baseline):
 
 | Export Name | Metric |
 |---|---|

@@ -30,10 +30,13 @@ Read and follow AGENTS.md at the repository root.
 - `/admin` page works end-to-end: `get_admin_table_coverage()` RPC cleaned of dropped tables (`econ_news_1d`, `policy_news_1d`) and PL/pgSQL column-reference ambiguity fixed (migration 035). Applied directly to remote via `psql`.
 - Warbird v1 8-table normalized schema (migration 010 + 011 + 012)
 - Auth flow, API surface (/warbird/signal, /warbird/history, /live/mes15m, /pivots/mes)
-- `indicators/v6-warbird-complete.pine` compiles clean: `isValid` and `atr` blockers fixed
-- 15-metric TA core pack embedded in `indicators/v6-warbird-complete.pine` as `ml_*` exports: EMAs (21/50/100/200), MACD hist (12/26/9), RSI(14), ATR(14), ADX(14), volume raw, vol SMA(20), vol ratio, vol acceleration, bar spread × vol, OBV, MFI(14). Output budget: 63/64 (60 plot + 3 alertcondition). TradingView paste-and-load validated — all exports visible in Style tab.
-- Three standalone harnesses retired (BigBeluga Pivot Levels, LuxAlgo MSB/OB, LuxAlgo Luminance) — they had zero downstream consumers in TypeScript, API routes, or DB
-- `indicators/v6-warbird-complete.pine` is the only active Pine work surface; the paired strategy and parity guard are now legacy scratch/reference only and do not block indicator work
+- `indicators/v7-warbird-institutional.pine` is the active Pine work surface. Compiles clean, TV-validated. Output budget: 58/64 (55 plot + 3 alertcondition, 6 slots headroom). 12 `request.security()` calls of 40 budget.
+- v7 intermarket basket: **TICK** (`USI:TICK`), **VOLD** (`USI:VOLD`), **VVIX** (`CBOE:VVIX`), **VIX/VIX3M** term structure (`CBOE:VIX` + `CBOE:VIX3M`), **HYG** (`AMEX:HYG`), **RTY** (`CME_MINI:RTY1!`), **SKEW** (`CBOE:SKEW`). NYSE A/D (`USI:ADD`) for daily breadth. All flow-based leading indicators — AG decides weights and correlations.
+- v7 regime: all 7 must agree or no trade. Hysteresis: 3 bars to flip, 4 bars cooldown, 16 bars (4h) neutralize stale regime. No weighted scoring, no decision model dropdown.
+- TICK and VOLD are flow indicators (positive/negative threshold), not price instruments (no EMA trend). HYG and RTY use EMA trend. VTS ratio, VVIX, and SKEW use level thresholds.
+- All signals gated by `barstate.isconfirmed` — bar close only, no mid-bar firing.
+- v6 (`indicators/v6-warbird-complete.pine`) is legacy baseline, not active work surface.
+- Three standalone harnesses retired (BigBeluga Pivot Levels, LuxAlgo MSB/OB, LuxAlgo Luminance) — zero downstream consumers
 - The active architecture lock is now engine-first: `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`, with TradingView kept execution-facing and the dashboard owning operator tables/mini charts from the same contract
 
 ### What Doesn't Work Yet
@@ -82,12 +85,12 @@ Follow the active architecture plan only.
 - Legacy `hit_*_first` / `prob_hit_*` names are scheduled for deletion. They must not appear in shared TypeScript types, active API responses, Admin/dashboard surfaces, packet payloads, or new schema work. No fallback aliases are permitted on new surfaces.
 - The Admin page should render structured candidate rows, full training metrics, packet metrics, feature drivers, setting hypotheses, and AI-generated recommendations. Do not use Markdown report blobs as the dashboard contract.
 - Decision vocabulary is `TAKE_TRADE`, `WAIT`, and `PASS`. Those are policy decisions, not realized trade outcomes.
-- Pivot distance/state is a critical trigger and reversal input, but not the sole decision maker. Intermarket trigger quality must respect each symbol's correlative path with aligned 15m / 1H / 4H state.
+- Pivot distance/state is a critical trigger and reversal input, but not the sole decision maker. Intermarket basket is 7 flow-based LEADING indicators (TICK, VOLD, VVIX, VIX/VIX3M term structure, HYG, RTY, SKEW) plus NYSE A/D breadth — all must agree for regime confirmation. AG decides correlations and weights from data.
 - Do not add more indicator settings, assets, or “zoo” modules ahead of training evidence. Build the minimal exportable core first, then let SHAP and feature-admission evidence decide what survives.
-- Minimal Pine export surface for training capture: fib lines/state, TA core pack (EMAs/MACD/RSI/ATR/ADX/volume family/OBV/MFI), and event/regime state from the canonical indicator surface.
-- TradingView enforces a hard maximum of 64 output calls per script. Hidden `display.none` plots AND `alertcondition()` calls both count toward the cap. The lint script (`pine-lint.sh`) previously excluded `alertcondition()` — this was a bug and has been fixed. Current budget: 60 plot + 0 bgcolor + 3 alertcondition = 63/64 (1 slot headroom).
+- Minimal Pine export surface for training capture: fib lines/state, TA core pack (EMAs/MACD/RSI/ATR/ADX/volume family/OBV/MFI), intermarket state (TICK/VOLD/VVIX/VTS/HYG/RTY/SKEW + NYSE A/D), and event/regime state from the canonical indicator surface (`v7-warbird-institutional.pine`).
+- TradingView enforces a hard maximum of 64 output calls per script. Hidden `display.none` plots AND `alertcondition()` calls both count toward the cap. Current v7 budget: 55 plot + 3 alertcondition = 58/64 (6 slots headroom).
 - TradingView keeps execution-facing visuals and alerts. Only 3 `alertcondition()` calls are kept: `WARBIRD ENTRY LONG`, `WARBIRD ENTRY SHORT`, and `PIVOT BREAK (against) + Regime Opposed` (the .50 reversal warning). All other alerts move to the dashboard. Dense operator tables, mini charts, and decision diagnostics belong on the dashboard, which must render the same stored engine state instead of recomputing fibs.
-- The current blocking sequence is: ~~Pine indicator recovery~~ (DONE, 63/64, TV-validated) -> fib engine hardening (anchor span, waypoint lines) -> canonical writer cutover -> dashboard/admin reader cutover -> training workbench buildout -> legacy retirement.
+- The current blocking sequence is: ~~Pine indicator recovery~~ (DONE) -> ~~v7 institutional upgrade~~ (DONE, 58/64, TV-validated, flow-based intermarket basket) -> fib engine hardening (anchor span, waypoint lines) -> canonical writer cutover -> dashboard/admin reader cutover -> training workbench buildout -> legacy retirement.
 - The 15-metric TA core pack is the canonical ML export surface. Do not re-introduce standalone third-party harnesses (BigBeluga, LuxAlgo MSB/OB, LuxAlgo Luminance are retired).
 
 ## Documentation Discipline

@@ -1,7 +1,7 @@
 # Warbird v7 — LuxAlgo-Informed Institutional Upgrade Design
 
 **Date:** 2026-03-29
-**Status:** IMPLEMENTED — all 14 features built, lint/contamination/build pass, ready for TV paste test
+**Status:** IMPLEMENTED — features built + intermarket basket fully replaced (flow-based leading indicators), regime gate simplified, TV-validated 58/64 budget
 **Base:** Copy of `indicators/v6-warbird-complete.pine` → `indicators/v7-warbird-institutional.pine`
 **Governing plan:** `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
 
@@ -58,40 +58,40 @@ LuxAlgo's scripts are proprietary. Every new feature must trace to a **published
 | Adaptive trailing stop | Chandelier Stop / ATR trail | Standard ATR trailing stop | `math.min(fibSL, entry - ATR * multiplier)` |
 | Volume confirmation | Relative Volume (RVOL) | Standard RVOL definition | `volume > ta.sma(volume, 20)` |
 
-### 4. VVIX Replaces VIX
+### 4. Entire Intermarket Basket Replaced (IMPLEMENTED)
 
-`CBOE:VVIX` replaces `CBOE:VIX` in the intermarket basket. VVIX is a 1-3 bar leading signal for MES regime shifts. The 2 daily VIX `request.security()` calls are dropped (AG computes server-side).
+The original basket (NQ, BANK, VIX, DXY, US10Y, SMH) was mostly coincident price correlations. Replaced with 7 flow-based LEADING indicators: TICK, VOLD, VVIX, VIX/VIX3M term structure, HYG, RTY, SKEW. Plus NYSE A/D (`USI:ADD`) for daily breadth. See "Intermarket Basket Change" section below for full details.
 
-### 5. SMH Added as Intermarket Symbol
+### 5. Regime Gate Simplified (IMPLEMENTED)
 
-`AMEX:SMH` (VanEck Semiconductor ETF) is added as the tech-led rally leader. When BANK lags during tech-dominant expansion, SMH provides the leading signal for MES direction.
+Removed the Decision Model dropdown and weighted scoring system. Single model: all 7 symbols must agree for regime confirmation. Hysteresis prevents whipsaw: 3 bars to flip, 4 bars cooldown, 16 bars (4h) neutralize stale regime. AG will discover optimal correlations and thresholds via SHAP.
 
 ---
 
 ## Plot Budget
 
-| Category | v6 (current) | v7 (after) |
+| Category | v6 (baseline) | v7 (current) |
 |---|---|---|
 | Fib engine / structure exports | 20 | 20 |
-| Intermarket / regime exports | 10 | 10 |
+| Intermarket / regime exports | 10 | 8 (7 symbol states + VTS ratio) |
 | Volume delta / CLV exports | 4 | 4 |
 | TA Core Pack exports | 15 | **0** (server-side) |
 | Model contract exports (ml_*) | 11 | 11 |
-| **New institutional features** | **0** | **14** |
-| **Total plots** | **60** | **59** |
+| **New institutional features** | **0** | **12** |
+| **Total plots** | **60** | **55** |
 | Alertconditions | 3 | 3 |
-| **Budget used** | **63/64** | **62/64** |
-| **Headroom** | **1 slot** | **2 slots** |
+| **Budget used** | **63/64** | **58/64** |
+| **Headroom** | **1 slot** | **6 slots** |
 
 ## Security Call Budget
 
 | Category | v6 | v7 |
 |---|---|---|
-| Intermarket 60min (NQ, BANK, VVIX, DXY, 10Y) | 5 | 5 (VIX→VVIX swap) |
-| VIX daily (close + percentrank) | 2 | **0** (dropped) |
-| SMH 60min | 0 | **1** (new) |
+| Intermarket 60min (TICK, VOLD, VVIX, VIX, VIX3M, HYG, RTY) | 5 | **6** (flow-based basket) |
+| Intermarket daily (SKEW, ADD) | 2 | **2** (daily regime + breadth) |
+| VIX daily (close + percentrank) | 2 | **0** (dropped — VIX now in 60min basket via term structure) |
 | HTF fib (1H, 4H, 1D) | 3 | 3 |
-| **Total** | **10/40** | **9/40** |
+| **Total** | **10/40** | **~12/40** |
 
 ---
 
@@ -109,8 +109,8 @@ All new features are Pine-only exports — things that depend on Pine's internal
 | 6 | CHoCH code | `ml_choch_code` | LuxAlgo PAC | 1 = bullish CHoCH, -1 = bearish CHoCH, 0 = none |
 | 7 | FVG bull distance | `ml_fvg_bull_dist` | LuxAlgo PAC | Distance to nearest unmitigated bullish FVG (pts) |
 | 8 | FVG bear distance | `ml_fvg_bear_dist` | LuxAlgo PAC | Distance to nearest unmitigated bearish FVG (pts) |
-| 9 | Intermarket bitmask | `ml_im_bitmask` | LuxAlgo suggestion | Bitwise encoding: NQ(1) + BANK(2) + VVIX(4) + DXY(8) + 10Y(16) + SMH(32) |
-| 10 | SMH regime state | `ml_smh_state` | Tech-led rally signal | 1 = bullish, -1 = bearish, 0 = neutral |
+| 9 | Intermarket alignment count | `ml_align_on` / `ml_align_off` | Regime gate | Count of 7 symbols in risk-on / risk-off (0-7) |
+| 10 | VTS ratio | `ml_vts_ratio` | VIX term structure | VIX/VIX3M: < 0.92 calm, > 1.0 stress |
 | 11 | Post-trade cooldown | `ml_cooldown_bars` | LuxAlgo reset logic | Bars remaining in post-SL/TP cooldown (0 = ready) |
 | 12 | Bars since exit | `ml_bars_since_exit` | Trade reset context | Bars since last SL or TP event |
 | 13 | Vol-adjusted SL dist | `ml_vol_adj_sl_dist` | Smart Trail Switch | Distance from entry to volatility-adjusted SL (pts) |
@@ -135,19 +135,27 @@ AG will later replace these hand-coded gates with packet-driven thresholds. The 
 
 ---
 
-## Intermarket Basket Change
+## Intermarket Basket Change (IMPLEMENTED)
 
-| Symbol | v6 Role | v7 Role |
-|---|---|---|
-| NQ (CME_MINI:NQ1!) | Risk appetite | Unchanged |
-| BANK (NASDAQ:BANK) | Financials | Unchanged (SMH supplements when BANK lags) |
-| VIX (CBOE:VIX) | Volatility | **Replaced by VVIX** |
-| VVIX (CBOE:VVIX) | N/A | **Volatility of volatility — leading signal** |
-| DXY (TVC:DXY) | USD strength | Unchanged |
-| US10Y (TVC:US10Y) | Yield | Unchanged |
-| SMH (AMEX:SMH) | N/A | **New — tech-led rally leader** |
+The entire intermarket basket was replaced with flow-based LEADING indicators. The old basket (NQ, BANK, DXY, US10Y, SMH) was mostly coincident price correlations with MES — essentially redundant. The new basket measures institutional order flow, volatility expectations, credit stress, and breadth — signals that LEAD MES moves.
 
-Weight defaults: SMH gets `wSMH = 2` (same as NQ/BANK/VVIX). Total weight increases. AG will discover optimal weights via SHAP.
+| Symbol | TradingView ID | v7 Role | Detection Method |
+|---|---|---|---|
+| TICK | `USI:TICK` | NYSE uptick/downtick — institutional program trading | Zero threshold (> 0 bull, < 0 bear) |
+| VOLD | `USI:VOLD` | NYSE up vol − down vol — money flow | Zero threshold (> 0 bull, < 0 bear) |
+| VVIX | `CBOE:VVIX` | Vol of vol — leads VIX by 1-3 bars | Level threshold (< 17 risk-on, > 25 risk-off) |
+| VIX | `CBOE:VIX` | 30-day implied vol — used for term structure | Part of VTS ratio |
+| VIX3M | `CBOE:VIX3M` | 3-month implied vol — VTS denominator | Part of VTS ratio |
+| HYG | `AMEX:HYG` | High-yield credit — credit desks sell before equity desks | EMA trend (price > EMA = bull) |
+| RTY | `CME_MINI:RTY1!` | Russell 2000 small-cap — breaks down/recovers first | EMA trend (price > EMA = bull) |
+| SKEW | `CBOE:SKEW` | Tail-risk hedging — institutions hedge before selling (daily) | Level threshold (< 140 risk-on, > 155 risk-off) |
+| NYSE A/D | `USI:ADD` | Advance-Decline breadth (daily) | Exported as feature, divergence = exhaustion |
+
+**VIX Term Structure (VTS):** `VIX / VIX3M` ratio. < 0.92 = contango (calm, risk-on). > 1.0 = backwardation (stress, risk-off). Backwardation is ALWAYS a warning regardless of regime.
+
+**Regime model:** All 7 must agree for regime confirmation. No weighted scoring, no decision model options. AG decides correlations and optimal thresholds from data. Hysteresis: 3 bars to flip, 4 bars cooldown, 16 bars (4h) neutralize stale regime.
+
+**Replaced (do NOT use):** NQ (0.95+ correlation, redundant), BANK (coincident/lagging), DXY (daily/weekly, not 15m leading), US10Y/ZN (regime-dependent, unreliable gate), SMH (partially redundant with NQ).
 
 ---
 

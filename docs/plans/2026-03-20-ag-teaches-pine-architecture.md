@@ -701,37 +701,28 @@ Add:
 
 ### B. Intermarket Engine
 
-Locked v1 live intermarket series:
+**SUPERSEDED (2026-03-30):** The v1 intermarket basket below was replaced with flow-based LEADING indicators. See v7 design doc for current basket.
 
-- `NQ1!`
-- `BANK`
-- `VIX`
-- `DXY`
-- `US10Y`
-- `HYG`
-- `LQD`
+~~Locked v1 live intermarket series: NQ1!, BANK, VIX, DXY, US10Y, HYG, LQD~~ — REPLACED
 
-Excluded from v1 unless explicitly reopened by a new decision:
+**Current v7 intermarket basket (flow-based leading indicators):**
 
-- `RTY1!`
-- `YM1!`
-- crude
-- gold
+- `USI:TICK` — NYSE uptick/downtick (institutional program trading, zero threshold)
+- `USI:VOLD` — NYSE up vol − down vol (money flow, zero threshold)
+- `CBOE:VVIX` — Vol of vol (leads VIX by 1-3 bars, level threshold)
+- `CBOE:VIX` + `CBOE:VIX3M` — VIX term structure ratio (< 0.92 calm, > 1.0 stress)
+- `AMEX:HYG` — High-yield credit (EMA trend, credit leads equity)
+- `CME_MINI:RTY1!` — Russell 2000 small-cap (EMA trend, breaks down/recovers first)
+- `CBOE:SKEW` — Tail-risk hedging (daily level threshold)
+- `USI:ADD` — NYSE Advance-Decline breadth (daily, divergence = exhaustion)
 
-Use Pine to compute:
-
-- trend state
-- slope state
-- distance from EMA
-- agreement score
-- hysteresis state
-- flip persistence
+Regime gate: all 7 must agree for confirmation. No weighted scoring. Hysteresis: 3 bars to flip, 4 bars cooldown, 16 bars neutralize stale. AG decides correlations and weights from data.
 
 Intermarket trigger rule:
 
-1. Each intermarket symbol must be interpreted through its own correlative path to MES, not through naive same-direction voting.
-2. Trigger quality must respect aligned 15m / 1H / 4H trend state on MES and aligned correlative-path state on the approved intermarket set.
-3. If correlation-path agreement is absent, the trigger degrades or is suppressed even if the fib geometry alone looks attractive.
+1. TICK + VOLD are the anchor — institutional flow is the foundation. Both must agree.
+2. All 7 symbols must agree for regime confirmation. No partial credit, no weighted scoring.
+3. AG will discover optimal thresholds and correlations via SHAP. Hand-coded values are starting points only.
 
 ### C. Volatility / Credit / Macro Engine
 
@@ -1489,10 +1480,14 @@ Required Phase 2 event-response export interface:
 | `ml_event_reversal_score` | reversal risk after impulse | `0-100` deterministic Pine score |
 | ~~`ml_event_volume_shock`~~ | lower-timeframe volume shock state | cut from Pine exports during budget reduction — AG computes from `ml_vol_ratio` + `ml_vol_acceleration` server-side |
 | ~~`ml_event_macro_window_code`~~ | scheduled macro window state | cut from Pine exports during budget reduction — AG computes from `econ_calendar` data server-side |
-| `ml_event_nq_state` | NQ reaction state | `-1`, `0`, `1` |
-| `ml_event_dxy_state` | dollar-state proxy (`DXY` in Pine if validated; otherwise approved dollar proxy) | `-1`, `0`, `1` |
-| `ml_event_zn_state` | ZN or `US10Y` reaction state | `-1`, `0`, `1` |
-| `ml_event_vix_state` | VIX reaction state | `-1`, `0`, `1` |
+| `ml_event_tick_state` | TICK institutional flow state | `-1`, `0`, `1` |
+| `ml_event_vold_state` | VOLD money flow state | `-1`, `0`, `1` |
+| `ml_event_vvix_state` | VVIX vol-of-vol state | `-1`, `0`, `1` |
+| `ml_event_vts_state` | VIX term structure state | `-1`, `0`, `1` |
+| `ml_event_hyg_state` | HYG credit state | `-1`, `0`, `1` |
+| `ml_event_rty_state` | RTY small-cap state | `-1`, `0`, `1` |
+| `ml_event_skew_state` | SKEW tail-risk state | `-1`, `0`, `1` |
+| `ml_vts_ratio` | VIX/VIX3M term structure ratio | float (< 0.92 calm, > 1.0 stress) |
 | `ml_event_pivot_interaction_code` | interaction with pivot state | `0=none`, `1=support`, `2=resistance`, `3=rejection`, `4=breakthrough`, `5=cluster_conflict` |
 
 #### Checkpoint Audit, Memory, And Document Discipline
@@ -2034,20 +2029,19 @@ Fib-structure rules:
 | `target_eligible_20pt` | derived | Boolean: target path ≥ 20 points |
 | `fib_range_atr_ratio` | derived | `fib_range / ATR(14)` — quality filter |
 
-**B. Intermarket Features** (from `request.security()`)
+**B. Intermarket Features** (from `request.security()`) — **UPDATED 2026-03-30: flow-based leading indicators**
 
 | Feature | Pine Source | Description |
 |---------|------------|-------------|
-| `nq_trend` | `request.security("NQ1!")` | NQ EMA slope state: -1/0/1 |
-| `nq_dist_ema` | `request.security("NQ1!")` | NQ distance from EMA(20) as % |
-| `vix_level` | `request.security("CBOE:VIX")` | VIX close |
-| `vix_sma_ratio` | derived | `VIX / SMA(VIX, 20)` |
-| `dxy_trend` | `request.security("DXY")` | DXY EMA slope state: -1/0/1 |
-| `us10y_level` | `request.security("TVC:US10Y")` | 10Y yield |
-| `us10y_delta` | derived | 10Y yield change over 5 bars |
-| `bank_trend` | `request.security("NASDAQ:BANK")` | Bank index slope state |
-| `hyg_lqd_ratio` | `request.security("AMEX:HYG")` / `request.security("AMEX:LQD")` | Credit risk proxy |
-| `intermarket_agreement` | derived | Count of aligned trend states / total |
+| `tick_state` | `request.security("USI:TICK")` | TICK flow state: > 0 bull, < 0 bear |
+| `vold_state` | `request.security("USI:VOLD")` | VOLD flow state: > 0 bull, < 0 bear |
+| `vvix_level` | `request.security("CBOE:VVIX")` | VVIX level (< 17 risk-on, > 25 risk-off) |
+| `vts_ratio` | derived | VIX/VIX3M term structure (< 0.92 calm, > 1.0 stress) |
+| `hyg_trend` | `request.security("AMEX:HYG")` | HYG EMA slope state: -1/0/1 |
+| `rty_trend` | `request.security("CME_MINI:RTY1!")` | RTY EMA slope state: -1/0/1 |
+| `skew_level` | `request.security("CBOE:SKEW")` | SKEW level (< 140 risk-on, > 155 risk-off, daily) |
+| `add_value` | `request.security("USI:ADD")` | NYSE A/D breadth (daily) |
+| `intermarket_alignment` | derived | Count of 7 symbols in agreement (0-7) |
 
 **C. Volatility Features** (from chart OHLCV + `request.security()`)
 
@@ -2092,16 +2086,19 @@ The v1 indicator must stay under this request budget:
 - target operating budget: `<= 12` unique `request.*()` calls
 - hard ceiling: `<= 16` unique `request.*()` calls
 
-Planned v1 usage:
+Planned v7 usage (UPDATED 2026-03-30):
 
-- `request.security()`:
-  - `NQ1!`
-  - `BANK`
-  - `VIX`
-  - `DXY`
-  - `US10Y`
-  - `HYG`
-  - `LQD`
+- `request.security()` — intermarket 60min:
+  - `USI:TICK`
+  - `USI:VOLD`
+  - `CBOE:VVIX`
+  - `CBOE:VIX`
+  - `CBOE:VIX3M`
+  - `AMEX:HYG`
+  - `CME_MINI:RTY1!`
+- `request.security()` — intermarket daily:
+  - `CBOE:SKEW`
+  - `USI:ADD`
 - `request.economic()`:
   - `IRSTCB01`
   - `CPALTT01`

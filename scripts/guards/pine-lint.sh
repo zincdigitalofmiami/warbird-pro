@@ -1,11 +1,11 @@
 #!/bin/bash
 # Pine Script v6 static analysis guard
 # Run before pasting into TradingView to catch common issues
-# Usage: ./scripts/guards/pine-lint.sh [indicators/v2-warbird-unified.pine]
+# Usage: ./scripts/guards/pine-lint.sh [indicators/v7-warbird-institutional.pine]
 
 set -e
 
-FILE="${1:-indicators/v2-warbird-unified.pine}"
+FILE="${1:-indicators/v7-warbird-institutional.pine}"
 
 if [ ! -f "$FILE" ]; then
     echo "FAIL: File not found: $FILE"
