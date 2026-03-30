@@ -32,7 +32,7 @@
 | P2 | **Plan drift**: Cross-asset route already has shard logic + daily aggregation. It is NOT untouched — it was built with sharding. Clarified wording. | Wording fixed |
 | A5 | **Massive field names verified** from live docs. `cpi_year_over_year` has NO FRED equivalent — only field requiring Massive. | Kept 1 Massive route |
 | A7 | `net.http_get(url, params, headers, timeout_ms)` signature differs from `http_post(url, headers, body)`. No `body` param, different param order. | Migration SQL adjusted |
-| A8 | Existing newsfilter/finnhub crons (11:00-23:00 UTC) have ZERO overlap with overnight batch (02:00-05:00 UTC). | No conflict |
+| A8 | Overnight batch (02:00-05:00 UTC) has ZERO overlap with market hours jobs (11:00-23:00 UTC). | No conflict |
 | A9 | Backfill script missing SI, NG, SOX — confirmed all 3 active in `seed.sql`. | Script update in Phase 2 |
 | A10 | FRED dynamic `[category]` route works with pg_cron URLs. Using 1 parameterized SQL function + 1 base URL vault secret. | Cleaner migration |
 | A11 | Massive auth = `?apiKey=` query param. But route reads `process.env.MASSIVE_API_KEY` internally. pg_cron only needs route URL + CRON_SECRET. | No extra vault secret |
@@ -41,12 +41,10 @@
 
 ## Current State
 
-### Existing pg_cron schedules (3 total)
+### Existing pg_cron schedules (1 total)
 | Job Name | Schedule | Route | HTTP Method |
 |----------|----------|-------|-------------|
 | `warbird_mes_1m_pull` | `* * * * 0-5` | `/api/cron/mes-1m` | POST (exports GET+POST) |
-| `warbird_newsfilter_raw_pull` | `*/15 11-23 * * 1-5` | `/api/cron/newsfilter-news` | POST |
-| `warbird_finnhub_raw_pull` | `5,20,35,50 11-23 * * 1-5` | `/api/cron/finnhub-news` | POST |
 
 ### NOT scheduled (routes exist but no pg_cron)
 - Cross-asset (Databento) — GET only
@@ -235,7 +233,7 @@ Add 13 new FRED series to `series_catalog`. The existing FRED cron routes (`/api
 - All within CME Globex hours (market open)
 - 10-minute spacing between every job
 - Zero Supabase pg_cron schedules
-- NO conflict with existing newsfilter/finnhub (11:00-23:00 UTC)
+- NO conflict with market hours jobs (11:00-23:00 UTC)
 
 ### SQL function patterns
 

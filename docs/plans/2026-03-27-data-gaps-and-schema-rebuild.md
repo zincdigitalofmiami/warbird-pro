@@ -180,7 +180,7 @@ DELETE FROM vault.secrets WHERE name IN (
 ```
 
 **"Done well" means:**
-- Only active Vault secrets remain: `warbird_edge_base_url`, `warbird_edge_cron_secret`, `warbird_cron_secret`, `warbird_finnhub_api_key`
+- Only active Vault secrets remain: `warbird_edge_base_url`, `warbird_edge_cron_secret`, `warbird_cron_secret`
 
 ---
 
@@ -213,8 +213,6 @@ SELECT cron.schedule('warbird_trump_effect_pull', '0 8 * * 1-5', $$SELECT public
 
 **Market hours jobs (unchanged — these need to run during session):**
 ```
-:30 past every hour 11-23 UTC  Finnhub news
-:02/:17/:32/:47 11-23 UTC      news_signals refresh
 :05 past every hour             MES hourly rollup
 every minute                    MES 1m
 ```

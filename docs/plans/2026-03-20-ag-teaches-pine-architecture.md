@@ -1656,11 +1656,6 @@ Phase 4 exact local targets:
   - `scripts/ag/evaluate-configs.py`
   - `scripts/ag/generate-packet.py`
   - `scripts/ag/publish-artifacts.py`
-- raw-news intake surfaces:
-  - `supabase/migrations/20260326000019_news_raw_extraction_and_scoring.sql`
-  - `scripts/poll-finnhub-news.py`
-  - `scripts/poll-newsfilter-news.py`
-
 Phase 4 exact training order:
 
 1. fib + event-response + TA core pack baseline
@@ -1692,15 +1687,8 @@ Phase 4 exact local warehouse entities:
   - `econ_indexes_1d`
   - `econ_calendar`
   - `macro_reports_1d`
-  - `news_signals`
   - `geopolitical_risk_1d`
   - `trump_effect_1d`
-  - `econ_news_topics`
-  - `econ_news_article_assessments`
-  - `econ_news_finnhub_articles`
-  - `econ_news_finnhub_article_segments`
-  - `econ_news_newsfilter_articles`
-  - `econ_news_newsfilter_article_segments`
 - `warbird_training_runs`
 - `warbird_training_run_metrics`
 - `warbird_shap_results`
@@ -2082,7 +2070,7 @@ Fib-structure rules:
 | `is_nfp_day` | Pine calendar logic | Boolean: is Non-Farm Payroll today? |
 | `bars_since_major_release` | derived | Bars since last major economic release |
 
-AG trains on the FULL economic context from all 10 Supabase FRED tables + GPR + Trump Effect + news signals. What Pine gets is the distilled version: `request.economic()` for live levels, plus calendar-based event windows that AG learned are significant. Example: AG discovers "CPI day pullbacks to 0.5 have 25% lower TP1 rate before 10am ET" → Pine encodes `is_cpi_day AND hour < 10 → reduce confidence`.
+AG trains on the FULL economic context from all 10 Supabase FRED tables + GPR + Trump Effect. What Pine gets is the distilled version: `request.economic()` for live levels, plus calendar-based event windows that AG learned are significant. Example: AG discovers "CPI day pullbacks to 0.5 have 25% lower TP1 rate before 10am ET" → Pine encodes `is_cpi_day AND hour < 10 → reduce confidence`.
 
 **Research-Only Macro Context (Tier 2 — AG uses for discovery, NOT direct production features)**
 
@@ -2091,9 +2079,7 @@ AG trains on the FULL economic context from all 10 Supabase FRED tables + GPR + 
 | Full FRED series (all 10 tables) | Supabase `econ_*_1d` | Must find exact `request.economic()` equivalent OR prove a Tier 1 proxy (e.g., US10Y, VIX) captures the same signal |
 | GPR geopolitical risk index | Supabase `geopolitical_risk_1d` | Must prove VIX + intermarket captures the same signal, OR stays research-only |
 | Trump Effect / policy uncertainty | Supabase `trump_effect_1d` | Must prove a Pine time/calendar analogue exists, OR stays research-only |
-| Bullish/bearish news polarity counts and event buckets | Supabase `news_signals` | Must prove a mirrored-live contract that pairs polarity with price action, session timing, and volatility context, OR stays research-only |
 | Economic calendar events | Supabase + user-maintained | Pine calendar logic (`is_fomc_week`, `is_cpi_day`) IF AG proves these events materially change outcomes |
-| Neural text/event cues (policy/lobbying/obscure narrative signals) | multi-source raw news + policy/event disclosures | Must prove a deterministic mirrored-live contract or Pine analogue exists, OR stays research-only |
 
 **Promotion gate:** A Tier 2 insight only enters Pine if there is an exact Pine analogue that AG can prove correlates. "AG discovered it matters" is not enough — "AG proved Pine feature X captures the same signal" is required.
 
@@ -2576,9 +2562,6 @@ Supabase pg_cron owns all recurring job scheduling. Supabase hosts the Next.js A
 | FRED money | `app/api/cron/fred/[category]/route.ts` | `0 13 * * *` | `econ_money_1d`, `job_log` |
 | FRED indexes | `app/api/cron/fred/[category]/route.ts` | `0 14 * * *` | `econ_indexes_1d`, `job_log` |
 | Economic calendar | `app/api/cron/econ-calendar/route.ts` | `0 15 * * *` | `econ_calendar`, `job_log` |
-| Macro surprise -> signals | `app/api/cron/news/route.ts` | `0 16 * * *` | `news_signals`, `job_log` |
-| Newsfilter raw articles (primary) | `app/api/cron/newsfilter-news/route.ts` | Supabase `pg_cron`: `*/15 11-23 * * 1-5` (`public.run_newsfilter_raw_pull`) | `econ_news_newsfilter_articles`, `econ_news_newsfilter_article_segments`, `econ_news_article_assessments`, `job_log` |
-| Finnhub raw articles (secondary) | `app/api/cron/finnhub-news/route.ts` | Supabase `pg_cron`: `5,20,35,50 11-23 * * 1-5` (`public.run_finnhub_raw_pull`) | `econ_news_finnhub_articles`, `econ_news_finnhub_article_segments`, `econ_news_article_assessments`, `job_log` |
 | Geopolitical risk | `app/api/cron/gpr/route.ts` | `0 19 * * *` | `geopolitical_risk_1d`, `job_log` |
 | Trump effect | `app/api/cron/trump-effect/route.ts` | `30 19 * * *` | `trump_effect_1d`, `job_log` |
 | Detect setups | `app/api/cron/detect-setups/route.ts` | `*/5 12-21 * * 1-5` | legacy `warbird_*` setup stack, `job_log` |
@@ -2613,9 +2596,6 @@ Target Supabase-owned recurring function inventory:
 | `fred-money` | `/api/cron/fred/money` | `econ_money_1d`, `job_log` |
 | `fred-indexes` | `/api/cron/fred/indexes` | `econ_indexes_1d`, `job_log` |
 | `econ-calendar` | `/api/cron/econ-calendar` | `econ_calendar`, `job_log` |
-| `news-aggregate` | `/api/cron/news` | `news_signals`, `job_log` |
-| `newsfilter-raw` | `/api/cron/newsfilter-news` | `econ_news_newsfilter_articles`, `econ_news_newsfilter_article_segments`, `econ_news_article_assessments`, `job_log` |
-| `finnhub-raw` | `/api/cron/finnhub-news` | `econ_news_finnhub_articles`, `econ_news_finnhub_article_segments`, `econ_news_article_assessments`, `job_log` |
 | `gpr` | `/api/cron/gpr` | `geopolitical_risk_1d`, `job_log` |
 | `trump-effect` | `/api/cron/trump-effect` | `trump_effect_1d`, `job_log` |
 | `detect-setups` | `/api/cron/detect-setups` | canonical setup tables + dashboard live state + `job_log` |
@@ -2642,11 +2622,7 @@ This is the exact approved source boundary for Phase 1 through Phase 4 work.
 2. FRED is the approved macro / release / calendar boundary.
 3. Massive is approved for one live macro exception only: `GET /fed/v1/inflation-expectations`; treasury yields, realized inflation, and labor market remain FRED-sourced.
 4. Massive stocks/indices intraday or delayed market-data products are not part of the Warbird feature contract; Databento remains the sole market intraday source.
-5. Newsfilter is approved as the **primary curated raw-news intake** only through the exact source-allowlist and query gates in Section 19.
-6. Finnhub open-data is approved as a **lean secondary raw-news intake** only through free endpoints (`/company-news`, `/news`) plus free analyst/insider proxy endpoints (`/stock/recommendation`, `/stock/insider-sentiment`, `/stock/insider-transactions`) under the relevance/noise gates in Section 19.
-7. Google News RSS is **not approved** for Warbird ingestion. Google RSS article links are aggregator URLs and Warbird will not ship custom decoding logic for them.
-8. Google Finance watchlist / AI summary capture is approved as **manual operator / research capture only** and is not a recurring training or live contract.
-9. The ZL external AI-news pipeline is out of scope for Warbird until a separate contract audit is completed.
+5. Google Finance watchlist / AI summary capture is approved as **manual operator / research capture only** and is not a recurring training or live contract.
 
 #### Databento schema scope
 
@@ -2765,8 +2741,7 @@ The AG system needs a local PostgreSQL training warehouse. This is the research 
 1. Hold explicit source snapshots aligned to the MES 15m bar-close contract.
 2. Hold feature-engineering staging tables and auditable training artifacts.
 3. Hold SHAP, calibration, packet candidates, and evaluation outputs.
-4. Hold mirrored raw-news snapshots, article-derived research features, and deterministic aggregation outputs under evaluation before publish-up.
-5. Never become a required always-on dependency for the cloud dashboard or live chart.
+4. Never become a required always-on dependency for the cloud dashboard or live chart.
 
 #### Exact local source-snapshot surface
 
@@ -2776,8 +2751,7 @@ The local warehouse may materialize explicit snapshots of:
 - `cross_asset_1h`, `cross_asset_1d`
 - `options_stats_1d`
 - `econ_rates_1d`, `econ_yields_1d`, `econ_fx_1d`, `econ_vol_1d`, `econ_inflation_1d`, `econ_labor_1d`, `econ_activity_1d`, `econ_money_1d`, `econ_commodities_1d`, `econ_indexes_1d`
-- `econ_calendar`, `macro_reports_1d`, `news_signals`, `geopolitical_risk_1d`, `trump_effect_1d`
-- `econ_news_rss_articles`, `econ_news_rss_article_segments`
+- `econ_calendar`, `macro_reports_1d`, `geopolitical_risk_1d`, `trump_effect_1d`
 
 Every snapshot table or extract must record:
 
@@ -2795,7 +2769,7 @@ Every snapshot table or extract must record:
 | `warbird_shap_results` | local feature-level explainability per run | `run_id`, `feature_name`, `feature_family`, `tier`, `mean_abs_shap`, `rank_in_run` |
 | `warbird_shap_indicator_settings` | local SHAP-derived indicator-setting candidates | `run_id`, `indicator_family`, `parameter_name`, `suggested_numeric_value`, `stability_score` |
 | `warbird_snapshot_pine_features` | point-in-time Pine hidden exports per snapshot | `snapshot_id`, `feature_contract_version`, `ml_confidence_score`, `ml_direction_code`, `ml_setup_archetype_code` |
-| `warbird_candidate_macro_context` | local Tier 2 macro/news context | `candidate_id`, `bar_date`, `macro_window_active`, `news_signal_direction`, `gpr_level` |
+| `warbird_candidate_macro_context` | local Tier 2 macro context | `candidate_id`, `bar_date`, `macro_window_active`, `gpr_level` |
 | `warbird_candidate_microstructure` | local OHLCV-derived 1m context | `candidate_id`, `window_bars`, `window_start_ts`, `window_end_ts`, `vol_ratio_at_entry`, `atr_14_at_touch` |
 | `warbird_candidate_path_diagnostics` | local path-first-touch diagnostics | `candidate_id`, `first_touch_code`, `bars_to_tp1`, `bars_to_tp2`, `bars_to_stop` |
 | `warbird_candidate_stopout_attribution` | local stop-out attribution surface | `candidate_id`, `stop_driver_code`, `stop_driver_confidence`, `notes_json` |
@@ -3049,235 +3023,7 @@ The model lifecycle does **not** require:
 
 ---
 
-### 19. Raw News Intake And Promotion Boundary
-
-News is now explicitly split into:
-
-1. raw intake
-2. deterministic aggregation
-3. promoted live-capable signals
-
-#### Raw Newsfilter + Finnhub intake contract
-
-Raw Finnhub secondary intake is approved only through:
-
-- migration: `supabase/migrations/20260326000019_news_raw_extraction_and_scoring.sql`
-- poller: `scripts/poll-finnhub-news.py`
-- production target: cloud-first retained raw capture
-- local target: optional research/training-only mirror
-
-Raw Newsfilter primary intake is approved only through:
-
-- migration: `supabase/migrations/20260326000019_news_raw_extraction_and_scoring.sql`
-- poller: `scripts/poll-newsfilter-news.py`
-- production target: cloud-first retained raw capture
-- local target: optional research/training-only mirror
-- live schedule wrapper: `supabase/migrations/20260326000020_supabase_news_raw_cron.sql`
-- current live blocker: missing Vault secret `warbird_newsfilter_api_key`
-
-The active raw tables are:
-
-- `econ_news_topics`
-- `econ_news_finnhub_articles`
-- `econ_news_finnhub_article_segments`
-- `econ_news_newsfilter_articles`
-- `econ_news_newsfilter_article_segments`
-- `econ_news_article_assessments`
-
-Legacy Google RSS tables (`econ_news_rss_articles`, `econ_news_rss_article_segments`) remain historical only and must not receive new writes.
-
-`econ_news_article_assessments` is research-only scoring metadata. It exists to record deterministic topic identification, reading evidence, and benchmark-fit scoring on top of raw article capture. It does **not** create live sentiment or packet features by itself.
-
-#### Full article extraction and scoring contract
-
-1. Raw-news rows must retain the source card fields and the extracted article body, not just the headline and first lines.
-2. Article extraction must use a proven parser/extractor, not hand-rolled DOM heuristics:
-   - Finnhub uses the shared `@mozilla/readability` + `jsdom` extractor against the publisher article page.
-   - Newsfilter uses the official article-content endpoint (`/articles/{id}.html`) as the primary body source.
-3. Stored body text must exclude footer, sidebar, nav, and page chrome. Only article/news content is retained.
-4. Canonical topic tagging remains normalized through `econ_news_topics` and provider segment-link tables.
-5. Deterministic research scoring is allowed only into `econ_news_article_assessments`; it is not a live signal surface.
-
-#### External research lock for news usage
-
-Primary-source literature supports using news as a paired modality with market data, not as a standalone price-forecast oracle:
-
-1. sentiment polarity is useful, but domain-specific modeling matters ([FinBERT](https://arxiv.org/abs/1908.10063))
-2. structured events improve movement prediction over raw text alone ([Ding et al. 2014](https://aclanthology.org/D14-1148/))
-3. fine-grained event extraction works best when combined with stock trade data ([Chen et al. 2019](https://aclanthology.org/D19-5105/))
-4. grouping and aggregating news by time/topic/category before fusing with trade data is more robust than one-headline-one-signal logic ([Chen et al. 2019](https://aclanthology.org/D19-5106/))
-5. recent market-prediction work shows both delayed pricing effects and the limits of sentiment-only features ([Wang et al. 2024](https://aclanthology.org/2024.findings-emnlp.189/))
-
-Warbird therefore treats news as an intraday event-response layer for MES 15m fib setups, not as an independent price-target engine.
-
-#### Initial promoted news/event families for MES research
-
-Derived event families under evaluation include:
-
-1. macro surprise and policy-outlook shocks
-2. analyst / rating / major-corporate narrative shocks that materially affect index leadership
-3. geopolitical / war / policy-escalation shocks
-4. energy / oil disruption shocks
-
-Each family must still pass the promotion boundary below before it can influence live logic.
-
-#### Finnhub secondary feed contract (lean / no-noise)
-
-Allowed endpoints for the secondary feed are:
-
-- `/company-news` for approved watchlist symbols only
-- `/news` with controlled category scope (`general`, `forex`) and incremental `minId` usage
-- `/stock/recommendation`, `/stock/insider-sentiment`, `/stock/insider-transactions` as side-channel proxy features keyed to the same watchlist
-
-Explicitly excluded from the secondary feed contract:
-
-- `/news-sentiment` (premium)
-- `/stock/social-sentiment` (premium)
-- `/stock/tick` and `/stock/candle` (premium)
-- any premium-only analyst estimate or target endpoint
-
-Relevance and anti-noise gates are mandatory:
-
-1. Keep only rows whose ticker or `related` field intersects the approved Warbird watchlist.
-2. Keep only rows that map to at least one approved segment keyword family.
-3. Keep only rows whose publisher domain passes the trusted-domain filter.
-4. De-duplicate by `(normalized headline, publisher domain, published minute)` before storage.
-5. Enforce a per-segment cap per pull window and log dropped rows by drop reason.
-
-If a row fails any gate, it is dropped and logged; do not coerce it into a segment.
-
-#### Newsfilter primary feed contract (curated source allowlist)
-
-The Newsfilter feed is the canonical primary article source and must remain lean.
-
-Required source-id allowlist (exact):
-
-- `cnbc`
-- `reuters`
-- `bloomberg`
-- `sec-api`
-- `usDod`
-- `barrons`
-
-Required query gates:
-
-1. keyword gate includes `S&P` (exact or equivalent tokenization).
-2. symbol gate uses the approved Warbird watchlist only.
-3. title/description search is constrained to S&P-centered market context.
-4. results from sources outside the allowlist are dropped.
-5. all rows still pass the shared relevance and anti-noise gates above.
-
-#### Exact S&P-centered raw-news segments
-
-The current approved segment set is:
-
-- `sp500_market`
-- `sp500_fed_policy`
-- `sp500_inflation`
-- `sp500_yields_rates`
-- `sp500_labor_growth`
-- `sp500_geopolitics`
-- `sp500_energy_inflation`
-- `sp500_volatility`
-- `sp500_earnings_megacap`
-- `sp500_policy`
-- `sp500_credit_liquidity`
-
-#### Raw-news rules
-
-1. Google News is not an approved ingestion source for Warbird.
-2. Store Newsfilter `source.id` and source metadata explicitly for auditability of allowlist enforcement.
-3. Keep multi-segment article mapping normalized.
-4. Retain extracted article body text and extraction metadata (`canonical_url`, `extraction_status`, `extraction_method`, `body_word_count`) on the raw article row.
-5. Do not write synthetic sentiment from the raw poller.
-6. Do not promote raw-news rows or research scores directly into live Pine logic.
-
-#### Promotion boundary for news
-
-1. `news_signals` remains the derived news surface, not the raw-news surface.
-2. A future raw-news aggregator may write to `news_signals` only after:
-   - timestamp alignment is locked to the MES 15m contract
-   - the aggregation logic is deterministic
-   - polarity is expressed as `BULLISH` / `BEARISH` market impact, not `LONG` / `SHORT`
-   - each promoted signal is paired with contemporaneous price-action context (MES impulse, volatility expansion, session bucket, and cross-asset shock state), not emitted as a text-only score
-   - leakage risk is audited
-   - the feature family proves additive value out of sample
-3. Finnhub analyst/insider proxy series follow the same promotion gate as raw headlines; they are research-only until deterministic mapping and additive-value checks pass.
-4. Newsfilter source-allowlist rows follow the same promotion gate as Finnhub rows.
-5. If no Pine analogue or mirrored-live path exists, or if the news event cannot be paired cleanly with price action, the insight stays research-only.
-
-#### 2026-03-26 checkpoint: news_signals polarity contract alignment
-
-Scope completed in repo:
-
-1. Added `supabase/migrations/20260326000016_news_signal_direction.sql` to move `news_signals.direction` onto a dedicated `market_impact_direction` enum (`BULLISH`, `BEARISH`) without touching the shared trading `signal_direction` enum.
-2. Updated the live news writers at that checkpoint so both emitted `BULLISH` / `BEARISH` instead of mixed `LONG` / `SHORT` semantics.
-3. Updated dataset readers in `scripts/warbird/build-warbird-dataset.ts` and `scripts/build-dataset.py` to normalize legacy and new values safely during transition.
-
-Validation completed:
-
-- `npm run build`
-- `python3 -m py_compile scripts/build-dataset.py`
-
-Remaining blocker after this checkpoint:
-
-1. The new migration still must be applied to the live Supabase database before the cloud writers are guaranteed to accept the locked polarity contract.
-2. Promoted news still needs explicit MES price-action pairing before it can move from research context into live logic.
-3. After the news pairing surface is defined, the next larger runtime migration remains the legacy `warbird_forecasts_1h` replacement.
-
-#### 2026-03-26 checkpoint: raw full-article extraction and research scoring
-
-Scope completed in repo:
-
-1. Added `supabase/migrations/20260326000019_news_raw_extraction_and_scoring.sql` to extend the raw-news contract with canonical topics, provider raw tables, full-body extraction fields, and the research-only `econ_news_article_assessments` surface.
-2. Added `config/news_raw_contract.json` plus shared helpers so Finnhub and Newsfilter use the same watchlist, topic taxonomy, dedupe contract, and Reuters-benchmark scoring rubric.
-3. Removed the Google News route and poller after live validation proved Google RSS is an aggregator-only path that would require custom decoding.
-4. Locked `scripts/poll-newsfilter-news.py` as the primary path and `scripts/poll-finnhub-news.py` as the secondary path for dry-run sampling and retained raw capture when provider access exists.
-
-Validation completed:
-
-- `npm run build`
-- `python3 -m py_compile scripts/raw_news_contract.py scripts/poll-finnhub-news.py scripts/poll-newsfilter-news.py`
-
-Remaining blockers after this checkpoint:
-
-1. Live Vault still does not have `warbird_newsfilter_api_key` or `warbird_finnhub_api_key`, so the Supabase cron wrappers skip before provider fetch.
-2. The first live provider dry runs and retained sample pulls still need to be executed after those Vault secrets are present.
-3. Legacy Google RSS tables remain in the historical schema, but they are no longer part of the active ingestion path.
-
-#### 2026-03-26 checkpoint: Supabase live raw-news runtime wiring
-
-Scope completed live:
-
-1. Applied `supabase/migrations/20260326000019_news_raw_extraction_and_scoring.sql` to the linked Supabase project, creating the canonical topic, provider raw-article, provider segment-link, and research-assessment surfaces.
-2. Applied `supabase/migrations/20260326000020_supabase_news_raw_cron.sql` to the linked Supabase project, creating `public.run_newsfilter_raw_pull()` and `public.run_finnhub_raw_pull()` plus their pg_cron jobs.
-3. Created the live Vault route-url secrets `warbird_newsfilter_raw_cron_url` and `warbird_finnhub_raw_cron_url` pointing to the active App Router cron endpoints.
-4. Executed both live cron wrapper functions once and verified the skip path is now strictly provider-secret gated, not schema-gated or schedule-gated.
-
-Validation completed:
-
-- `npm run build`
-- `select jobname, schedule from cron.job where jobname in ('warbird_newsfilter_raw_pull', 'warbird_finnhub_raw_pull');`
-- `select proname from pg_proc join pg_namespace n on n.oid = pg_proc.pronamespace where n.nspname = 'public' and proname in ('run_newsfilter_raw_pull', 'run_finnhub_raw_pull');`
-- `select name from vault.decrypted_secrets where name in ('warbird_cron_secret', 'warbird_newsfilter_raw_cron_url', 'warbird_finnhub_raw_cron_url', 'warbird_newsfilter_api_key', 'warbird_finnhub_api_key');`
-- `select public.run_newsfilter_raw_pull();`
-- `select public.run_finnhub_raw_pull();`
-
-Remaining blocker after this checkpoint:
-
-1. Live Vault still lacks `warbird_newsfilter_api_key` and `warbird_finnhub_api_key`.
-2. Until those two secrets exist, the live cron wrapper functions will skip before making any provider request.
-3. No raw-news rows should promote beyond research-only storage until the later pairing boundary with MES price action is locked and validated.
-
-#### Out-of-scope for now
-
-1. ZL external AI-news pipeline
-2. Google Finance recurring machine ingestion
-3. opaque black-box sentiment scores with no reproducible contract
-
----
-
-### 20. Immediate Next Steps (updated 2026-03-29)
+### 19. Immediate Next Steps (updated 2026-03-29)
 
 Completed items are struck through. Current blocking order is at the top of this plan.
 
@@ -3287,11 +3033,10 @@ Completed items are struck through. Current blocking order is at the top of this
 4. **Fib engine hardening** — anchor-span visual gap, intermediate waypoint lines (1.382, 1.50, 1.786), direction logic, MTF alignment.
 5. **Canonical writer checkpoint** — port `detect-setups` / `score-trades` to Supabase Edge Functions writing canonical tables.
 6. **Dashboard/admin reader cutover** — cut off legacy tables, webhook alerts from TradingView → Edge Function → Supabase Realtime → dashboard.
-7. **Finish provider-secret cutover** — set `warbird_newsfilter_api_key` and `warbird_finnhub_api_key` in Vault, prove dry-run pulls.
-8. **Stand up the local AG workbench** — venv, `scripts/ag/*.py` (load-source-snapshots, compute-features, build-fib-dataset, train-fib-model, evaluate-configs, generate-packet, publish-artifacts).
-9. **Export 12+ months of TradingView MES 15m data** with canonical fib contract + TA core pack exports loaded.
-10. **Train the staged baseline** — fib + event-response + TA core pack baseline → parameter admission → joint configuration.
-11. **Add cloud publish-up tables** — `warbird_training_runs`, `warbird_packets`, `warbird_packet_activations`, `warbird_packet_metrics`, `warbird_packet_feature_importance`, `warbird_packet_setting_hypotheses`, `warbird_packet_recommendations`, plus dashboard views.
-12. **Define packet activation and rollback transitions** including the 2-consecutive-PT1-miss rule.
-13. **Migrate dashboard and admin/status consumers** to the new publish-up and live-state surface.
-14. **Only after reader/writer cutover is complete, drop dormant or superseded cloud tables.**
+7. **Stand up the local AG workbench** — venv, `scripts/ag/*.py` (load-source-snapshots, compute-features, build-fib-dataset, train-fib-model, evaluate-configs, generate-packet, publish-artifacts).
+8. **Export 12+ months of TradingView MES 15m data** with canonical fib contract + TA core pack exports loaded.
+9. **Train the staged baseline** — fib + event-response + TA core pack baseline → parameter admission → joint configuration.
+10. **Add cloud publish-up tables** — `warbird_training_runs`, `warbird_packets`, `warbird_packet_activations`, `warbird_packet_metrics`, `warbird_packet_feature_importance`, `warbird_packet_setting_hypotheses`, `warbird_packet_recommendations`, plus dashboard views.
+11. **Define packet activation and rollback transitions** including the 2-consecutive-PT1-miss rule.
+12. **Migrate dashboard and admin/status consumers** to the new publish-up and live-state surface.
+13. **Only after reader/writer cutover is complete, drop dormant or superseded cloud tables.**

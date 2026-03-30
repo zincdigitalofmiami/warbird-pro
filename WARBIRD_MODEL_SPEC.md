@@ -17,21 +17,18 @@ This document is a subordinate reference for the model contract. It must not ove
 5. AutoGluon is offline only. It trains, calibrates, and emits a Pine-ready packet.
 6. The adaptive fib engine snapshot is the canonical base object. The model does **not** invent raw entries from scratch. The Pine fib engine creates the candidate setup first.
 7. The model output is MES 15m setup-outcome state: TP1 probability, TP2 probability, reversal risk, and bounded stop-family selection. It is **not** a predicted-price forecast surface.
-8. News is not a separate setup engine. It is part of the event-response block that can suppress, delay, confirm, or reclassify a valid 15m fib setup.
-9. `news_signals` is a derived `BULLISH` / `BEARISH` market-impact surface. It is not a `LONG` / `SHORT` trade-direction table.
-10. News may influence the model only when paired with contemporaneous price action, session timing, volatility state, and cross-asset reaction.
-11. AG and offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close, not repaint-prone live chart reads.
-12. The retained core historical window for training/support data starts at `2024-01-01T00:00:00Z`. Pre-2024 core rows are out of scope and must not be reintroduced into the canonical dataset.
-13. The fib engine must preserve lookback/confluence intelligence; a simple zigzag-only anchor path is insufficient for Warbird.
-14. Pivot distance and pivot-state are critical trigger/reversal inputs, but not the sole final decision maker.
-15. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
-16. Overlapping MA / volume / trend features across base logic and admitted harnesses must be de-duplicated by feature family.
-17. The minimal Pine export surface for training capture is fib lines/state, pivot state/distance, and admitted indicator/harness outputs from the canonical indicator surface.
-18. The canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`.
-19. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
-20. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
-21. Cloud core support data remains `2024-01-01T00:00:00Z` forward. By explicit user direction, local offline training research may use up to five years of comparable electronic futures data, but that does not reopen pre-2024 cloud core retention.
-22. The operator-approved fib visual spec is a contract. Colors, line widths, line styles, and visible level-label presentation must be reproduced exactly across Pine and dashboard renderers unless explicitly reapproved.
+8. AG and offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close, not repaint-prone live chart reads.
+9. The retained core historical window for training/support data starts at `2024-01-01T00:00:00Z`. Pre-2024 core rows are out of scope and must not be reintroduced into the canonical dataset.
+10. The fib engine must preserve lookback/confluence intelligence; a simple zigzag-only anchor path is insufficient for Warbird.
+11. Pivot distance and pivot-state are critical trigger/reversal inputs, but not the sole final decision maker.
+12. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
+13. Overlapping MA / volume / trend features across base logic and admitted harnesses must be de-duplicated by feature family.
+14. The minimal Pine export surface for training capture is fib lines/state, pivot state/distance, and admitted indicator/harness outputs from the canonical indicator surface.
+15. The canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`.
+16. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
+17. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
+18. Cloud core support data remains `2024-01-01T00:00:00Z` forward. By explicit user direction, local offline training research may use up to five years of comparable electronic futures data, but that does not reopen pre-2024 cloud core retention.
+19. The operator-approved fib visual spec is a contract. Colors, line widths, line styles, and visible level-label presentation must be reproduced exactly across Pine and dashboard renderers unless explicitly reapproved.
 
 ---
 

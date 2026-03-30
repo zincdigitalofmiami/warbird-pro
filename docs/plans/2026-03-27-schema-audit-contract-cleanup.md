@@ -6,7 +6,7 @@
 > - `superpowers:subagent-driven-development` — if subagent execution chosen
 > - `superpowers:requesting-code-review` — at Phase 3 and Phase 5 gates
 
-**Goal:** Fix the broken lint gate, align all user-facing copy and docs to the MES 15m fib-outcome contract, delete duplicate/retired cron routes, add auth form accessibility, and close the news_signals access gap.
+**Goal:** Fix the broken lint gate, align all user-facing copy and docs to the MES 15m fib-outcome contract, delete duplicate/retired cron routes, and add auth form accessibility.
 
 **Architecture:** Cleanup-only pass. No new features. Every phase has a gate that must pass before proceeding. Pine files are NOT touched. Every deletion is evidence-backed.
 
@@ -55,14 +55,6 @@ Full impact analysis was performed before this plan was written. Evidence is rec
 | "24/5 Market Coverage" | 76 | **YES** | MES trades Sun evening – Fri close |
 | "5 lookback windows" | 131 | **YES** | Active plan line 459: confluence family `8/13/21/34/55` |
 | "ML-driven" | 126 | **NO** — model not live yet | Should be "rule-driven" until AG training completes |
-
-### news_signals Access Audit
-
-- Migration 008 (line 97-98): Original RLS on `news_signals` table: `authenticated` SELECT
-- Migration 028 (line 160): Drops table, recreates as materialized view — **no RLS reapplied**
-- Materialized views CANNOT have RLS in Postgres — must use GRANT instead
-- No app code currently queries `news_signals` directly (grep confirms zero hits in `app/`, `components/`, `lib/`)
-- `news_signals` is refreshed by `security definer` function via pg_cron every 15 min
 
 ### Auth Forms Audit
 

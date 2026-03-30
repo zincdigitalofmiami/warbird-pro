@@ -15,21 +15,14 @@ Read and follow AGENTS.md at the repository root.
 - All active recurring ingestion schedules run via Supabase pg_cron → Edge Functions. The remaining App Router routes `detect-setups` and `score-trades` are unscheduled legacy bridge code, not active pg_cron-owned production writers.
 - Supabase-owned minute schedule support for MES via `supabase/migrations/20260326000015_mes_1m_supabase_cron.sql` (pg_cron + pg_net + vault secrets)
 - Live core retention floor is now locked to `2024-01-01T00:00:00Z` forward only. `supabase/migrations/20260327000024_trim_pre_2024_core_history.sql` was applied live to surgically remove older rows from affected econ/geopolitical/legacy econ-news tables; MES and cross-asset intraday tables were already clean.
-- Finnhub Edge Function (`supabase/functions/finnhub-news/`) produces scored, body-extracted news articles into `econ_news_finnhub_articles` + `econ_news_article_assessments`. pg_cron schedule: every 15 min during market hours. Pending: Kirk must set `FINNHUB_API_KEY` as Edge Function secret to unblock.
 - GPR (Caldara-Iacoviello Geopolitical Risk Index) is backfill-only training data. Cron, Vercel route, and Edge Function removed (migration 036). Data in `geopolitical_risk_1d` is populated by one-time local backfill and refreshed manually monthly.
 - Trump Effect Edge Function (`supabase/functions/trump-effect/`) fetches Federal Register executive orders and memoranda. pg_cron schedule: daily 19:30 UTC Mon-Fri. No API key needed.
-- `news_signals` is now a materialized view aggregating all signal sources (article assessments, GPR, Trump Effect) with full provenance columns. Refreshed every 15 min during market hours by pg_cron.
-- `all_news_articles` unified read view across all news article providers (currently Finnhub only)
 - `series_catalog` is now FK-enforced from all 10 `econ_*_1d` tables (migration 028)
 - 22 new FRED macro series registered in `series_catalog` (migration 026): GDP, trade, government fiscal, prices, investment, expectations
 - `T5YIE` and `T10YIE` breakeven inflation series reactivated
-- Dead tables dropped (migration 028): `econ_news_1d`, `policy_news_1d`, Newsfilter tables (2), RSS tables (2)
-- Newsfilter removed entirely — no free API tier exists. Edge Function, pg_cron job, and helper function all dropped (migration 025).
-- Dead Vercel cron routes deleted: `mes-1m`, `cross-asset`, `google-news`, `finnhub-news`, `newsfilter-news`, `news`, `mes-hourly`, `fred`, `massive/inflation`, `massive/inflation-expectations`, `trump-effect`, `forecast`, `measured-moves`, `mes-catchup`, `gpr`
+- Dead Vercel cron routes deleted: `mes-1m`, `cross-asset`, `mes-hourly`, `fred`, `massive/inflation`, `massive/inflation-expectations`, `trump-effect`, `forecast`, `measured-moves`, `mes-catchup`, `gpr`
 - Remaining App Router cron routes: `detect-setups` (active core), `score-trades` (active core)
-- Orphaned `lib/news/` directory deleted (provider-ingest, article-extractor, raw-news-contract — all superseded by Edge Function copies in `supabase/functions/_shared/`)
 - Unique constraints added on `econ_calendar(ts, event_name)` and `trump_effect_1d(ts, title)` to enforce upsert deduplication
-- `news_signals` materialized view access restricted to `authenticated` role via GRANT (migration 034)
 - ESLint gate passes clean (`npm run lint` = 0 errors, 0 warnings). ESLint 9 native flat config with `_` prefix ignore pattern.
 - Auth forms have proper `name`, `autoComplete`, `role="alert"`, `aria-live="polite"` attributes
 - Marketing page aligned to MES 15m fib-outcome contract (no ML/forecasting references)
@@ -45,11 +38,8 @@ Read and follow AGENTS.md at the repository root.
 ### What Doesn't Work Yet
 - mes_1s ingestion (table exists, nothing writes to it)
 - Core backfill is not fully finished for the Jan 1, 2024 floor: `cross_asset_1d` still starts at `2026-03-15`, and `econ_inflation_1d` is still stale relative to the live schedule.
-- Finnhub Edge Function is deployed and wired but Kirk must set `FINNHUB_API_KEY` as a Supabase Edge Function secret before it produces rows (Phase 1 manual step)
 - FRED backfill script (`python scripts/backfill-fred.py`) needs to run AFTER migration 026 is applied to production to populate the 22 new series
 - TradingEconomics free tier is untested — Kirk must set API key and run curl tests (Phase 4 manual step)
-- `news_signals` materialized view BULLISH/BEARISH thresholds (market_relevance_score > 0.6 / < 0.4, GPR > 100 / < 80) are starter heuristics pending AG training refinement
-- `macro_reports_1d` not yet included in `news_signals` materialized view (pending TradingEconomics actual/forecast/surprise data evaluation)
 - ML model training (target `scripts/ag/*` path not built yet)
 - Python feature computation layer (not built yet)
 - AG training pipeline (not built yet)
@@ -67,7 +57,7 @@ Read and follow AGENTS.md at the repository root.
 - `scripts/warbird/fib-engine.ts` still reflects a legacy 1H helper path and is not the target point-in-time fib snapshot surface for AG training
 - Legacy `warbird_forecasts_1h` table still exists in DB (forecast route deleted but table remains)
 - Remote Supabase migration ledger only records through `20260326000017` — live DB has later schema changes applied directly. `supabase db push` is unsafe until drift is reconciled.
-- `/admin` data-quality issues visible: negative `econ_calendar` staleness, `news_signals` rows with empty freshness (not related to migration 035 fix)
+- `/admin` data-quality issues visible: negative `econ_calendar` staleness (not related to migration 035 fix)
 
 ### Architecture Direction
 Follow the active architecture plan only.
@@ -91,7 +81,6 @@ Follow the active architecture plan only.
 - Legacy `hit_*_first` / `prob_hit_*` names are scheduled for deletion. They must not appear in shared TypeScript types, active API responses, Admin/dashboard surfaces, packet payloads, or new schema work. No fallback aliases are permitted on new surfaces.
 - The Admin page should render structured candidate rows, full training metrics, packet metrics, feature drivers, setting hypotheses, and AI-generated recommendations. Do not use Markdown report blobs as the dashboard contract.
 - Decision vocabulary is `TAKE_TRADE`, `WAIT`, and `PASS`. Those are policy decisions, not realized trade outcomes.
-- `news_signals` is a derived `BULLISH` / `BEARISH` event-response surface that must be paired with price action before it can influence live logic.
 - Pivot distance/state is a critical trigger and reversal input, but not the sole decision maker. Intermarket trigger quality must respect each symbol's correlative path with aligned 15m / 1H / 4H state.
 - Do not add more indicator settings, assets, or “zoo” modules ahead of training evidence. Build the minimal exportable core first, then let SHAP and feature-admission evidence decide what survives.
 - Minimal Pine export surface for training capture: fib lines/state, TA core pack (EMAs/MACD/RSI/ATR/ADX/volume family/OBV/MFI), and event/regime state from the canonical indicator surface.
