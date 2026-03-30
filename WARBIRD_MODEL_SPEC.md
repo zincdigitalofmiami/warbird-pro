@@ -18,7 +18,7 @@ This document is a subordinate reference for the model contract. It must not ove
 6. The adaptive fib engine snapshot is the canonical base object. The model does **not** invent raw entries from scratch. The Pine fib engine creates the candidate setup first.
 7. The model output is MES 15m setup-outcome state: TP1 probability, TP2 probability, reversal risk, and bounded stop-family selection. It is **not** a predicted-price forecast surface.
 8. AG and offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close, not repaint-prone live chart reads.
-9. The retained core historical window for training/support data starts at `2024-01-01T00:00:00Z`. Pre-2024 core rows are out of scope and must not be reintroduced into the canonical dataset.
+9. The retained core historical window for training/support data starts at `2018-01-01T00:00:00Z`. Pre-2018 core rows are out of scope and must not be reintroduced into the canonical dataset.
 10. The fib engine must preserve lookback/confluence intelligence; a simple zigzag-only anchor path is insufficient for Warbird.
 11. Pivot distance and pivot-state are critical trigger/reversal inputs, but not the sole final decision maker.
 12. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
@@ -27,7 +27,7 @@ This document is a subordinate reference for the model contract. It must not ove
 15. The canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`.
 16. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
 17. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
-18. Cloud core support data remains `2024-01-01T00:00:00Z` forward. By explicit user direction, local offline training research may use up to five years of comparable electronic futures data, but that does not reopen pre-2024 cloud core retention.
+18. Cloud core support data starts at `2018-01-01T00:00:00Z`. All MES ingestion uses `MES.c.0` continuous contract via Databento Live API (real-time) and Historical API (backfill). No manual contract-roll logic.
 19. The operator-approved fib visual spec is a contract. Colors, line widths, line styles, and visible level-label presentation must be reproduced exactly across Pine and dashboard renderers unless explicitly reapproved.
 
 ---

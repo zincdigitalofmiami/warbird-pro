@@ -35,7 +35,7 @@ Everything else is archived or reference-only and should not drive current imple
 - NEVER use mock, demo, placeholder, or fake data. Every data point must be real.
 - If a feature has no real data yet, show NOTHING.
 - NEVER query inactive symbols from Databento. Only `is_active=true AND data_source='DATABENTO'`.
-- Core historical retention starts at `2024-01-01T00:00:00Z`. Do not preserve, backfill, or train on pre-2024 core rows unless the user explicitly reopens that contract.
+- Core historical retention starts at `2018-01-01T00:00:00Z`. Do not preserve, backfill, or train on pre-2018 core rows unless the user explicitly reopens that contract.
 
 ### Naming
 
@@ -104,8 +104,14 @@ Everything else is archived or reference-only and should not drive current imple
 
 ## MES Ingestion — Current State
 
-**Current:** `mes-1m` is a lightweight route called every minute by Supabase pg_cron (`warbird_mes_1m_pull`). Fetches ohlcv-1m incrementally from Databento, upserts `mes_1m`, rolls up touched 15m buckets into `mes_15m`.
+**Primary (real-time):** `mes-1m` Edge Function, called every minute by Supabase pg_cron (`warbird_mes_1m_pull`). Connects to the **Databento Live API** (TCP gateway, `ohlcv-1s`, `MES.c.0` continuous contract, `stype_in=continuous`). Aggregates 1s → 1m, upserts `mes_1m`, rolls up touched 15m buckets into `mes_15m`. **Zero lag** — data arrives within the current minute.
 
-**Legacy catchup:** `mes-catchup` is locked behind explicit manual params. No recurring schedule. Manual backfill only, with the retained history floor fixed at `2024-01-01T00:00:00Z`.
+**Fallback:** For gaps > 60 minutes, falls back to the Databento Historical API (`ohlcv-1m`). Historical API has ~10-15 min publication delay — used only for large catch-ups, never for live chart display.
 
-**Databento free schemas (Standard $179/mo):** ohlcv-1s, ohlcv-1m, ohlcv-1h, ohlcv-1d, definition, statistics. Currently using 2 of 6.
+**Hourly:** `mes-hourly` Edge Function pulls `ohlcv-1h` and `ohlcv-1d` directly from Databento Historical API (`MES.c.0`, `stype_in=continuous`). Rolls 1h → 4h locally (Databento has no `ohlcv-4h` schema). No application-level 1m→1h or 1h→1d aggregation.
+
+**Symbology:** All MES Databento calls use `MES.c.0` (calendar front-month continuous) with `stype_in=continuous`. No manual contract-roll logic. The `contract-roll.ts` files are dead code.
+
+**Retention floor:** `2018-01-01T00:00:00Z`.
+
+**Databento schemas (Standard $179/mo):** ohlcv-1s, ohlcv-1m, ohlcv-1h, ohlcv-1d, definition, statistics. Currently using: ohlcv-1s (Live API for real-time), ohlcv-1m (Historical API fallback), ohlcv-1h, ohlcv-1d.

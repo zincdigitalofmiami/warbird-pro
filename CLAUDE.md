@@ -10,11 +10,12 @@ Read and follow AGENTS.md at the repository root.
 ## Current Status
 
 ### What Works
-- MES chart pipeline end-to-end (Databento → cron → Supabase → Realtime → chart)
-- Lightweight MES minute path: Edge Function `mes-1m` pulls incremental `ohlcv-1m` and rolls up only touched 15m buckets
+- MES chart pipeline end-to-end (Databento Live API → cron → Supabase → Realtime → chart)
+- Real-time MES minute path: Edge Function `mes-1m` connects to Databento Live API (TCP gateway), streams `ohlcv-1s` for `MES.c.0` (continuous), aggregates 1s → 1m, upserts `mes_1m`, rolls up touched 15m buckets into `mes_15m`. Zero lag — data arrives within the current minute. Falls back to Historical API for gaps > 60 min.
+- `mes-hourly` Edge Function pulls `ohlcv-1h` and `ohlcv-1d` directly from Databento Historical API (`MES.c.0`, `stype_in=continuous`). Rolls 1h → 4h locally (no ohlcv-4h schema). No 1m→1h or 1h→1d aggregation.
 - All active recurring ingestion schedules run via Supabase pg_cron → Edge Functions. The remaining App Router routes `detect-setups` and `score-trades` are unscheduled legacy bridge code, not active pg_cron-owned production writers.
 - Supabase-owned minute schedule support for MES via `supabase/migrations/20260326000015_mes_1m_supabase_cron.sql` (pg_cron + pg_net + vault secrets)
-- Live core retention floor is now locked to `2024-01-01T00:00:00Z` forward only. `supabase/migrations/20260327000024_trim_pre_2024_core_history.sql` was applied live to surgically remove older rows from affected econ/geopolitical/legacy econ-news tables; MES and cross-asset intraday tables were already clean.
+- Live core retention floor is now locked to `2018-01-01T00:00:00Z` forward. Previous 2024 floor was lifted; backfill and training may use data back to 2018-01-01.
 - GPR (Caldara-Iacoviello Geopolitical Risk Index) is backfill-only training data. Cron, Vercel route, and Edge Function removed (migration 036). Data in `geopolitical_risk_1d` is populated by one-time local backfill and refreshed manually monthly.
 - Trump Effect Edge Function (`supabase/functions/trump-effect/`) fetches Federal Register executive orders and memoranda. pg_cron schedule: daily 19:30 UTC Mon-Fri. No API key needed.
 - `series_catalog` is now FK-enforced from all 10 `econ_*_1d` tables (migration 028)
@@ -72,8 +73,8 @@ Follow the active architecture plan only.
 - Warbird is split into `Generator` (Pine with embedded TA core pack), `Selector` (offline models scoring frozen candidates), and `Diagnostician` (research explaining wins, losses, and improvement paths).
 - Cloud Supabase is the production system of record; the local warehouse is explicit-snapshot training/research only.
 - AG/offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close; repaint-prone live chart reads are not acceptable dataset truth.
-- Retained core historical data starts at `2024-01-01T00:00:00Z`. Pre-2024 core rows are out of scope for live support data and offline training.
-- By explicit user direction, local offline training research may use up to five years of comparable electronic futures data, but that does not reopen pre-2024 cloud core retention.
+- Retained core historical data starts at `2018-01-01T00:00:00Z`. Pre-2018 core rows are out of scope.
+- All MES Databento calls use `MES.c.0` (calendar front-month continuous) with `stype_in=continuous`. No manual contract-roll logic.
 - Local machines are for training/calculations/research only.
 - Production ingestion, crons, and chart-serving must not depend on local machines.
 - No new predicted-price or `warbird_forecasts_1h`-style surfaces. Live model state is TP1/TP2/reversal outcome state on the MES 15m contract.
