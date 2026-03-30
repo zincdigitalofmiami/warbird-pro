@@ -50,3 +50,4 @@ __pycache__/
 
 # claude code
 .claude/
+.tmp/
