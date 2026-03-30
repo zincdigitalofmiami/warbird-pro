@@ -13,7 +13,7 @@ const ONE_MINUTE_MS = 60_000;
 const BAR_15M_SEC = 900;
 const LOOKBACK_ON_EMPTY_MINUTES = 180;
 const MAX_INCREMENTAL_LOOKBACK_MINUTES = 360;
-const INGEST_DELAY_SECONDS = 90;
+const INGEST_DELAY_SECONDS = 0;
 const UPSERT_CHUNK_SIZE = 200;
 
 function floorTo15m(timeSec: number): number {
