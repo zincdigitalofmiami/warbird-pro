@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import CorrelationsRow from "@/components/dashboard/CorrelationsRow";
-import AlertFeedPanel from "@/components/dashboard/AlertFeedPanel";
 import DataTablesPanel from "@/components/dashboard/DataTablesPanel";
 import { fromWarbirdSetup, type SetupCandidate } from "@/lib/setup-candidates";
 import type { WarbirdSignal, WarbirdSetupEventRow, WarbirdSetupRow } from "@/lib/warbird/types";
@@ -93,15 +92,10 @@ export default function DashboardLiveClient() {
       {/* Top: Correlations Row */}
       <CorrelationsRow correlations={data?.correlations ?? null} />
 
-      {/* Middle: Chart (80%) + Alert Feed (20%) */}
+      {/* Middle: Chart (full width) */}
       <div className="flex flex-1 min-h-0">
-        {/* Chart */}
-        <div className="flex-[4] min-w-0 min-h-0">
+        <div className="flex-1 min-w-0 min-h-0">
           <LiveMesChart signal={data?.signal ?? null} setups={setups} />
-        </div>
-        {/* Alert Feed */}
-        <div className="w-[280px] flex-shrink-0 min-h-0">
-          <AlertFeedPanel events={data?.signalEvents ?? []} />
         </div>
       </div>
 

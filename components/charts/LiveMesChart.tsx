@@ -30,8 +30,7 @@ import { FibLinesPrimitive } from "@/lib/charts/FibLinesPrimitive";
 import { ensureFutureWhitespace } from "@/lib/charts/ensureFutureWhitespace";
 import { getEventDisplayPhase } from "@/lib/event-display";
 import type { SetupCandidate } from "@/lib/setup-candidates";
-import { RegimeAnchorPrimitive } from "@/lib/charts/RegimeAnchorPrimitive";
-import { REGIME_LABEL, REGIME_START_ISO } from "@/lib/warbird/constants";
+
 import { warbirdSignalToTargets } from "@/lib/warbird/projection";
 import type { WarbirdSignal } from "@/lib/warbird/types";
 import TV from "@/lib/colors";
@@ -306,7 +305,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
     const primitiveRef = useRef<ForecastTargetsPrimitive | null>(null);
     const setupPrimitiveRef = useRef<SetupMarkersPrimitive | null>(null);
     const fibPrimitiveRef = useRef<FibLinesPrimitive | null>(null);
-    const regimePrimitiveRef = useRef<RegimeAnchorPrimitive | null>(null);
+
     const initialViewportAppliedRef = useRef(false);
     const displayEventPhase = getEventDisplayPhase(eventPhase);
 
@@ -478,8 +477,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       series.attachPrimitive(fibPrimitive);
 
 
-      const regimePrimitive = new RegimeAnchorPrimitive();
-      series.attachPrimitive(regimePrimitive);
+
 
       chartRef.current = chart;
       seriesRef.current = series;
@@ -487,8 +485,6 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       primitiveRef.current = primitive;
       setupPrimitiveRef.current = setupPrimitive;
       fibPrimitiveRef.current = fibPrimitive;
-      regimePrimitiveRef.current = regimePrimitive;
-
       const resizeObserver = new ResizeObserver(() => {
         chart.applyOptions({ autoSize: true });
       });
@@ -499,7 +495,6 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         series.detachPrimitive(primitive);
         series.detachPrimitive(setupPrimitive);
         series.detachPrimitive(fibPrimitive);
-        series.detachPrimitive(regimePrimitive);
         chart.removeSeries(whitespaceSeries);
         chart.remove();
         chartRef.current = null;
@@ -508,7 +503,6 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         primitiveRef.current = null;
         setupPrimitiveRef.current = null;
         fibPrimitiveRef.current = null;
-        regimePrimitiveRef.current = null;
       };
     }, []);
 
@@ -968,22 +962,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
     }, [lastPrice, signal]);
 
 
-    useEffect(() => {
-      if (!regimePrimitiveRef.current) return;
-      const regimeTime = realToGapFree(
-        Math.floor(new Date(REGIME_START_ISO).getTime() / 1000),
-      );
 
-      regimePrimitiveRef.current.setAnchor(
-        regimeTime != null
-          ? {
-              time: regimeTime,
-              label: `Regime ${REGIME_LABEL} · Jan 20 2025`,
-              color: "rgba(255,152,0,0.8)",
-            }
-          : null,
-      );
-    }, [lastPrice]);
 
     const changeColor = priceChange >= 0 ? TV.bull.bright : TV.bear.bright;
 
@@ -1089,14 +1068,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
 
         {/* Chart — flex-1 fills remaining space, min-h prevents collapse */}
         <div className="relative flex-1 min-h-[400px]">
-          <div className="absolute bottom-12 left-3 z-20 rounded-md border border-orange-500/25 bg-black/35 px-3 py-1.5">
-            <div className="text-[10px] uppercase tracking-[0.18em] text-orange-300/80">
-              Regime Anchor
-            </div>
-            <div className="text-[11px] text-white/70">
-              {REGIME_LABEL} · Jan 20, 2025
-            </div>
-          </div>
+
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
             <Image
               src="/chart_watermark.svg"
