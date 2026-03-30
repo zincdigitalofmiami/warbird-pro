@@ -10,7 +10,7 @@ interface DataTablesPanelProps {
 export default function DataTablesPanel({ signal, setups }: DataTablesPanelProps) {
   return (
     <div
-      className="w-full grid grid-cols-1 lg:grid-cols-3 gap-0"
+      className="w-full grid grid-cols-1 lg:grid-cols-3 gap-0 max-h-[120px] overflow-y-auto flex-shrink-0"
       style={{
         background: "#131722",
         borderTop: "1px solid rgba(255,255,255,0.06)",
