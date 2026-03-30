@@ -974,7 +974,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         }}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-3 border-b border-white/5 flex-shrink-0">
+        <div className="flex items-center justify-between px-3 py-1 border-b border-white/5 flex-shrink-0">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <div
@@ -1084,7 +1084,7 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
         </div>
 
         {/* Legend Footer */}
-        <div className="flex items-center justify-center gap-8 px-6 py-2 border-t border-white/5 bg-black/20 flex-shrink-0">
+        <div className="flex items-center justify-center gap-6 px-3 py-1 border-t border-white/5 bg-black/20 flex-shrink-0">
           <div className="flex items-center gap-2">
             <div
               className="w-3 h-4 rounded-sm"
