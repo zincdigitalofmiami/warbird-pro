@@ -5,7 +5,7 @@ Read and follow AGENTS.md at the repository root.
 - **Active architecture plan:** `/Volumes/Satechi Hub/warbird-pro/docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
 - **Live:** deployment URL managed in project operations docs
 - **Repo:** github.com/zincdigitalofmiami/warbird-pro
-- **DB:** Supabase cloud (check env vars, NOT Prisma)
+- **DB:** Supabase cloud (production) + local Supabase via Docker (training/dev). No Prisma.
 
 ## Current Status
 
@@ -13,18 +13,19 @@ Read and follow AGENTS.md at the repository root.
 - MES chart pipeline end-to-end (Databento Live API → cron → Supabase → Realtime → chart)
 - Real-time MES minute path: Edge Function `mes-1m` connects to Databento Live API (TCP gateway), streams `ohlcv-1s` for `MES.c.0` (continuous), aggregates 1s → 1m, upserts `mes_1m`, rolls up touched 15m buckets into `mes_15m`. Zero lag — data arrives within the current minute. Falls back to Historical API for gaps > 60 min.
 - `mes-hourly` Edge Function pulls `ohlcv-1h` and `ohlcv-1d` directly from Databento Historical API (`MES.c.0`, `stype_in=continuous`). Rolls 1h → 4h locally (no ohlcv-4h schema). No 1m→1h or 1h→1d aggregation.
-- All active recurring ingestion runs via Supabase pg_cron → Edge Functions (9 functions in `supabase/functions/`). The remaining App Router routes `detect-setups` and `score-trades` are unscheduled legacy bridge code, not active pg_cron-owned production writers.
-- Cross-asset pipeline: `cross-asset` Edge Function pulls `ohlcv-1h` from Databento Historical API for all active DATABENTO symbols (excl MES, .OPT). 4 shards fire hourly at `:05/:06/:07/:08` Sun-Fri (migration 040). All ~17 symbols updated within 4 minutes each hour. Upserts `cross_asset_1h`, derives `cross_asset_1d`.
+- All active recurring ingestion runs via Supabase pg_cron → SQL market-hours dispatch gate → Edge Functions (9 functions in `supabase/functions/`). The remaining App Router routes `detect-setups` and `score-trades` are unscheduled legacy bridge code, not active pg_cron-owned production writers.
+- `mes-1m`, `mes-hourly`, and `cross-asset` helper functions now gate dispatch in Postgres using America/Chicago CME session hours before invoking the Edge Functions. Broad cron expressions remain, but closed-session minutes/hours no longer create Edge invocations or `job_log` `market_closed` noise.
+- Cross-asset pipeline: `cross-asset` Edge Function pulls `ohlcv-1h` from Databento Historical API for all active DATABENTO symbols (excl MES, .OPT). 4 shards fire hourly at `:05/:06/:07/:08` Sun-Fri (migration 040). All ~17 symbols updated within 4 minutes each open-market hour. Upserts `cross_asset_1h`, derives `cross_asset_1d`.
 - All Databento calls use `.c.0` continuous front-month contracts with `stype_in=continuous`. No manual contract-roll logic. `contract-roll.ts` in `_shared/` is dead code. Databento handles rolls automatically.
 - Live core retention floor is now locked to `2018-01-01T00:00:00Z` forward. Previous 2024 floor was lifted; backfill and training may use data back to 2018-01-01.
 - GPR (Caldara-Iacoviello Geopolitical Risk Index) is backfill-only training data. Cron, helper function, and Vercel vault secret removed (migration 036 applied 2026-03-31). Data in `geopolitical_risk_1d` is populated by one-time local backfill and refreshed manually monthly.
-- Trump Effect Edge Function (`supabase/functions/trump-effect/`) fetches Federal Register executive orders and memoranda. pg_cron schedule: daily 19:30 UTC Mon-Fri. No API key needed.
+- Executive Orders Edge Function (`supabase/functions/exec-orders/`) fetches Federal Register executive orders and memoranda. pg_cron schedule: daily 08:00 UTC Mon-Fri. No API key needed. Table: `executive_orders_1d` (renamed from `trump_effect_1d`, migration 043).
 - `series_catalog` is now FK-enforced from all 10 `econ_*_1d` tables (migration 028)
 - 22 new FRED macro series registered in `series_catalog` (migration 026): GDP, trade, government fiscal, prices, investment, expectations
 - `T5YIE` and `T10YIE` breakeven inflation series reactivated
 - Dead Vercel cron routes deleted: `mes-1m`, `cross-asset`, `mes-hourly`, `fred`, `massive/inflation`, `massive/inflation-expectations`, `trump-effect`, `forecast`, `measured-moves`, `mes-catchup`, `gpr`
 - Remaining App Router cron routes: `detect-setups` (active core), `score-trades` (active core)
-- Unique constraints added on `econ_calendar(ts, event_name)` and `trump_effect_1d(ts, title)` to enforce upsert deduplication
+- Unique constraints added on `econ_calendar(ts, event_name)` and `executive_orders_1d(ts, title)` to enforce upsert deduplication
 - ESLint gate passes clean (`npm run lint` = 0 errors, 0 warnings). ESLint 9 native flat config with `_` prefix ignore pattern.
 - Auth forms have proper `name`, `autoComplete`, `role="alert"`, `aria-live="polite"` attributes
 - Marketing page aligned to MES 15m fib-outcome contract (no ML/forecasting references)
@@ -47,8 +48,7 @@ Read and follow AGENTS.md at the repository root.
 
 ### What Doesn't Work Yet
 - mes_1s ingestion (table exists, nothing writes to it)
-- Migrations 039 + 040 committed but **not yet applied** to remote Supabase. Must apply before dashboard tiles populate or hourly crons activate.
-- Backfill scripts ready but **not yet executed**: `scripts/backfill-cross-asset.py` (1h/1d from 2024-01-01) and `scripts/backfill-intermarket-15m.py` (15m/1h/1d from 2018-01-01). Require local env vars `DATABENTO_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+- Backfill scripts ready but **not yet executed**: `scripts/backfill-cross-asset.py` (1h/1d from 2024-01-01) and `scripts/backfill-intermarket-15m.py` (15m/1h/1d from 2018-01-01). Require local env vars `DATABENTO_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. Can target local Supabase directly for training data.
 - Ongoing 15m ingestion Edge Function not yet built — `cross_asset_15m` is backfill-populated only.
 - Companion pane indicator not yet built (regime_score, impulse_quality, exhaustion_score, agreement_velocity — own 64-plot/40-call budget).
 - `econ_inflation_1d` is still stale relative to the live schedule.
@@ -57,20 +57,19 @@ Read and follow AGENTS.md at the repository root.
 - ML model training (target `scripts/ag/*` path not built yet)
 - Python feature computation layer (not built yet)
 - AG training pipeline (not built yet)
-- Local PostgreSQL training warehouse application layer (DB now exists locally, but schema/scripts are not built)
+- Local Supabase running via Docker on external drive. Same schema as production (43 migrations replay clean). Training data backfill scripts can target local directly. AG training workspace (`scripts/ag/*`) not built yet.
 - DB-side aggregation (all TypeScript, zero Postgres functions)
 - Type generation (manual types, no supabase gen types)
 - No active `pinescript-server`, TradingView chart MCP, or TradingView CLI is configured in the current Codex profile, so live-chart read / install / edit / deep-test flows described in older docs are not available from this terminal session
-- Cloud publish-up tables for packet lineage, training metrics, and Admin explainability (not built): `warbird_training_runs`, `warbird_training_run_metrics`, `warbird_packets`, `warbird_packet_activations`, `warbird_packet_metrics`, `warbird_packet_feature_importance`, `warbird_packet_setting_hypotheses`, `warbird_packet_recommendations`
-- Checkpoint handoff doc saved at `docs/decisions/2026-03-28-schema-admin-contract-handoff.md` for clean chat restart context
-- The canonical normalized live schema is now locked in docs, but the new base tables are not built yet: `warbird_fib_engine_snapshots_15m`, `warbird_fib_candidates_15m`, `warbird_candidate_outcomes_15m`, `warbird_signals_15m`, `warbird_signal_events`, and `warbird_packets`.
-- Draft migrations 037 (canonical warbird tables) and 038 (compat views) are intentionally unapplied — no writers exist yet. They run via `supabase db push` when the writer cutover is ready. `scripts/ag/local_warehouse_schema.sql` is local-only.
+- Canonical warbird tables (13 tables + 8 views) deployed to production via migrations 037+038 (applied 2026-03-31). All empty — no writers active yet. Writers (`detect-setups`, `score-trades`) must be ported to Edge Functions targeting these canonical tables.
 - `detect-setups` and `score-trades` are Vercel routes with NO pg_cron schedule and NO Edge Function port. The legacy warbird_* decision tables they write to are empty in production. These must be ported to Edge Functions writing to the canonical tables before the setup engine is operational.
 - Dashboard fib recompute was cut (commit `77ec03e`). `LiveMesChart.tsx` no longer calls the legacy fib-engine helper. Dashboard is not yet wired to canonical engine state — that's blocking order #4.
 - `/admin` still presents stale `measured_moves` (76 rows, all NULL setup_id). The warbird operational tables (`warbird_triggers_15m`, `warbird_conviction`, `warbird_setups`, `warbird_setup_events`, `warbird_risk`) now have the correct 018 schema but remain empty — no writers active. `measured_moves` is preserved until canonical writer cutover replaces it with `warbird_admin_candidate_rows_v`.
 - `scripts/warbird/fib-engine.ts` still reflects a legacy 1H helper path and is not the target point-in-time fib snapshot surface for AG training
-- Legacy `warbird_forecasts_1h` backed up to `warbird_forecasts_1h_legacy_20260326` and dropped (migration 018 applied 2026-03-31).
-- Migration ledger reconciled through 040 (2026-03-31). Only 037+038 remain intentionally unapplied. `supabase db push` is now safe — it will only run 037+038.
+- Migration ledger fully reconciled (2026-03-31). 43 migrations, 43 local files, zero drift. `supabase db reset` replays clean. `supabase db push` is safe.
+- News infrastructure removed (migration 042): finnhub tables, news_signals matview, all_news_articles view, news types, news crons. Keeping: FRED, GPR, econ_calendar, executive_orders.
+- 14 legacy tables dropped (migration 043): trade_scores, vol_states, models, sources, coverage_log, symbol_mappings, options_stats_1d, macro_reports_1d, 6x legacy backup tables.
+- Security advisor: 0 code warnings. 1 WARN (auth password protection — dashboard setting).
 - `/admin` data-quality issues visible: negative `econ_calendar` staleness (not related to migration 035 fix)
 
 ### Architecture Direction

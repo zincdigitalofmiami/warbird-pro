@@ -4,6 +4,8 @@ Historical record of all plan changes. Extracted from the active plan on 2026-03
 
 ---
 
+- 2026-03-31: **Local Supabase setup + full migration reconciliation + news/legacy cleanup.** Docker Desktop + local Supabase running (external drive). 43 migrations replay clean via `db reset`. Migration ledger fully reconciled — 4 never-applied migrations found and fixed (018/031/033/036), 2 partials patched (039/040). Canonical warbird tables (037+038) applied to production — 13 tables + 8 views live but empty. News infrastructure removed (042): finnhub tables, matview, types, crons, Edge Function, Python scripts. trump_effect renamed to executive_orders (043). 14 legacy tables dropped. Security advisor: 0 code warnings. Pine v7 CME Globex intermarket pivot completed (NQ/RTY/CL/HG/6E/6J). Plan cleaned 2963→948 lines. Python Pyright warnings fixed.
+
 
 - 2026-03-31: **Migration ledger reconciliation.** Full audit of migrations 018-040 against live DB. Found 4 never-applied (018, 031, 033, 036), 2 partially applied (039, 040). Stamped 15 confirmed-applied into ledger, ran 4 missing migrations, patched 2 partials. Security advisor pass: 0 ERRORs. Ledger now reconciled through 040. Only 037+038 (canonical warbird tables) remain intentionally unapplied. `supabase db push` is now safe. Migration discipline rule added to AGENTS.md.
 - 2026-03-31: **v7 CME Globex intermarket pivot.** NQ/RTY/CL/HG/6E/6J replace TICK/VOLD/VVIX/VIX/VIX3M/HYG in Pine indicator. Leadership/Risk-appetite/Macro-FX/Exec regime groups. 6J inverted at state boundary. 60 plot + 3 alert = 63/64. Commit `6f3e7a6`.
