@@ -939,6 +939,7 @@ Current blocking order is at the top of this plan.
 2. ~~**v7 institutional upgrade**~~ — DONE. Grouped regime scoring, ES execution quality, 64/64.
 3. ~~**Intermarket pivot to CME Globex**~~ — DONE. NQ/RTY/CL/HG/6E/6J. 63/64 (1 headroom). Commit `6f3e7a6`.
 4. ~~**Supabase pg_cron sole schedule producer**~~ — DONE.
+   Runtime note locked 2026-03-31: `mes-1m`, `mes-hourly`, and `cross-asset` Edge Functions handle market-hours skips internally via `isMarketOpen()`. SQL helper functions are `net.http_*` dispatch wrappers only — no session-hour gating in Postgres.
 5. **Companion pane indicator** — regime_score, impulse_quality, exhaustion_score, agreement_velocity lines + event markers. Own 64-plot / 40-call budget. Discusses after main indicator is stable.
 6. **Fib engine hardening** — anchor-span visual gap, intermediate waypoint lines (1.382, 1.50, 1.786), direction logic, MTF alignment.
 7. **Canonical writer checkpoint** — port `detect-setups` / `score-trades` to Supabase Edge Functions writing canonical tables.

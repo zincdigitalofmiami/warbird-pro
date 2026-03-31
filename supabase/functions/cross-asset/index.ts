@@ -1,6 +1,7 @@
 // Edge Function: cross-asset
 // Ported from app/api/cron/cross-asset/route.ts
-// Triggered on a 15m cadence by Supabase pg_cron (warbird_cross_asset_s0..s3).
+// Triggered hourly by Supabase pg_cron shard jobs (warbird_cross_asset_s0..s3).
+// Market-hours skip logic is handled internally via isMarketOpen().
 // Auth: x-cron-secret header validated against EDGE_CRON_SECRET env var.
 
 import { createAdminClient } from "../_shared/admin.ts";

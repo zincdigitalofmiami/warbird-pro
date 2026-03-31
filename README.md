@@ -22,7 +22,7 @@ Older plans, audits, checkpoints, and archived specs are not authoritative.
 
 - Daily bias: macro directional shadow
 - 4H structure: confirms or denies trend
-- 15m fib-outcome engine: TP1_ONLY / TP2_HIT / STOPPED / REVERSAL / NO_TRADE classification
+- 15m fib-outcome engine: TP1_ONLY / TP2_HIT / STOPPED / REVERSAL classification (unresolved rows remain OPEN)
 - 15m fib geometry: multi-period confluence with 5-window family (8/13/21/34/55)
 - 15m trigger: oscillator extremes at fib zones with mechanical stop-loss (SL = -0.236 fib extension)
 
@@ -41,13 +41,13 @@ This is the intended steady-state authority map. Do not create multiple live wri
 - Local machines are for training, heavy calculations, and research processing only.
 - Production ingestion, cron jobs, reconciliation, and chart-serving must not depend on local machines.
 - If bar continuity is not provable, fib/model/setup logic is not safe.
-- Retained core historical data starts at `2024-01-01T00:00:00Z`. Anything earlier is out of scope for the canonical live/training dataset.
+- Retained core historical data starts at `2018-01-01T00:00:00Z`. Pre-2018 core rows are out of scope.
 
 ## Current Repo Reality
 
 - Canonical cutover is in place: legacy `forecasts` is gone and Warbird v1 writes to normalized `warbird_*` tables.
-- Active API surface is `app/api/warbird/signal` and `app/api/warbird/history`.
-- `mes-1m` is the primary MES data path — called every minute by Supabase pg_cron (`warbird_mes_1m_pull`), no sidecar dependency.
+- Active API surface: `app/api/warbird/signal`, `app/api/warbird/history`, `app/api/warbird/dashboard`, `app/api/admin/status`.
+- `mes-1m` is the primary MES data path — owned by Supabase pg_cron (`warbird_mes_1m_pull`). Edge Functions handle market-closed skips internally. No sidecar dependency.
 - The repo still contains some stale legacy scaffolding and documentation from the pre-cutover build plan.
 
 ## Immediate Priorities
@@ -63,7 +63,7 @@ This is the intended steady-state authority map. Do not create multiple live wri
 - App runtime: Next.js App Router (dashboard/API surface)
 - Database: Supabase Postgres + Auth + Realtime + RLS
 - Live market data: Databento
-- MES ingestion: Supabase pg_cron `warbird_mes_1m_pull` (every minute, Sun–Fri) via Databento ohlcv-1m
+- MES ingestion: Supabase pg_cron `warbird_mes_1m_pull` (every minute Sun-Fri) via Databento Live API, falls back to Historical API for gaps
 - Historical backfill: [scripts/backfill.py](/Volumes/Satechi%20Hub/warbird-pro/scripts/backfill.py) (local research only, `2024-01-01` forward)
 - Canonical Warbird engine: [scripts/warbird](/Volumes/Satechi%20Hub/warbird-pro/scripts/warbird)
 

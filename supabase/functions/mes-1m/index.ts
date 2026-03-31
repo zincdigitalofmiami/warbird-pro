@@ -1,5 +1,6 @@
 // Edge Function: mes-1m
-// Triggered every minute by Supabase pg_cron (warbird_mes_1m_pull).
+// Triggered by Supabase pg_cron (warbird_mes_1m_pull).
+// Market-hours skip logic is handled internally via isMarketOpen().
 // Uses Databento Live API (real-time TCP gateway) for ohlcv-1s → aggregates to 1m/15m.
 // Falls back to Historical API for gaps > 10 minutes.
 // Auth: x-cron-secret header validated against EDGE_CRON_SECRET env var.

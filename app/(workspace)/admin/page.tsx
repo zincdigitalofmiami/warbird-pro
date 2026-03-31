@@ -39,29 +39,34 @@ interface JobLogEntry {
   created_at: string;
 }
 
-type TargetResult = "HIT" | "MISS" | "OPEN";
-type OutcomeResult = "TP2_HIT" | "TP1_ONLY" | "STOPPED" | "REVERSAL" | "OPEN";
+type TargetHitState = "HIT" | "MISS" | "OPEN";
+type OutcomeState = "TP2_HIT" | "TP1_ONLY" | "STOPPED" | "REVERSAL" | "OPEN";
 
-interface SetupEntry {
-  id: number;
-  ts: string;
+interface CandidateRow {
+  candidate_id: number;
+  signal_id: string | null;
+  bar_close_ts: string;
   symbol_code: string;
   direction: string;
-  status: string;
+  anchor_price: number | null;
+  target_price: number | null;
   entry_price: number | null;
   stop_loss: number | null;
-  tp1: number | null;
-  tp2: number | null;
-  tp1_hit_at: string | null;
-  tp2_hit_at: string | null;
-  last_event_type: string | null;
-  last_event_ts: string | null;
-  pt1_result: TargetResult;
-  pt2_result: TargetResult;
-  outcome_result: OutcomeResult;
-  conviction_level: string | null;
-  fib_level: number | null;
+  tp1_price: number | null;
+  tp2_price: number | null;
+  fib_level_touched: string | null;
   fib_ratio: number | null;
+  setup_archetype: string | null;
+  confidence_score: number | null;
+  decision_code: string | null;
+  tp1_probability: number | null;
+  tp2_probability: number | null;
+  reversal_risk: number | null;
+  target_hit_state: TargetHitState;
+  outcome_state: OutcomeState;
+  status: string;
+  emitted_at: string | null;
+  packet_id: string | null;
 }
 
 interface SymbolEntry {
@@ -71,43 +76,11 @@ interface SymbolEntry {
   is_active: boolean;
 }
 
-interface TriggerEntry {
-  id: number;
-  ts: string;
-  symbol_code: string;
-  direction: string;
-  decision: string;
-  fib_level: number | null;
-  entry_price: number | null;
-  stop_loss: number | null;
-  tp1: number | null;
-  tp2: number | null;
-  trigger_quality_ratio: number | null;
-  no_trade_reason: string | null;
-}
-
-interface MeasuredMoveEntry {
-  id: number;
-  ts: string;
-  symbol_code: string;
-  direction: string;
-  anchor_price: number | null;
-  target_price: number | null;
-  retracement_price: number | null;
-  fib_level: number | null;
-  status: string;
-  target_result: TargetResult;
-  outcome_result: OutcomeResult;
-}
-
 interface AdminData {
   coverage: TableCoverage[];
   jobLogs: JobLogEntry[];
-  activeSetups: SetupEntry[];
-  recentSetups: SetupEntry[];
+  candidates: CandidateRow[];
   symbols: SymbolEntry[];
-  triggers: TriggerEntry[];
-  measuredMoves: MeasuredMoveEntry[];
   generatedAt: string;
 }
 
@@ -127,17 +100,6 @@ function coverageStatusColor(staleness: string): string {
   return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
 }
 
-function statusColor(status: string): string {
-  switch (status) {
-    case "ACTIVE": return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
-    case "TP1_HIT": return "bg-blue-500/20 text-blue-400 border-blue-500/30";
-    case "TP2_HIT": return "bg-purple-500/20 text-purple-400 border-purple-500/30";
-    case "STOPPED": return "bg-red-500/20 text-red-400 border-red-500/30";
-    case "EXPIRED": return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
-    default: return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
-  }
-}
-
 function jobStatusColor(status: string): string {
   if (status === "OK" || status === "SUCCESS") return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
   if (status === "ERROR" || status === "FAILED") return "bg-red-500/20 text-red-400 border-red-500/30";
@@ -150,17 +112,24 @@ function directionColor(dir: string): string {
   return "text-red-400";
 }
 
-function targetBadgeColor(state: TargetResult): string {
+function targetBadgeColor(state: TargetHitState): string {
   if (state === "HIT") return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
   if (state === "MISS") return "bg-red-500/20 text-red-400 border-red-500/30";
   return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
 }
 
-function outcomeBadgeColor(state: OutcomeResult): string {
+function outcomeBadgeColor(state: OutcomeState): string {
   if (state === "TP2_HIT") return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
   if (state === "TP1_ONLY") return "bg-blue-500/20 text-blue-300 border-blue-500/30";
   if (state === "STOPPED") return "bg-red-500/20 text-red-400 border-red-500/30";
   if (state === "REVERSAL") return "bg-amber-500/20 text-amber-300 border-amber-500/30";
+  return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
+}
+
+function decisionBadgeColor(code: string | null): string {
+  if (code === "TAKE_TRADE") return "bg-emerald-500/20 text-emerald-400 border-emerald-500/30";
+  if (code === "WAIT") return "bg-yellow-500/20 text-yellow-400 border-yellow-500/30";
+  if (code === "PASS") return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
   return "bg-zinc-500/20 text-zinc-400 border-zinc-500/30";
 }
 
@@ -175,6 +144,14 @@ function formatTs(ts: string | null): string {
     hour12: true,
     timeZone: "America/Chicago",
   });
+}
+
+function formatPrice(v: number | null): string {
+  return v != null ? v.toFixed(2) : "—";
+}
+
+function formatPct(v: number | null): string {
+  return v != null ? `${(v * 100).toFixed(1)}%` : "—";
 }
 
 // --- Main Admin Page ---
@@ -220,7 +197,6 @@ export default function AdminPage() {
     );
   }
 
-  // Summary stats
   const totalRows = data.coverage.reduce((s, c) => s + c.rowCount, 0);
   const activeTables = data.coverage.filter((c) => c.rowCount > 0).length;
   const totalTables = data.coverage.length;
@@ -259,7 +235,7 @@ export default function AdminPage() {
         <SummaryCard label="Total Rows" value={totalRows.toLocaleString()} />
         <SummaryCard label="Tables" value={`${activeTables}/${totalTables} active`} />
         <SummaryCard label="Symbols" value={`${activeSymbols} active`} />
-        <SummaryCard label="Active Setups" value={data.activeSetups.length.toString()} />
+        <SummaryCard label="Candidates" value={data.candidates.length.toString()} />
         <SummaryCard label="Jobs (1h)" value={recentJobs.toString()} />
         <SummaryCard label="Errors" value={errorJobs.toString()} alert={errorJobs > 0} />
       </div>
@@ -270,14 +246,11 @@ export default function AdminPage() {
           <TabsTrigger value="coverage" className="text-xs data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40">
             Data Coverage
           </TabsTrigger>
-          <TabsTrigger value="setups" className="text-xs data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40">
-            Setups
+          <TabsTrigger value="candidates" className="text-xs data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40">
+            Candidates
           </TabsTrigger>
           <TabsTrigger value="jobs" className="text-xs data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40">
             Job Log
-          </TabsTrigger>
-          <TabsTrigger value="triggers" className="text-xs data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40">
-            Triggers
           </TabsTrigger>
           <TabsTrigger value="symbols" className="text-xs data-[state=active]:bg-white/10 data-[state=active]:text-white text-white/40">
             Symbols
@@ -301,17 +274,10 @@ export default function AdminPage() {
                     className="flex items-center justify-between px-3 py-2 rounded-md bg-white/[0.02] border border-white/[0.04]"
                   >
                     <div className="flex flex-col">
-                      <span className="text-white/70 text-xs font-mono">
-                        {c.table}
-                      </span>
-                      <span className="text-white/30 text-[10px]">
-                        {c.rowCount.toLocaleString()} rows
-                      </span>
+                      <span className="text-white/70 text-xs font-mono">{c.table}</span>
+                      <span className="text-white/30 text-[10px]">{c.rowCount.toLocaleString()} rows</span>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={`text-[10px] ${coverageStatusColor(c.staleness)}`}
-                    >
+                    <Badge variant="outline" className={`text-[10px] ${coverageStatusColor(c.staleness)}`}>
                       {c.staleness}
                     </Badge>
                   </div>
@@ -321,229 +287,23 @@ export default function AdminPage() {
           </Card>
         </TabsContent>
 
-        {/* --- Setups Tab --- */}
-        <TabsContent value="setups" className="mt-4 space-y-4">
-          {/* Active */}
+        {/* --- Candidates Tab --- */}
+        <TabsContent value="candidates" className="mt-4">
           <Card className="bg-white/[0.02] border-white/[0.06]">
             <CardHeader className="pb-3">
               <CardTitle className="text-white text-sm">
-                Active Setups ({data.activeSetups.length})
+                Fib Candidates ({data.candidates.length})
               </CardTitle>
               <CardDescription className="text-white/30 text-xs">
-                ACTIVE
+                From warbird_admin_candidate_rows_v — canonical fib engine output
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {data.activeSetups.length === 0 ? (
-                <span className="text-white/20 text-xs">No active setups</span>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="border-white/5">
-                        <TableHead className="text-white/30 text-[10px]">Time</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Status</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Dir</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Entry</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">SL</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">TP1 Px</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">PT1</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">TP2 Px</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">PT2</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Outcome</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Last Event</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Conviction</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data.activeSetups.map((s) => {
-                        return (
-                          <TableRow key={s.id} className="border-white/5">
-                            <TableCell className="text-white/50 text-xs font-mono">{formatTs(s.ts)}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={`text-[10px] ${statusColor(s.status)}`}>
-                                {s.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className={`text-xs font-medium ${directionColor(s.direction)}`}>
-                              {s.direction}
-                            </TableCell>
-                            <TableCell className="text-white/60 text-xs tabular-nums">
-                              {s.entry_price?.toFixed(2) ?? "—"}
-                            </TableCell>
-                            <TableCell className="text-red-400/60 text-xs tabular-nums">
-                              {s.stop_loss?.toFixed(2) ?? "—"}
-                            </TableCell>
-                            <TableCell className="text-emerald-400/60 text-xs tabular-nums">
-                              {s.tp1?.toFixed(2) ?? "—"}
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] ${targetBadgeColor(s.pt1_result)}`}
-                              >
-                                {s.pt1_result}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-emerald-400/60 text-xs tabular-nums">
-                              {s.tp2?.toFixed(2) ?? "—"}
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] ${targetBadgeColor(s.pt2_result)}`}
-                              >
-                                {s.pt2_result}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] ${outcomeBadgeColor(s.outcome_result)}`}
-                              >
-                                {s.outcome_result}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex flex-col gap-1">
-                                <Badge
-                                  variant="outline"
-                                  className="text-[10px] bg-zinc-500/20 text-zinc-300 border-zinc-500/30 w-fit"
-                                >
-                                  {s.last_event_type ?? "—"}
-                                </Badge>
-                                <span className="text-white/30 text-[10px] font-mono">
-                                  {formatTs(s.last_event_ts)}
-                                </span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-white/40 text-xs tabular-nums">
-                              {s.conviction_level ?? "—"}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
+              {data.candidates.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-2">
+                  <span className="text-white/20 text-sm">No candidates yet</span>
+                  <span className="text-white/10 text-xs">Canonical writer not active — candidates appear when the fib engine writer is deployed</span>
                 </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Recent */}
-          <Card className="bg-white/[0.02] border-white/[0.06]">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-white text-sm">
-                Recent Setups — 7 Days ({data.recentSetups.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {data.recentSetups.length === 0 ? (
-                <span className="text-white/20 text-xs">No recent setups</span>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="border-white/5">
-                        <TableHead className="text-white/30 text-[10px]">Time</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Status</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Dir</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Entry</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">SL</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">TP1 Px</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">PT1</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">TP2 Px</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">PT2</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Outcome</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Last Event</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Fib</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data.recentSetups.map((s) => {
-                        return (
-                          <TableRow key={s.id} className="border-white/5">
-                            <TableCell className="text-white/50 text-xs font-mono">{formatTs(s.ts)}</TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={`text-[10px] ${statusColor(s.status)}`}>
-                                {s.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className={`text-xs font-medium ${directionColor(s.direction)}`}>
-                              {s.direction}
-                            </TableCell>
-                            <TableCell className="text-white/60 text-xs tabular-nums">
-                              {s.entry_price?.toFixed(2) ?? "—"}
-                            </TableCell>
-                            <TableCell className="text-red-400/60 text-xs tabular-nums">
-                              {s.stop_loss?.toFixed(2) ?? "—"}
-                            </TableCell>
-                            <TableCell className="text-emerald-400/60 text-xs tabular-nums">
-                              {s.tp1?.toFixed(2) ?? "—"}
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] ${targetBadgeColor(s.pt1_result)}`}
-                              >
-                                {s.pt1_result}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-emerald-400/60 text-xs tabular-nums">
-                              {s.tp2?.toFixed(2) ?? "—"}
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] ${targetBadgeColor(s.pt2_result)}`}
-                              >
-                                {s.pt2_result}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] ${outcomeBadgeColor(s.outcome_result)}`}
-                              >
-                                {s.outcome_result}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex flex-col gap-1">
-                                <Badge
-                                  variant="outline"
-                                  className="text-[10px] bg-zinc-500/20 text-zinc-300 border-zinc-500/30 w-fit"
-                                >
-                                  {s.last_event_type ?? "—"}
-                                </Badge>
-                                <span className="text-white/30 text-[10px] font-mono">
-                                  {formatTs(s.last_event_ts)}
-                                </span>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-white/30 text-xs">
-                              {s.fib_ratio != null ? s.fib_ratio.toFixed(3) : "—"}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Measured Moves */}
-          <Card className="bg-white/[0.02] border-white/[0.06]">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-white text-sm">
-                Measured Moves ({data.measuredMoves.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {data.measuredMoves.length === 0 ? (
-                <span className="text-white/20 text-xs">No measured moves</span>
               ) : (
                 <div className="overflow-x-auto">
                   <Table>
@@ -552,65 +312,58 @@ export default function AdminPage() {
                         <TableHead className="text-white/30 text-[10px]">Time</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Dir</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Anchor</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Target</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Retrace</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Entry</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">SL</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">TP1</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">TP2</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Fib</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Archetype</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Score</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Decision</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">TP1 Prob</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">TP2 Prob</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Rev Risk</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Target Hit</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Outcome</TableHead>
+                        <TableHead className="text-white/30 text-[10px]">Packet</TableHead>
                         <TableHead className="text-white/30 text-[10px]">Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {data.measuredMoves.map((m) => {
-                        return (
-                          <TableRow key={m.id} className="border-white/5">
-                            <TableCell className="text-white/50 text-xs font-mono">{formatTs(m.ts)}</TableCell>
-                            <TableCell className={`text-xs font-medium ${directionColor(m.direction)}`}>
-                              {m.direction}
-                            </TableCell>
-                            <TableCell className="text-white/60 text-xs tabular-nums">
-                              {m.anchor_price?.toFixed(2) ?? "—"}
-                            </TableCell>
-                            <TableCell className="text-emerald-400/60 text-xs tabular-nums">
-                              {m.target_price?.toFixed(2) ?? "—"}
-                            </TableCell>
-                            <TableCell className="text-white/40 text-xs tabular-nums">
-                              {m.retracement_price?.toFixed(2) ?? "—"}
-                            </TableCell>
-                            <TableCell className="text-white/40 text-xs tabular-nums">
-                              {m.fib_level?.toFixed(3) ?? "—"}
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] ${targetBadgeColor(m.target_result)}`}
-                              >
-                                {m.target_result}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] ${outcomeBadgeColor(m.outcome_result)}`}
-                              >
-                                {m.outcome_result}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] ${
-                                  m.status === "ACTIVE"
-                                    ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
-                                    : "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
-                                }`}
-                              >
-                                {m.status}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
+                      {data.candidates.map((c) => (
+                        <TableRow key={c.candidate_id} className="border-white/5">
+                          <TableCell className="text-white/50 text-xs font-mono">{formatTs(c.bar_close_ts)}</TableCell>
+                          <TableCell className={`text-xs font-medium ${directionColor(c.direction)}`}>{c.direction}</TableCell>
+                          <TableCell className="text-white/60 text-xs tabular-nums">{formatPrice(c.anchor_price)}</TableCell>
+                          <TableCell className="text-white/60 text-xs tabular-nums">{formatPrice(c.entry_price)}</TableCell>
+                          <TableCell className="text-red-400/60 text-xs tabular-nums">{formatPrice(c.stop_loss)}</TableCell>
+                          <TableCell className="text-emerald-400/60 text-xs tabular-nums">{formatPrice(c.tp1_price)}</TableCell>
+                          <TableCell className="text-emerald-400/60 text-xs tabular-nums">{formatPrice(c.tp2_price)}</TableCell>
+                          <TableCell className="text-white/40 text-xs">{c.fib_level_touched ?? "—"}</TableCell>
+                          <TableCell className="text-white/40 text-xs">{c.setup_archetype ?? "—"}</TableCell>
+                          <TableCell className="text-white/50 text-xs tabular-nums">{c.confidence_score != null ? c.confidence_score.toFixed(0) : "—"}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={`text-[10px] ${decisionBadgeColor(c.decision_code)}`}>
+                              {c.decision_code ?? "—"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-white/50 text-xs tabular-nums">{formatPct(c.tp1_probability)}</TableCell>
+                          <TableCell className="text-white/50 text-xs tabular-nums">{formatPct(c.tp2_probability)}</TableCell>
+                          <TableCell className="text-white/50 text-xs tabular-nums">{formatPct(c.reversal_risk)}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={`text-[10px] ${targetBadgeColor(c.target_hit_state)}`}>
+                              {c.target_hit_state}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={`text-[10px] ${outcomeBadgeColor(c.outcome_state)}`}>
+                              {c.outcome_state}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-white/40 text-xs font-mono">{c.packet_id ? c.packet_id.slice(0, 8) : "—"}</TableCell>
+                          <TableCell className="text-white/40 text-xs">{c.status}</TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
                 </div>
@@ -623,12 +376,8 @@ export default function AdminPage() {
         <TabsContent value="jobs" className="mt-4">
           <Card className="bg-white/[0.02] border-white/[0.06]">
             <CardHeader className="pb-3">
-              <CardTitle className="text-white text-sm">
-                Job Log — Last 50 Runs
-              </CardTitle>
-              <CardDescription className="text-white/30 text-xs">
-                All cron job executions
-              </CardDescription>
+              <CardTitle className="text-white text-sm">Job Log — Last 50 Runs</CardTitle>
+              <CardDescription className="text-white/30 text-xs">All cron job executions</CardDescription>
             </CardHeader>
             <CardContent>
               {data.jobLogs.length === 0 ? (
@@ -649,108 +398,14 @@ export default function AdminPage() {
                     <TableBody>
                       {data.jobLogs.map((j) => (
                         <TableRow key={j.id} className="border-white/5">
-                          <TableCell className="text-white/50 text-xs font-mono">
-                            {formatTs(j.created_at)}
-                          </TableCell>
-                          <TableCell className="text-white/70 text-xs font-mono">
-                            {j.job_name}
-                          </TableCell>
+                          <TableCell className="text-white/50 text-xs font-mono">{formatTs(j.created_at)}</TableCell>
+                          <TableCell className="text-white/70 text-xs font-mono">{j.job_name}</TableCell>
                           <TableCell>
-                            <Badge variant="outline" className={`text-[10px] ${jobStatusColor(j.status)}`}>
-                              {j.status}
-                            </Badge>
+                            <Badge variant="outline" className={`text-[10px] ${jobStatusColor(j.status)}`}>{j.status}</Badge>
                           </TableCell>
-                          <TableCell className="text-white/50 text-xs tabular-nums">
-                            {j.rows_affected ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-white/40 text-xs tabular-nums">
-                            {j.duration_ms != null ? `${j.duration_ms}ms` : "—"}
-                          </TableCell>
-                          <TableCell className="text-red-400/60 text-xs max-w-[200px] truncate">
-                            {j.error_message ?? "—"}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* --- Triggers Tab --- */}
-        <TabsContent value="triggers" className="mt-4">
-          <Card className="bg-white/[0.02] border-white/[0.06]">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-white text-sm">
-                Triggers ({data.triggers.length})
-              </CardTitle>
-              <CardDescription className="text-white/30 text-xs">
-                Latest MES 15m trigger evaluations
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {data.triggers.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-8 gap-2">
-                  <span className="text-white/20 text-sm">No triggers yet</span>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="border-white/5">
-                        <TableHead className="text-white/30 text-[10px]">Time</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Symbol</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Dir</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Decision</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Fib</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Entry</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">SL</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">TP1</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">TP2</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">Score</TableHead>
-                        <TableHead className="text-white/30 text-[10px]">No-Go Reason</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data.triggers.map((trigger) => (
-                        <TableRow key={trigger.id} className="border-white/5">
-                          <TableCell className="text-white/50 text-xs font-mono">
-                            {formatTs(trigger.ts)}
-                          </TableCell>
-                          <TableCell className="text-white/70 text-xs font-mono">
-                            {trigger.symbol_code}
-                          </TableCell>
-                          <TableCell className={`text-xs font-medium ${directionColor(trigger.direction)}`}>
-                            {trigger.direction}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline" className="text-[10px] bg-zinc-500/20 text-zinc-300 border-zinc-500/30">
-                              {trigger.decision}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-white/40 text-xs tabular-nums">
-                            {trigger.fib_level?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-white/60 text-xs tabular-nums">
-                            {trigger.entry_price?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-red-400/60 text-xs tabular-nums">
-                            {trigger.stop_loss?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-emerald-400/60 text-xs tabular-nums">
-                            {trigger.tp1?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-emerald-400/60 text-xs tabular-nums">
-                            {trigger.tp2?.toFixed(2) ?? "—"}
-                          </TableCell>
-                          <TableCell className="text-white/50 text-xs tabular-nums">
-                            {trigger.trigger_quality_ratio != null ? trigger.trigger_quality_ratio.toFixed(3) : "—"}
-                          </TableCell>
-                          <TableCell className="text-white/30 text-xs max-w-[220px] truncate">
-                            {trigger.no_trade_reason ?? "—"}
-                          </TableCell>
+                          <TableCell className="text-white/50 text-xs tabular-nums">{j.rows_affected ?? "—"}</TableCell>
+                          <TableCell className="text-white/40 text-xs tabular-nums">{j.duration_ms != null ? `${j.duration_ms}ms` : "—"}</TableCell>
+                          <TableCell className="text-red-400/60 text-xs max-w-[200px] truncate">{j.error_message ?? "—"}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -765,45 +420,22 @@ export default function AdminPage() {
         <TabsContent value="symbols" className="mt-4">
           <Card className="bg-white/[0.02] border-white/[0.06]">
             <CardHeader className="pb-3">
-              <CardTitle className="text-white text-sm">
-                Symbol Registry ({data.symbols.length} total, {activeSymbols} active)
-              </CardTitle>
-              <CardDescription className="text-white/30 text-xs">
-                Databento + FRED + Manual sources
-              </CardDescription>
+              <CardTitle className="text-white text-sm">Symbols ({data.symbols.length})</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                 {data.symbols.map((s) => (
                   <div
                     key={s.code}
-                    className={`flex items-center justify-between px-3 py-2 rounded-md border ${
-                      s.is_active
-                        ? "bg-white/[0.02] border-white/[0.06]"
-                        : "bg-white/[0.01] border-white/[0.03] opacity-40"
-                    }`}
+                    className="flex items-center justify-between px-3 py-2 rounded-md bg-white/[0.02] border border-white/[0.04]"
                   >
                     <div className="flex flex-col">
-                      <span className="text-white/70 text-xs font-mono font-medium">
-                        {s.code}
-                      </span>
-                      <span className="text-white/30 text-[10px]">
-                        {s.display_name}
-                      </span>
+                      <span className="text-white/70 text-xs font-mono">{s.code}</span>
+                      <span className="text-white/30 text-[10px]">{s.display_name} — {s.data_source}</span>
                     </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <Badge
-                        variant="outline"
-                        className={`text-[10px] ${
-                          s.is_active
-                            ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
-                            : "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"
-                        }`}
-                      >
-                        {s.is_active ? "active" : "inactive"}
-                      </Badge>
-                      <span className="text-white/20 text-[10px]">{s.data_source}</span>
-                    </div>
+                    <Badge variant="outline" className={`text-[10px] ${s.is_active ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" : "bg-zinc-500/20 text-zinc-400 border-zinc-500/30"}`}>
+                      {s.is_active ? "ACTIVE" : "OFF"}
+                    </Badge>
                   </div>
                 ))}
               </div>
@@ -815,30 +447,12 @@ export default function AdminPage() {
   );
 }
 
-// --- Summary Card Component ---
-
-function SummaryCard({
-  label,
-  value,
-  alert,
-}: {
-  label: string;
-  value: string;
-  alert?: boolean;
-}) {
+function SummaryCard({ label, value, alert }: { label: string; value: string; alert?: boolean }) {
   return (
     <Card className="bg-white/[0.02] border-white/[0.06]">
       <CardContent className="pt-4 pb-3 px-4">
-        <div className="text-white/30 text-[10px] uppercase tracking-wider mb-1">
-          {label}
-        </div>
-        <div
-          className={`text-lg font-semibold tabular-nums ${
-            alert ? "text-red-400" : "text-white/80"
-          }`}
-        >
-          {value}
-        </div>
+        <div className={`text-lg font-semibold tracking-tight ${alert ? "text-red-400" : "text-white"}`}>{value}</div>
+        <div className="text-white/30 text-[10px] mt-0.5">{label}</div>
       </CardContent>
     </Card>
   );

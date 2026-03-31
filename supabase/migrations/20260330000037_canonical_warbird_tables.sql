@@ -1,10 +1,9 @@
 -- Migration 037: Canonical Warbird normalized schema
--- Draft rewrite aligned to the 2026-03-28 hierarchy lock.
+-- Aligned to the 2026-03-28 hierarchy lock.
 -- Applies the canonical cloud tables and packet lineage tables
 -- for the MES 15m fib candidate contract.
 --
--- This file remains draft-only until the schema rewrite checkpoint is approved.
--- Apply via psql only. Do NOT use supabase db push while remote ledger drift exists.
+-- Applied to production 2026-03-31. All tables empty — no writers active yet.
 --
 -- Existing types reused from earlier migrations:
 --   timeframe          (migration 001)

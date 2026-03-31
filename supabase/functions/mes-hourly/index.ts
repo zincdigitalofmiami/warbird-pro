@@ -1,5 +1,6 @@
 // Edge Function: mes-hourly
-// Triggered at :05 past every hour (Sun-Fri) by Supabase pg_cron (warbird_mes_hourly_pull).
+// Triggered by Supabase pg_cron (warbird_mes_hourly_pull).
+// Market-hours skip logic is handled internally via isMarketOpen().
 // Pulls ohlcv-1h and ohlcv-1d directly from Databento (MES.c.0 continuous).
 // Aggregates 1h → 4h locally (Databento has no ohlcv-4h schema).
 // Auth: x-cron-secret header validated against EDGE_CRON_SECRET env var.

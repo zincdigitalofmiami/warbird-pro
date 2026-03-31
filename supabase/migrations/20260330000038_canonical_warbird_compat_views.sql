@@ -1,10 +1,9 @@
 -- Migration 038: Canonical Warbird compatibility views
--- Draft rewrite aligned to the 2026-03-28 hierarchy lock.
+-- Aligned to the 2026-03-28 hierarchy lock.
 -- These are forward-facing read helpers over the canonical tables and do not
 -- recreate legacy GO/NO_GO or measured-move semantics.
 --
--- This file remains draft-only until the schema rewrite checkpoint is approved.
--- Apply via psql only. Do NOT use supabase db push.
+-- Applied to production 2026-03-31.
 
 begin;
 
