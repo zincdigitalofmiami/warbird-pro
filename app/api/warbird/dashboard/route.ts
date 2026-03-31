@@ -20,9 +20,9 @@ export async function GET(request: Request) {
     const days = Math.max(1, Math.min(30, Number(url.searchParams.get("days") ?? 7)));
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 100)));
 
-    // Parallel fetch: state + history + signal events + cross-asset correlations
-    // HG, NQ, 6E, CL — all Databento hourly from cross_asset_1h
-    const correlationSymbols = ["HG", "NQ", "6E", "CL"];
+    // Intermarket panel: NQ, RTY, CL, HG, 6E, 6J — all Databento hourly from cross_asset_1h
+    // 6J is inverted (JPY weakness = MES bullish)
+    const correlationSymbols = ["NQ", "RTY", "CL", "HG", "6E", "6J"];
 
     const [state, history, signalEventsResult, ...crossAssetResults] = await Promise.all([
       fetchLatestWarbirdState(supabase, symbolCode),
