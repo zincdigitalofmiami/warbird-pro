@@ -7,7 +7,7 @@
 -- ============================================================
 
 insert into symbols (code, display_name, short_name, description, tick_size, data_source, dataset, databento_symbol, fred_symbol, is_active) values
-  -- Active DATABENTO futures (16)
+  -- Active DATABENTO futures (17)
   ('MES', 'MES', 'Micro S&P', 'Micro E-mini S&P 500 Futures', 0.25, 'DATABENTO', 'GLBX.MDP3', 'MES.v.0', null, true),
   ('ES', 'ES', 'E-mini S&P', 'E-mini S&P 500 Futures', 0.25, 'DATABENTO', 'GLBX.MDP3', 'ES.c.0', null, true),
   ('NQ', 'NQ', 'E-mini Nasdaq', 'E-mini Nasdaq-100 Futures', 0.25, 'DATABENTO', 'GLBX.MDP3', 'NQ.c.0', null, true),
@@ -24,6 +24,7 @@ insert into symbols (code, display_name, short_name, description, tick_size, dat
   ('SR3', 'SR3', 'SOFR 3M', '3-Month SOFR Futures', 0.0025, 'DATABENTO', 'GLBX.MDP3', 'SR3.c.0', null, true),
   ('6E', '6E', 'EUR/USD', 'Euro FX Futures (EUR/USD)', 0.00005, 'DATABENTO', 'GLBX.MDP3', '6E.c.0', null, true),
   ('6J', '6J', 'JPY/USD', 'Japanese Yen Futures (JPY/USD)', 0, 'DATABENTO', 'GLBX.MDP3', '6J.c.0', null, true),
+  ('HG', 'HG', 'Copper', 'Copper Futures (COMEX)', 0.0005, 'DATABENTO', 'GLBX.MDP3', 'HG.c.0', null, true),
 
   -- Active DATABENTO options (15)
   ('ES.OPT', 'ES Options', 'ES Opts', 'E-mini S&P 500 Options (CME parent)', 0, 'DATABENTO', 'GLBX.MDP3', 'ES.OPT', null, true),
@@ -112,7 +113,7 @@ on conflict do nothing;
 
 insert into symbol_role_members (role_id, symbol_code)
 select r.id, s.code from symbol_roles r, (values
-  ('COMMODITY', 'CL'), ('COMMODITY', 'GC'), ('COMMODITY', 'SI'), ('COMMODITY', 'NG')
+  ('COMMODITY', 'CL'), ('COMMODITY', 'GC'), ('COMMODITY', 'SI'), ('COMMODITY', 'NG'), ('COMMODITY', 'HG')
 ) as s(role, code) where r.name = s.role
 on conflict do nothing;
 

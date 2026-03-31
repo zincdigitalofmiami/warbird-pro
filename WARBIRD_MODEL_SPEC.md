@@ -302,23 +302,30 @@ Tier 2 can influence the research conclusion, but it cannot enter the live Pine 
 
 ### 6a. Intraday Regime Gate (15m bar close, grouped scoring)
 
-The regime gate produces a continuous score (0-100) from grouped intraday flow indicators. All update at 15m bar close. Sign convention: positive = bullish/risk-on, negative = bearish/risk-off.
+The regime gate produces a continuous score (0-100) from grouped intraday indicators. All update at 15m bar close. AG decides final weights and correlations from training data.
 
-| Group | Weight | Symbols | Detection |
+**AG Training Basket — CME Globex (Databento GLBX.MDP3):**
+
+| Group | Symbols | Detection | Databento |
 |---|---|---|---|
-| Flow | 30% | TICK (`USI:TICK`), VOLD (`USI:VOLD`) | Zero threshold (> 0 bull, < 0 bear). Equal weight within group. |
-| Volatility | 45% | VVIX (`CBOE:VVIX`), VIX/VIX3M term structure | Level thresholds. INVERTED at group boundary (low VVIX = positive). VVIX 55% / VTS 45%. |
-| Participation | 15% | RTY (`CME_MINI:RTY1!`), HYG (`AMEX:HYG`) | EMA trend. RTY 75% / HYG 25%. |
-| Execution | 10% | ES VWAP state/event, range expansion, efficiency | Chart-native, zero security calls. |
+| Leadership | NQ (`CME_MINI:NQ1!`) | EMA trend, relative strength vs MES | NQ.c.0 |
+| Risk Appetite | RTY (`CME_MINI:RTY1!`), CL (`NYMEX:CL1!`), HG (`COMEX:HG1!`) | EMA trend, correlation divergence | RTY.c.0, CL.c.0, HG.c.0 |
+| Macro-FX | 6E (`CME:6E1!`), 6J (`CME:6J1!`) | EMA trend, risk-on/risk-off flow | 6E.c.0, 6J.c.0 |
+| Execution | ES VWAP state/event, range expansion, efficiency | Chart-native, zero security calls | N/A |
 
-State machine: NEUTRAL(0) → BULL(1) / BEAR(-1). Score > 65 for N bars → BULL. Score < 35 for N bars → BEAR. Exit to NEUTRAL at 50. Override (direct bull↔bear) only when flow AND vol both extreme same direction.
+**ES chart-native vol fills VIX/VVIX gap:** ATR ratio, range expansion, intrabar efficiency, VWAP state/event — all computed from MES OHLCV directly.
+
+State machine: NEUTRAL(0) → BULL(1) / BEAR(-1). Score > 65 for N bars → BULL. Score < 35 for N bars → BEAR. Exit to NEUTRAL at 50. Override (direct bull↔bear) only when multiple groups extreme same direction.
+
+**Why CME-only:** AG training needs 15m historical data from Databento. NYSE internals (TICK, VOLD), CBOE indices (VIX, VVIX, VIX3M), and ETFs (HYG) are only available on separate exchanges not covered by the CME Standard plan.
 
 ### 6b. Daily Context Exports (NOT gate members)
 
 These are daily-only — same value for all 27 bars in a session. Exported as AG training features, NOT used in the 15m regime gate.
 
-| Symbol | TradingView ID | Role |
+| Symbol | Source | Role |
 |---|---|---|
+| VIX | FRED (daily) | Vol regime context — AG learns low-vol vs high-vol behavior |
 | SKEW | `CBOE:SKEW` | Tail-risk hedging — institutions hedge before selling |
 | NYSE A/D | `USI:ADD` | Advance-Decline breadth — divergence = exhaustion warning |
 

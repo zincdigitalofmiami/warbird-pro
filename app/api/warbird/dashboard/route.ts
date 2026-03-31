@@ -21,7 +21,8 @@ export async function GET(request: Request) {
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 100)));
 
     // Parallel fetch: state + history + signal events + cross-asset correlations
-    const correlationSymbols = ["NQ", "DX", "US10Y", "SOX"];
+    // HG, NQ, 6E, CL — all Databento hourly from cross_asset_1h
+    const correlationSymbols = ["HG", "NQ", "6E", "CL"];
 
     const [state, history, signalEventsResult, ...crossAssetResults] = await Promise.all([
       fetchLatestWarbirdState(supabase, symbolCode),
@@ -33,7 +34,7 @@ export async function GET(request: Request) {
         .limit(50),
       ...correlationSymbols.map((sym) =>
         supabase
-          .from("cross_asset_1d")
+          .from("cross_asset_1h")
           .select("ts, close")
           .eq("symbol_code", sym)
           .order("ts", { ascending: false })

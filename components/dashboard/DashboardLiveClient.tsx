@@ -93,7 +93,7 @@ export default function DashboardLiveClient() {
       <CorrelationsRow correlations={data?.correlations ?? null} />
 
       {/* Middle: Chart (full width) */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex min-h-0" style={{ height: "80vh" }}>
         <div className="flex-1 min-w-0 min-h-0">
           <LiveMesChart signal={data?.signal ?? null} setups={setups} />
         </div>

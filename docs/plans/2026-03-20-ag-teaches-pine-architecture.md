@@ -29,55 +29,14 @@ Binding note: the 2026-03-28 update-log entries supersede older references below
 
 ## Update Log
 
-- 2026-03-30: **Kirk chart reading teaching session — foundational methodology locked.** Key directives absorbed into memory and plan: (1) **Structure before indicators** — horizontal S/R from prior high-volume swing highs/lows is the primary chart read; fibs/EMAs/indicators confirm, they don't lead. (2) **Fibonacci universality** — pivots, S/R, trendlines, and fib retracements are all expressions of the same Fibonacci mathematics; demonstrated to-the-tick precision across 4H→1H→15m (fib 6388.98 vs M(S4) 6388.25 = 0.73pts, fib 6482.00 vs structural level 6482.75 = 0.75pts). (3) **Volume as the force at Fibonacci levels** — exhaustion score + RVOL determine whether a level holds (rejection) or breaks (market structure change); same level produces opposite outcomes depending on volume. (4) **Post-sweep entry methodology** — enter AFTER the liquidity sweep, not at the level; 10-tick SL is possible because liquidity is already harvested; this is how Kirk would trade with minimal risk. (5) **S/R flip as AG feature** — when support breaks it becomes resistance via trapped traders seeking breakeven exits; volume at original pivot determines flip strength. (6) **Training data floor extended to 2018-01-01** per LuxAlgo suggestion — 8 years of Fibonacci structure for AG training depth (cloud core stays 2024-01-01). (7) **Fractal timeframe alignment confirmed** — monthly fib levels appear on 15m and even 1m charts to the tick; the same structure exists at every scale. AG feature implications: fib proximity + MTF S/R proximity + pivot proximity converging near zero = highest probability zones; SHAP will discover these cluster together because they measure the same underlying Fibonacci structure. V7 features `ml_exhaustion_score`, `ml_rvol_at_entry`, `ml_liq_sweep_bull/bear` are the key discriminators.
-- 2026-03-30: v7 indicator verified and pushed (commit `ffb26f8`). AG label surface fixed (`lastExitOutcome`, `tradeDir`), 9 collinear plots removed, cooldown 4→8, PIT documentation added. Plot budget: 52 plots + 3 alertconditions = 55/64 (9 slots headroom). All 4 gates passed: pine-facade compile, pine-lint, check-contamination, npm build.
-- 2026-03-29: Locked Admin candidate table staple columns per user directive. The table that replaces legacy "Measured Moves" on `/admin` MUST include Dir, Target, TP1 Hit, TP2 Hit, SL Hit, Status as non-negotiable staple columns. The existing `target_hit_state` column in `warbird_admin_candidate_rows_v` (migration 038) is ambiguous — it must be split into three explicit computed columns: `tp1_hit`, `tp2_hit`, `sl_hit` (each emitting HIT/MISS/OPEN). Full locked column set: Time, Dir, Entry, Target, TP1 Hit, TP2 Hit, SL Hit, Status (non-negotiable), plus SL Price, TP2 Price, Fib Level, Outcome, Decision (recommended operator context). See locked spec section below view table definition.
-- 2026-03-29: Added TradingView → Dashboard webhook architecture section. The 3 kept Pine alertconditions (entry long, entry short, pivot break .50 reversal) are the live event bridge from Pine to the dashboard command center via TradingView webhook → Supabase Edge Function (`tv-alert-webhook`) → canonical tables → Supabase Realtime → dashboard. The 8 cut alerts are reconstituted as dashboard-side derived state from stored fib engine + intermarket data. Fixed CLAUDE.md: budget corrected to 63/64 (bgcolor removed), blocking order updated (Pine recovery DONE), fib recompute claim removed (cut in commit 77ec03e).
-- 2026-03-29: Plan deep cleanup — removed ~600 lines of accumulated noise. Collapsed Phase 2 checkpoint locks (5 checkpoints, 280 lines → 6-line summary). Collapsed Phase 3 retired section (220 lines → 3-line summary). Marked Required Harness Modules as SUPERSEDED by TA core pack (commit `c506c48`). Updated Phase 4 training order to remove harness admission steps. Updated Feature-Family De-Duplication Rule to reference TA core pack. Rewrote Section 20 Immediate Next Steps with current reality (struck completed items, removed harness references). Fixed packet format alert line (now 3 alerts: entry long, entry short, pivot break reversal). Audited Pine export contract lists against current Pine file and marked cut exports. Marked completed items in Forensic Review / What Must Change. Fixed March 23 Delta harness references. Fixed line 3040 contradiction (said "Supabase does not own any cron schedules" — corrected to "Vercel"). Updated Blocking Order #1 to DONE with TV-validated 63/64 budget.
-- 2026-03-29: Fib visual gap identified vs Auto Fib GOLDEN TARGET reference. Two improvements needed: (1) anchor span — fib lines should extend left to cover the full anchor high/low swing area, not just the pivot bar (purely visual for operator geometry). (2) Intermediate waypoint lines — the locked fib inventory already includes `1.382`, `1.500`, `1.786` as gray waypoints but WB v6 does not draw them yet. Price reacts to these levels and the model may benefit from waypoint-touch features. Both improvements apply to Pine and dashboard fib renderers. No output budget impact — these are `line.new()` / `label.new()` drawing objects, not `plot()` calls. Also removed `bgcolor()` regime tint and `showBg` input (never used) — budget now 63/64 with 1 slot headroom.
-- 2026-03-29: Pine output budget fix — TradingView-validated blocker. Manual TradingView paste-and-load confirmed the indicator loads but TradingView silently drops all outputs after position 64. `alertcondition()` counts toward the 64-output hard cap — `pine-lint.sh` had a bug claiming they do not (line 96 explicitly excluded them). Actual budget was 74/64 (62 plot + 1 bgcolor + 11 alertcondition), not the 63/64 the lint script reported. `ml_tp2_hit_event` and the entire 15-metric TA Core Pack (lines 816–830) were invisible to TradingView — never exported. Agreed cut plan: (1) Remove 8 `alertcondition()` calls, keeping only `WARBIRD ENTRY LONG`, `WARBIRD ENTRY SHORT`, and `PIVOT BREAK (against) + Regime Opposed` (the .50 reversal warning — fires when price breaks pivot against fib direction with intermarket regime confirmation, maps to `setupFailedMoveReversal` archetype, contributes 45 pts to `eventReversalScore`). (2) Remove 2 plot exports: `er_20` (AG computes from `mes_15m` OHLCV trivially) and `vix_pct_252d` (AG computes from FRED VIX data). (3) Remove dead helper bools `riskOnFlip`/`riskOffFlip` (only the cut RISK-ON/RISK-OFF alerts consumed them). (4) Fix `pine-lint.sh` to count `alertcondition()` toward the 64-output budget. Budget after cuts: 60 plot + 1 bgcolor + 3 alertcondition = 64/64 exact cap. All non-essential alerts move to the Next.js dashboard. All hidden `display=display.none` `plot()` calls must remain — that is the only Pine data-export mechanism for AG training. Next: TradingView re-validate to confirm all 15 TA Core Pack exports now appear in Style tab.
-- 2026-03-29: Outcome contract reset checkpoint. Canonical economic outcomes are now locked to `TP2_HIT` / `TP1_ONLY` / `STOPPED` / `REVERSAL` with `OPEN` as operational-only (excluded from training labels). Removed censored/timed-out wording from the active plan and model-spec alignment sections, and aligned draft canonical schema surfaces (`037`, `038`) plus TypeScript canonical payload types to the same contract. Legacy `score-trades` no longer writes `EXPIRED`; setups remain open until TP/SL resolution. Admin/dashboard outcome presentation now emits `TP2_HIT` / `TP1_ONLY` / `STOPPED` / `REVERSAL` / `OPEN` instead of `WIN` / `LOSS` / `EXPIRED`. Validation: `./scripts/guards/pine-lint.sh` (pass with known warning), `npm run lint` (pass), `npm run build` (pass). Next blocker: finalize the TA-only indicator simplification checkpoint (remove the three custom harness dependencies) and keep trade/admin surfaces intact during that feature swap.
-- 2026-03-28: Pine type-safety hardening — added explicit type annotations (`float`, `bool`, `int`, `string`, `color`) to every global-scope variable declaration in `indicators/v6-warbird-complete.pine`. Prior state had 80+ implicitly-typed globals — a known Pine v6 compile-failure vector. Every `input.*()`, fib constant, color/width constant, computed series, intermarket flag, structure condition, event bool, and drawing variable now carries an explicit type. Also fixed output budget (removed 2 duplicate exports: `adx_14`/`ml_adx_14` and `fib_direction`/`ml_direction_code` — now 63/64) and fixed 2 `log.info()` calls that exceeded Pine v6's 5-arg format limit. Updated `scripts/guards/pine-lint.sh` to count `bgcolor()`/`fill()`/`hline()` in the output budget and fixed method-call false positives and grep `|| echo 0` bugs. Pine-lint passes: 63/64 outputs, 6/40 `request.security()` calls, 0 errors. `npm run build` passes. Status: NOT yet TradingView-validated. Pine recovery is not complete until manual paste-and-load in TradingView confirms the indicator compiles and loads without error.
-- 2026-03-28: Locked the corrected mental model for the full system. This entry supersedes any prior confusion about what AG decides vs what price action/structure decides. Binding rules confirmed: (1) Fib anchor placement is determined by price action and swing structure — AG does NOT place anchors, it tunes fib engine settings (left/right bar space, anchor spacing, direction logic) through SHAP discovery. (2) Multi-timeframe direction alignment is structural — 15m fibs plus 1H/4H market structure must all agree in direction for a valid trigger; this is not a model-decided gate. (3) Entry trigger is the hardest and most important problem — AG optimizes the conditions but the difficulty is real; the crown jewel is entry, not confirmation. (4) Exhaustion signal is preserved — it found tops and bottoms through pivots, candlestick formations, and volume, tied to the REVERSAL outcome label; exhaustion is not noise. (5) Outcome labels are exactly: `TP2_HIT` / `TP1_ONLY` / `STOPPED` / `REVERSAL` / `OPEN` (OPEN is operational-only, not a training label). (6) Original locked AG configuration is confirmed from plan line 2817–2838 and `train-warbird.py`: `best_quality` preset, 5 bag folds, 2 stack levels, `log_loss` eval metric, `["KNN","FASTAI"]` excluded, 7200s time limit, walk-forward with 40-bar purge and 80-bar embargo, IC ranking → cluster dedup → 15–25 features per fold, features in ≥4/5 folds = robust (keep in Pine), <2/5 = fragile (remove). (7) Promotion thresholds are confirmed: mean OOS TP1 AUC-ROC ≥ 0.65, TP2 ≥ 0.60, TP1 calibration error ≤ 10%, worst fold TP1 AUC ≥ 0.55, stop rate on high-confidence ≤ 30%, high-confidence signals/week 3–25, AUC stability across folds ≤ 0.15. (8) SHAP pipeline is confirmed 5-step: TreeExplainer on best tree model → golden zone extraction via quantile binning → surrogate decision tree (max_depth=4) for rule extraction → rolling median across 4 weekly retrains for stability → encode as Pine inputs. (9) SHAP reporting to Admin dashboard must include: which model in the zoo made it, all settings for Pine, what was noise, what data was noise and what needs more data, feature importance rankings, golden zones per feature, indicator settings discovery (RSI 8 vs 14, EMA 21 vs 50, etc.). (10) AG trains on ALL MISSED trades — learning why setups were missed; `label_origin` field distinguishes `forward_scan` (synthetic) vs `setup_event` (real outcome); scored outcomes feed back into training labels. (11) Lateral crons keep running — they feed the AG training warehouse; nothing is paused for this mental model correction. (12) Volume and liquidity are the most important feature families — VWAP, all volume types, liquidity metrics; AG classifies which correlation pairs matter (may be different from current NQ/VIX/DXY/US10Y/HYG/LQD/BANK set). (13) Local AG warehouse gets up to 5 years of comparable electronic futures data for training depth; cloud core stays 2024-01-01 forward. No invented terminology, no premature infrastructure — Pine compiles first, fib engine is the focus, schema follows the core. Next blocker order updated below.
-- 2026-03-28: Removed the legacy `prob_hit_*` aliases from the active shared signal/API contract. Binding rule: `hit_*_first` and `prob_hit_*` names are now deletion-only debt inside the old local `scripts/warbird/*` workbench and must not be reintroduced as fallback fields in new API, dashboard/Admin, packet, or schema surfaces. *(Blocker order superseded: the corrected blocking order above moves Pine recovery to #1 and fib engine hardening to #2, ahead of the canonical writer cutover.)*
-- 2026-03-28: Completed the schema/admin contract reconciliation checkpoint. The draft schema package now matches the locked hierarchy, outcome semantics, and cloud-vs-local boundary, and was syntax-validated in a disposable Postgres 17 instance. Cloud publish-up is now structured around `warbird_training_runs`, `warbird_training_run_metrics`, `warbird_packets`, `warbird_packet_activations`, `warbird_packet_metrics`, `warbird_packet_feature_importance`, `warbird_packet_setting_hypotheses`, and `warbird_packet_recommendations`; raw SHAP remains local-only in `warbird_shap_results` and `warbird_shap_indicator_settings`. Admin requirements are now locked to two explicit surfaces: screenshot-style candidate/signal rows via `warbird_admin_candidate_rows_v` and full model/training metrics via `warbird_active_training_run_metrics_v`, alongside the packet KPI/explanation/recommendation views. *(Blocker order superseded: see corrected blocking order above — Pine recovery is #1.)*
-- 2026-03-28: Saved a restart-safe checkpoint handoff at `docs/decisions/2026-03-28-schema-admin-contract-handoff.md` capturing the repo audit, external research conclusions, locked architecture/schema decisions, validation results, excluded dirty files, and the exact next blocking sequence for a new chat.
-- 2026-03-28: Locked the hierarchy-first architecture checkpoint. Binding direction: the outcome contract now drives the platform, not the current model family; Warbird is split into `Generator` (Pine + admitted harnesses), `Selector` (offline model stack scoring frozen MES 15m fib candidates), and `Diagnostician` (research stack explaining wins, losses, and improvement paths). Canonical cloud tables exist to preserve point-in-time setup truth, realized path truth, and published decision/signal lineage only; explanatory features, SHAP outputs, ablation results, stop-out attribution, and entry-definition experiments belong in local research tables. `EXPIRED` / `NO_REACTION` are no longer treated as canonical economic model outcomes, and unresolved rows remain `OPEN` until they resolve to an economic outcome. The current 2026-03-30 schema drafts (`037`, `038`, and the local warehouse draft) are retained as design inputs only and are not deployable truth until rewritten against this lock. Next blocker: rewrite the schema drafts to match the locked hierarchy and truth semantics before any remote apply or reader/writer cutover.
-- 2026-03-27: Locked the architecture reset after a live repo audit. Current repo truth is `NO-GO`: `indicators/v6-warbird-complete.pine` is not TradingView-loadable (`isValid` / `atr` undeclared in the active file and downstream `log.info` type failures), the dashboard still recomputes fib geometry through the legacy `scripts/warbird/fib-engine.ts` helper instead of rendering a shared packet, `/admin` still leans on stale `measured_moves`, and the live `warbird_*` decision/outcome tables are empty. Binding delta: the adaptive fib engine snapshot is now the canonical base object; the canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`; decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, `PASS`; TradingView keeps execution-facing visuals/alerts plus the exhaustion precursor diamond while operator tables move to the dashboard; five years of comparable electronic futures data is approved for offline training research only, while cloud core support tables remain `2024-01-01T00:00:00Z` forward. The exact snapshot/candidate/outcome schema is now locked in this plan and `WARBIRD_MODEL_SPEC.md`. Next blocker: implement the migration, cut dashboard consumers off local fib computation, and replace the legacy `warbird_triggers_15m` / `warbird_conviction` / `warbird_risk` / `warbird_setups` path with the canonical normalized tables.
-- 2026-03-27: Applied live retention-floor trim migration `supabase/migrations/20260327000024_trim_pre_2024_core_history.sql` to keep core historical data at `2024-01-01T00:00:00Z` forward only. Validation confirmed zero pre-2024 rows remain in `econ_rates_1d`, `econ_yields_1d`, `econ_fx_1d`, `econ_vol_1d`, `econ_inflation_1d`, `econ_labor_1d`, `econ_activity_1d`, `econ_money_1d`, `econ_commodities_1d`, `econ_indexes_1d`, `geopolitical_risk_1d`, and legacy `econ_news_1d`; MES and cross-asset intraday tables were already clean. Next blocker: finish the remaining Jan 1 2024 forward-only core backfill gaps, especially `cross_asset_1d` and stale `econ_inflation_1d` freshness.
-- 2026-03-26: Locked the Supabase Edge cron cutover guardrails. Runtime truth for recurring ingestion is `pg_cron -> pg_net -> Supabase Edge Functions -> Supabase DB`; Vercel/`npm run build` remains only the frontend app deploy gate and is not evidence that Edge Functions package, deploy, or run. Required cutover order is now: fix Supabase-function-only packaging/runtime issues, deploy each function with the Supabase toolchain, invoke each function directly with `x-cron-secret`, then apply the pg_cron cutover migration. Hard stop: do not call the cutover complete while any live pg_cron helper still targets a Vercel URL or while Edge runtime correctness is inferred from the Vercel build instead of direct function deploy/invoke proof.
-- 2026-03-26: Restored `app/api/cron/google-news/route.ts` and `scripts/poll-google-news.py` as dormant research assets for later evaluation. They are intentionally unscheduled and not part of the active ingestion contract.
-- 2026-03-26: Bound the active Pine path back to indicator-only by explicit user direction. The paired Pine strategy, local indicator/strategy parity, and Deep Backtesting are retired from the active blocking path. `indicators/v6-warbird-complete-strategy.pine` and `scripts/guards/check-indicator-strategy-parity.sh` remain as legacy scratch/reference surfaces only and do not block indicator work unless the plan is explicitly reopened.
-- 2026-03-26: Rolled back the indicator-side fixed-color fib budget hack in `indicators/v6-warbird-complete.pine` after it changed the live operator-visible fib presentation without explicit approval. The four hidden-export removals (`ml_msb_bull_break`, `ml_msb_bear_break`, `ml_luminance_over_upper`, `ml_luminance_over_lower`) remain in both indicator and strategy to preserve parity, but the fib color inputs are restored and the live TradingView plot-budget blocker is reopened pending an approved non-visual reduction path.
-- 2026-03-26: Completed a bounded Pine exhaustion-budget checkpoint in `indicators/v6-warbird-complete.pine`: removed the native exhaustion `plotshape()` and exhaustion `alertcondition()`, preserved `fib_exh_flag` logic, and moved exhaustion visibility into the bottom-left `WARBIRD METRICS` table (`EXH ON/OFF`, live energy %, `AT FIB`). Validation passed (`./scripts/guards/pine-lint.sh`, `./scripts/guards/check-contamination.sh`, `npm run build`). Next blocker remains additional live plot-count reduction to reach TradingView's `<=64` hard cap.
-- 2026-03-26: Verified the backend checkpoint and tightened the remaining defects: `20260326000018` now preserves cutover state via `*_legacy_20260326` backup copies instead of renaming live production tables in place, `indicators/v6-warbird-complete.pine` and `indicators/v6-warbird-complete-strategy.pine` now export the 52-field minimum live packet (`53` and `56` total plot-style calls respectively), and `scripts/guards/check-indicator-strategy-parity.sh` now enforces real total plot counts instead of hidden-field count alone. Local gates passed (`pine-lint`, parity, `npm run build`). Next blocker is manual TradingView Strategy Tester + Deep Backtesting validation on the now-loadable scripts.
-- 2026-03-26: Manual TradingView validation established the live Pine blocker the local guards had missed: TradingView enforces a hard maximum of `64` plot counts per script, hidden `display.none` plots still count, and the current Warbird indicator/strategy export surfaces exceed that budget and will not load. Repo guards and status docs were updated so parity success no longer implies loadability. The next blocking Pine checkpoint is export-budget reduction to a `<=64` live plot-count contract.
-- 2026-03-26: Applied the raw-news schema (`20260326000019`) and Supabase cron wrapper migration (`20260326000020`) to the live database, created Vault route-url secrets for Newsfilter/Finnhub, and verified live pg_cron ownership for both provider pulls. Current live blocker is no longer schema or scheduling; it is the missing Vault provider secrets `warbird_newsfilter_api_key` and `warbird_finnhub_api_key`, which cause both cron wrapper functions to skip before fetch.
-- 2026-03-26: Corrected Pine / TradingView toolchain reality in the active plan and docs. The current Codex profile does not actually have `pinescript-server`, a TradingView chart MCP, or a TradingView CLI configured, so any references to CLI/MCP chart capture are conditional future capability, not a current execution path. Present truth is: repo guard scripts + installed skills for Pine authoring, and manual TradingView UI for live chart validation and Deep Backtesting.
-- 2026-03-26: Removed Google News from the active ingestion contract after live validation showed Google RSS article links are aggregator URLs that would require custom decoding. Deleted the Google cron route and poller, locked Newsfilter as the primary curated article source, and kept Finnhub as the secondary metadata/open-data source. Validation passed with `npm run build` and `python3 -m py_compile scripts/raw_news_contract.py scripts/poll-finnhub-news.py scripts/poll-newsfilter-news.py`.
-- 2026-03-26: Absorbed execution delta for the fib-engine and validation contract: AG/training must use point-in-time fib snapshots materialized from confirmed lookback/confluence state instead of repaint-prone live chart reads, Deep Backtesting is required but not sufficient by itself, pivot state is a critical trigger/reversal gate (distance matters, but it is not the sole decision maker), intermarket trigger alignment must respect each symbol's correlative path across 15m/1H/4H, and overlapping MA/volume/trend features across the three installed harnesses must be de-duplicated by feature family.
-- 2026-03-26: Completed a bounded `news_signals` contract-alignment checkpoint: added `supabase/migrations/20260326000016_news_signal_direction.sql` with a dedicated `market_impact_direction` enum, updated the active news writers at that checkpoint to emit `BULLISH` / `BEARISH`, normalized dataset readers for legacy plus new values, and validated with `npm run build` plus `python3 -m py_compile scripts/build-dataset.py`. Next blocker: pair promoted news signals with MES price-action context before live use, then replace the legacy `warbird_forecasts_1h` path.
-- 2026-03-26: Locked the balanced architecture decision: production remains cloud-first (`provider -> cloud Supabase -> live routes/dashboard`), the local database is snapshot-based training/research only, legacy `warbird_forecasts_1h` semantics are retired in favor of MES 15m fib-outcome state (`tp1_probability`, `tp2_probability`, `reversal_risk`), and `news_signals` is locked as a derived `BULLISH`/`BEARISH` event-response surface that must be paired with price action before promotion.
-- 2026-03-26: Cut MES live ingestion to a Supabase-owned minute schedule (`supabase/migrations/20260326000015_mes_1m_supabase_cron.sql`) that calls `/api/cron/mes-1m`, removed the Supabase `mes-catchup` schedule, and reduced live MES processing to incremental `ohlcv-1m` pulls with touched-bucket `mes_15m` rollups only; `mes-catchup` now remains manual backfill/rebuild-only.
-- 2026-03-24: Applied TradingView dashboard correction in Phase 3 manual-validation path: top-right table offset tuned (down/left via spacer row/col), correlation view switched from single-symbol to the plan-frozen cross-asset set (`NQ`, `DXY`, `US10Y`, `VIX`), and strategy-side top-right panel now includes closed trades, win rate, wins/losses, and profit factor. Operator note: `1h` signal preference observed, but canonical contract remains MES `15m` unless the plan lock is explicitly reopened.
-- 2026-03-24: Added Massive provider limit guards (bounded retries, `429` handling, `Retry-After` compliance, exponential backoff) in both live cron ingestion and the 2-year backfill path to keep inflation-expectations pulls stable under plan limits.
-- 2026-03-24: Validated Massive REST auth with `MASSIVE_API_KEY` in `.env.local`, confirmed `GET /fed/v1/inflation-expectations` live pull, and completed 2-year backfill (`scripts/backfill-massive-inflation-expectations.py`) writing 165 rows across 7 provider-tagged inflation-expectation series into `econ_inflation_1d` (`2024-04-01` to `2026-03-01`).
-- 2026-03-24: Implemented `MASSIVE_API_KEY` runtime wiring in `.env.local`, added Massive inflation-expectations ingestion (`/api/cron/massive/inflation-expectations` + `scripts/backfill-massive-inflation-expectations.py`), and deactivated FRED `T5YIE`/`T10YIE` to prevent source overlap.
-- 2026-03-24: Locked a provider-agnostic macro requirement for Phase 4 (`yields`, `inflation`, `inflation expectations`, `labor market`) with Massive `/fed` endpoints approved as optional parity/fallback ingestion while Databento remains the only intraday market-data contract.
-- 2026-03-24: Validated Newsfilter Query API auth/endpoint docs and live endpoint behavior; access is API-key gated (`POST https://api.newsfilter.io/search`) and remains blocked as `pending_provider_access` until a valid key is issued.
-- 2026-03-24: Added a curated Newsfilter tertiary raw-news contract (exact source allowlist + S&P/watchlist gating) under the same Phase 4 Google/Finnhub raw-news workflow and promotion gates.
-- 2026-03-24: Added a Phase 4 plan delta for a lean Finnhub open-data secondary news feed folded into the existing Google News work, with strict relevance gating and no premium sentiment/tick dependencies.
-- 2026-03-24: Added an explicit Phase 3 manual TradingView Strategy Tester + Deep Backtesting validation protocol, evidence checklist, and close criteria to unblock deterministic Phase 3 closure before Phase 4.
-- 2026-03-24: Completed Phase 3 checkpoint 2 local parity preflight by adding `scripts/guards/check-indicator-strategy-parity.sh`, validating hidden export parity and core predicate/encoding parity between indicator and strategy, and locking manual TradingView Deep Backtesting as the remaining blocker.
-- 2026-03-24: Completed Phase 3 checkpoint 1 by creating `indicators/v6-warbird-complete-strategy.pine` as a true Pine `strategy()` with indicator-parity entry predicates, deterministic stop/target execution using the locked stop-family + `20pt+` gate, and full hidden export contract parity with `indicators/v6-warbird-complete.pine`; validation gates passed.
-- 2026-03-24: Completed Phase 2 implementation checkpoint 5 in `indicators/v6-warbird-complete.pine` by replacing the interim local pivot path with admitted BigBeluga harness signals, wiring admitted LuxAlgo MSB/OB + Luminance export families into the always-on hidden contract, and reclassifying setup-event wiring to harness-backed states; validation gates passed.
-- 2026-03-24: Plan delta absorbed from execution directive: `Luminance Breakout Engine [LuxAlgo]` is now a required exact-copy standalone harness (not later-phase candidate).
-- 2026-03-24: Completed Phase 2 implementation checkpoint 4 by admitting the required standalone exact-copy `Luminance Breakout Engine [LuxAlgo]` harness at `indicators/harnesses/luxalgo-luminance-breakout-engine-harness.pine`, confirming source access, and wiring hidden luminance harness exports for training capture.
-- 2026-03-24: Completed Phase 2 implementation checkpoint 3 by admitting the required standalone exact-copy `Market Structure Break & OB Probability Toolkit [LuxAlgo]` harness at `indicators/harnesses/luxalgo-msb-ob-probability-toolkit-harness.pine`, confirming source access, and wiring hidden MSB/OB harness exports for training capture.
-- 2026-03-24: Completed Phase 2 implementation checkpoint 2 by admitting the required standalone exact-copy `Pivot Levels [BigBeluga]` harness at `indicators/harnesses/bigbeluga-pivot-levels-harness.pine`, confirming source access, and wiring hidden pivot harness exports for training capture.
-- 2026-03-26: Supabase is now the sole cron/function producer. `score-trades` Supabase pg_cron stopped and removed from `Supabase cron migration files`. All recurring job scheduling is Supabase pg_cron only. The app runtime is frontend dashboard and route handlers only.
-- 2026-03-26: Completed cost/abuse hardening checkpoint: public read APIs now require authenticated user cookies instead of service-role reads, admin coverage moved to low-cost Supabase RPC + 5 minute polling, dashboard duplicate polling collapsed, FRED and cross-asset ingestion made incremental, measured-moves retired as a writer in favor of `detect-setups`, dedup loops moved to unique-key upserts, and cron auth now fails closed when `CRON_SECRET` is missing.
-- 2026-03-24: Completed Phase 2 implementation checkpoint 1 in `indicators/v6-warbird-complete.pine`: structural fib-direction hardening, explicit directional `0/1` levels, bounded stop-family + `20pt+` eligibility interface, always-on hidden export contract fields, and the first always-on hidden event-response block; validation gates passed.
+- 2026-03-31: **Intermarket pivot to CME Globex.** NYSE/CBOE data (TICK, VOLD, VVIX, VIX/VIX3M, HYG, SKEW, ADD) is NOT available from Databento GLBX.MDP3. Replaced v7a flow basket with CME Globex futures: NQ, RTY, CL, HG, 6E, 6J -- all available at 15m from Databento ($0 OHLCV on Standard plan). ES chart-native vol (ATR ratio, range expansion, efficiency, VWAP) fills the VIX gap. Daily context: VIX (FRED `VIXCLS`), SKEW (`CBOE:SKEW`), NYSE A/D (`USI:ADD`) -- daily-only, NOT gate members. Intermarket feature table, ML exports, and request.security() inventory updated throughout plan.
+- 2026-03-30: **Kirk chart reading teaching session -- foundational methodology locked.** Structure before indicators, Fibonacci universality (to-the-tick MTF precision), volume as force at fib levels, post-sweep entry methodology, S/R flip as AG feature, training floor extended to 2018-01-01, fractal timeframe alignment confirmed. Key AG feature implications: fib proximity + MTF S/R proximity + pivot proximity converging near zero = highest probability zones.
+- 2026-03-30: v7 indicator verified and pushed (commit `ffb26f8`). AG labels fixed, 9 collinear plots removed, cooldown 4->8. Budget: 52 plots + 3 alertconditions = 55/64 (9 headroom). All 4 gates passed.
+- 2026-03-29: Admin candidate table staple columns locked: Dir, Target, TP1 Hit, TP2 Hit, SL Hit, Status (non-negotiable). TradingView -> Dashboard webhook architecture added. Plan deep cleanup (-600 lines). Pine output budget fixed to 64/64 exact cap (8 alerts cut, 2 plot exports cut, pine-lint bug fixed). Fib visual gap identified (anchor span + waypoint lines). Outcome contract reset: `TP2_HIT`/`TP1_ONLY`/`STOPPED`/`REVERSAL`/`OPEN`.
+- 2026-03-28: Pine type-safety hardening (80+ explicit type annotations). Locked corrected mental model (AG tunes settings via SHAP, not anchor placement; entry is the crown jewel). Hierarchy-first architecture checkpoint locked (Generator/Selector/Diagnostician split). Schema/admin reconciliation completed. Legacy `prob_hit_*` aliases removed. Restart-safe handoff saved.
+- 2026-03-27: Architecture reset after live repo audit -- canonical flow locked as `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`. Retention-floor trim migration applied (2024-01-01 forward).
+- 2026-03-26: Supabase Edge cron cutover guardrails locked. Strategy path retired (indicator-only). Pine budget work (exhaustion checkpoint, 64-cap discovery, news schema, backend checkpoint). Cloud-first architecture locked. MES minute schedule cut to Supabase-owned. Cost/abuse hardening. Newsfilter locked as primary news source. See `docs/plans/archive/2026-03-31-plan-cleanup-removed-content.md` for full March 26 detail.
+- 2026-03-24: Phase 2 completed (5 checkpoints). Phase 3 strategy created + retired. Massive inflation-expectations validated + backfilled. Newsfilter/Finnhub raw-news contracts added. Provider-agnostic macro requirement locked. Three standalone harnesses admitted then retired 2026-03-28 (replaced by TA core pack). See archive for full checkpoint detail.
 - 2026-03-23: Rewrote the active plan from the live audit: locked current Supabase pg_cron reality vs target Supabase-owned runtime, exact Databento/FRED/news scope, raw Google News intake contract, cloud realtime/dashboard surfaces, and the 2-consecutive-PT1-miss rollback rule.
 - 2026-03-23: Absorbed the March 23 execution delta into an explicit phase-order lock and recorded a Phase 2 kickoff audit against `indicators/v6-warbird-complete.pine`.
 - 2026-03-23: Added audited Phase 4 operations requirements for the local PostgreSQL training warehouse, cloud publish-up tables, and packet / run lifecycle after verifying the linked Supabase project and live Supabase schema.
@@ -509,13 +468,7 @@ No module should move into AG training or Deep Backtesting just because it “lo
 
 ### High-Risk Problems To Resolve Before AG
 
-1. The intermarket MTF mechanics are not trustworthy yet.
-   - `request.security()` is pulling `close` from `tfIM`, but EMA and slope are then computed on the chart timeframe from repeated higher-timeframe values.
-   - That distorts `maLen`, `slopeBars`, and the regime logic.
-   - Direction:
-     - compute EMA, slope, and any regime-state transforms inside the requested timeframe context
-     - reduce the intermarket engine to a small set of defensible states first: trend, slope, distance-from-mean, agreement
-     - prove the higher-timeframe implementation in Deep Backtesting before letting AG optimize its settings
+1. ~~The intermarket MTF mechanics are not trustworthy yet.~~ DONE — addressed by v7 grouped scoring (flow/vol/participation/execution) and 2026-03-31 CME Globex pivot (NQ/RTY/CL/HG/6E/6J).
 
 2. The news proxy mechanics are too weak for v1.
    - The current proxy uses lower-timeframe `request.security()` and then measures lookback on chart bars, not proxy-timeframe bars.
@@ -570,13 +523,7 @@ No module should move into AG training or Deep Backtesting just because it “lo
        - visual-only settings
      - only the first bucket belongs in the AG optimization surface
 
-8. The symbol set is not frozen yet.
-   - `NQ`, `VIX`, `DXY`, and `US10Y` are reasonable first-pass candidates.
-   - `BANK`, credit proxies, oil, and any additional cross-asset series must be verified and justified before they are allowed into the production contract.
-   - Direction:
-     - start with the smallest defensible live series set
-     - add `BANK`, credit, oil, or additional symbols only if holdout and Deep Backtesting evidence show material value
-     - do not let AG search a drifting symbol universe
+8. ~~The symbol set is not frozen yet.~~ DONE — CME Globex basket frozen 2026-03-31: NQ, RTY, CL, HG, 6E, 6J (all Databento GLBX.MDP3). Daily context: VIX (FRED), SKEW, ADD.
 
 ### Keep As Candidate Logic
 
@@ -584,7 +531,7 @@ No module should move into AG training or Deep Backtesting just because it “lo
 - `8/13/21/34/55` anchor family as a candidate search space
 - accept / reject / retest structure archetypes
 - weighted intermarket regime concept
-- `NQ`, `VIX`, `DXY`, `US10Y` as first-pass context candidates
+- CME Globex intermarket basket (NQ, RTY, CL, HG, 6E, 6J) as locked context candidates
 
 ### Cut Or Demote For v1 Until Proven
 
@@ -701,48 +648,42 @@ Add:
 
 ### B. Intermarket Engine
 
-**SUPERSEDED (2026-03-30):** The v1 intermarket basket below was replaced with flow-based LEADING indicators. See v7 design doc for current basket.
+**SUPERSEDED (2026-03-30):** v1 basket (NQ1!, BANK, VIX, DXY, US10Y, HYG, LQD) — REPLACED
+**SUPERSEDED (2026-03-30):** v7a flow basket (TICK, VOLD, VVIX, VIX/VIX3M, HYG, RTY) — REPLACED (NYSE/CBOE not on Databento)
 
-~~Locked v1 live intermarket series: NQ1!, BANK, VIX, DXY, US10Y, HYG, LQD~~ — REPLACED
+**Current v7b intermarket basket (CME Globex, Databento GLBX.MDP3) — LOCKED 2026-03-31:**
 
-**Current v7 intermarket basket (flow-based leading indicators):**
+AG training basket (all available at 15m from Databento, $0 OHLCV on Standard plan):
+- `CME_MINI:NQ1!` (NQ.c.0) — Tech leadership correlation
+- `CME_MINI:RTY1!` (RTY.c.0) — Small-cap risk appetite
+- `NYMEX:CL1!` (CL.c.0) — Energy/inflation proxy
+- `COMEX:HG1!` (HG.c.0) — Copper = industrial demand leading indicator
+- `CME:6E1!` (6E.c.0) — EUR/USD macro-FX flow
+- `CME:6J1!` (6J.c.0) — JPY/USD risk-off flow
 
-- `USI:TICK` — NYSE uptick/downtick (institutional program trading, zero threshold)
-- `USI:VOLD` — NYSE up vol − down vol (money flow, zero threshold)
-- `CBOE:VVIX` — Vol of vol (leads VIX by 1-3 bars, level threshold)
-- `CBOE:VIX` + `CBOE:VIX3M` — VIX term structure ratio (< 0.92 calm, > 1.0 stress)
-- `AMEX:HYG` — High-yield credit (EMA trend, credit leads equity)
-- `CME_MINI:RTY1!` — Russell 2000 small-cap (EMA trend, breaks down/recovers first)
-- `CBOE:SKEW` — Tail-risk hedging (daily level threshold)
-- `USI:ADD` — NYSE Advance-Decline breadth (daily, divergence = exhaustion)
+ES chart-native vol (fills VIX/VVIX gap, zero security calls):
+- ATR ratio, range expansion, intrabar efficiency, VWAP state/event
 
-Regime gate: all 7 must agree for confirmation. No weighted scoring. Hysteresis: 3 bars to flip, 4 bars cooldown, 16 bars neutralize stale. AG decides correlations and weights from data.
+Daily context (NOT gate members, same value all 27 session bars):
+- VIX (FRED daily), SKEW (`CBOE:SKEW`), NYSE A/D (`USI:ADD`)
 
-Intermarket trigger rule:
+**Why CME-only:** AG needs 15m historical data from Databento. NYSE internals (TICK/VOLD), CBOE indices (VIX/VVIX/VIX3M/SKEW), and ETFs (HYG) are NOT on GLBX.MDP3. CFE (VX futures) is $750+/mo separate subscription.
 
-1. TICK + VOLD are the anchor — institutional flow is the foundation. Both must agree.
-2. All 7 symbols must agree for regime confirmation. No partial credit, no weighted scoring.
-3. AG will discover optimal thresholds and correlations via SHAP. Hand-coded values are starting points only.
+**Data:** `cross_asset_15m` table (migration 039). Backfill from 2018-01-01 via `scripts/backfill-intermarket-15m.py`.
 
-### C. Volatility / Credit / Macro Engine
+Regime gate: grouped weighted scoring → 0-100 with hysteresis. AG decides final group structure, weights, and correlations from data.
 
-The plan uses only TradingView-available live series.
+### C. Volatility / Credit / Macro Engine — SUPERSEDED (2026-03-31)
 
-Locked v1 live macro / credit inputs:
+**SUPERSEDED by CME Globex basket + ES chart-native vol + daily FRED context.** VIX/US10Y/HYG/LQD live Pine pulls replaced by: ES chart-native vol (ATR ratio, range expansion, efficiency, VWAP state/event) for real-time vol, plus daily VIX from FRED (`VIXCLS`). Credit proxy is no longer a live Pine input.
 
-- VIX
-- US10Y
-- credit proxy = `HYG / LQD`
-- `request.economic("US", "IRSTCB01")` for Fed funds
-- `request.economic("US", "CPALTT01")` for CPI YoY
-- `request.economic("US", "LRHUTTTTUSM156S")` for unemployment
-- `request.economic("US", "BSCICP02")` for PMI manufacturing
+The `request.economic()` calls for macro context remain active:
+
+- `request.economic(“US”, “IRSTCB01”)` for Fed funds
+- `request.economic(“US”, “CPALTT01”)` for CPI YoY
+- `request.economic(“US”, “LRHUTTTTUSM156S”)` for unemployment
+- `request.economic(“US”, “BSCICP02”)` for PMI manufacturing
 - Pine calendar logic for `is_fomc_week`, `is_cpi_day`, `is_nfp_day`
-
-Important constraint:
-
-- “Credit” is not assumed to exist as a magical direct feed.
-- `VVIX`, `JNK`, GDP growth, and any extra economic fields are v2 candidates, not v1 requirements.
 
 ### D. Volume Engine
 
@@ -892,13 +833,13 @@ Regime block:
 
 Component block:
 
-- NQ
-- BANK
-- VIX
-- DXY
-- US10Y
-- credit proxy
-- volume state
+- NQ (CME Globex)
+- RTY (CME Globex)
+- CL (CME Globex)
+- HG (CME Globex)
+- 6E (CME Globex)
+- 6J (CME Globex)
+- ES chart-native vol state
 
 Structure block:
 
@@ -1462,7 +1403,7 @@ The main indicator must gain an always-on hidden event-response block. This bloc
 
 Minimum candidate inputs:
 
-1. MES / NQ / dollar-state proxy / ZN / VIX reaction state
+1. MES / NQ / RTY / CL / HG / 6E / 6J reaction state (CME Globex basket)
 2. lower-timeframe volume shock / expansion state
 3. reversal-vs-continuation state after the impulse
 4. scheduled macro proximity / release windows
@@ -1480,14 +1421,13 @@ Required Phase 2 event-response export interface:
 | `ml_event_reversal_score` | reversal risk after impulse | `0-100` deterministic Pine score |
 | ~~`ml_event_volume_shock`~~ | lower-timeframe volume shock state | cut from Pine exports during budget reduction — AG computes from `ml_vol_ratio` + `ml_vol_acceleration` server-side |
 | ~~`ml_event_macro_window_code`~~ | scheduled macro window state | cut from Pine exports during budget reduction — AG computes from `econ_calendar` data server-side |
-| `ml_event_tick_state` | TICK institutional flow state | `-1`, `0`, `1` |
-| `ml_event_vold_state` | VOLD money flow state | `-1`, `0`, `1` |
-| `ml_event_vvix_state` | VVIX vol-of-vol state | `-1`, `0`, `1` |
-| `ml_event_vts_state` | VIX term structure state | `-1`, `0`, `1` |
-| `ml_event_hyg_state` | HYG credit state | `-1`, `0`, `1` |
-| `ml_event_rty_state` | RTY small-cap state | `-1`, `0`, `1` |
-| `ml_event_skew_state` | SKEW tail-risk state | `-1`, `0`, `1` |
-| `ml_vts_ratio` | VIX/VIX3M term structure ratio | float (< 0.92 calm, > 1.0 stress) |
+| `ml_event_nq_state` | NQ tech leadership trend state | `-1`, `0`, `1` |
+| `ml_event_rty_state` | RTY small-cap risk appetite state | `-1`, `0`, `1` |
+| `ml_event_cl_state` | CL energy/inflation proxy state | `-1`, `0`, `1` |
+| `ml_event_hg_state` | HG copper/industrial demand state | `-1`, `0`, `1` |
+| `ml_event_eur_state` | 6E EUR/USD macro-FX flow state | `-1`, `0`, `1` |
+| `ml_event_jpy_state` | 6J JPY/USD risk-off flow state | `-1`, `0`, `1` |
+| `ml_event_skew_state` | SKEW tail-risk state (daily) | `-1`, `0`, `1` |
 | `ml_event_pivot_interaction_code` | interaction with pivot state | `0=none`, `1=support`, `2=resistance`, `3=rejection`, `4=breakthrough`, `5=cluster_conflict` |
 
 #### Checkpoint Audit, Memory, And Document Discipline
@@ -1585,7 +1525,7 @@ Phase 2 target files:
 Phase 2 required hidden export contract (current actual exports):
 
 - `ml_confidence_score`, `ml_direction_code`, `ml_setup_archetype_code`, `ml_fib_level_touched`, `ml_stop_family_code`
-- `ml_event_mode_code`, `ml_event_shock_score`, `ml_event_reversal_score`, `ml_event_nq_state`, `ml_event_dxy_state`, `ml_event_zn_state`, `ml_event_vix_state`, `ml_event_pivot_interaction_code`
+- `ml_event_mode_code`, `ml_event_shock_score`, `ml_event_reversal_score`, `ml_event_nq_state`, `ml_event_rty_state`, `ml_event_cl_state`, `ml_event_hg_state`, `ml_event_eur_state`, `ml_event_jpy_state`, `ml_event_pivot_interaction_code`
 - `ml_ema21_dir`, `ml_ema50_dir`, `ml_ema200_dir`, `ml_ema21_dist_pct`, `ml_ema50_dist_pct`, `ml_ema200_dist_pct`
 - `ml_entry_long_trigger`, `ml_entry_short_trigger`, `ml_tp1_hit_event`, `ml_tp2_hit_event`
 - TA Core Pack: `ml_ema_21`, `ml_ema_50`, `ml_ema_100`, `ml_ema_200`, `ml_macd_hist`, `ml_rsi_14`, `ml_atr_14`, `ml_adx_14`, `ml_volume_raw`, `ml_vol_sma_20`, `ml_vol_ratio`, `ml_vol_acceleration`, `ml_bar_spread_x_vol`, `ml_obv`, `ml_mfi_14`
@@ -1783,8 +1723,8 @@ Secondary metrics:
 
 These are non-blocking v2 questions, not blockers for v1:
 
-1. Whether `RTY1!` or `YM1!` add material value beyond the locked v1 basket.
-2. Whether `VVIX`, `JNK`, crude, or gold add enough value to justify request-budget expansion.
+1. ~~Whether `RTY1!` or `YM1!` add material value beyond the locked v1 basket.~~ DONE — RTY is now in the locked CME Globex basket. YM remains a research candidate.
+2. Whether `GC` (gold) or `NG` (natural gas) add enough value to justify request-budget expansion beyond the 6-symbol CME basket.
 3. Whether one unified model works best, or whether separate long and short parameter sets are required.
 4. Whether a compact gauge improves table usability over bar-state rows after v1 is visually complete.
 
@@ -2029,19 +1969,21 @@ Fib-structure rules:
 | `target_eligible_20pt` | derived | Boolean: target path ≥ 20 points |
 | `fib_range_atr_ratio` | derived | `fib_range / ATR(14)` — quality filter |
 
-**B. Intermarket Features** (from `request.security()`) — **UPDATED 2026-03-30: flow-based leading indicators**
+**B. Intermarket Features** (from `request.security()`) — **UPDATED 2026-03-31: CME Globex basket (Databento GLBX.MDP3)**
 
 | Feature | Pine Source | Description |
 |---------|------------|-------------|
-| `tick_state` | `request.security("USI:TICK")` | TICK flow state: > 0 bull, < 0 bear |
-| `vold_state` | `request.security("USI:VOLD")` | VOLD flow state: > 0 bull, < 0 bear |
-| `vvix_level` | `request.security("CBOE:VVIX")` | VVIX level (< 17 risk-on, > 25 risk-off) |
-| `vts_ratio` | derived | VIX/VIX3M term structure (< 0.92 calm, > 1.0 stress) |
-| `hyg_trend` | `request.security("AMEX:HYG")` | HYG EMA slope state: -1/0/1 |
-| `rty_trend` | `request.security("CME_MINI:RTY1!")` | RTY EMA slope state: -1/0/1 |
-| `skew_level` | `request.security("CBOE:SKEW")` | SKEW level (< 140 risk-on, > 155 risk-off, daily) |
-| `add_value` | `request.security("USI:ADD")` | NYSE A/D breadth (daily) |
-| `intermarket_alignment` | derived | Count of 7 symbols in agreement (0-7) |
+| `nq_trend` | `request.security("CME_MINI:NQ1!")` | NQ EMA trend state: -1/0/1 (tech leadership) |
+| `rty_trend` | `request.security("CME_MINI:RTY1!")` | RTY EMA trend state: -1/0/1 (small-cap risk appetite) |
+| `cl_trend` | `request.security("NYMEX:CL1!")` | CL EMA trend state: -1/0/1 (energy/inflation proxy) |
+| `hg_trend` | `request.security("COMEX:HG1!")` | HG EMA trend state: -1/0/1 (copper = industrial demand) |
+| `eur_trend` | `request.security("CME:6E1!")` | 6E EMA trend state: -1/0/1 (EUR/USD macro-FX flow) |
+| `jpy_trend` | `request.security("CME:6J1!")` | 6J EMA trend state: -1/0/1 (JPY/USD risk-off flow) |
+| `nq_rel_strength` | derived | NQ relative strength vs ES (percent change ratio) |
+| `rty_rel_strength` | derived | RTY relative strength vs ES |
+| `skew_level` | `request.security("CBOE:SKEW")` | SKEW level (daily-only context, NOT gate member) |
+| `add_value` | `request.security("USI:ADD")` | NYSE A/D breadth (daily-only context, NOT gate member) |
+| `intermarket_alignment` | derived | Count of 6 CME symbols in agreement (0-6) |
 
 **C. Volatility Features** (from chart OHLCV + `request.security()`)
 
@@ -2086,17 +2028,16 @@ The v1 indicator must stay under this request budget:
 - target operating budget: `<= 12` unique `request.*()` calls
 - hard ceiling: `<= 16` unique `request.*()` calls
 
-Planned v7 usage (UPDATED 2026-03-30):
+Planned v7b usage (UPDATED 2026-03-31 — CME Globex pivot):
 
-- `request.security()` — intermarket 60min:
-  - `USI:TICK`
-  - `USI:VOLD`
-  - `CBOE:VVIX`
-  - `CBOE:VIX`
-  - `CBOE:VIX3M`
-  - `AMEX:HYG`
-  - `CME_MINI:RTY1!`
-- `request.security()` — intermarket daily:
+- `request.security()` — CME Globex intermarket (15m or 60min):
+  - `CME_MINI:NQ1!` — tech leadership
+  - `CME_MINI:RTY1!` — small-cap risk appetite
+  - `NYMEX:CL1!` — energy/inflation proxy
+  - `COMEX:HG1!` — copper/industrial demand
+  - `CME:6E1!` — EUR/USD macro-FX flow
+  - `CME:6J1!` — JPY/USD risk-off flow
+- `request.security()` — daily context (NOT gate members):
   - `CBOE:SKEW`
   - `USI:ADD`
 - `request.economic()`:
@@ -2105,7 +2046,7 @@ Planned v7 usage (UPDATED 2026-03-30):
   - `LRHUTTTTUSM156S`
   - `BSCICP02`
 
-This yields a planned base budget of `11` unique `request.*()` calls, leaving limited room for future additions.
+This yields a planned base budget of `12` unique `request.*()` calls, leaving room for future additions within the 16-call hard ceiling.
 
 **D. Volume Features** (from chart OHLCV)
 
@@ -2707,8 +2648,8 @@ Source policy:
 Dollar-state rule:
 
 1. Local research uses FRED broad-dollar and FX proxies, not a separate paid `DXY` provider feed.
-2. The hidden export name `ml_event_dxy_state` remains the stable contract label for the dollar-state proxy.
-3. Pine may use `DXY` directly only if the TradingView live path is validated and semantically mapped back to the same dollar-state concept.
+2. The CME Globex basket now includes `6E` (EUR/USD) and `6J` (JPY/USD) as direct FX flow inputs, superseding the need for a separate DXY Pine pull. Dollar-state is derived from 6E/6J trend agreement.
+3. The old `ml_event_dxy_state` export is retired; replaced by `ml_event_eur_state` + `ml_event_jpy_state`.
 
 #### Promotion-parity rule
 

@@ -1,22 +1,18 @@
 "use client";
 
-interface CorrelationTicker {
+// Symbol bar: HG, NQ, 6E, CL — all Databento hourly, green/red = MES-aligned move
+// mesPolarity: "positive" = symbol up → MES up (green bg)
+//              "inverse"  = symbol up → MES down (red bg)
+const TICKERS: {
   label: string;
-  symbolCode: string | null;
-  close: number | null;
-  prevClose: number | null;
-  changePercent: number | null;
-}
-
-// Requested correlation tickers mapped to available symbol codes.
-// Symbols not in the DB show "—" per zero-mock-data rule.
-const TICKERS: { label: string; symbolCode: string | null; sublabel: string }[] = [
-  { label: "NQ", symbolCode: "NQ", sublabel: "Risk Appetite" },
-  { label: "BANK", symbolCode: null, sublabel: "Financials" },
-  { label: "VVIX", symbolCode: null, sublabel: "Vol of Vol" },
-  { label: "DXY", symbolCode: "DX", sublabel: "USD" },
-  { label: "US10Y", symbolCode: "US10Y", sublabel: "Yield" },
-  { label: "SOX", symbolCode: "SOX", sublabel: "Semis" },
+  symbolCode: string;
+  sublabel: string;
+  mesPolarity: "positive" | "inverse";
+}[] = [
+  { label: "HG",  symbolCode: "HG",  sublabel: "Copper",  mesPolarity: "positive" },
+  { label: "NQ",  symbolCode: "NQ",  sublabel: "Nasdaq",  mesPolarity: "positive" },
+  { label: "EUR", symbolCode: "6E",  sublabel: "EUR/USD", mesPolarity: "positive" },
+  { label: "CL",  symbolCode: "CL",  sublabel: "Crude",   mesPolarity: "positive" },
 ];
 
 interface CorrelationsRowProps {
@@ -26,30 +22,52 @@ interface CorrelationsRowProps {
 export default function CorrelationsRow({ correlations }: CorrelationsRowProps) {
   return (
     <div
-      className="flex items-center gap-0 w-full overflow-x-auto"
+      className="flex items-center gap-0 w-full overflow-x-auto flex-shrink-0"
       style={{
-        background: "#131722",
         borderBottom: "1px solid rgba(255,255,255,0.06)",
       }}
     >
       {TICKERS.map((ticker) => {
-        const data = ticker.symbolCode
-          ? correlations?.[ticker.symbolCode] ?? null
-          : null;
+        const data = correlations?.[ticker.symbolCode] ?? null;
         const close = data?.close ?? null;
         const prevClose = data?.prevClose ?? null;
         const changePct =
           close != null && prevClose != null && prevClose !== 0
             ? ((close - prevClose) / prevClose) * 100
             : null;
-        const isPositive = changePct != null ? changePct >= 0 : null;
+
+        // Green bg = this hour's move is aligned with MES going up
+        // Red bg   = this hour's move is aligned with MES going down
+        // Null     = no data → transparent (zero-mock rule)
+        const isBullishForMES =
+          changePct == null
+            ? null
+            : ticker.mesPolarity === "positive"
+              ? changePct > 0
+              : changePct < 0;
+
+        const bgColor =
+          isBullishForMES === true
+            ? "rgba(38, 166, 91, 0.15)"
+            : isBullishForMES === false
+              ? "rgba(242, 54, 69, 0.15)"
+              : "transparent";
+
+        const changeColor =
+          changePct == null
+            ? "rgba(255,255,255,0.15)"
+            : changePct >= 0
+              ? "#26C6DA"
+              : "#F23645";
 
         return (
           <div
             key={ticker.label}
-            className="flex-1 min-w-[120px] px-3 py-1 flex flex-col gap-0"
+            className="flex-1 min-w-[110px] px-3 py-1.5 flex flex-col gap-0"
             style={{
+              background: bgColor,
               borderRight: "1px solid rgba(255,255,255,0.04)",
+              transition: "background 0.3s ease",
             }}
           >
             <div className="flex items-center gap-2">
@@ -67,11 +85,9 @@ export default function CorrelationsRow({ correlations }: CorrelationsRowProps) 
               {changePct != null ? (
                 <span
                   className="text-[10px] font-medium tabular-nums"
-                  style={{
-                    color: isPositive ? "#26C6DA" : "#FF0000",
-                  }}
+                  style={{ color: changeColor }}
                 >
-                  {isPositive ? "+" : ""}
+                  {changePct >= 0 ? "+" : ""}
                   {changePct.toFixed(2)}%
                 </span>
               ) : (
@@ -85,8 +101,8 @@ export default function CorrelationsRow({ correlations }: CorrelationsRowProps) 
   );
 }
 
-function formatPrice(price: number, symbolCode: string | null): string {
-  if (symbolCode === "US10Y") return price.toFixed(3);
-  if (symbolCode === "DX") return price.toFixed(3);
+function formatPrice(price: number, symbolCode: string): string {
+  if (symbolCode === "6E") return price.toFixed(5);
+  if (symbolCode === "HG") return price.toFixed(4);
   return price.toFixed(2);
 }

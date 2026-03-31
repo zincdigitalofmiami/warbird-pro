@@ -14,6 +14,7 @@ import databento as db
 from supabase import create_client
 
 CORRELATION_SYMBOLS = [
+    "HG.c.0",
     "NQ.c.0",
     "ZN.c.0",
     "ZF.c.0",
@@ -34,6 +35,7 @@ CORRELATION_SYMBOLS = [
 # VX and DX are FRED-sourced, not Databento — skip here
 
 SYMBOL_TO_CODE = {
+    "HG.c.0": "HG",
     "NQ.c.0": "NQ",
     "ZN.c.0": "ZN",
     "ZF.c.0": "ZF",
@@ -114,7 +116,7 @@ def main() -> None:
     supabase = create_client(sb_url, sb_key)
 
     start_date = date(2024, 1, 1)
-    end_date = date(2026, 3, 27)  # exclusive upper bound
+    end_date = date.today()  # exclusive upper bound
 
     client = db.Historical(api_key)
 
