@@ -17,7 +17,7 @@ Read and follow AGENTS.md at the repository root.
 - Cross-asset pipeline: `cross-asset` Edge Function pulls `ohlcv-1h` from Databento Historical API for all active DATABENTO symbols (excl MES, .OPT). 4 shards fire hourly at `:05/:06/:07/:08` Sun-Fri (migration 040). All ~17 symbols updated within 4 minutes each hour. Upserts `cross_asset_1h`, derives `cross_asset_1d`.
 - All Databento calls use `.c.0` continuous front-month contracts with `stype_in=continuous`. No manual contract-roll logic. `contract-roll.ts` in `_shared/` is dead code. Databento handles rolls automatically.
 - Live core retention floor is now locked to `2018-01-01T00:00:00Z` forward. Previous 2024 floor was lifted; backfill and training may use data back to 2018-01-01.
-- GPR (Caldara-Iacoviello Geopolitical Risk Index) is backfill-only training data. Cron, Vercel route, and Edge Function removed (migration 036). Data in `geopolitical_risk_1d` is populated by one-time local backfill and refreshed manually monthly.
+- GPR (Caldara-Iacoviello Geopolitical Risk Index) is backfill-only training data. Cron, helper function, and Vercel vault secret removed (migration 036 applied 2026-03-31). Data in `geopolitical_risk_1d` is populated by one-time local backfill and refreshed manually monthly.
 - Trump Effect Edge Function (`supabase/functions/trump-effect/`) fetches Federal Register executive orders and memoranda. pg_cron schedule: daily 19:30 UTC Mon-Fri. No API key needed.
 - `series_catalog` is now FK-enforced from all 10 `econ_*_1d` tables (migration 028)
 - 22 new FRED macro series registered in `series_catalog` (migration 026): GDP, trade, government fiscal, prices, investment, expectations
@@ -64,13 +64,13 @@ Read and follow AGENTS.md at the repository root.
 - Cloud publish-up tables for packet lineage, training metrics, and Admin explainability (not built): `warbird_training_runs`, `warbird_training_run_metrics`, `warbird_packets`, `warbird_packet_activations`, `warbird_packet_metrics`, `warbird_packet_feature_importance`, `warbird_packet_setting_hypotheses`, `warbird_packet_recommendations`
 - Checkpoint handoff doc saved at `docs/decisions/2026-03-28-schema-admin-contract-handoff.md` for clean chat restart context
 - The canonical normalized live schema is now locked in docs, but the new base tables are not built yet: `warbird_fib_engine_snapshots_15m`, `warbird_fib_candidates_15m`, `warbird_candidate_outcomes_15m`, `warbird_signals_15m`, `warbird_signal_events`, and `warbird_packets`.
-- The current 2026-03-30 draft migrations and local warehouse draft are now reconciled against the 2026-03-28 hierarchy/outcome-contract lock and validate in a disposable Postgres 17 instance, but they remain unapplied draft assets until remote ledger drift is resolved and the writer/API cutover is approved: `20260330000037_canonical_warbird_tables.sql`, `20260330000038_canonical_warbird_compat_views.sql`, and `scripts/ag/local_warehouse_schema.sql`.
+- Draft migrations 037 (canonical warbird tables) and 038 (compat views) are intentionally unapplied — no writers exist yet. They run via `supabase db push` when the writer cutover is ready. `scripts/ag/local_warehouse_schema.sql` is local-only.
 - `detect-setups` and `score-trades` are Vercel routes with NO pg_cron schedule and NO Edge Function port. The legacy warbird_* decision tables they write to are empty in production. These must be ported to Edge Functions writing to the canonical tables before the setup engine is operational.
 - Dashboard fib recompute was cut (commit `77ec03e`). `LiveMesChart.tsx` no longer calls the legacy fib-engine helper. Dashboard is not yet wired to canonical engine state — that's blocking order #4.
-- `/admin` still presents stale `measured_moves` while the live legacy `warbird_triggers_15m`, `warbird_conviction`, `warbird_setups`, `warbird_setup_events`, and `warbird_risk` tables are empty. These are legacy/operational tables, not the canonical AG training surface.
+- `/admin` still presents stale `measured_moves` (76 rows, all NULL setup_id). The warbird operational tables (`warbird_triggers_15m`, `warbird_conviction`, `warbird_setups`, `warbird_setup_events`, `warbird_risk`) now have the correct 018 schema but remain empty — no writers active. `measured_moves` is preserved until canonical writer cutover replaces it with `warbird_admin_candidate_rows_v`.
 - `scripts/warbird/fib-engine.ts` still reflects a legacy 1H helper path and is not the target point-in-time fib snapshot surface for AG training
-- Legacy `warbird_forecasts_1h` table still exists in DB (forecast route deleted but table remains)
-- Remote Supabase migration ledger only records through `20260326000017` — live DB has later schema changes applied directly. `supabase db push` is unsafe until drift is reconciled.
+- Legacy `warbird_forecasts_1h` backed up to `warbird_forecasts_1h_legacy_20260326` and dropped (migration 018 applied 2026-03-31).
+- Migration ledger reconciled through 040 (2026-03-31). Only 037+038 remain intentionally unapplied. `supabase db push` is now safe — it will only run 037+038.
 - `/admin` data-quality issues visible: negative `econ_calendar` staleness (not related to migration 035 fix)
 
 ### Architecture Direction

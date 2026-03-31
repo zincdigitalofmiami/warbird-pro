@@ -90,17 +90,14 @@ Everything else is archived or reference-only and should not drive current imple
 - This applies to: library integrations, API call patterns, algorithm ports, Pine Script engine code — EVERYTHING.
 - Violating this rule produces broken code that looks right but behaves wrong, wastes hours of debugging, and poisons downstream model training with inaccurate signals.
 
-### Required Open-Source Harnesses
+### Migration Discipline — Non-Negotiable
 
-- `Pivot Levels [BigBeluga]` is required.
-- `Market Structure Break & OB Probability Toolkit [LuxAlgo]` is required.
-- `Luminance Breakout Engine [LuxAlgo]` is required.
-- For required or approved harnesses:
-  - confirm the TradingView page shows `OPEN-SOURCE SCRIPT`
-  - retrieve code through the script page's `Source code` entry
-  - copy internals exactly
-  - allow interface-only edits
-  - if exact-copy use is blocked, STOP
+- **NEVER apply DDL to remote Supabase outside a migration file.** Every `execute_sql` that runs DDL creates ledger drift.
+- If DDL was applied directly (MCP, psql, SQL editor), **immediately stamp the version into `supabase_migrations.schema_migrations`** and ensure a corresponding local migration file exists.
+- Before running `supabase db push`, **verify the remote ledger matches local files** via `list_migrations` or `supabase db diff --linked`.
+- When reconciling drift: audit EVERY object each migration should have created against the live DB. Do not assume "applied directly" — verify each one. Previous sessions incorrectly claimed 018-036 were all applied when 4 of them never ran.
+- After any DDL change, run `get_advisors` (security type) to catch missing RLS or policy issues.
+
 
 ## MES Ingestion — Current State
 
