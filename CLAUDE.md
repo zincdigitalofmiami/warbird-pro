@@ -13,8 +13,9 @@ Read and follow AGENTS.md at the repository root.
 - MES chart pipeline end-to-end (Databento Live API → cron → Supabase → Realtime → chart)
 - Real-time MES minute path: Edge Function `mes-1m` connects to Databento Live API (TCP gateway), streams `ohlcv-1s` for `MES.c.0` (continuous), aggregates 1s → 1m, upserts `mes_1m`, rolls up touched 15m buckets into `mes_15m`. Zero lag — data arrives within the current minute. Falls back to Historical API for gaps > 60 min.
 - `mes-hourly` Edge Function pulls `ohlcv-1h` and `ohlcv-1d` directly from Databento Historical API (`MES.c.0`, `stype_in=continuous`). Rolls 1h → 4h locally (no ohlcv-4h schema). No 1m→1h or 1h→1d aggregation.
-- All active recurring ingestion schedules run via Supabase pg_cron → Edge Functions. The remaining App Router routes `detect-setups` and `score-trades` are unscheduled legacy bridge code, not active pg_cron-owned production writers.
-- Supabase-owned minute schedule support for MES via `supabase/migrations/20260326000015_mes_1m_supabase_cron.sql` (pg_cron + pg_net + vault secrets)
+- All active recurring ingestion runs via Supabase pg_cron → Edge Functions (9 functions in `supabase/functions/`). The remaining App Router routes `detect-setups` and `score-trades` are unscheduled legacy bridge code, not active pg_cron-owned production writers.
+- Cross-asset pipeline: `cross-asset` Edge Function pulls `ohlcv-1h` from Databento Historical API for all active DATABENTO symbols (excl MES, .OPT). 4 shards fire hourly at `:05/:06/:07/:08` Sun-Fri (migration 040). All ~17 symbols updated within 4 minutes each hour. Upserts `cross_asset_1h`, derives `cross_asset_1d`.
+- All Databento calls use `.c.0` continuous front-month contracts with `stype_in=continuous`. No manual contract-roll logic. `contract-roll.ts` in `_shared/` is dead code. Databento handles rolls automatically.
 - Live core retention floor is now locked to `2018-01-01T00:00:00Z` forward. Previous 2024 floor was lifted; backfill and training may use data back to 2018-01-01.
 - GPR (Caldara-Iacoviello Geopolitical Risk Index) is backfill-only training data. Cron, Vercel route, and Edge Function removed (migration 036). Data in `geopolitical_risk_1d` is populated by one-time local backfill and refreshed manually monthly.
 - Trump Effect Edge Function (`supabase/functions/trump-effect/`) fetches Federal Register executive orders and memoranda. pg_cron schedule: daily 19:30 UTC Mon-Fri. No API key needed.
@@ -33,7 +34,10 @@ Read and follow AGENTS.md at the repository root.
 - `indicators/v7-warbird-institutional.pine` is the active Pine work surface. Compiles clean, TV-validated. Output budget: 64/64 (61 plot + 3 alertcondition, 0 headroom). 12 `request.security()` calls of 40 budget. TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed.
 - v7 intermarket AG training basket: **NQ**, **RTY**, **CL**, **HG**, **6E**, **6J** — all CME Globex (GLBX.MDP3), available at 15m from Databento ($0 OHLCV). ES chart-native vol (ATR ratio, range expansion, efficiency, VWAP) fills the VIX/VVIX gap. **Daily context** (VIX from FRED, SKEW, NYSE A/D) are AG training features, NOT gate members. Pine indicator still has old TICK/VOLD/VVIX/HYG basket — Pine update pending.
 - v7 regime: grouped weighted scoring → 0-100 score with hysteresis (bull >65, bear <35, exit at 50). Persistence (confirmBars), cooldown, neutralize. Override (direct bull↔bear flip) only when flow AND vol both extreme same direction. Group structure will be reworked when Pine updates to CME basket (Leadership/Macro-FX/Risk-appetite/Execution). No unanimous gate, no decision model dropdown.
-- `cross_asset_15m` table created (migration 039). HG (Copper) added to symbols. Backfill from 2018-01-01 for all 6 AG symbols via `scripts/backfill-intermarket-15m.py`.
+- `cross_asset_15m` table created (migration 039, RLS enabled). HG (Copper) added to symbols (migration 039 + 040). Backfill from 2018-01-01 for all 6 AG symbols via `scripts/backfill-intermarket-15m.py`.
+- Dashboard symbol bar: HG, NQ, 6E (EUR), CL — 4 tiles reading latest 2 rows from `cross_asset_1h`, green/red background = MES-aligned hourly move. All positive polarity. Shows `—` when no data.
+- Cross-asset crons switched from nightly (02:00-02:30 UTC) to **hourly** — 4 shards at `:05/:06/:07/:08` past every hour, Sun-Fri (migration 040). All ~16 active Databento symbols updated within 4 minutes each hour.
+- Chart container height locked to `80vh`.
 - ES execution quality block: VWAP state/event (+2 reclaim, +1 above, 0 band, -1 below, -2 reject), range expansion (clamped, mintick-guarded), intrabar efficiency. Chart-native, zero security calls.
 - 6 new ML exports: ml_vwap_code, ml_range_expansion, ml_efficiency, ml_agreement_velocity, ml_impulse_quality, ml_regime_score. Impulse quality is direction-relative (higher = better for THIS setup's direction).
 - All signals gated by `barstate.isconfirmed` — bar close only, no mid-bar firing.
@@ -43,7 +47,9 @@ Read and follow AGENTS.md at the repository root.
 
 ### What Doesn't Work Yet
 - mes_1s ingestion (table exists, nothing writes to it)
-- Intermarket 15m backfill (NQ, RTY, CL, HG, 6E, 6J from 2018-01-01) running via `scripts/backfill-intermarket-15m.py`. Data flows to `cross_asset_15m`, `cross_asset_1h`, `cross_asset_1d`. Ongoing 15m ingestion Edge Function not yet built.
+- Migrations 039 + 040 committed but **not yet applied** to remote Supabase. Must apply before dashboard tiles populate or hourly crons activate.
+- Backfill scripts ready but **not yet executed**: `scripts/backfill-cross-asset.py` (1h/1d from 2024-01-01) and `scripts/backfill-intermarket-15m.py` (15m/1h/1d from 2018-01-01). Require local env vars `DATABENTO_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`.
+- Ongoing 15m ingestion Edge Function not yet built — `cross_asset_15m` is backfill-populated only.
 - Pine indicator still has old TICK/VOLD/VVIX/HYG intermarket basket — needs update to NQ/RTY/CL/HG/6E/6J with new `request.security()` calls and regime group rework.
 - `econ_inflation_1d` is still stale relative to the live schedule.
 - FRED backfill script (`python scripts/backfill-fred.py`) needs to run AFTER migration 026 is applied to production to populate the 22 new series

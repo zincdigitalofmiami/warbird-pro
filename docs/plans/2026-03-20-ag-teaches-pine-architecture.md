@@ -29,6 +29,7 @@ Binding note: the 2026-03-28 update-log entries supersede older references below
 
 ## Update Log
 
+- 2026-03-31: **Dashboard symbol bar + hourly cross-asset crons.** CorrelationsRow shows HG/NQ/6E/CL tiles from `cross_asset_1h` (green/red = MES-aligned hourly move). Cross-asset crons switched from nightly to hourly (4 shards at :05-:08, Sun-Fri). Chart height locked to 80vh. Migration 039 creates `cross_asset_15m` (RLS enabled). Migration 040 inserts HG into symbols + reschedules crons. Backfill scripts ready. Plan runtime section rewritten to match actual Edge Function cron state. All docs updated for `.c.0` continuous contracts (no manual roll logic).
 - 2026-03-31: **Intermarket pivot to CME Globex.** NYSE/CBOE data (TICK, VOLD, VVIX, VIX/VIX3M, HYG, SKEW, ADD) is NOT available from Databento GLBX.MDP3. Replaced v7a flow basket with CME Globex futures: NQ, RTY, CL, HG, 6E, 6J -- all available at 15m from Databento ($0 OHLCV on Standard plan). ES chart-native vol (ATR ratio, range expansion, efficiency, VWAP) fills the VIX gap. Daily context: VIX (FRED `VIXCLS`), SKEW (`CBOE:SKEW`), NYSE A/D (`USI:ADD`) -- daily-only, NOT gate members. Intermarket feature table, ML exports, and request.security() inventory updated throughout plan.
 - 2026-03-30: **Kirk chart reading teaching session -- foundational methodology locked.** Structure before indicators, Fibonacci universality (to-the-tick MTF precision), volume as force at fib levels, post-sweep entry methodology, S/R flip as AG feature, training floor extended to 2018-01-01, fractal timeframe alignment confirmed. Key AG feature implications: fib proximity + MTF S/R proximity + pivot proximity converging near zero = highest probability zones.
 - 2026-03-30: v7 indicator verified and pushed (commit `ffb26f8`). AG labels fixed, 9 collinear plots removed, cooldown 4->8. Budget: 52 plots + 3 alertconditions = 55/64 (9 headroom). All 4 gates passed.
@@ -2476,79 +2477,60 @@ This snapshot is based on the linked Supabase project, the repo runtime surfaces
 2. Production environment variables include the required Supabase/Postgres connection surface plus `DATABENTO_API_KEY` and `FRED_API_KEY`.
 3. Supabase cloud now has the raw-news schema and raw-news Supabase cron wrapper migrations applied live (`20260326000019`, `20260326000020`) in addition to the earlier baseline schema.
 4. Local PostgreSQL 17 is installed, running on `:5432`, and `warbird_training` now exists locally.
-5. The repo currently has **no** `supabase/functions/` directory and **no** repo-owned `pg_cron` schedule definitions.
+5. `supabase/functions/` contains 9 Edge Functions (the production ingestion runtime). All Vercel cron routes have been deleted except `detect-setups` and `score-trades` (unscheduled legacy bridge code).
 
-#### Current runtime ownership: Supabase pg_cron is the sole schedule producer
+#### Current runtime: Supabase pg_cron → Edge Functions (COMPLETED)
 
-Supabase pg_cron owns all recurring job scheduling. Supabase hosts the Next.js App Router route handlers that pg_cron calls via pg_net. Vercel does not own any cron schedules.
+Runtime truth: `pg_cron → pg_net → Supabase Edge Functions → Supabase DB`. Vercel is the frontend deploy surface only. All recurring ingestion is Supabase-owned.
 
-1. All recurring jobs are triggered by Supabase pg_cron via pg_net HTTP POST to the App Router route.
-2. Supabase is retained only for dashboard delivery and read-oriented API/UI surfaces.
+**Symbology:** All Databento calls use `.c.0` continuous front-month contracts with `stype_in=continuous`. No manual contract-roll logic. `contract-roll.ts` in `_shared/` is dead code.
 
-| Responsibility | Current route | Current schedule | Current write surface |
+| pg_cron Job | Schedule | Edge Function | Writes |
 | --- | --- | --- | --- |
-| MES minute pull (primary) | `app/api/cron/mes-1m/route.ts` | Supabase `pg_cron`: `* * * * 0-5` (`public.run_mes_1m_pull`) | `mes_1m`, `mes_15m`, `job_log` |
-| MES catch-up (legacy manual only) | `app/api/cron/mes-catchup/route.ts` | no recurring schedule | `mes_1m`, `mes_15m`, `mes_1h`, `mes_4h`, `mes_1d`, `job_log` |
-| Cross-asset catch-up | `app/api/cron/cross-asset/route.ts` | `*/15 * * * *` | `cross_asset_1h`, `cross_asset_1d`, `job_log` |
-| FRED rates | `app/api/cron/fred/[category]/route.ts` | `0 5 * * *` | `econ_rates_1d`, `job_log` |
-| FRED yields | `app/api/cron/fred/[category]/route.ts` | `0 6 * * *` | `econ_yields_1d`, `job_log` |
-| FRED vol | `app/api/cron/fred/[category]/route.ts` | `0 7 * * *` | `econ_vol_1d`, `job_log` |
-| FRED inflation (realized only) | `app/api/cron/fred/[category]/route.ts` | `0 8 * * *` | `econ_inflation_1d`, `job_log` |
-| Massive inflation expectations | `app/api/cron/massive/inflation-expectations/route.ts` | `30 8 * * *` | `econ_inflation_1d`, `job_log` |
-| FRED fx | `app/api/cron/fred/[category]/route.ts` | `0 9 * * *` | `econ_fx_1d`, `job_log` |
-| FRED labor | `app/api/cron/fred/[category]/route.ts` | `0 10 * * *` | `econ_labor_1d`, `job_log` |
-| FRED activity | `app/api/cron/fred/[category]/route.ts` | `0 11 * * *` | `econ_activity_1d`, `job_log` |
-| FRED commodities | `app/api/cron/fred/[category]/route.ts` | `0 12 * * *` | `econ_commodities_1d`, `job_log` |
-| FRED money | `app/api/cron/fred/[category]/route.ts` | `0 13 * * *` | `econ_money_1d`, `job_log` |
-| FRED indexes | `app/api/cron/fred/[category]/route.ts` | `0 14 * * *` | `econ_indexes_1d`, `job_log` |
-| Economic calendar | `app/api/cron/econ-calendar/route.ts` | `0 15 * * *` | `econ_calendar`, `job_log` |
-| Geopolitical risk | `app/api/cron/gpr/route.ts` | `0 19 * * *` | `geopolitical_risk_1d`, `job_log` |
-| Trump effect | `app/api/cron/trump-effect/route.ts` | `30 19 * * *` | `trump_effect_1d`, `job_log` |
-| Detect setups | `app/api/cron/detect-setups/route.ts` | `*/5 12-21 * * 1-5` | legacy `warbird_*` setup stack, `job_log` |
-| Measured moves | `app/api/cron/measured-moves/route.ts` | `0 18 * * 1-5` | `measured_moves`, `job_log` |
-| Score trades | `app/api/cron/score-trades/route.ts` | **STOPPED** — removed from Supabase cron migration files 2026-03-26 | `trade_scores`, `job_log` |
-| Legacy forecast check | `app/api/cron/forecast/route.ts` | `30 * * * 1-5` | legacy `warbird_forecasts_1h`, `job_log` |
+| `warbird_mes_1m_pull` | `* * * * 0-5` (every min Sun-Fri) | `mes-1m` (Databento Live API, ohlcv-1s → 1m/15m) | `mes_1m`, `mes_15m`, `job_log` |
+| `warbird_mes_hourly_pull` | `5 * * * 0-5` (:05 hourly Sun-Fri) | `mes-hourly` (ohlcv-1h + ohlcv-1d, rolls 1h→4h) | `mes_1h`, `mes_4h`, `mes_1d`, `job_log` |
+| `warbird_cross_asset_s0` | `5 * * * 0-5` (:05 hourly Sun-Fri) | `cross-asset` shard 0 | `cross_asset_1h`, `cross_asset_1d`, `job_log` |
+| `warbird_cross_asset_s1` | `6 * * * 0-5` (:06 hourly Sun-Fri) | `cross-asset` shard 1 | `cross_asset_1h`, `cross_asset_1d`, `job_log` |
+| `warbird_cross_asset_s2` | `7 * * * 0-5` (:07 hourly Sun-Fri) | `cross-asset` shard 2 | `cross_asset_1h`, `cross_asset_1d`, `job_log` |
+| `warbird_cross_asset_s3` | `8 * * * 0-5` (:08 hourly Sun-Fri) | `cross-asset` shard 3 | `cross_asset_1h`, `cross_asset_1d`, `job_log` |
+| `warbird_fred_rates` | `45 2 * * 1-5` (02:45 Mon-Fri) | `fred?category=rates` | `econ_rates_1d`, `job_log` |
+| `warbird_fred_yields` | `55 2 * * 1-5` (02:55 Mon-Fri) | `fred?category=yields` | `econ_yields_1d`, `job_log` |
+| `warbird_fred_vol` | `5 3 * * 1-5` (03:05 Mon-Fri) | `fred?category=vol` | `econ_vol_1d`, `job_log` |
+| `warbird_fred_inflation` | `15 3 * * 1-5` (03:15 Mon-Fri) | `fred?category=inflation` | `econ_inflation_1d`, `job_log` |
+| `warbird_fred_fx` | `25 3 * * 1-5` (03:25 Mon-Fri) | `fred?category=fx` | `econ_fx_1d`, `job_log` |
+| `warbird_fred_labor` | `35 3 * * 1-5` (03:35 Mon-Fri) | `fred?category=labor` | `econ_labor_1d`, `job_log` |
+| `warbird_fred_activity` | `45 3 * * 1-5` (03:45 Mon-Fri) | `fred?category=activity` | `econ_activity_1d`, `job_log` |
+| `warbird_fred_money` | `55 3 * * 1-5` (03:55 Mon-Fri) | `fred?category=money` | `econ_money_1d`, `job_log` |
+| `warbird_fred_commodities` | `5 4 * * 1-5` (04:05 Mon-Fri) | `fred?category=commodities` | `econ_commodities_1d`, `job_log` |
+| `warbird_fred_indexes` | `15 4 * * 1-5` (04:15 Mon-Fri) | `fred?category=indexes` | `econ_indexes_1d`, `job_log` |
+| `warbird_econ_calendar` | `20 4 * * 1-5` (04:20 Mon-Fri) | `econ-calendar` | `econ_calendar`, `job_log` |
+| `warbird_massive_inflation` | `30 4 * * 1-5` (04:30 Mon-Fri) | `massive-inflation` | `econ_inflation_1d`, `job_log` |
+| `warbird_massive_ie` | `40 4 * * 1-5` (04:40 Mon-Fri) | `massive-inflation-expectations` | `econ_inflation_1d`, `job_log` |
+| `warbird_trump_effect_pull` | `0 8 * * 1-5` (08:00 Mon-Fri) | `trump-effect` | `trump_effect_1d`, `job_log` |
+| `warbird_finnhub_raw_pull` | `5,20,35,50 11-23 * * 1-5` (4x/hr) | `finnhub-news` | `econ_news_finnhub_*`, `job_log` |
+| `warbird_refresh_news_signals` | `2,17,32,47 11-23 * * 1-5` (4x/hr) | N/A (in-DB matview refresh) | `news_signals` |
 
-#### Target runtime ownership: Supabase-owned schedules and functions
+**Removed:** `warbird_newsfilter_raw_pull` (no free API), `warbird_gpr_pull` (backfill-only, manual monthly).
 
-The target runtime for recurring jobs is:
+**Unscheduled legacy:** `detect-setups` and `score-trades` are Vercel App Router routes with NO pg_cron schedule. They write to empty legacy `warbird_*` tables and must be ported to Edge Functions writing canonical tables.
 
-1. Supabase-owned schedules
-2. Supabase-owned function execution for recurring ingestion, aggregation, and publish-up work
-3. Supabase retained only for dashboard delivery and read-oriented API/UI surfaces
+#### Cross-asset pipeline detail
 
-Target Supabase-owned recurring function inventory:
+The `cross-asset` Edge Function (`supabase/functions/cross-asset/index.ts`):
+1. Queries `symbols` for all active `DATABENTO` symbols (excludes MES and `.OPT`)
+2. Shards by `index % shardCount` — 4 shards cover all ~17 symbols within 4 minutes
+3. For each symbol: finds latest `cross_asset_1h` row, pulls incremental `ohlcv-1h` from Databento Historical API
+4. Upserts new 1h bars, then re-aggregates touched days into `cross_asset_1d`
+5. All symbols use `.c.0` continuous contracts — Databento handles contract rolls automatically
 
-| Target function | Replaces current route | Writes |
-| --- | --- | --- |
-| `mes-1m-pull` | `/api/cron/mes-1m` | `mes_1m`, `mes_15m`, `job_log` |
-| `mes-catchup` (legacy/manual) | `/api/cron/mes-catchup` | `mes_*`, `job_log` |
-| `cross-asset` | `/api/cron/cross-asset` | `cross_asset_*`, `job_log` |
-| `fred-rates` | `/api/cron/fred/rates` | `econ_rates_1d`, `job_log` |
-| `fred-yields` | `/api/cron/fred/yields` | `econ_yields_1d`, `job_log` |
-| `fred-vol` | `/api/cron/fred/vol` | `econ_vol_1d`, `job_log` |
-| `fred-inflation` | `/api/cron/fred/inflation` | `econ_inflation_1d`, `job_log` |
-| `massive-inflation-expectations` | `/api/cron/massive/inflation-expectations` | `econ_inflation_1d`, `job_log` |
-| `fred-fx` | `/api/cron/fred/fx` | `econ_fx_1d`, `job_log` |
-| `fred-labor` | `/api/cron/fred/labor` | `econ_labor_1d`, `job_log` |
-| `fred-activity` | `/api/cron/fred/activity` | `econ_activity_1d`, `job_log` |
-| `fred-commodities` | `/api/cron/fred/commodities` | `econ_commodities_1d`, `job_log` |
-| `fred-money` | `/api/cron/fred/money` | `econ_money_1d`, `job_log` |
-| `fred-indexes` | `/api/cron/fred/indexes` | `econ_indexes_1d`, `job_log` |
-| `econ-calendar` | `/api/cron/econ-calendar` | `econ_calendar`, `job_log` |
-| `gpr` | `/api/cron/gpr` | `geopolitical_risk_1d`, `job_log` |
-| `trump-effect` | `/api/cron/trump-effect` | `trump_effect_1d`, `job_log` |
-| `detect-setups` | `/api/cron/detect-setups` | canonical setup tables + dashboard live state + `job_log` |
-| `measured-moves` | `/api/cron/measured-moves` | `measured_moves`, `job_log` |
-| `score-trades` | `/api/cron/score-trades` | trade outcomes + `job_log` |
-| `setup-outcome-publish` (legacy `/api/cron/forecast` route name until cutover) | `/api/cron/forecast` | `warbird_active_signals_v`, `warbird_active_packet_metrics_v`, `warbird_active_packet_recommendations_v`, `job_log` |
+**Dashboard symbol bar** reads `cross_asset_1h` for HG/NQ/6E/CL (latest 2 rows → current vs previous close → green/red MES-aligned tiles).
 
 #### Runtime rules
 
-1. Supabase pg_cron is the only schedule producer. No recurring schedules in `Supabase cron migration files`.
-2. Every recurring job must keep `job_log` writes, deterministic schedule ownership, and explicit input/output table lists.
-3. Local research runs are allowed, but recurring production ownership must end up in Supabase, not Supabase and not a local always-on process.
-4. Supabase is for the Next.js frontend dashboard and read-oriented API/UI route handlers only.
+1. Supabase pg_cron is the sole schedule producer. All schedules are defined in `supabase/migrations/` SQL files.
+2. Every recurring job logs to `job_log` on success, failure, and skip.
+3. Local machines are for training/research only — no recurring production ingestion.
+4. Vercel hosts the Next.js frontend dashboard and read-oriented API/UI route handlers only.
 
 ---
 

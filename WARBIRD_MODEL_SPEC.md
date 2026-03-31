@@ -1,6 +1,6 @@
 # WARBIRD MODEL SPEC — v3
 
-**Date:** 2026-03-28
+**Date:** 2026-03-31
 **Status:** Reference-Only, aligned to the active plan
 **Governing source:** `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
 
@@ -27,7 +27,7 @@ This document is a subordinate reference for the model contract. It must not ove
 15. The canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`.
 16. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
 17. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
-18. Cloud core support data starts at `2018-01-01T00:00:00Z`. All MES ingestion uses `MES.c.0` continuous contract via Databento Live API (real-time) and Historical API (backfill). No manual contract-roll logic.
+18. Cloud core support data starts at `2018-01-01T00:00:00Z`. All Databento ingestion uses `.c.0` continuous front-month contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic. `contract-roll.ts` is dead code. MES uses `MES.c.0` via Live API (real-time) and Historical API (backfill). Cross-asset symbols (NQ, RTY, CL, HG, 6E, 6J, etc.) use `{SYMBOL}.c.0` via Historical API `ohlcv-1h`, pulled hourly by the `cross-asset` Edge Function.
 19. The operator-approved fib visual spec is a contract. Colors, line widths, line styles, and visible level-label presentation must be reproduced exactly across Pine and dashboard renderers unless explicitly reapproved.
 
 ---
@@ -306,18 +306,24 @@ The regime gate produces a continuous score (0-100) from grouped intraday indica
 
 **AG Training Basket — CME Globex (Databento GLBX.MDP3):**
 
-| Group | Symbols | Detection | Databento |
-|---|---|---|---|
-| Leadership | NQ (`CME_MINI:NQ1!`) | EMA trend, relative strength vs MES | NQ.c.0 |
-| Risk Appetite | RTY (`CME_MINI:RTY1!`), CL (`NYMEX:CL1!`), HG (`COMEX:HG1!`) | EMA trend, correlation divergence | RTY.c.0, CL.c.0, HG.c.0 |
-| Macro-FX | 6E (`CME:6E1!`), 6J (`CME:6J1!`) | EMA trend, risk-on/risk-off flow | 6E.c.0, 6J.c.0 |
-| Execution | ES VWAP state/event, range expansion, efficiency | Chart-native, zero security calls | N/A |
+All 6 symbols use `.c.0` continuous contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic needed.
+
+| Group | Symbols | Detection | Databento | Data Pipeline |
+|---|---|---|---|---|
+| Leadership | NQ (`CME_MINI:NQ1!`) | EMA trend, relative strength vs MES | NQ.c.0 | `cross-asset` Edge Function → `cross_asset_1h` (hourly) |
+| Risk Appetite | RTY (`CME_MINI:RTY1!`), CL (`NYMEX:CL1!`), HG (`COMEX:HG1!`) | EMA trend, correlation divergence | RTY.c.0, CL.c.0, HG.c.0 | `cross-asset` Edge Function → `cross_asset_1h` (hourly) |
+| Macro-FX | 6E (`CME:6E1!`), 6J (`CME:6J1!`) | EMA trend, risk-on/risk-off flow | 6E.c.0, 6J.c.0 | `cross-asset` Edge Function → `cross_asset_1h` (hourly) |
+| Execution | ES VWAP state/event, range expansion, efficiency | Chart-native, zero security calls | N/A | Computed from MES OHLCV directly |
+
+**Dashboard symbol bar:** HG, NQ, 6E, CL displayed as green/red tiles from `cross_asset_1h` (latest 2 rows → hourly change). All positive polarity (up = MES-aligned = green).
 
 **ES chart-native vol fills VIX/VVIX gap:** ATR ratio, range expansion, intrabar efficiency, VWAP state/event — all computed from MES OHLCV directly.
 
 State machine: NEUTRAL(0) → BULL(1) / BEAR(-1). Score > 65 for N bars → BULL. Score < 35 for N bars → BEAR. Exit to NEUTRAL at 50. Override (direct bull↔bear) only when multiple groups extreme same direction.
 
 **Why CME-only:** AG training needs 15m historical data from Databento. NYSE internals (TICK, VOLD), CBOE indices (VIX, VVIX, VIX3M), and ETFs (HYG) are only available on separate exchanges not covered by the CME Standard plan.
+
+**Data tables:** `cross_asset_1h` (hourly, Edge Function), `cross_asset_15m` (15m, backfill script for AG training), `cross_asset_1d` (daily, derived from 1h).
 
 ### 6b. Daily Context Exports (NOT gate members)
 
@@ -384,7 +390,7 @@ All metrics are deterministic, point-in-time safe, and require no external depen
 
 ## 8. Hidden Export Contract
 
-The active `v6` indicator must expose stable machine-readable outputs for local training capture.
+The active `v7` indicator (`indicators/v7-warbird-institutional.pine`) must expose stable machine-readable outputs for local training capture.
 
 TradingView enforces a hard maximum of `64` plot counts per script, and hidden `display.none` plots still count toward that limit.
 
@@ -405,9 +411,11 @@ Minimum required hidden fields:
 - `ml_event_shock_score`
 - `ml_event_reversal_score`
 - `ml_event_nq_state`
-- `ml_event_dxy_state`
-- `ml_event_zn_state`
-- `ml_event_vix_state`
+- `ml_event_rty_state`
+- `ml_event_cl_state`
+- `ml_event_hg_state`
+- `ml_event_eur_state`
+- `ml_event_jpy_state`
 - `ml_event_pivot_interaction_code`
 - `ml_ema21_dir`
 - `ml_ema50_dir`
@@ -435,7 +443,7 @@ Minimum required hidden fields:
 - `ml_obv`
 - `ml_mfi_14`
 
-The live `v6` indicator exports the minimum subset above. Research-only diagnostics outside this list stay out of the live Pine packet until a later checkpoint re-admits them without breaking the TradingView plot budget.
+The live `v7` indicator exports the minimum subset above. Research-only diagnostics outside this list stay out of the live Pine packet until a later checkpoint re-admits them without breaking the TradingView plot budget.
 
 The export contract must remain always-on and schema-stable for training capture.
 
@@ -495,7 +503,7 @@ Primary live planning source:
 
 Primary current Pine target:
 
-- `indicators/v6-warbird-complete.pine`
+- `indicators/v7-warbird-institutional.pine` (active work surface, v6 is legacy baseline)
 
 Planned AG build surfaces:
 
