@@ -473,9 +473,9 @@ The live chart never waits on AG.
 
 ### Required Design Changes
 
-1. ~~Stop treating intermarket as just confirmation color.~~ DONE — weighted scored regime with hysteresis.
-2. ~~Turn every external series into a scored feature or explicit gate.~~ DONE.
-3. ~~Reduce duplicated logic and repeated `request.*()` calls.~~ DONE — 6 of 40 budget used.
+1. ~~Stop treating intermarket as just confirmation color.~~ DONE — grouped weighted regime scoring (flow/vol/participation/execution → 0-100) with hysteresis, persistence, cooldown, override.
+2. ~~Turn every external series into a scored feature or explicit gate.~~ DONE — 6 intraday gate members, 2 daily context exports. ES execution quality block added (VWAP, range, efficiency).
+3. ~~Reduce duplicated logic and repeated `request.*()` calls.~~ DONE — 12 of 40 budget used. 64/64 plot budget (0 headroom).
 4. ~~Build one shared rule block for both the indicator and the strategy.~~ Retired — strategy path retired 2026-03-26.
 
 ---

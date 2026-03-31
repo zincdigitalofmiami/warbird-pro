@@ -1,15 +1,32 @@
 // This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © Kirk / ZINC Digital
-// Warbird v7 Institutional — LuxAlgo-Informed ICT/SMC Upgrade
+// Warbird v7 Institutional — Flow-Based Intermarket + Grouped Regime Scoring
 // Base: v6-warbird-complete.pine (2026-03-26)
-// Upgrade: ICT/SMC institutional features, VVIX/SMH intermarket, TA Core Pack offloaded
-// Date: 2026-03-29
+// Upgrade: Flow-based leading intermarket, grouped regime scoring, ES execution quality
+// Date: 2026-03-30
 //
 // NO-REPAINT AUDIT:
 // - All structure conditions gated by barstate.isconfirmed — signals fire at bar close only
 // - request.security(): lookahead_off on all calls
 // - Structure conditions: close-based, bar-close semantics
 // - Last verified: 2026-03-30
+//
+// ── FEATURE CONTRACT (locked 2026-03-30) ──
+// SIGN CONVENTION: positive = bullish/risk-on. negative = bearish/risk-off. zero = neutral.
+//   flow_score > 0 = buying pressure (TICK+, VOLD+)
+//   vol_score > 0 = supportive vol (low VVIX, VTS contango) — raw INVERTED at group boundary
+//   part_score > 0 = supportive breadth (RTY up, HYG up)
+//   exec_score > 0 = supportive execution (above VWAP, expanding range, high efficiency)
+// REGIME STATE MACHINE: NEUTRAL(0)→BULL(1)/BEAR(-1). No direct bull↔bear without override.
+//   Override: flow_score AND vol_score both extreme same direction. Bypasses persistence+cooldown.
+//   Normal transitions: score > upper for confirmBars → BULL. Score < lower for confirmBars → BEAR.
+//   Exit to NEUTRAL: score crosses midline for confirmBars. Neutralize after prolonged mid-range.
+// VWAP CODE: +2=reclaim, +1=above, 0=in-band, -1=below, -2=reject. Band=5% ATR around VWAP.
+// IMPULSE QUALITY: direction-relative. Higher = better for THIS setup direction.
+//   Components: TICK persistence, VOLD expansion, range expansion, efficiency, VWAP alignment.
+// AGREEMENT VELOCITY: Δ(net atomic alignment). Level=consensus, Δ=momentum of consensus.
+// GROUP WEIGHTS (AG tunes): flow(30%) + vol(45%) + participation(15%) + execution(10%).
+// WITHIN-GROUP: flow(TICK 50/VOLD 50), vol(VVIX 55/VTS 45), part(RTY 75/HYG 25).
 //
 // REQUEST.SECURITY() BUDGET:
 // Intermarket (60min): TICK, VOLD, VVIX, VIX, VIX3M, HYG, RTY = 7 calls
@@ -19,6 +36,9 @@
 // HTF fib (4H):        [high, low] tuple                 = 1 call
 // HTF fib (1D):        [high, low] tuple                 = 1 call
 // TOTAL:                                                 = 12 of 40 (30%)
+//
+// PLOT BUDGET: 61 plot + 3 alertcondition = 64/64 (0 headroom)
+// TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed.
 //@version=6
 indicator("Warbird v7 Institutional", shorttitle="WB v7", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100)
 import TradingView/ZigZag/7 as zigzag
@@ -532,6 +552,11 @@ bool tickBull = tick > 0
 bool tickBear = tick < 0
 bool voldBull = vold > 0
 bool voldBear = vold < 0
+// TICK/VOLD persistence counters (for impulse quality)
+var int tickBullRun = 0
+var int tickBearRun = 0
+tickBullRun := tickBull ? tickBullRun + 1 : 0
+tickBearRun := tickBear ? tickBearRun + 1 : 0
 
 // Price instruments use EMA trend detection
 float vvxMA = ta.ema(vvx, maLen)
@@ -552,41 +577,103 @@ bool hygBear = hygDown
 // RTY: small-cap up = broad risk appetite = MES up
 bool rtyBull = rtyUp
 bool rtyBear = rtyDown
-// SKEW: low = calm = MES up, high = tail hedging = MES down (daily regime gate)
+// SKEW: daily-only context — NOT in the 15m regime gate. AG uses as training feature.
 bool skewRiskOn = skew < 140
 bool skewRiskOff = skew > 155
 
-// All 7 must agree — any one off = no trade
-bool candidateOn = tickBull and voldBull and vvxRiskOn and vtsRiskOn and hygBull and rtyBull and skewRiskOn
-bool candidateOff = tickBear and voldBear and vvxRiskOff and vtsRiskOff and hygBear and rtyBear and skewRiskOff
-bool onExclusive = candidateOn and not candidateOff
-bool offExclusive = candidateOff and not candidateOn
+//=====================
+// ES EXECUTION QUALITY (chart-native, zero security calls)
+//=====================
+float vwapVal = ta.vwap(hlc3)
+float vwapBand = atrRaw * 0.05
+// VWAP state: +1 above band, -1 below band, 0 inside tolerance
+int vwapState = close > vwapVal + vwapBand ? 1 : close < vwapVal - vwapBand ? -1 : 0
+int prevVwapSt = nz(vwapState[1], 0)
+// VWAP code: +2 reclaim (was below, now above), -2 reject (was above, now below)
+// Tolerance band ALWAYS outputs 0. Reclaim/reject only fire when close is clearly outside band.
+int vwapCode = vwapState == 0 ? 0 : vwapState == 1 ? (prevVwapSt == -1 ? 2 : 1) : (prevVwapSt == 1 ? -2 : -1)
+// barRange already defined in volume delta section (line ~497)
+float avgRange5 = ta.sma(barRange, 5)
+float rangeExpansion = barRange / math.max(avgRange5, syminfo.mintick)
+float rangeExpClamped = math.min(rangeExpansion, 5.0)
+float barEfficiency = math.abs(close - open) / math.max(barRange, syminfo.mintick)
+
+//=====================
+// GROUPED REGIME SCORING (replaces unanimous gate)
+// Group structure prevents correlated features from double-counting.
+// Sign convention: positive = bullish/risk-on, negative = bearish/risk-off, zero = neutral.
+//=====================
+// Flow group (TICK + VOLD): equal weight, both measure NYSE order flow
+float tickSignal = tickBull ? 1.0 : tickBear ? -1.0 : 0.0
+float voldSignal = voldBull ? 1.0 : voldBear ? -1.0 : 0.0
+float flowScore = 0.5 * tickSignal + 0.5 * voldSignal
+// Vol group (VVIX + VTS): VVIX leads by 1-3 bars, slightly heavier
+// INVERTED at group boundary: low VVIX = risk-on = POSITIVE, contango VTS = risk-on = POSITIVE
+float vvixSignal = vvxRiskOn ? 1.0 : vvxRiskOff ? -1.0 : 0.0
+float vtsSignal = vtsRiskOn ? 1.0 : vtsRiskOff ? -1.0 : 0.0
+float volScore = 0.55 * vvixSignal + 0.45 * vtsSignal
+// Participation group: RTY primary (0.75), HYG confirmer (0.25)
+float rtySignal = rtyBull ? 1.0 : rtyBear ? -1.0 : 0.0
+float hygSignal = hygBull ? 1.0 : hygBear ? -1.0 : 0.0
+float partScore = 0.75 * rtySignal + 0.25 * hygSignal
+// Execution group: VWAP direction with quality confirmation
+// Reclaim/reject = full signal, steady state = partial, in-band = zero
+float execDir = vwapCode == 2 ? 1.0 : vwapCode == -2 ? -1.0 : vwapCode == 1 ? 0.5 : vwapCode == -1 ? -0.5 : 0.0
+float execQual = 0.5 * barEfficiency + 0.5 * math.min(rangeExpClamped / 3.0, 1.0)
+float execScore = execDir * (0.5 + 0.5 * execQual)
+// Regime score: weighted group sum → 0-100
+// flow(30) + vol(45) + participation(15) + execution(10) = 100
+float regimeRaw = 0.30 * flowScore + 0.45 * volScore + 0.15 * partScore + 0.10 * execScore
+float regimeScore = math.max(0.0, math.min(100.0, (regimeRaw + 1.0) * 50.0))
+
+//=====================
+// REGIME STATE MACHINE (score-based with hysteresis)
+// States: NEUTRAL(0), BULL(1), BEAR(-1)
+// No direct bull↔bear without override.
+// Override: flow + vol both extreme in same direction — bypasses persistence and cooldown.
+//=====================
+float overrideHigh = 0.8
+float overrideLow = -0.8
+bool overrideBull = flowScore > overrideHigh and volScore > overrideHigh
+bool overrideBear = flowScore < overrideLow and volScore < overrideLow
+float upperThresh = 65.0
+float lowerThresh = 35.0
+float midThresh = 50.0
 var int regime = 0
-var int onStreak = 0
-var int offStreak = 0
-var int inactiveStreak = 0
+var int entryBullStreak = 0
+var int entryBearStreak = 0
+var int exitStreak = 0
+var int neutralCount = 0
 var int lastFlipBar = na
-onStreak := onExclusive ? onStreak + 1 : 0
-offStreak := offExclusive ? offStreak + 1 : 0
-inactiveStreak := (not candidateOn and not candidateOff) ? inactiveStreak + 1 : 0
+entryBullStreak := regimeScore > upperThresh ? entryBullStreak + 1 : 0
+entryBearStreak := regimeScore < lowerThresh ? entryBearStreak + 1 : 0
+bool wantExit = (regime == 1 and regimeScore < midThresh) or (regime == -1 and regimeScore > midThresh)
+exitStreak := wantExit ? exitStreak + 1 : 0
+bool inNeutralZone = regimeScore >= lowerThresh and regimeScore <= upperThresh
+neutralCount := inNeutralZone ? neutralCount + 1 : 0
 if useIntermarket
     bool canFlip = na(lastFlipBar) or (bar_index - lastFlipBar >= cooldownBars)
     if regime == 0
-        if onStreak >= confirmBars
+        if entryBullStreak >= confirmBars or overrideBull
             regime := 1
             lastFlipBar := bar_index
-        else if offStreak >= confirmBars
+        else if entryBearStreak >= confirmBars or overrideBear
             regime := -1
             lastFlipBar := bar_index
     else if regime == 1
-        if offStreak >= confirmBars and canFlip
+        if overrideBear and canFlip
             regime := -1
             lastFlipBar := bar_index
+        else if exitStreak >= confirmBars
+            regime := 0
     else if regime == -1
-        if onStreak >= confirmBars and canFlip
+        if overrideBull and canFlip
             regime := 1
             lastFlipBar := bar_index
-    if neutralizeBars > 0 and inactiveStreak >= neutralizeBars
+        else if exitStreak >= confirmBars
+            regime := 0
+    // Neutralize stale regime if score stays in mid-range too long
+    if neutralizeBars > 0 and neutralCount >= neutralizeBars and regime != 0
         regime := 0
 else
     regime := 0
@@ -598,9 +685,10 @@ bool riskOn = riskOnBase
 bool riskOff = riskOffBase
 
 // Atomic intermarket states for AG (signed: 1=bull/risk-on, -1=bear/risk-off, 0=neutral)
+// Sign convention matches feature contract: positive = supportive for MES longs
 int eventTickState = tickBull ? 1 : tickBear ? -1 : 0
 int eventVoldState = voldBull ? 1 : voldBear ? -1 : 0
-int eventVvixState = vvxRiskOff ? 1 : vvxRiskOn ? -1 : 0
+int eventVvixState = vvxRiskOn ? 1 : vvxRiskOff ? -1 : 0
 int eventVtsState = vtsRiskOn ? 1 : vtsRiskOff ? -1 : 0
 int eventHygState = hygBull ? 1 : hygBear ? -1 : 0
 int eventRtyState = rtyBull ? 1 : rtyBear ? -1 : 0
@@ -609,7 +697,7 @@ int eventSkewState = skewRiskOn ? 1 : skewRiskOff ? -1 : 0
 if enableDebugLogs and barstate.isconfirmed
     bool stateFlip = riskOn != riskOn[1] or riskOff != riskOff[1] or regime != regime[1]
     if stateFlip
-        log.info(str.format("WBDBG_STATE bar={0} useIM={1} regime={2} riskOn={3} riskOff={4} candOn={5} candOff={6}", bar_index, useIntermarket, regime, riskOn, riskOff, candidateOn, candidateOff))
+        log.info(str.format("WBDBG_STATE bar={0} useIM={1} regime={2} riskOn={3} riskOff={4} score={5}", bar_index, useIntermarket, regime, riskOn, riskOff, regimeScore))
     if riskOn == riskOff
         log.info("WBDBG_CONTRADICTION bar={0} regime={1} riskOn={2} riskOff={3}", bar_index, regime, riskOn, riskOff)
 
@@ -687,17 +775,37 @@ if isValid
     if d100 < nearest
         fibLevelTouched := 100
 
-bool shockContinuation = dir == 1 ? (eventTickState == 1 and eventVtsState >= 0 and eventVvixState <= 0) : (eventTickState == -1 and eventVtsState <= 0 and eventVvixState >= 0)
-bool shockFailure = dir == 1 ? (eventTickState == -1 or eventVtsState == -1 or eventVvixState == 1) : (eventTickState == 1 or eventVtsState == 1 or eventVvixState == -1)
-// Alignment count: how many of 7 agree on direction (for shock scoring)
-int alignOn = (tickBull ? 1 : 0) + (voldBull ? 1 : 0) + (vvxRiskOn ? 1 : 0) + (vtsRiskOn ? 1 : 0) + (hygBull ? 1 : 0) + (rtyBull ? 1 : 0) + (skewRiskOn ? 1 : 0)
-int alignOff = (tickBear ? 1 : 0) + (voldBear ? 1 : 0) + (vvxRiskOff ? 1 : 0) + (vtsRiskOff ? 1 : 0) + (hygBear ? 1 : 0) + (rtyBear ? 1 : 0) + (skewRiskOff ? 1 : 0)
+// Shock logic: with corrected VVIX sign (positive = risk-on = supportive for longs)
+bool shockContinuation = dir == 1 ? (eventTickState == 1 and eventVtsState >= 0 and eventVvixState >= 0) : (eventTickState == -1 and eventVtsState <= 0 and eventVvixState <= 0)
+bool shockFailure = dir == 1 ? (eventTickState == -1 or eventVtsState == -1 or eventVvixState == -1) : (eventTickState == 1 or eventVtsState == 1 or eventVvixState == 1)
+// Alignment count: how many of 6 intraday flow indicators agree (SKEW excluded — daily only)
+int alignOn = (tickBull ? 1 : 0) + (voldBull ? 1 : 0) + (vvxRiskOn ? 1 : 0) + (vtsRiskOn ? 1 : 0) + (hygBull ? 1 : 0) + (rtyBull ? 1 : 0)
+int alignOff = (tickBear ? 1 : 0) + (voldBear ? 1 : 0) + (vvxRiskOff ? 1 : 0) + (vtsRiskOff ? 1 : 0) + (hygBear ? 1 : 0) + (rtyBear ? 1 : 0)
 float eventShockScore = math.max(0.0, math.min(100.0, math.abs(float(alignOn - alignOff)) * 12.0 + math.abs(ta.roc(close, 1)) / (atrRaw + 0.0001) * 20.0 + (conflictBreak ? 20.0 : 0.0)))
 float eventReversalScore = math.max(0.0, math.min(100.0, (breakAgainstConfirmed ? 45.0 : 0.0) + (rejectConfirmed ? 35.0 : 0.0) + (conflictBreak ? 20.0 : 0.0)))
 int eventModeCode = conflictBreak ? 6 : shockFailure ? 2 : shockContinuation ? 1 : rejectConfirmed ? 3 : 0
 
+// Agreement velocity: Δ of net atomic alignment count (level=consensus, change=momentum)
+int netAlignment = alignOn - alignOff
+int agreementVelocity = netAlignment - nz(netAlignment[1], 0)
+
 float confidenceRaw = 50.0 + float(alignOn - alignOff) * 5.0 + (setupAcceptContinuation ? 12.0 : 0.0) - (setupZoneRejection ? 8.0 : 0.0) - (conflictBreak ? 12.0 : 0.0) + (targetEligible20pt ? 8.0 : -12.0)
 float confidenceScore = math.max(0.0, math.min(100.0, confidenceRaw))
+
+// Impulse quality: direction-relative composite (higher = better quality for this setup's direction)
+// Components normalized to [0, 1], combined as weighted sum → 0-100
+float iqTick = 0.0
+float iqVold = 0.0
+float iqVwap = 0.0
+if dir == 1
+    iqTick := math.min(float(tickBullRun), 10.0) / 10.0
+    iqVold := voldBull ? (vold > nz(vold[1]) ? 1.0 : 0.5) : 0.0
+    iqVwap := vwapState == 1 ? 1.0 : vwapState == 0 ? 0.5 : 0.0
+else
+    iqTick := math.min(float(tickBearRun), 10.0) / 10.0
+    iqVold := voldBear ? (vold < nz(vold[1]) ? 1.0 : 0.5) : 0.0
+    iqVwap := vwapState == -1 ? 1.0 : vwapState == 0 ? 0.5 : 0.0
+float impulseQuality = math.min(100.0, (0.25 * iqTick + 0.25 * iqVold + 0.20 * math.min(rangeExpClamped / 3.0, 1.0) + 0.20 * barEfficiency + 0.10 * iqVwap) * 100.0)
 
 // RVOL gate: require volume confirmation on entry (volRatio = volume / SMA(volume, 20))
 bool rvolOK = volRatio >= rvolMin
@@ -988,6 +1096,14 @@ plot(float(eventSkewState), "ml_event_skew_state", display=display.none)
 plot(vtsRatio, "ml_vts_ratio", display=display.none)
 plot(float(eventPivotInteractionCode), "ml_event_pivot_interaction_code", display=display.none)
 
+// ── ES EXECUTION QUALITY + REGIME SCORE + AGREEMENT + IMPULSE (6 new exports) ──
+plot(float(vwapCode), "ml_vwap_code", display=display.none)
+plot(rangeExpClamped, "ml_range_expansion", display=display.none)
+plot(barEfficiency, "ml_efficiency", display=display.none)
+plot(float(agreementVelocity), "ml_agreement_velocity", display=display.none)
+plot(impulseQuality, "ml_impulse_quality", display=display.none)
+plot(regimeScore, "ml_regime_score", display=display.none)
+
 // ── EMA DISTANCE (3 magnitudes — direction codes dropped, collinear with IM regime) ──
 // ml_ema21_dir / ml_ema50_dir / ml_ema200_dir removed — collinear with IM regime and dist_pct.
 // Distance % carries both sign and magnitude; direction codes are a strict subset.
@@ -1035,9 +1151,9 @@ plot(contrChoch ? 1.0 : 0.0, "ml_contrarian_choch", display=display.none)
 
 // ── TA Core Pack: computation stays (used by AG packet gates), plot exports
 // ── offloaded to server-side (AG computes from Databento OHLCV) ──
-// ── PLOT BUDGET: 52 plots + 3 alertconditions = 55/64 (9 slots headroom) ──
-// ── Removed: stop_family_code(constant), im_bitmask(mis-typed for AG), trend_strength(collinear), ──
-// ── correlation_strength(collinear), ema_dir×3(collinear), entry_long/short_trigger(zero variance) ──
+// ── PLOT BUDGET: 61 plots + 3 alertconditions = 64/64 (0 headroom) ──
+// ── TA Core Pack exports (7 plots: di_spread, adx_slope, er_10, atr_pct, clv, signed_vol, vol_delta) ──
+// ── are AG server-side computable — cut candidates if budget slots needed ──
 
 //=====================
 // ALERTS

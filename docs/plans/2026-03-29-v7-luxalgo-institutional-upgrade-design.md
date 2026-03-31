@@ -1,7 +1,7 @@
 # Warbird v7 — LuxAlgo-Informed Institutional Upgrade Design
 
 **Date:** 2026-03-29
-**Status:** IMPLEMENTED — features built + intermarket basket fully replaced (flow-based leading indicators), regime gate simplified, TV-validated 58/64 budget
+**Status:** IMPLEMENTED — flow-based intermarket + grouped regime scoring + ES execution block + 6 new exports. TV-validated 64/64 budget. VVIX sign fixed.
 **Base:** Copy of `indicators/v6-warbird-complete.pine` → `indicators/v7-warbird-institutional.pine`
 **Governing plan:** `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
 
@@ -75,13 +75,13 @@ Removed the Decision Model dropdown and weighted scoring system. Single model: a
 | Fib engine / structure exports | 20 | 20 |
 | Intermarket / regime exports | 10 | 8 (7 symbol states + VTS ratio) |
 | Volume delta / CLV exports | 4 | 4 |
-| TA Core Pack exports | 15 | **0** (server-side) |
+| TA Core Pack exports | 15 | **7** (partial offload — 7 remain as AG cut candidates) |
 | Model contract exports (ml_*) | 11 | 11 |
-| **New institutional features** | **0** | **12** |
-| **Total plots** | **60** | **55** |
+| **New institutional features** | **0** | **11** (incl. 6 new: vwap_code, range_expansion, efficiency, agreement_velocity, impulse_quality, regime_score) |
+| **Total plots** | **60** | **61** |
 | Alertconditions | 3 | 3 |
-| **Budget used** | **63/64** | **58/64** |
-| **Headroom** | **1 slot** | **6 slots** |
+| **Budget used** | **63/64** | **64/64** |
+| **Headroom** | **1 slot** | **0 slots** (TA Core Pack 7 plots are cut candidates) |
 
 ## Security Call Budget
 

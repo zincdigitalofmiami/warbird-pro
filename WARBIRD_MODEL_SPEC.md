@@ -298,31 +298,49 @@ Tier 2 can influence the research conclusion, but it cannot enter the live Pine 
 
 ---
 
-## 6. Required Event-Response Layer
+## 6. Regime Gate + Context Layer
 
-The event-response block is mandatory.
+### 6a. Intraday Regime Gate (15m bar close, grouped scoring)
 
-It must score or gate at least these families:
+The regime gate produces a continuous score (0-100) from grouped intraday flow indicators. All update at 15m bar close. Sign convention: positive = bullish/risk-on, negative = bearish/risk-off.
+
+| Group | Weight | Symbols | Detection |
+|---|---|---|---|
+| Flow | 30% | TICK (`USI:TICK`), VOLD (`USI:VOLD`) | Zero threshold (> 0 bull, < 0 bear). Equal weight within group. |
+| Volatility | 45% | VVIX (`CBOE:VVIX`), VIX/VIX3M term structure | Level thresholds. INVERTED at group boundary (low VVIX = positive). VVIX 55% / VTS 45%. |
+| Participation | 15% | RTY (`CME_MINI:RTY1!`), HYG (`AMEX:HYG`) | EMA trend. RTY 75% / HYG 25%. |
+| Execution | 10% | ES VWAP state/event, range expansion, efficiency | Chart-native, zero security calls. |
+
+State machine: NEUTRAL(0) → BULL(1) / BEAR(-1). Score > 65 for N bars → BULL. Score < 35 for N bars → BEAR. Exit to NEUTRAL at 50. Override (direct bull↔bear) only when flow AND vol both extreme same direction.
+
+### 6b. Daily Context Exports (NOT gate members)
+
+These are daily-only — same value for all 27 bars in a session. Exported as AG training features, NOT used in the 15m regime gate.
+
+| Symbol | TradingView ID | Role |
+|---|---|---|
+| SKEW | `CBOE:SKEW` | Tail-risk hedging — institutions hedge before selling |
+| NYSE A/D | `USI:ADD` | Advance-Decline breadth — divergence = exhaustion warning |
+
+### 6c. MES-Native State (chart OHLCV)
 
 1. MES impulse / reversal state
-2. TICK institutional flow state (`USI:TICK` — positive/negative threshold, not EMA trend)
-3. VOLD money flow state (`USI:VOLD` — positive/negative threshold, confirms TICK)
-4. VVIX vol-of-vol state (`CBOE:VVIX` — level threshold, leads VIX by 1-3 bars)
-5. VIX/VIX3M term structure ratio (`CBOE:VIX` / `CBOE:VIX3M` — < 0.92 contango = calm, > 1.0 backwardation = stress)
-6. HYG credit state (`AMEX:HYG` — EMA trend, credit leads equity)
-7. RTY small-cap state (`CME_MINI:RTY1!` — EMA trend, breaks down/recovers first)
-8. SKEW tail-risk state (`CBOE:SKEW` — daily level threshold, institutions hedge before selling)
-9. NYSE A/D breadth (`USI:ADD` — daily, divergence = exhaustion warning)
-10. lower-timeframe volume shock / expansion state
-11. scheduled macro proximity / release window state
-12. breaking-news / narrative shock state paired with MES price reaction
-13. pivot interaction state
+2. ES execution quality (VWAP state/event, range expansion, intrabar efficiency)
+3. lower-timeframe volume shock / expansion state
+4. pivot interaction state
 
-The purpose of the event-response block is to:
+### 6d. Macro/News Context (server-side)
 
-- suppress weak setups
-- delay entries
-- confirm high-quality setups
+5. scheduled macro proximity / release window state
+6. breaking-news / narrative shock state paired with MES price reaction
+
+### Purpose
+
+The regime gate and context layer exist to:
+
+- suppress weak setups via grouped intermarket scoring
+- delay entries via hysteresis and persistence requirements
+- confirm high-quality setups via impulse quality filtering
 - detect shock-failure or de-escalation reversals
 - tie macro/news catalysts to observed MES reaction instead of treating text as a separate trade engine
 - use pivot-state and pivot-distance as serious exhaustion / reversal context without turning pivots into the only decision surface
