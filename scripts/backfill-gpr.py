@@ -35,9 +35,10 @@ def main() -> None:
         import openpyxl
         wb = openpyxl.load_workbook(str(xls_path))
         ws = wb.active
-        headers = [cell.value for cell in ws[1]]
+        from typing import Any
+        headers: list[Any] = [cell.value for cell in ws[1]]
         rows_raw = [
-            {headers[i]: row[i].value for i in range(len(headers))}
+            {headers[i]: row[i].value for i in range(len(headers)) if headers[i] is not None}
             for row in ws.iter_rows(min_row=2)
         ]
 

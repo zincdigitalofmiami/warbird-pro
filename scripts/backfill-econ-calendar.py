@@ -83,9 +83,10 @@ def main() -> None:
         )
         if not batch.data:
             break
-        for r in batch.data:
+        rows = batch.data  # type narrowing for Pyright
+        for r in rows:
             existing_keys.add(f"{r['ts']}|{r['event_name']}")
-        if len(batch.data) < 1000:
+        if len(rows) < 1000:
             break
         offset += 1000
 

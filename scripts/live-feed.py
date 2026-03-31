@@ -86,7 +86,7 @@ def main():
 
     for record in client:
         if not running: break
-        if not hasattr(record, "open"): continue
+        if not isinstance(record, db.OHLCVMsg): continue
         ts_s = record.ts_event // 1_000_000_000
         if is_weekend(ts_s): continue
         o = record.open / PRICE_SCALE

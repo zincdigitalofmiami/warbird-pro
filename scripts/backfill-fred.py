@@ -56,7 +56,7 @@ def main() -> None:
 
     # Pull active series from series_catalog
     res = supabase.table("series_catalog").select("series_id, category").eq("is_active", True).execute()
-    catalog = res.data or []
+    catalog: list[dict[str, str]] = res.data or []
     print(f"Found {len(catalog)} active series")
 
     for entry in catalog:
