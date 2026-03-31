@@ -1,9 +1,9 @@
 // This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © Kirk / ZINC Digital
-// Warbird v7 Institutional — Flow-Based Intermarket + Grouped Regime Scoring
+// Warbird v7 Institutional — CME Globex Intermarket + Grouped Regime Scoring
 // Base: v6-warbird-complete.pine (2026-03-26)
-// Upgrade: Flow-based leading intermarket, grouped regime scoring, ES execution quality
-// Date: 2026-03-30
+// Upgrade: 6 CME Globex futures (NQ/RTY/CL/HG/6E/6J), Leadership/Risk/MacroFX/Exec regime groups
+// Date: 2026-03-31
 //
 // NO-REPAINT AUDIT:
 // - All structure conditions gated by barstate.isconfirmed — signals fire at bar close only
@@ -11,33 +11,33 @@
 // - Structure conditions: close-based, bar-close semantics
 // - Last verified: 2026-03-30
 //
-// ── FEATURE CONTRACT (locked 2026-03-30) ──
+// ── FEATURE CONTRACT (locked 2026-03-31) ──
 // SIGN CONVENTION: positive = bullish/risk-on. negative = bearish/risk-off. zero = neutral.
-//   flow_score > 0 = buying pressure (TICK+, VOLD+)
-//   vol_score > 0 = supportive vol (low VVIX, VTS contango) — raw INVERTED at group boundary
-//   part_score > 0 = supportive breadth (RTY up, HYG up)
+//   leader_score > 0 = NQ leading ES higher
+//   risk_score > 0 = broad risk appetite (RTY+, CL+, HG+)
+//   macro_fx_score > 0 = supportive FX (EUR up / JPY INVERTED down = USD weak)
 //   exec_score > 0 = supportive execution (above VWAP, expanding range, high efficiency)
 // REGIME STATE MACHINE: NEUTRAL(0)→BULL(1)/BEAR(-1). No direct bull↔bear without override.
-//   Override: flow_score AND vol_score both extreme same direction. Bypasses persistence+cooldown.
+//   Override: leader_score AND risk_score both extreme same direction. Bypasses persistence+cooldown.
 //   Normal transitions: score > upper for confirmBars → BULL. Score < lower for confirmBars → BEAR.
 //   Exit to NEUTRAL: score crosses midline for confirmBars. Neutralize after prolonged mid-range.
 // VWAP CODE: +2=reclaim, +1=above, 0=in-band, -1=below, -2=reject. Band=5% ATR around VWAP.
 // IMPULSE QUALITY: direction-relative. Higher = better for THIS setup direction.
-//   Components: TICK persistence, VOLD expansion, range expansion, efficiency, VWAP alignment.
+//   Components: intermarket alignment, range expansion, efficiency, VWAP alignment.
 // AGREEMENT VELOCITY: Δ(net atomic alignment). Level=consensus, Δ=momentum of consensus.
-// GROUP WEIGHTS (AG tunes): flow(30%) + vol(45%) + participation(15%) + execution(10%).
-// WITHIN-GROUP: flow(TICK 50/VOLD 50), vol(VVIX 55/VTS 45), part(RTY 75/HYG 25).
+// GROUP WEIGHTS (AG tunes): leadership(25%) + risk-appetite(40%) + macro-fx(15%) + execution(20%).
+// WITHIN-GROUP: risk(RTY 1/3, CL 1/3, HG 1/3), macro-fx(6E 50%, 6J-inv 50%).
 //
 // REQUEST.SECURITY() BUDGET:
-// Intermarket (60min): TICK, VOLD, VVIX, VIX, VIX3M, HYG, RTY = 7 calls
+// Intermarket (60min): NQ, RTY, CL, HG, 6E, 6J         = 6 calls
 // SKEW (D):            close                             = 1 call
 // NYSE A-D Line (D):   close                             = 1 call
 // HTF fib (1H):        [high, low] tuple                 = 1 call
 // HTF fib (4H):        [high, low] tuple                 = 1 call
 // HTF fib (1D):        [high, low] tuple                 = 1 call
-// TOTAL:                                                 = 12 of 40 (30%)
+// TOTAL:                                                 = 11 of 40 (28%)
 //
-// PLOT BUDGET: 61 plot + 3 alertcondition = 64/64 (0 headroom)
+// PLOT BUDGET: 60 plot + 3 alertcondition = 63/64 (1 headroom)
 // TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed.
 //@version=6
 indicator("Warbird v7 Institutional", shorttitle="WB v7", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100)
@@ -106,15 +106,13 @@ string tfIM           = input.timeframe("60", "Intermarket Timeframe", group=gro
 int maLen          = input.int(20, "Confirm EMA Length", minval=5, group=groupIM)
 int slopeBars      = input.int(2, "Slope Bars", minval=1, maxval=10, group=groupIM)
 float neutralBandPct = input.float(0.15, "Neutral Band Around EMA (%)", minval=0.0, step=0.01, group=groupIM)
-string symTICK = input.symbol("USI:TICK", "TICK (NYSE uptick/downtick — institutional flow)", group=groupIM)
-string symVOLD = input.symbol("USI:VOLD", "VOLD (NYSE up vol - down vol — money flow)", group=groupIM)
-string symVVIX = input.symbol("CBOE:VVIX", "VVIX (vol of vol — leading)", group=groupIM)
-string symVIX  = input.symbol("CBOE:VIX", "VIX (30-day implied vol)", group=groupIM)
-string symV3M  = input.symbol("CBOE:VIX3M", "VIX3M (3-month implied vol)", group=groupIM)
-string symHYG  = input.symbol("AMEX:HYG", "HYG (high-yield credit — leads equity)", group=groupIM)
-string symRTY  = input.symbol("CME_MINI:RTY1!", "RTY (Russell 2000 small-cap — leads at turns)", group=groupIM)
+string symNQ   = input.symbol("CME_MINI:NQ1!", "NQ (E-mini Nasdaq 100 — ES leadership)", group=groupIM)
+string symRTY  = input.symbol("CME_MINI:RTY1!", "RTY (Russell 2000 — small-cap risk appetite)", group=groupIM)
+string symCL   = input.symbol("NYMEX:CL1!", "CL (Crude Oil — growth/energy demand)", group=groupIM)
+string symHG   = input.symbol("COMEX:HG1!", "HG (Copper — industrial demand proxy)", group=groupIM)
+string sym6E   = input.symbol("CME:6E1!", "6E (Euro FX — USD weakness = risk-on)", group=groupIM)
+string sym6J   = input.symbol("CME:6J1!", "6J (Japanese Yen — safe haven, INVERTED)", group=groupIM)
 string symSKEW = input.symbol("CBOE:SKEW", "SKEW (tail-risk hedging — daily regime)", group=groupIM)
-float vvixMaxRiskOn = input.float(90.0, "VVIX Max (risk-on filter)", step=1.0, group=groupIM, tooltip="VVIX typically 60-150+. Below 90 = complacent/risk-on. Above 120 = fear/risk-off.")
 
 string groupIMModel = "Intermarket Regime"
 int confirmBars       = input.int(3, "Bars Required To Flip", minval=1, maxval=10, group=groupIMModel)
@@ -527,13 +525,13 @@ f_ema_dir(float emaVal) =>
 f_ema_dist_pct(float emaVal) =>
     emaVal != 0 ? (close - emaVal) / emaVal * 100.0 : 0.0
 
-float tick = imClose(symTICK)
-float vold = imClose(symVOLD)
-float vvx = imClose(symVVIX)
-float vix = imClose(symVIX)
-float v3m = imClose(symV3M)
-float hyg = imClose(symHYG)
-float rty = imClose(symRTY)
+// 6 CME Globex futures — all price instruments, EMA trend detection
+float nqClose  = imClose(symNQ)
+float rtyClose = imClose(symRTY)
+float clClose  = imClose(symCL)
+float hgClose  = imClose(symHG)
+float eurClose = imClose(sym6E)
+float jpyClose = imClose(sym6J)
 float skew = request.security(symSKEW, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 // NYSE Advance-Decline issues (daily breadth): leading exhaustion signal for MES
@@ -543,40 +541,40 @@ float adSlope     = adLineRaw - nz(adLineRaw[3])
 float adSlopeSma  = ta.sma(math.abs(adSlope), 20)
 float adSlopeNorm = adSlopeSma > 0 ? adSlope / adSlopeSma : 0.0
 
-// VIX term structure ratio: < 0.85 contango (calm), > 1.0 backwardation (stress)
-float vtsRatio = v3m > 0 ? vix / v3m : 1.0
+// EMA trend for each CME symbol
+float nqMA  = ta.ema(nqClose, maLen)
+float rtyMA = ta.ema(rtyClose, maLen)
+float clMA  = ta.ema(clClose, maLen)
+float hgMA  = ta.ema(hgClose, maLen)
+float eurMA = ta.ema(eurClose, maLen)
+float jpyMA = ta.ema(jpyClose, maLen)
 
-// TICK and VOLD are flow indicators oscillating around zero — not prices.
-// Positive = net buying, negative = net selling. No EMA trend needed.
-bool tickBull = tick > 0
-bool tickBear = tick < 0
-bool voldBull = vold > 0
-bool voldBear = vold < 0
-// TICK/VOLD persistence counters (for impulse quality)
-var int tickBullRun = 0
-var int tickBearRun = 0
-tickBullRun := tickBull ? tickBullRun + 1 : 0
-tickBearRun := tickBear ? tickBearRun + 1 : 0
+[nqUp, nqDown]   = trendFlags(nqClose, nqMA, slopeBars, neutralBandPct)
+[rtyUp, rtyDown] = trendFlags(rtyClose, rtyMA, slopeBars, neutralBandPct)
+[clUp, clDown]   = trendFlags(clClose, clMA, slopeBars, neutralBandPct)
+[hgUp, hgDown]   = trendFlags(hgClose, hgMA, slopeBars, neutralBandPct)
+[eurUp, eurDown] = trendFlags(eurClose, eurMA, slopeBars, neutralBandPct)
+[jpyUp, jpyDown] = trendFlags(jpyClose, jpyMA, slopeBars, neutralBandPct)
 
-// Price instruments use EMA trend detection
-float vvxMA = ta.ema(vvx, maLen)
-float hygMA = ta.ema(hyg, maLen)
-float rtyMA = ta.ema(rty, maLen)
-[vvxUp, vvxDown] = trendFlags(vvx, vvxMA, slopeBars, neutralBandPct)
-[hygUp, hygDown] = trendFlags(hyg, hygMA, slopeBars, neutralBandPct)
-[rtyUp, rtyDown] = trendFlags(rty, rtyMA, slopeBars, neutralBandPct)
-// VVIX inverse: declining VVIX = complacency = MES up
-bool vvxRiskOn = vvxDown and vvx < vvixMaxRiskOn
-bool vvxRiskOff = vvxUp
-// VIX term structure: contango = calm = MES up, backwardation = stress = MES down
-bool vtsRiskOn = vtsRatio < 0.92
-bool vtsRiskOff = vtsRatio > 1.0
-// HYG: credit up = risk appetite = MES up
-bool hygBull = hygUp
-bool hygBear = hygDown
-// RTY: small-cap up = broad risk appetite = MES up
+// Sign convention: 1=bullish/risk-on for MES, -1=bearish/risk-off, 0=neutral
+// NQ: up = ES leadership aligned
+bool nqBull = nqUp
+bool nqBear = nqDown
+// RTY: up = small-cap risk appetite
 bool rtyBull = rtyUp
 bool rtyBear = rtyDown
+// CL: up = growth/energy demand
+bool clBull = clUp
+bool clBear = clDown
+// HG: up = industrial demand
+bool hgBull = hgUp
+bool hgBear = hgDown
+// 6E: up = EUR strength (USD weak) = risk-on
+bool eurBull = eurUp
+bool eurBear = eurDown
+// 6J: INVERTED — up = JPY strength = safe haven = risk-off
+bool jpyBull = jpyDown  // JPY falling = risk-on = MES bullish
+bool jpyBear = jpyUp    // JPY rising = risk-off = MES bearish
 // SKEW: daily-only context — NOT in the 15m regime gate. AG uses as training feature.
 bool skewRiskOn = skew < 140
 bool skewRiskOff = skew > 155
@@ -600,30 +598,30 @@ float barEfficiency = math.abs(close - open) / math.max(barRange, syminfo.mintic
 
 //=====================
 // GROUPED REGIME SCORING (replaces unanimous gate)
-// Group structure prevents correlated features from double-counting.
+// Group structure: Leadership / Risk-appetite / Macro-FX / Execution
+// Prevents correlated features from double-counting.
 // Sign convention: positive = bullish/risk-on, negative = bearish/risk-off, zero = neutral.
 //=====================
-// Flow group (TICK + VOLD): equal weight, both measure NYSE order flow
-float tickSignal = tickBull ? 1.0 : tickBear ? -1.0 : 0.0
-float voldSignal = voldBull ? 1.0 : voldBear ? -1.0 : 0.0
-float flowScore = 0.5 * tickSignal + 0.5 * voldSignal
-// Vol group (VVIX + VTS): VVIX leads by 1-3 bars, slightly heavier
-// INVERTED at group boundary: low VVIX = risk-on = POSITIVE, contango VTS = risk-on = POSITIVE
-float vvixSignal = vvxRiskOn ? 1.0 : vvxRiskOff ? -1.0 : 0.0
-float vtsSignal = vtsRiskOn ? 1.0 : vtsRiskOff ? -1.0 : 0.0
-float volScore = 0.55 * vvixSignal + 0.45 * vtsSignal
-// Participation group: RTY primary (0.75), HYG confirmer (0.25)
+// Leadership group (NQ): single instrument, strongest ES correlation
+float nqSignal = nqBull ? 1.0 : nqBear ? -1.0 : 0.0
+float leaderScore = nqSignal
+// Risk-appetite group (RTY + CL + HG): broad growth/demand proxy, equal weight
 float rtySignal = rtyBull ? 1.0 : rtyBear ? -1.0 : 0.0
-float hygSignal = hygBull ? 1.0 : hygBear ? -1.0 : 0.0
-float partScore = 0.75 * rtySignal + 0.25 * hygSignal
-// Execution group: VWAP direction with quality confirmation
+float clSignal  = clBull ? 1.0 : clBear ? -1.0 : 0.0
+float hgSignal  = hgBull ? 1.0 : hgBear ? -1.0 : 0.0
+float riskScore = (rtySignal + clSignal + hgSignal) / 3.0
+// Macro-FX group (6E + 6J inverted): currency risk context
+float eurSignal = eurBull ? 1.0 : eurBear ? -1.0 : 0.0
+float jpySignal = jpyBull ? 1.0 : jpyBear ? -1.0 : 0.0
+float macroFxScore = 0.5 * eurSignal + 0.5 * jpySignal
+// Execution group: VWAP direction with quality confirmation (chart-native, zero security calls)
 // Reclaim/reject = full signal, steady state = partial, in-band = zero
 float execDir = vwapCode == 2 ? 1.0 : vwapCode == -2 ? -1.0 : vwapCode == 1 ? 0.5 : vwapCode == -1 ? -0.5 : 0.0
 float execQual = 0.5 * barEfficiency + 0.5 * math.min(rangeExpClamped / 3.0, 1.0)
 float execScore = execDir * (0.5 + 0.5 * execQual)
 // Regime score: weighted group sum → 0-100
-// flow(30) + vol(45) + participation(15) + execution(10) = 100
-float regimeRaw = 0.30 * flowScore + 0.45 * volScore + 0.15 * partScore + 0.10 * execScore
+// leadership(25) + risk-appetite(40) + macro-fx(15) + execution(20) = 100
+float regimeRaw = 0.25 * leaderScore + 0.40 * riskScore + 0.15 * macroFxScore + 0.20 * execScore
 float regimeScore = math.max(0.0, math.min(100.0, (regimeRaw + 1.0) * 50.0))
 
 //=====================
@@ -634,8 +632,8 @@ float regimeScore = math.max(0.0, math.min(100.0, (regimeRaw + 1.0) * 50.0))
 //=====================
 float overrideHigh = 0.8
 float overrideLow = -0.8
-bool overrideBull = flowScore > overrideHigh and volScore > overrideHigh
-bool overrideBear = flowScore < overrideLow and volScore < overrideLow
+bool overrideBull = leaderScore > overrideHigh and riskScore > overrideHigh
+bool overrideBear = leaderScore < overrideLow and riskScore < overrideLow
 float upperThresh = 65.0
 float lowerThresh = 35.0
 float midThresh = 50.0
@@ -686,12 +684,13 @@ bool riskOff = riskOffBase
 
 // Atomic intermarket states for AG (signed: 1=bull/risk-on, -1=bear/risk-off, 0=neutral)
 // Sign convention matches feature contract: positive = supportive for MES longs
-int eventTickState = tickBull ? 1 : tickBear ? -1 : 0
-int eventVoldState = voldBull ? 1 : voldBear ? -1 : 0
-int eventVvixState = vvxRiskOn ? 1 : vvxRiskOff ? -1 : 0
-int eventVtsState = vtsRiskOn ? 1 : vtsRiskOff ? -1 : 0
-int eventHygState = hygBull ? 1 : hygBear ? -1 : 0
+// 6J INVERTED at state boundary: jpyBull = JPY falling = risk-on
+int eventNqState  = nqBull ? 1 : nqBear ? -1 : 0
 int eventRtyState = rtyBull ? 1 : rtyBear ? -1 : 0
+int eventClState  = clBull ? 1 : clBear ? -1 : 0
+int eventHgState  = hgBull ? 1 : hgBear ? -1 : 0
+int eventEurState = eurBull ? 1 : eurBear ? -1 : 0
+int eventJpyState = jpyBull ? 1 : jpyBear ? -1 : 0
 int eventSkewState = skewRiskOn ? 1 : skewRiskOff ? -1 : 0
 
 if enableDebugLogs and barstate.isconfirmed
@@ -732,7 +731,7 @@ bool regimeOpposed = dir == 1 ? riskOff : riskOn
 bool acceptConfirmed = acceptInDir and regimeAligned
 bool rejectConfirmed = rejectAtZone and regimeOpposed
 bool breakAgainstConfirmed = breakAgainst and regimeOpposed
-bool conflictBreak = breakInDir and (dir == 1 ? (vvxRiskOff or vtsRiskOff) : (vvxRiskOn or vtsRiskOn))
+bool conflictBreak = breakInDir and (dir == 1 ? (nqBear or riskScore < -0.3) : (nqBull or riskScore > 0.3))
 bool acceptEvent = oneShotEvent ? (acceptConfirmed and not acceptConfirmed[1]) : acceptConfirmed
 bool rejectEvent = oneShotEvent ? (rejectConfirmed and not rejectConfirmed[1]) : rejectConfirmed
 bool breakAgainstEvent = oneShotEvent ? (breakAgainstConfirmed and not breakAgainstConfirmed[1]) : breakAgainstConfirmed
@@ -775,12 +774,12 @@ if isValid
     if d100 < nearest
         fibLevelTouched := 100
 
-// Shock logic: with corrected VVIX sign (positive = risk-on = supportive for longs)
-bool shockContinuation = dir == 1 ? (eventTickState == 1 and eventVtsState >= 0 and eventVvixState >= 0) : (eventTickState == -1 and eventVtsState <= 0 and eventVvixState <= 0)
-bool shockFailure = dir == 1 ? (eventTickState == -1 or eventVtsState == -1 or eventVvixState == -1) : (eventTickState == 1 or eventVtsState == 1 or eventVvixState == 1)
-// Alignment count: how many of 6 intraday flow indicators agree (SKEW excluded — daily only)
-int alignOn = (tickBull ? 1 : 0) + (voldBull ? 1 : 0) + (vvxRiskOn ? 1 : 0) + (vtsRiskOn ? 1 : 0) + (hygBull ? 1 : 0) + (rtyBull ? 1 : 0)
-int alignOff = (tickBear ? 1 : 0) + (voldBear ? 1 : 0) + (vvxRiskOff ? 1 : 0) + (vtsRiskOff ? 1 : 0) + (hygBear ? 1 : 0) + (rtyBear ? 1 : 0)
+// Shock logic: leadership + risk-appetite alignment determines continuation vs failure
+bool shockContinuation = dir == 1 ? (eventNqState == 1 and riskScore > 0) : (eventNqState == -1 and riskScore < 0)
+bool shockFailure = dir == 1 ? (eventNqState == -1 or riskScore < -0.3) : (eventNqState == 1 or riskScore > 0.3)
+// Alignment count: how many of 6 CME intermarket symbols agree (SKEW excluded — daily only)
+int alignOn  = (nqBull ? 1 : 0) + (rtyBull ? 1 : 0) + (clBull ? 1 : 0) + (hgBull ? 1 : 0) + (eurBull ? 1 : 0) + (jpyBull ? 1 : 0)
+int alignOff = (nqBear ? 1 : 0) + (rtyBear ? 1 : 0) + (clBear ? 1 : 0) + (hgBear ? 1 : 0) + (eurBear ? 1 : 0) + (jpyBear ? 1 : 0)
 float eventShockScore = math.max(0.0, math.min(100.0, math.abs(float(alignOn - alignOff)) * 12.0 + math.abs(ta.roc(close, 1)) / (atrRaw + 0.0001) * 20.0 + (conflictBreak ? 20.0 : 0.0)))
 float eventReversalScore = math.max(0.0, math.min(100.0, (breakAgainstConfirmed ? 45.0 : 0.0) + (rejectConfirmed ? 35.0 : 0.0) + (conflictBreak ? 20.0 : 0.0)))
 int eventModeCode = conflictBreak ? 6 : shockFailure ? 2 : shockContinuation ? 1 : rejectConfirmed ? 3 : 0
@@ -793,19 +792,17 @@ float confidenceRaw = 50.0 + float(alignOn - alignOff) * 5.0 + (setupAcceptConti
 float confidenceScore = math.max(0.0, math.min(100.0, confidenceRaw))
 
 // Impulse quality: direction-relative composite (higher = better quality for this setup's direction)
-// Components normalized to [0, 1], combined as weighted sum → 0-100
-float iqTick = 0.0
-float iqVold = 0.0
+// Components: intermarket alignment, range expansion, efficiency, VWAP alignment
+// Normalized to [0, 1], combined as weighted sum → 0-100
+float iqAlign = 0.0
 float iqVwap = 0.0
 if dir == 1
-    iqTick := math.min(float(tickBullRun), 10.0) / 10.0
-    iqVold := voldBull ? (vold > nz(vold[1]) ? 1.0 : 0.5) : 0.0
+    iqAlign := math.max(0.0, float(alignOn - alignOff)) / 6.0
     iqVwap := vwapState == 1 ? 1.0 : vwapState == 0 ? 0.5 : 0.0
 else
-    iqTick := math.min(float(tickBearRun), 10.0) / 10.0
-    iqVold := voldBear ? (vold < nz(vold[1]) ? 1.0 : 0.5) : 0.0
+    iqAlign := math.max(0.0, float(alignOff - alignOn)) / 6.0
     iqVwap := vwapState == -1 ? 1.0 : vwapState == 0 ? 0.5 : 0.0
-float impulseQuality = math.min(100.0, (0.25 * iqTick + 0.25 * iqVold + 0.20 * math.min(rangeExpClamped / 3.0, 1.0) + 0.20 * barEfficiency + 0.10 * iqVwap) * 100.0)
+float impulseQuality = math.min(100.0, (0.30 * iqAlign + 0.25 * math.min(rangeExpClamped / 3.0, 1.0) + 0.25 * barEfficiency + 0.20 * iqVwap) * 100.0)
 
 // RVOL gate: require volume confirmation on entry (volRatio = volume / SMA(volume, 20))
 bool rvolOK = volRatio >= rvolMin
@@ -1085,15 +1082,15 @@ plot(eventShockScore, "ml_event_shock_score", display=display.none)
 plot(eventReversalScore, "ml_event_reversal_score", display=display.none)
 
 // ── INTERMARKET ATOMIC STATES (7 signals, signed: 1=bull/risk-on, -1=bear/risk-off, 0=neutral) ──
-// Each is an atomic column for AG tabular ML. AG decides weights and correlations.
-plot(float(eventTickState), "ml_event_tick_state", display=display.none)
-plot(float(eventVoldState), "ml_event_vold_state", display=display.none)
-plot(float(eventVvixState), "ml_event_vvix_state", display=display.none)
-plot(float(eventVtsState), "ml_event_vts_state", display=display.none)
-plot(float(eventHygState), "ml_event_hyg_state", display=display.none)
+// 6 CME Globex futures + daily SKEW. AG decides weights and correlations.
+// 6J sign already inverted at state boundary: eventJpyState +1 = JPY falling = risk-on.
+plot(float(eventNqState), "ml_event_nq_state", display=display.none)
 plot(float(eventRtyState), "ml_event_rty_state", display=display.none)
+plot(float(eventClState), "ml_event_cl_state", display=display.none)
+plot(float(eventHgState), "ml_event_hg_state", display=display.none)
+plot(float(eventEurState), "ml_event_eur_state", display=display.none)
+plot(float(eventJpyState), "ml_event_jpy_state", display=display.none)
 plot(float(eventSkewState), "ml_event_skew_state", display=display.none)
-plot(vtsRatio, "ml_vts_ratio", display=display.none)
 plot(float(eventPivotInteractionCode), "ml_event_pivot_interaction_code", display=display.none)
 
 // ── ES EXECUTION QUALITY + REGIME SCORE + AGREEMENT + IMPULSE (6 new exports) ──
@@ -1151,7 +1148,7 @@ plot(contrChoch ? 1.0 : 0.0, "ml_contrarian_choch", display=display.none)
 
 // ── TA Core Pack: computation stays (used by AG packet gates), plot exports
 // ── offloaded to server-side (AG computes from Databento OHLCV) ──
-// ── PLOT BUDGET: 61 plots + 3 alertconditions = 64/64 (0 headroom) ──
+// ── PLOT BUDGET: 60 plots + 3 alertconditions = 63/64 (1 headroom) ──
 // ── TA Core Pack exports (7 plots: di_spread, adx_slope, er_10, atr_pct, clv, signed_vol, vol_delta) ──
 // ── are AG server-side computable — cut candidates if budget slots needed ──
 
