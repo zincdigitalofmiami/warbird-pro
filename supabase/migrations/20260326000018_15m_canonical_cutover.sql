@@ -3,6 +3,9 @@
 
 begin;
 
+-- Drop FK from measured_moves before dropping warbird_setups (measured_moves.setup_id is always NULL)
+alter table if exists measured_moves drop constraint if exists measured_moves_setup_id_fkey;
+
 drop table if exists mes_1s;
 drop table if exists options_ohlcv_1d;
 
