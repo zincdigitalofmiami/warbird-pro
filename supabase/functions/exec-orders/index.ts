@@ -1,7 +1,6 @@
-// Trump Effect Edge Function — Federal Register executive orders + memoranda
-// Ported from app/api/cron/trump-effect/route.ts — NextResponse → Response
-// Schedule: daily at 19:30 UTC Mon-Fri (30 19 * * 1-5)
+// Executive Orders Edge Function — Federal Register executive orders + memoranda
 // Source: https://www.federalregister.gov/api/v1 (free, no key needed)
+// Schedule: daily at 08:00 UTC Mon-Fri
 
 import { validateCronRequest } from "../_shared/cron-auth.ts";
 import { createAdminClient } from "../_shared/admin.ts";
@@ -74,20 +73,20 @@ Deno.serve(async (req: Request) => {
     let rowsAffected = 0;
     if (dedupedRows.length > 0) {
       const { data: insertedRows, error } = await supabase
-        .from("trump_effect_1d")
+        .from("executive_orders_1d")
         .upsert(dedupedRows, {
           onConflict: "ts,title",
           ignoreDuplicates: true,
         })
         .select("id");
 
-      if (error) throw new Error(`trump_effect upsert: ${error.message}`);
+      if (error) throw new Error(`executive_orders upsert: ${error.message}`);
       rowsAffected = insertedRows?.length ?? 0;
     }
 
     const durationMs = Date.now() - startTime;
     await writeJobLog({
-      job_name: "trump-effect",
+      job_name: "exec-orders",
       status: rowsAffected > 0 ? "SUCCESS" : "SKIPPED",
       rows_affected: rowsAffected,
       duration_ms: durationMs,
@@ -108,7 +107,7 @@ Deno.serve(async (req: Request) => {
     let finalMessage = message;
     try {
       await writeJobLog({
-        job_name: "trump-effect",
+        job_name: "exec-orders",
         status: "FAILED",
         rows_affected: 0,
         duration_ms: Date.now() - startTime,

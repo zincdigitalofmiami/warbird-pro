@@ -18,13 +18,10 @@ verify_jwt = false
 [functions.massive-inflation-expectations]
 verify_jwt = false
 
-[functions.finnhub-news]
-verify_jwt = false
-
 [functions.gpr]
 verify_jwt = false
 
-[functions.trump-effect]
+[functions.exec-orders]
 verify_jwt = false
 
 [functions.econ-calendar]

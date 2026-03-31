@@ -142,16 +142,6 @@ on conflict do nothing;
 -- ============================================================
 -- DATA SOURCES
 -- ============================================================
-
-insert into sources (name, description, base_url, api_key_env, is_active) values
-  ('databento', 'Databento market data (Standard plan)', 'https://hist.databento.com/v0', 'DATABENTO_API_KEY', true),
-  ('fred', 'Federal Reserve Economic Data', 'https://api.stlouisfed.org/fred', 'FRED_API_KEY', true),
-  ('massive', 'Massive economy endpoints (inflation expectations)', 'https://api.massive.com/fed/v1', 'MASSIVE_API_KEY', true),
-  ('federal_register', 'Federal Register API (free, no key)', 'https://www.federalregister.gov/api/v1', null, true),
-  ('gpr', 'Caldara-Iacoviello Geopolitical Risk Index', 'https://www.matteoiacoviello.com/gpr_files', null, true)
-on conflict (name) do nothing;
-
--- ============================================================
 -- SERIES CATALOG (FRED series used for economic data)
 -- ============================================================
 

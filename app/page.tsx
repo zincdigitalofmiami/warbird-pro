@@ -136,7 +136,7 @@ export default function Home() {
             />
             <IntelCard
               title="Macro Context"
-              description="31 FRED series, GPR index, economic calendar, Trump Effect tracker."
+              description="31 FRED series, GPR index, economic calendar, Federal Register executive orders."
               accent={false}
             />
             <IntelCard
