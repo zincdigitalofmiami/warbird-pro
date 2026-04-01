@@ -306,13 +306,19 @@ float exhaustionScore = math.abs(hwNorm) / 100.0 * 50.0 + math.abs(mfNorm) / 50.
 string groupHTF = "HTF Confluence"
 float htfConfTolPct = 0.15
 
-[htf1hHigh, htf1hLow] = request.security(syminfo.tickerid, "60", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[htf4hHigh, htf4hLow] = request.security(syminfo.tickerid, "240", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[htf1hHigh, htf1hLow, htf1hClose, htf1hEma21] = request.security(syminfo.tickerid, "60", [ta.highest(high, 55), ta.lowest(low, 55), close, ta.ema(close, 21)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[htf4hHigh, htf4hLow, htf4hClose, htf4hEma21] = request.security(syminfo.tickerid, "240", [ta.highest(high, 55), ta.lowest(low, 55), close, ta.ema(close, 21)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [htf1dHigh, htf1dLow] = request.security(syminfo.tickerid, "D", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 float htf1hRange = nz(htf1hHigh - htf1hLow)
 float htf4hRange = nz(htf4hHigh - htf4hLow)
 float htf1dRange = nz(htf1dHigh - htf1dLow)
+
+// HTF directional agreement: 1H/4H close above own EMA(21) = bullish, below = bearish.
+// Both values are HTF-native (no mixed-timeframe comparison).
+// htfDirAgrees is computed below (after fibBull) and gates entry triggers.
+bool htf1hBull = nz(htf1hClose) > nz(htf1hEma21)
+bool htf4hBull = nz(htf4hClose) > nz(htf4hEma21)
 
 htfFibPrice(float htfHigh, float htfLow, float htfRng, float ratio) =>
     htfRng <= 0 ? na : htfLow + htfRng * ratio
@@ -370,6 +376,7 @@ fibZzUpdate() =>
     float pivotLowPrice = na
     int pivotHighBar = na
     int pivotLowBar = na
+    int swingDir = 0  // +1 = up-swing (low→high, bullish), -1 = down-swing (high→low, bearish), 0 = flat/no pivot
     if fibZZ.update()
         lastPvt := fibZZ.lastPivot()
         if not na(lastPvt)
@@ -378,15 +385,16 @@ fibZzUpdate() =>
             float endP = lastPvt.end.price
             pivotHighPrice := math.max(startP, endP)
             pivotLowPrice  := math.min(startP, endP)
+            swingDir := endP > startP ? 1 : endP < startP ? -1 : 0
             if startP >= endP
                 pivotHighBar := lastPvt.start.index
                 pivotLowBar  := lastPvt.end.index
             else
                 pivotHighBar := lastPvt.end.index
                 pivotLowBar  := lastPvt.start.index
-    [newPivot, pivotHighPrice, pivotLowPrice, pivotHighBar, pivotLowBar]
+    [newPivot, pivotHighPrice, pivotLowPrice, pivotHighBar, pivotLowBar, swingDir]
 
-[zzNewPivot, zzHighPrice, zzLowPrice, zzHighBar, zzLowBar] = fibZzUpdate()
+[zzNewPivot, zzHighPrice, zzLowPrice, zzHighBar, zzLowBar, zzSwingDir] = fibZzUpdate()
 
 var float fibAnchorHigh = na
 var float fibAnchorLow = na
@@ -438,17 +446,18 @@ if not na(fibAnchorHigh) and not na(fibAnchorLow)
 
 float fibRange = fibAnchorHigh - fibAnchorLow
 bool isValid = not na(fibAnchorHigh) and not na(fibAnchorLow) and fibRange > 0
-float fibMidpoint = fibAnchorLow + fibRange * 0.5
 
-float hystBand = fibRange * 0.02
+// Direction: swing sequence from ZigZag is the primary signal.
+// fibBull only changes when a new pivot confirms a non-flat swing.
+// Between pivots direction holds steady — eliminates spurious flips
+// during consolidation near the midpoint.
 var bool fibBull = true
-if fibRange > 0
-    if close >= fibMidpoint + hystBand
-        fibBull := true
-    else if close <= fibMidpoint - hystBand
-        fibBull := false
-else
-    fibBull := true
+if zzNewPivot and zzSwingDir != 0
+    fibBull := zzSwingDir > 0
+
+// HTF directional agreement: 15m fibBull must match both 1H and 4H trend direction.
+// Gates entry triggers per plan requirement: "15m fibs + 1H/4H structure must agree in direction."
+bool htfDirAgrees = (fibBull == htf1hBull) and (fibBull == htf4hBull)
 
 float fibBase = fibBull ? fibAnchorLow : fibAnchorHigh
 float fibDir = fibBull ? 1.0 : -1.0
@@ -484,6 +493,20 @@ int htfConfPivot = htfConfluenceCheck(pPivot, fibRange)
 int htfConf382   = htfConfluenceCheck(p382, fibRange)
 int htfConf618   = htfConfluenceCheck(p618, fibRange)
 int htfConfTotal = htfConfPivot + htfConf382 + htfConf618
+
+//=====================
+// EXHAUSTION DIAMOND (precursor visual at fib interaction)
+// Fires once when exhaustionScore >= threshold while price is in the fib zone (.382–.618).
+// Diamond below bar for bullish setup (selling exhaustion at pullback zone),
+// above bar for bearish setup (buying exhaustion at rally zone).
+// Uses label.new() from the 200-label pool — zero plot budget cost.
+//=====================
+float exhaustionThreshold = 70.0
+bool exhaustionAtFib = exhaustionScore >= exhaustionThreshold and isValid and close >= zoneFillLower and close <= zoneFillUpper
+bool exhaustionEvent = exhaustionAtFib and not exhaustionAtFib[1]
+
+if exhaustionEvent and barstate.isconfirmed
+    label.new(bar_index, na, "◆", color=color(na), textcolor=COLOR_STOP, style=label.style_none, yloc=fibBull ? yloc.belowbar : yloc.abovebar, size=size.small)
 
 //=====================
 // VOLUME DELTA AT FIB TOUCHES
@@ -806,8 +829,8 @@ float impulseQuality = math.min(100.0, (0.30 * iqAlign + 0.25 * math.min(rangeEx
 
 // RVOL gate: require volume confirmation on entry (volRatio = volume / SMA(volume, 20))
 bool rvolOK = volRatio >= rvolMin
-bool entryLongTrigger = acceptEvent and dir == 1 and targetEligible20pt and not conflictBreak and not breakAgainstConfirmed and rvolOK
-bool entryShortTrigger = acceptEvent and dir == -1 and targetEligible20pt and not conflictBreak and not breakAgainstConfirmed and rvolOK
+bool entryLongTrigger = acceptEvent and dir == 1 and targetEligible20pt and not conflictBreak and not breakAgainstConfirmed and rvolOK and htfDirAgrees
+bool entryShortTrigger = acceptEvent and dir == -1 and targetEligible20pt and not conflictBreak and not breakAgainstConfirmed and rvolOK and htfDirAgrees
 
 if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or conflictEvent or entryLongTrigger or entryShortTrigger)
     log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent) + str.format(" conflict={0} longTrig={1} shortTrig={2} aligned={3} opposed={4}", conflictEvent, entryLongTrigger, entryShortTrigger, regimeAligned, regimeOpposed))
