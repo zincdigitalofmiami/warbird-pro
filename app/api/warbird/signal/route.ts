@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { composeWarbirdSignal } from "@/lib/warbird/projection";
+import { checkWarbirdLegacyReaderRuntime } from "@/lib/warbird/runtime-guard";
 import { fetchLatestWarbirdState } from "@/lib/warbird/queries";
 
 export async function GET(request: Request) {
@@ -14,6 +15,19 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const runtime = await checkWarbirdLegacyReaderRuntime();
+
+    if (runtime.active) {
+      return NextResponse.json({
+        signal: null,
+        setup: null,
+        trigger: null,
+        conviction: null,
+        risk: null,
+        runtime,
+      });
+    }
+
     const state = await fetchLatestWarbirdState(supabase, symbolCode);
     const signal = composeWarbirdSignal(state);
 
@@ -23,6 +37,7 @@ export async function GET(request: Request) {
       trigger: state.trigger,
       conviction: state.conviction,
       risk: state.risk,
+      runtime,
     });
   } catch (error) {
     return NextResponse.json(

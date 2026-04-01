@@ -217,10 +217,25 @@ export interface WarbirdSignal {
   };
 }
 
+export type WarbirdRuntimeMode =
+  | "OK"
+  | "LEGACY_READER_MISSING_OBJECTS"
+  | "RUNTIME_GUARD_FAILED";
+
+export interface WarbirdRuntimeState {
+  active: boolean;
+  mode: WarbirdRuntimeMode;
+  reason: string | null;
+  missingObjects: string[];
+  checkedObjects: string[];
+  checkedAt: string;
+}
+
 export interface WarbirdSignalResponse {
   signal: WarbirdSignal | null;
   setup: WarbirdSetupRow | null;
   trigger: WarbirdTriggerRow | null;
   conviction: WarbirdConvictionRow | null;
   risk: WarbirdRiskRow | null;
+  runtime: WarbirdRuntimeState;
 }

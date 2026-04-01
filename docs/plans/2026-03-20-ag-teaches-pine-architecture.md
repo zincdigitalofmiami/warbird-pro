@@ -12,20 +12,26 @@
 
 Historical note: any remaining references below to the paired strategy, parity-only checkpoints, or Deep Backtesting are archived execution history unless a newer update-log entry explicitly reactivates them.
 
-Historical retention note: cloud core data window is `2024-01-01T00:00:00Z` forward only. Local offline training warehouse extends to `2018-01-01T00:00:00Z` per 2026-03-30 directive (LuxAlgo suggestion) — 8 years of comparable electronic futures data for AG training depth.
+Historical retention note: cloud core data window is `2024-01-01T00:00:00Z` forward only. Local offline training warehouse extends to `2020-01-01T00:00:00Z` per 2026-04-01 directive (5-year training window) — 6 years of comparable electronic futures data for AG training depth, covering COVID crash, recovery, inflation cycle, and rate hike cycle.
 
 Binding note: the 2026-03-28 update-log entries supersede older references below to right-side TradingView tables, `LONG READY` / `SHORT READY` action labels, dashboard-local fib computation, Markdown report blobs, and any schema language that still treats `EXPIRED` / `NO_REACTION` as canonical economic model truth.
 
-### Next Blocking Order (2026-03-31 updated — CME Globex intermarket complete)
+### Next Blocking Order (2026-03-31 updated — fib engine hardening complete)
 
 1. ~~**Pine indicator recovery**~~ — **DONE.** v7 institutional upgrade complete (commit `fe51412`).
 2. ~~**v7 institutional upgrade**~~ — **DONE.** Flow-based intermarket, grouped regime scoring, ES execution quality. 64/64.
 3. ~~**Intermarket pivot to CME Globex**~~ — **DONE.** NQ/RTY/CL/HG/6E/6J replace TICK/VOLD/VVIX/VIX/VIX3M/HYG. Leadership/Risk-appetite/Macro-FX/Exec regime groups. 60 plot + 3 alert = 63/64 (1 headroom). 11 security calls. Commit `6f3e7a6`.
-4. **Fib engine hardening** — anchor quality drives everything; confirm left/right bar space, direction logic, multi-timeframe alignment (15m fibs + 1H/4H structure must agree in direction for trigger), exhaustion signal preservation, anchor-span visual gap (lines should extend to full swing area), and intermediate waypoint lines (1.382, 1.50, 1.786) as drawing objects.
+4. ~~**Fib engine hardening**~~ — **DONE.** Commit `4a25806`. Three changes: (a) direction logic replaced midpoint-hysteresis with ZigZag swing-sequence — fibBull only changes on confirmed pivots, eliminates spurious flips; (b) HTF directional agreement gate — 1H/4H security tuples expanded to `[high, low, close, ema21]` (0 extra calls), entry triggers gated on `htfDirAgrees`; (c) exhaustion diamond visual via `label.new()` with `label.style_none` + `"◆"` at fib zone interaction. Plot budget unchanged at 63/64. Anchor quality, left/right bar space, anchor-span visual gap, and waypoint lines (1.382/1.50/1.786) confirmed correct — no changes needed. Forensic review passed. Known residual: `htfDirAgrees` gates alerts only, not the trade state machine (pre-existing architecture split). Header comments (HTF tuple shape, no-repaint audit date) are stale — documentation-only nits.
 5. **Canonical writer checkpoint** — port or replace the legacy `detect-setups` / `score-trades` Vercel routes as Supabase Edge Functions that write to the reconciled canonical tables. Fix CME continuity-gap handling before calling the writer live.
 6. **Dashboard/admin/API reader cutover** — cut `/admin`, `/api/admin/status`, and dashboard consumers off legacy tables and onto the canonical snapshot/candidate surfaces plus the new Admin packet views. TradingView webhook alerts (entry long, entry short, pivot break reversal) can drive real-time dashboard state via Supabase Edge Function webhook receiver.
 7. **Local warehouse / selector buildout** — stand up the AG workbench (`scripts/ag/*`), local PostgreSQL snapshot mirror, diagnostic tables, and packet publish-up lifecycle.
 8. **Legacy table retirement** — drop `warbird_triggers_15m`, `warbird_conviction`, `warbird_risk`, `warbird_setups`, `warbird_setup_events`, `measured_moves`, `warbird_forecasts_1h` only after all readers/writers are migrated.
+
+Runtime-truth gate (2026-03-31, updated after Checkpoint 1): migration `20260331000045` is now reconciled and replay-verified, but phases 5-7 remain blocked. Do not proceed with canonical writer design, dashboard/admin cutover, schema/table recording design, action/event recording design, or local training buildout from a narrow `candidates + signals + outcomes` framing. The active plan already requires a larger contract: point-in-time setup truth, realized path truth, published signal lineage, and a distinct explanatory/research layer. Admin page assumptions, schema assumptions, and action/event recording assumptions must be re-audited against the plan before Checkpoint 2 resumes.
+
+Runtime-safety checkpoint (2026-03-31 locked): `/api/warbird/dashboard`, `/api/warbird/signal`, and `/api/warbird/history` now run an explicit service-role runtime guard before touching the stale legacy reader path. When the legacy reader objects are absent, the routes return `200` with an explicit `runtime` degradation payload instead of throwing `500`s, and the dashboard surfaces that degraded state visibly. This is containment only. It is not the step-6 reader cutover, and it does not change the requirement that canonical rows must exist before reader migration is claimed complete.
+
+MES minute-efficiency checkpoint (2026-03-31 locked in repo): the `mes-1m` Edge Function now treats the last closed minute boundary as the incremental cutoff and filters out the current in-progress 1m bar before persistence. This removes the alternating `SUCCESS` / `SKIPPED no_gap` churn caused by writing partial current-minute bars, while preserving the minute cron cadence and the 1m-driven forming 15m chart path.
 
 ---
 
@@ -438,7 +444,7 @@ Daily context (NOT gate members, same value all 27 session bars):
 
 **Why CME-only:** AG needs 15m historical data from Databento. NYSE internals (TICK/VOLD), CBOE indices (VIX/VVIX/VIX3M/SKEW), and ETFs (HYG) are NOT on GLBX.MDP3. CFE (VX futures) is $750+/mo separate subscription.
 
-**Data:** `cross_asset_15m` table (migration 039). Backfill from 2018-01-01 via `scripts/backfill-intermarket-15m.py`.
+**Data:** `cross_asset_15m` table (migration 039). Backfill from 2020-01-01 via `scripts/backfill-intermarket-15m.py`.
 
 Regime gate: grouped weighted scoring → 0-100 with hysteresis. AG decides final group structure, weights, and correlations from data.
 
@@ -824,7 +830,6 @@ Phase 4 exact local warehouse entities:
   - `mes_1d`
   - `cross_asset_1h`
   - `cross_asset_1d`
-  - `options_stats_1d`
   - `econ_rates_1d`
   - `econ_yields_1d`
   - `econ_fx_1d`
@@ -836,9 +841,8 @@ Phase 4 exact local warehouse entities:
   - `econ_commodities_1d`
   - `econ_indexes_1d`
   - `econ_calendar`
-  - `macro_reports_1d`
   - `geopolitical_risk_1d`
-  - `trump_effect_1d`
+  - `executive_orders_1d`
 - `warbird_training_runs`
 - `warbird_training_run_metrics`
 - `warbird_shap_results`

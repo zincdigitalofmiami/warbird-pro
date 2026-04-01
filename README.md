@@ -41,7 +41,7 @@ This is the intended steady-state authority map. Do not create multiple live wri
 - Local machines are for training, heavy calculations, and research processing only.
 - Production ingestion, cron jobs, reconciliation, and chart-serving must not depend on local machines.
 - If bar continuity is not provable, fib/model/setup logic is not safe.
-- Retained core historical data starts at `2018-01-01T00:00:00Z`. Pre-2018 core rows are out of scope.
+- Retained core historical data starts at `2020-01-01T00:00:00Z`. Pre-2020 core rows are out of scope.
 
 ## Current Repo Reality
 

@@ -23,6 +23,8 @@ from datetime import date, datetime, timedelta, timezone
 import databento as db
 from supabase import create_client
 
+from project_env import load_project_env
+
 # AG training basket — 6 CME Globex intermarket symbols
 INTERMARKET_SYMBOLS = {
     "NQ": "NQ.c.0",
@@ -37,8 +39,8 @@ DATASET = "GLBX.MDP3"
 PRICE_SCALE = 1_000_000_000
 BATCH_SIZE = 500
 
-# Default range: 2018-01-01 to today
-DEFAULT_START = date(2018, 1, 1)
+# Default range: 2020-01-01 to today (5-year training window)
+DEFAULT_START = date(2020, 1, 1)
 
 
 def is_weekend_bar(ts_epoch: int) -> bool:
@@ -335,9 +337,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    load_project_env()
     api_key = os.environ["DATABENTO_API_KEY"]
-    sb_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ["SUPABASE_URL"]
+    sb_url = os.environ["SUPABASE_URL"]
     sb_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    print(f"Target Supabase: {sb_url}")
 
     start = date.fromisoformat(args.start)
     end = date.fromisoformat(args.end) if args.end else date.today()

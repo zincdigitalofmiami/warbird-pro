@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import date
 import requests
 from supabase import create_client
 
@@ -31,7 +32,7 @@ def fetch_fred_series(series_id: str, api_key: str, start: str = "2020-01-01") -
         "api_key": api_key,
         "file_type": "json",
         "observation_start": start,
-        "observation_end": "2026-03-16",
+        "observation_end": date.today().isoformat(),
     }
     resp = requests.get(url, params=params, timeout=30)
     resp.raise_for_status()
@@ -50,8 +51,9 @@ def fetch_fred_series(series_id: str, api_key: str, start: str = "2020-01-01") -
 def main() -> None:
     load_project_env()
     fred_key = os.environ["FRED_API_KEY"]
-    sb_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL") or os.environ["SUPABASE_URL"]
+    sb_url = os.environ["SUPABASE_URL"]
     sb_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    print(f"Target Supabase: {sb_url}")
     supabase = create_client(sb_url, sb_key)
 
     # Pull active series from series_catalog

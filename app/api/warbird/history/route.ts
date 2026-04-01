@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { checkWarbirdLegacyReaderRuntime } from "@/lib/warbird/runtime-guard";
 import { fetchWarbirdHistory } from "@/lib/warbird/queries";
 
 export async function GET(request: Request) {
@@ -16,6 +17,17 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const runtime = await checkWarbirdLegacyReaderRuntime();
+
+    if (runtime.active) {
+      return NextResponse.json({
+        setups: [],
+        events: [],
+        runtime,
+        generatedAt: runtime.checkedAt,
+      });
+    }
+
     const history = await fetchWarbirdHistory(supabase, {
       symbolCode,
       days,
@@ -24,6 +36,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({
       ...history,
+      runtime,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {

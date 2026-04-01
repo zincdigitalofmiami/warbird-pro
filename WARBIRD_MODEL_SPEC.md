@@ -6,6 +6,8 @@
 
 This document is a subordinate reference for the model contract. It must not override the active plan. If this file and the active plan ever disagree, the active plan wins immediately.
 
+Status note (2026-03-31): this file is not implementation authority for the pending writer/admin/schema/action-event recording work. Checkpoint 1 (migration `045`) is locked, but phases 5-7 are paused until the active plan's broader contract is re-audited and explicitly locked across point-in-time setup truth, realized path truth, published signal lineage, admin surfaces, and the explanatory/research layer.
+
 ---
 
 ## 1. Governing Contract
@@ -18,7 +20,7 @@ This document is a subordinate reference for the model contract. It must not ove
 6. The adaptive fib engine snapshot is the canonical base object. The model does **not** invent raw entries from scratch. The Pine fib engine creates the candidate setup first.
 7. The model output is MES 15m setup-outcome state: TP1 probability, TP2 probability, reversal risk, and bounded stop-family selection. It is **not** a predicted-price forecast surface.
 8. AG and offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close, not repaint-prone live chart reads.
-9. The retained core historical window for training/support data starts at `2018-01-01T00:00:00Z`. Pre-2018 core rows are out of scope and must not be reintroduced into the canonical dataset.
+9. The retained core historical window for training/support data starts at `2020-01-01T00:00:00Z`. Pre-2020 core rows are out of scope and must not be reintroduced into the canonical dataset.
 10. The fib engine must preserve lookback/confluence intelligence; a simple zigzag-only anchor path is insufficient for Warbird.
 11. Pivot distance and pivot-state are critical trigger/reversal inputs, but not the sole final decision maker.
 12. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
@@ -27,7 +29,7 @@ This document is a subordinate reference for the model contract. It must not ove
 15. The canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`.
 16. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
 17. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
-18. Cloud core support data starts at `2018-01-01T00:00:00Z`. All Databento ingestion uses `.c.0` continuous front-month contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic. `contract-roll.ts` is dead code. MES uses `MES.c.0` via Live API (real-time) and Historical API (backfill). Cross-asset symbols (NQ, RTY, CL, HG, 6E, 6J, etc.) use `{SYMBOL}.c.0` via Historical API `ohlcv-1h`, pulled hourly by the `cross-asset` Edge Function.
+18. Cloud core support data starts at `2020-01-01T00:00:00Z`. All Databento ingestion uses `.c.0` continuous front-month contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic. `contract-roll.ts` is dead code. MES uses `MES.c.0` via Live API (real-time) and Historical API (backfill). Cross-asset symbols (NQ, RTY, CL, HG, 6E, 6J, etc.) use `{SYMBOL}.c.0` via Historical API `ohlcv-1h`, pulled hourly by the `cross-asset` Edge Function.
 19. The operator-approved fib visual spec is a contract. Colors, line widths, line styles, and visible level-label presentation must be reproduced exactly across Pine and dashboard renderers unless explicitly reapproved.
 
 ---
@@ -195,7 +197,7 @@ The dashboard/Admin page may read only the distilled cloud publish-up surfaces a
 
 ### 3.3 Non-Canonical Surfaces
 
-The following tables exist and may receive writes from legacy bridge code, but they are **not** the canonical AG training truth and must not drive new architecture:
+The following names are legacy bridge surfaces in code and docs, but they are **not** the canonical AG training truth and must not drive new architecture:
 
 - `warbird_triggers_15m`
 - `warbird_conviction`
@@ -207,7 +209,9 @@ The following tables exist and may receive writes from legacy bridge code, but t
 - `warbird_structure_4h`
 - `warbird_forecasts_1h` — forecast route deleted; this is explicit retirement debt, not future architecture; the table may still exist remotely until drift reconciliation and final retirement, but must not drive any new work
 
-These will be retired once the canonical tables above have active writers and all dashboard/API consumers are migrated.
+As of 2026-03-31 DB-truth audit, the legacy operational tables above do not exist on either checked DB. Any remaining code references to them are schema-stale debt, not proof that the tables are still live.
+
+These references will be retired once the canonical tables above have active writers and all dashboard/API consumers are migrated.
 
 Dashboard/Admin compatibility surfaces such as `warbird_active_signals_v`, `warbird_admin_candidate_rows_v`, `warbird_active_training_run_metrics_v`, `warbird_active_packet_metrics_v`, `warbird_active_packet_feature_importance_v`, `warbird_active_packet_setting_hypotheses_v`, and `warbird_active_packet_recommendations_v` should be derived views over these canonical and publish-up tables, not independent writer-owned base tables.
 

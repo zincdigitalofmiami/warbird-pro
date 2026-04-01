@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { composeWarbirdSignal } from "@/lib/warbird/projection";
 import {
+  emptyDashboardCounts,
+  fetchDashboardCorrelations,
+} from "@/lib/warbird/runtime";
+import { checkWarbirdLegacyReaderRuntime } from "@/lib/warbird/runtime-guard";
+import {
   fetchLatestWarbirdState,
   fetchWarbirdSetupHistory,
 } from "@/lib/warbird/queries";
@@ -19,12 +24,23 @@ export async function GET(request: Request) {
     const symbolCode = url.searchParams.get("symbol") ?? "MES";
     const days = Math.max(1, Math.min(30, Number(url.searchParams.get("days") ?? 7)));
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 100)));
+    const runtime = await checkWarbirdLegacyReaderRuntime();
 
-    // Intermarket panel: NQ, RTY, CL, HG, 6E, 6J — all Databento hourly from cross_asset_1h
-    // 6J is inverted (JPY weakness = MES bullish)
-    const correlationSymbols = ["NQ", "RTY", "CL", "HG", "6E", "6J"];
+    if (runtime.active) {
+      return NextResponse.json({
+        signal: null,
+        setup: null,
+        setups: [],
+        events: [],
+        signalEvents: [],
+        correlations: await fetchDashboardCorrelations(supabase),
+        counts: emptyDashboardCounts(),
+        runtime,
+        generatedAt: runtime.checkedAt,
+      });
+    }
 
-    const [state, history, signalEventsResult, ...crossAssetResults] = await Promise.all([
+    const [state, history, signalEventsResult, correlations] = await Promise.all([
       fetchLatestWarbirdState(supabase, symbolCode),
       fetchWarbirdSetupHistory(supabase, { symbolCode, days, limit }),
       supabase
@@ -32,29 +48,11 @@ export async function GET(request: Request) {
         .select("signal_event_id, signal_id, ts, event_type, price, note")
         .order("ts", { ascending: false })
         .limit(50),
-      ...correlationSymbols.map((sym) =>
-        supabase
-          .from("cross_asset_1h")
-          .select("ts, close")
-          .eq("symbol_code", sym)
-          .order("ts", { ascending: false })
-          .limit(2),
-      ),
+      fetchDashboardCorrelations(supabase),
     ]);
 
     // Build signal events array (may not exist yet — table is in migration 037)
     const signalEvents = signalEventsResult.error ? [] : (signalEventsResult.data ?? []);
-
-    // Build correlations map: { symbolCode: { close, prevClose } }
-    const correlations: Record<string, { close: number; prevClose: number }> = {};
-    correlationSymbols.forEach((sym, i) => {
-      const result = crossAssetResults[i];
-      if (result.error || !result.data || result.data.length < 2) return;
-      correlations[sym] = {
-        close: Number(result.data[0].close),
-        prevClose: Number(result.data[1].close),
-      };
-    });
 
     const activeWindow = history.setups.filter((setup) =>
       setup.status === "ACTIVE" || setup.status === "TP1_HIT",
@@ -77,6 +75,7 @@ export async function GET(request: Request) {
           (setup) => setup.status === "ACTIVE" || setup.status === "EXPIRED",
         ).length,
       },
+      runtime,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {

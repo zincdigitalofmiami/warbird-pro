@@ -1,0 +1,460 @@
+// This Pine Script(TM) v5 indicator is subject to the Terms of Use.
+// Warbird Oscillator Matrix — adapted from LuxAlgo Oscillator Matrix [6.0]
+// Warbird institutional palette, all bugs fixed, calibrated for MES 15m.
+//@version=5
+indicator("Warbird Oscillator Matrix [MES 15m]", shorttitle = "WB Osc Matrix", max_lines_count = 500)
+
+// ============================================================================
+// WARBIRD PALETTE
+// ============================================================================
+var color WB_BULL       = #26a69a   // institutional teal
+var color WB_BULL_BRT   = #22ab94   // bright teal emphasis
+var color WB_BEAR       = #ef5350   // institutional red
+var color WB_BEAR_BRT   = #f23645   // bright red emphasis
+var color WB_NEUTRAL    = #787b86   // neutral gray
+var color WB_PIVOT      = #ff9800   // pivot orange
+var color WB_BLUE       = #2962ff   // accent blue
+var color WB_BG_DARK    = #131722   // chart background
+var color WB_TEXT        = #d1d4dc   // primary text
+
+// ============================================================================
+// TOOLTIPS
+// ============================================================================
+string TT_WAVE   = "Hyper wave lookback. Default 10 = 2.5h on 15m (half RTH session)."
+string TT_SIGNAL = "[SMA] Smooth with simple moving average\n[EMA] Smooth with exponential moving average\nEMA recommended for MES."
+string TT_DIV    = "Divergence sensitivity. Default 25 filters 15m noise. Lower = more short-term, higher = long-term."
+string TT_METER  = "Show confluence meter at the side of the oscillator."
+string TT_AREA   = "Show confluence areas at the top/bottom of the oscillator."
+string TT_FACTOR = "Higher factor = fewer but stronger reversal signals.\nLower factor = more signals, less strength.\nDefault 5 filters MES volume noise on 15m."
+
+// ============================================================================
+// INPUTS — HYPER WAVE
+// ============================================================================
+string GRP_WAVE = "Hyper Wave"
+bool   showWave     = input.bool  (true,   "Show Hyper Wave",          group = GRP_WAVE, tooltip = TT_WAVE,   inline = "w1")
+int    waveLen      = input.int   (10,     "",                         group = GRP_WAVE, minval = 5, maxval = 21, inline = "w1")
+string signalType   = input.string("EMA",  "Signal Type",             group = GRP_WAVE, options = ["SMA", "EMA"], tooltip = TT_SIGNAL, inline = "w2")
+int    signalLen    = input.int   (3,      "",                         group = GRP_WAVE, minval = 2, maxval = 10, inline = "w2")
+color  waveBullClr  = input.color (WB_BULL_BRT, "Bull / Bear",        group = GRP_WAVE, inline = "wc")
+color  waveBearClr  = input.color (WB_NEUTRAL,  "",                   group = GRP_WAVE, inline = "wc")
+int    waveFillAlph = input.int   (85,     "Fill Transparency",        group = GRP_WAVE, minval = 0, maxval = 100)
+
+// ============================================================================
+// INPUTS — DIVERGENCE
+// ============================================================================
+string GRP_DIV = "Divergence"
+bool   showDiv      = input.bool  (true,                    "Show Divergences", group = GRP_DIV, inline = "d1")
+int    divSens      = input.int   (25,                      "Sensitivity",      group = GRP_DIV, minval = 20, maxval = 40, tooltip = TT_DIV, inline = "d2")
+color  divBullClr   = input.color (color.new(WB_BLUE, 20), "Bull / Bear",      group = GRP_DIV, inline = "dc")
+color  divBearClr   = input.color (color.new(WB_BEAR_BRT, 20), "",             group = GRP_DIV, inline = "dc")
+
+// ============================================================================
+// INPUTS — SMART MONEY FLOW
+// ============================================================================
+string GRP_MFI = "Smart Money Flow"
+bool   showMfi      = input.bool  (true,       "Show Money Flow",  group = GRP_MFI, inline = "m1")
+int    mfiLen       = input.int   (27,         "Length",            group = GRP_MFI, minval = 10, maxval = 55, inline = "m2", tooltip = "Default 27 = one RTH session on 15m.")
+int    mfiSmooth    = input.int   (4,          "Smooth",            group = GRP_MFI, minval = 2,  maxval = 10, inline = "m3")
+color  mfiBullClr   = input.color (WB_BULL,    "Bull / Bear",      group = GRP_MFI, inline = "mc")
+color  mfiBearClr   = input.color (WB_BEAR,    "",                  group = GRP_MFI, inline = "mc")
+
+// ============================================================================
+// INPUTS — CONFLUENCE
+// ============================================================================
+string GRP_CNF = "Confluence"
+color  cnfBullClr   = input.color (WB_BULL,    "Bull / Bear",       group = GRP_CNF, inline = "cc")
+color  cnfBearClr   = input.color (WB_BEAR,    "",                   group = GRP_CNF, inline = "cc")
+bool   showMeter    = input.bool  (true,        "Show Meter",        group = GRP_CNF, tooltip = TT_METER, inline = "cm")
+bool   showAreas    = input.bool  (true,        "Show Areas",        group = GRP_CNF, tooltip = TT_AREA,  inline = "ca")
+
+// ============================================================================
+// INPUTS — REVERSAL
+// ============================================================================
+string GRP_REV = "Reversal"
+bool   showRev      = input.bool  (true,       "Show Reversals",    group = GRP_REV, inline = "r1")
+int    revFactor    = input.int   (5,          "Factor",             group = GRP_REV, options = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], tooltip = TT_FACTOR, inline = "r2")
+color  revBullClr   = input.color (WB_BULL,    "Bull / Bear",       group = GRP_REV, inline = "rc")
+color  revBearClr   = input.color (WB_BEAR,    "",                   group = GRP_REV, inline = "rc")
+
+// ============================================================================
+// UDTs
+// ============================================================================
+type OscillatorState
+    float sig
+    float sigSmooth
+    color clr
+
+type DivergencePoint
+    int   barIdx
+    float price
+    float oscVal
+
+type MoneyFlowState
+    float mfi
+    color clr
+    float bullMfi
+    float bearMfi
+
+type ConfluenceState
+    color up
+    color dn
+    float[] bullThresh
+    float[] bearThresh
+
+// ============================================================================
+// STATE INIT
+// ============================================================================
+var OscillatorState  osc = OscillatorState.new(na, na, na)
+var DivergencePoint  dvg = DivergencePoint.new(na, na, na)
+var MoneyFlowState   mf  = MoneyFlowState.new(na, na, na, na)
+
+var ConfluenceState  cf  = ConfluenceState.new(
+     color.rgb(54, 58, 69, 60)
+   , color.rgb(54, 58, 69, 60)
+   , array.new<float>(1, na)
+   , array.new<float>(1, na)
+   )
+
+// Pre-declare cached averages (updated each bar before use)
+var float blAvg = na
+var float brAvg = na
+
+// ============================================================================
+// HELPER METHODS
+// ============================================================================
+smoothSignal(float src, int len) =>
+    switch signalType
+        "SMA" => ta.sma(src, len)
+        "EMA" => ta.ema(src, len)
+        => ta.sma(src, len)
+
+applyTransp(color x, int inv) =>
+    inv == 1 ? color.new(x, waveFillAlph) : color.new(x, 0)
+
+// ============================================================================
+// OSCILLATOR — FIX #4 (removed unused smt param), FIX #5 (div-by-zero guard)
+// ============================================================================
+calcOsc(int len) =>
+    float hi = ta.highest(len)
+    float lo = ta.lowest(len)
+    float av = ta.sma(hl2, len)
+    float span = math.max(hi - lo, syminfo.mintick)  // FIX #5: guard div-by-zero
+    float raw = (close - math.avg(hi, lo, av)) / span * 100
+    osc.sig       := ta.ema(ta.linreg(raw, len, 0), signalLen)
+    osc.sigSmooth := smoothSignal(osc.sig, 2)
+    osc.clr       := osc.sig > osc.sigSmooth ? applyTransp(waveBullClr, 1) : applyTransp(waveBearClr, 1)
+
+// ============================================================================
+// MONEY FLOW INDEX — plain series for max_bars_back compatibility
+// ============================================================================
+float _mfiRaw = ta.sma(ta.mfi(hl2, mfiLen) - 50, mfiSmooth)
+max_bars_back(_mfiRaw, 60)
+
+calcMfi() =>
+    mf.mfi := _mfiRaw
+    mf.clr := mf.mfi > 0 ? mfiBullClr : mfiBearClr
+
+    float bL = mf.mfi - 10
+    float bR = mf.mfi + 10
+
+    // Use cached averages
+    mf.bullMfi := mf.mfi > 0 and mf.mfi > blAvg ? bL : 0
+    mf.bearMfi := mf.mfi < 0 and mf.mfi < brAvg ? bR : 0
+
+// ============================================================================
+// MONEY FLOW THRESHOLD TRACKER — FIX #2 (bearish branch uses brAvg)
+// ============================================================================
+updateMfThresholds() =>
+    switch
+        mf.mfi > 0 =>
+            if cf.bearThresh.size() > 1
+                cf.bearThresh.pop()
+            if cf.bullThresh.size() > mfiLen
+                cf.bullThresh.pop()
+            if mf.mfi > blAvg
+                cf.bullThresh.unshift(mf.mfi)
+            else
+                cf.bullThresh.unshift(mf.mfi[mfiLen] > 0 ? mf.mfi[mfiLen] : mf.mfi)
+
+        mf.mfi < 0 =>
+            if cf.bullThresh.size() > 1
+                cf.bullThresh.pop()
+            if cf.bearThresh.size() > mfiLen
+                cf.bearThresh.pop()
+            // FIX #2: was cf.blT.avg() — now correctly uses brAvg (bearish threshold)
+            if mf.mfi < brAvg
+                cf.bearThresh.unshift(mf.mfi)
+            else
+                cf.bearThresh.unshift(mf.mfi[mfiLen] < 0 ? mf.mfi[mfiLen] : mf.mfi)
+
+// ============================================================================
+// DIVERGENCE — FIX #1 (reset state on zone transition)
+// Hoisted crossover/crossunder to global scope (FIX: compiler warnings)
+// lastDivZone managed in global scope (FIX: cannot modify global in function)
+// ============================================================================
+var int lastDivZone = 0  // +1 = bull zone, -1 = bear zone, 0 = neutral
+
+// Hoist cross-detection to global scope so they run every bar
+bool _crossUnder = ta.crossunder(osc.sig, osc.sigSmooth)
+bool _crossOver  = ta.crossover(osc.sig, osc.sigSmooth)
+
+calcDiv(bool crossUnder, bool crossOver) =>
+    int curZone = osc.sig > divSens ? 1 : osc.sig < -divSens ? -1 : 0
+
+    // FIX #1: reset divergence state when zone changes
+    if curZone != lastDivZone
+        dvg.barIdx := na
+        dvg.price  := na
+        dvg.oscVal := na
+
+    float mx = math.max(osc.sig, osc.sigSmooth, osc.sig[1], osc.sigSmooth[1])
+    float mn = math.min(osc.sig, osc.sigSmooth, osc.sig[1], osc.sigSmooth[1])
+
+    int mxid = mx == osc.sig[1] or mx == osc.sigSmooth[1] ? 1 : 0
+    int mnid = mn == osc.sig[1] or mn == osc.sigSmooth[1] ? 1 : 0
+
+    switch
+        osc.sig > divSens =>
+            if crossUnder
+                switch
+                    na(dvg.price) =>
+                        dvg.barIdx := bar_index - mxid
+                        dvg.price  := math.max(open[mxid], close[mxid])
+                        dvg.oscVal := mx
+
+                    not na(dvg.price) =>
+                        if math.max(open[mxid], close[mxid]) > dvg.price and not(osc.sig[mxid] > dvg.oscVal)
+                            line.new(x1 = dvg.barIdx, x2 = bar_index - mxid, y1 = dvg.oscVal, y2 = mx, color = divBearClr)
+                            dvg.barIdx := na
+                            dvg.price  := na
+                            dvg.oscVal := na
+                        else
+                            dvg.barIdx := bar_index - mxid
+                            dvg.price  := math.max(open[mxid], close[mxid])
+                            dvg.oscVal := mx
+
+        osc.sig < -divSens =>
+            if crossOver
+                switch
+                    na(dvg.price) =>
+                        dvg.barIdx := bar_index - mnid
+                        dvg.price  := math.min(open[mnid], close[mnid])
+                        dvg.oscVal := mn
+
+                    not na(dvg.price) =>
+                        if math.min(open[mnid], close[mnid]) < dvg.price and not(osc.sig[mnid] < dvg.oscVal)
+                            line.new(x1 = dvg.barIdx, x2 = bar_index - mnid, y1 = dvg.oscVal, y2 = mn, color = divBullClr)
+                            dvg.barIdx := na
+                            dvg.price  := na
+                            dvg.oscVal := na
+                        else
+                            dvg.barIdx := bar_index - mnid
+                            dvg.price  := math.min(open[mnid], close[mnid])
+                            dvg.oscVal := mn
+
+// ============================================================================
+// REVERSAL — momentum-turn gate: only fire when oscillator is hooking
+// in the reversal direction, not while trend is still accelerating.
+// mjBull: deeply bearish BUT momentum turning up (osc > sigSmooth)
+// mjBear: deeply bullish BUT momentum turning down (osc < sigSmooth)
+// ============================================================================
+calcReversal() =>
+    float vMA = ta.sma(volume, 7)
+    float rsi = ta.rsi(vMA, 7) - 50
+
+    float thresh = revFactor != 10 ? 1.0 + revFactor / 10.0 : 2.0
+    float threshMn = revFactor != 10 ? revFactor / 10.0 : 2.0
+
+    bool isMajorVol = volume > vMA * thresh
+    bool isMinorVol = volume > vMA * threshMn and not isMajorVol
+
+    // GATE: require momentum turn — osc must cross signal in reversal direction
+    bool oscTurningUp   = osc.sig > osc.sigSmooth  // momentum hooking bullish
+    bool oscTurningDown = osc.sig < osc.sigSmooth  // momentum hooking bearish
+
+    bool mjBear = isMajorVol and osc.sig >  revFactor and mf.mfi > blAvg and oscTurningDown
+    bool mjBull = isMajorVol and osc.sig < -revFactor and mf.mfi < brAvg and oscTurningUp
+
+    bool mnBear = isMinorVol and osc.sig >  20 and oscTurningDown and rsi >  20
+    bool mnBull = isMinorVol and osc.sig < -20 and oscTurningUp   and rsi < -20
+
+    [mjBull, mjBear, mnBear, mnBull]
+
+// ============================================================================
+// EXECUTION
+// ============================================================================
+// Cache array averages once per bar (FIX #7)
+blAvg := cf.bullThresh.avg()
+brAvg := cf.bearThresh.avg()
+
+calcOsc(waveLen)
+calcMfi()
+updateMfThresholds()
+
+// Re-cache after threshold update
+blAvg := cf.bullThresh.avg()
+brAvg := cf.bearThresh.avg()
+
+if showDiv
+    calcDiv(_crossUnder, _crossOver)
+// Update zone tracker in global scope (cannot modify inside function)
+lastDivZone := osc.sig > divSens ? 1 : osc.sig < -divSens ? -1 : 0
+
+[mjBull, mjBear, mnBear, mnBull] = calcReversal()
+
+// ============================================================================
+// PLOTS — REVERSAL SIGNALS
+// ============================================================================
+plotshape(mjBull and showRev ? -65 : na, location = location.absolute, color = revBullClr, size = size.tiny, style = shape.triangleup)
+plotshape(mjBear and showRev ?  65 : na, location = location.absolute, color = revBearClr, size = size.tiny, style = shape.triangledown)
+
+plot(mnBull and showRev ? -65 : na, color = revBullClr, linewidth = 1, style = plot.style_circles)
+plot(mnBear and showRev ?  65 : na, color = revBearClr, linewidth = 1, style = plot.style_circles)
+
+// ============================================================================
+// PLOTS — HYPER WAVE
+// ============================================================================
+plot(ta.crossover(osc.sig, osc.sigSmooth)  and showWave ? math.min(osc.sig, osc.sigSmooth) : na, style = plot.style_circles, linewidth = 2, color = applyTransp(osc.sig > osc.sigSmooth ? waveBullClr : waveBearClr, 0))
+plot(ta.crossunder(osc.sig, osc.sigSmooth) and showWave ? math.max(osc.sig, osc.sigSmooth) : na, style = plot.style_circles, linewidth = 2, color = applyTransp(osc.sig > osc.sigSmooth ? waveBullClr : waveBearClr, 0))
+
+pO = plot(showWave ? osc.sig       : na, color = applyTransp(osc.sig > osc.sigSmooth ? waveBullClr : waveBearClr, 0), linewidth = 2)
+iO = plot(showWave ? osc.sigSmooth : na, color = applyTransp(osc.sig > osc.sigSmooth ? waveBullClr : waveBearClr, 1), display = display.none)
+bL = plot(0, color = WB_NEUTRAL)
+
+fill(pO, iO, color = showWave ? osc.clr : na)
+
+// ============================================================================
+// PLOTS — SMART MONEY FLOW
+// ============================================================================
+pmf = plot(showMfi ? mf.mfi : na, color = mf.clr)
+p_blT = plot(mf.bullMfi > 0 and mf.mfi > 0 ? mf.bullMfi : 0, color = na, display = display.none)
+p_brT = plot(mf.bearMfi < 0 and mf.mfi < 0 ? mf.bearMfi : 0, color = na, display = display.none)
+
+fill(bL, pmf,  color.new(mf.clr, showMfi ? 50 : 100))
+fill(bL, p_blT, color.new(mf.clr, showMfi ?  0 : 100))
+fill(bL, p_brT, color.new(mf.clr, showMfi ?  0 : 100))
+
+// ============================================================================
+// CONFLUENCE AREAS
+// ============================================================================
+cf.up := color.rgb(54, 58, 69, 60)
+cf.dn := color.rgb(54, 58, 69, 60)
+
+switch
+    osc.sig > 0 and mf.mfi > 0 => cf.up := cnfBullClr
+    osc.sig < 0 and mf.mfi < 0 => cf.dn := cnfBearClr
+    =>
+        cf.dn := color.new(cnfBearClr, 60)
+        cf.up := color.new(cnfBullClr, 60)
+
+tLv = plot( 55, color = showAreas ? cf.up : na)
+bLv = plot(-55, color = showAreas ? cf.dn : na)
+tfL = plot( 50, display = display.none)
+dfL = plot(-50, display = display.none)
+
+fill(tLv, tfL, color = showAreas ? cf.up : na)
+fill(bLv, dfL, color = showAreas ? cf.dn : na)
+
+plot(mf.mfi > 0 and showMfi ? blAvg : na, color = mfiBullClr, style = plot.style_linebr)
+plot(mf.mfi < 0 and showMfi ? brAvg : na, color = mfiBearClr, style = plot.style_linebr)
+
+// ============================================================================
+// CONFLUENCE METER — FIX #3 (var lines, proper cleanup), FIX #6 (arithmetic loop)
+// ============================================================================
+var line dashHi = na
+var line dashLo = na
+
+if barstate.islast
+    // FIX #3: delete-before-recreate for dashed reference lines
+    dashHi.delete()
+    dashLo.delete()
+    dashHi := line.new(x1 = last_bar_index, x2 = bar_index - 1, y1 =  20, y2 =  20, color = color.new(WB_TEXT, 50), style = line.style_dashed, extend = extend.right)
+    dashLo := line.new(x1 = last_bar_index, x2 = bar_index - 1, y1 = -20, y2 = -20, color = color.new(WB_TEXT, 50), style = line.style_dashed, extend = extend.right)
+
+    if showMeter
+        var line[] meterLines = array.new<line>()
+        for j in meterLines
+            j.delete()
+        meterLines.clear()
+
+        var label[] meterLabels = array.new<label>()
+        for lb in meterLabels
+            lb.delete()
+        meterLabels.clear()
+
+        // ── Confluence Score: osc + mfi normalized to -100..+100 ──
+        float oscNorm = math.max(-50.0, math.min(50.0, osc.sig)) / 50.0
+        float mfiNorm = math.max(-50.0, math.min(50.0, mf.mfi)) / 50.0
+        // Boost when both agree strongly
+        float agree   = oscNorm * mfiNorm > 0 ? 1.2 : 0.8
+        float cnfScore = math.max(-100.0, math.min(100.0, (oscNorm + mfiNorm) / 2.0 * 100.0 * agree))
+        int   scoreRound = math.round(cnfScore)
+
+        // ── Status text ──
+        string statusTxt = switch
+            cnfScore >  60 => "STRONG\nBULL"
+            cnfScore >  20 => "BULL"
+            cnfScore > -20 => "NEUTRAL"
+            cnfScore > -60 => "BEAR"
+            =>                "STRONG\nBEAR"
+
+        color statusClr = switch
+            cnfScore >  60 => WB_BULL_BRT
+            cnfScore >  20 => WB_BULL
+            cnfScore > -20 => WB_NEUTRAL
+            cnfScore > -60 => WB_BEAR
+            =>                WB_BEAR_BRT
+
+        // ── Gradient bar meter (colored) ──
+        int meterX = bar_index + 3
+        for i = 0 to 21
+            int id = 55 - i * 5
+            meterLines.unshift(
+                 line.new(
+                     x1 = meterX, x2 = meterX
+                   , y1 = id, y2 = id - 5
+                   , color = color.from_gradient(id, -50, 55, cnfBearClr, cnfBullClr)
+                   , width = 5
+                   )
+                 )
+
+        // ── Needle: bright white line at score position ──
+        float needleY = math.max(-50.0, math.min(55.0, cnfScore / 100.0 * 55.0))
+        meterLines.unshift(
+             line.new(
+                 x1 = meterX - 1, x2 = meterX + 1
+               , y1 = needleY, y2 = needleY
+               , color = #ffffff
+               , width = 3
+               )
+             )
+
+        // ── Score number (huge) ──
+        meterLabels.unshift(
+             label.new(
+                 x = meterX + 3, y = 0
+               , text = str.tostring(scoreRound)
+               , color = na
+               , textcolor = statusClr
+               , size = size.huge
+               , style = label.style_label_left
+               )
+             )
+
+        // ── Status text (large, above score) ──
+        meterLabels.unshift(
+             label.new(
+                 x = meterX + 3, y = 35
+               , text = statusTxt
+               , color = na
+               , textcolor = statusClr
+               , size = size.large
+               , style = label.style_label_left
+               )
+             )
+
+        // ── Zone labels on meter ──
+        meterLabels.unshift(label.new(x = meterX - 2, y =  55, text = "▲", color = na, textcolor = color.new(cnfBullClr, 30), size = size.tiny, style = label.style_label_right))
+        meterLabels.unshift(label.new(x = meterX - 2, y = -50, text = "▼", color = na, textcolor = color.new(cnfBearClr, 30), size = size.tiny, style = label.style_label_right))
+
+// ============================================================================

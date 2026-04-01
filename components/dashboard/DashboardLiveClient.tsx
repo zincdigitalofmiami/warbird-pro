@@ -5,7 +5,12 @@ import dynamic from "next/dynamic";
 import CorrelationsRow from "@/components/dashboard/CorrelationsRow";
 import DataTablesPanel from "@/components/dashboard/DataTablesPanel";
 import { fromWarbirdSetup, type SetupCandidate } from "@/lib/setup-candidates";
-import type { WarbirdSignal, WarbirdSetupEventRow, WarbirdSetupRow } from "@/lib/warbird/types";
+import type {
+  WarbirdRuntimeState,
+  WarbirdSignal,
+  WarbirdSetupEventRow,
+  WarbirdSetupRow,
+} from "@/lib/warbird/types";
 
 // bundle-dynamic-imports: heavy chart component loaded client-side only
 const LiveMesChart = dynamic(
@@ -38,6 +43,7 @@ interface DashboardPayload {
   signalEvents: SignalEvent[];
   correlations: Record<string, { close: number; prevClose: number }>;
   counts: DashboardSetupCounts;
+  runtime: WarbirdRuntimeState;
   generatedAt: string;
 }
 
@@ -89,6 +95,41 @@ export default function DashboardLiveClient() {
 
   return (
     <div className="flex flex-col w-full h-full" style={{ background: "#131722" }}>
+      {data?.runtime.active ? (
+        <div
+          className="px-4 py-3 text-[11px] leading-5"
+          style={{
+            background: "rgba(242, 54, 69, 0.12)",
+            borderBottom: "1px solid rgba(242, 54, 69, 0.28)",
+            color: "rgba(255,255,255,0.82)",
+          }}
+        >
+          <div className="font-semibold uppercase tracking-[0.18em] text-[10px] text-red-300">
+            Warbird Runtime Degraded
+          </div>
+          <div className="mt-1 text-white/75">
+            {data.runtime.reason ??
+              "Legacy Warbird reader health could not be proven. The MES chart can still render, but Warbird setup state is intentionally withheld."}
+          </div>
+          <div className="mt-1 text-white/55">
+            Checked{" "}
+            {new Date(data.runtime.checkedAt).toLocaleString("en-US", {
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: true,
+              timeZone: "America/Chicago",
+            })}
+            {" · "}
+            Missing objects:{" "}
+            {data.runtime.missingObjects.length > 0
+              ? data.runtime.missingObjects.join(", ")
+              : "none reported"}
+          </div>
+        </div>
+      ) : null}
+
       {/* Top: Correlations Row */}
       <CorrelationsRow correlations={data?.correlations ?? null} />
 

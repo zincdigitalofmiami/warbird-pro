@@ -23,6 +23,10 @@ function floorTo15m(timeSec: number): number {
   return Math.floor(timeSec / BAR_15M_SEC) * BAR_15M_SEC;
 }
 
+function floorToMinute(timeMs: number): number {
+  return Math.floor(timeMs / ONE_MINUTE_MS) * ONE_MINUTE_MS;
+}
+
 function aggregate15m(rows: Array<{
   ts: string; open: number; high: number; low: number; close: number; volume: number;
 }>): Array<{
@@ -102,15 +106,15 @@ Deno.serve(async (req: Request) => {
     }
 
     const now = Date.now();
+    const lastClosedMinuteStartMs = floorToMinute(now) - ONE_MINUTE_MS;
     const maxLookbackStartMs = now - MAX_INCREMENTAL_LOOKBACK_MINUTES * ONE_MINUTE_MS;
     const defaultStartMs = now - LOOKBACK_ON_EMPTY_MINUTES * ONE_MINUTE_MS;
     const latestStartMs = latest?.ts
       ? new Date(latest.ts).getTime() + ONE_MINUTE_MS
       : defaultStartMs;
     const rangeStartMs = Math.max(latestStartMs, maxLookbackStartMs);
-    const gapMinutes = (now - rangeStartMs) / ONE_MINUTE_MS;
 
-    if (gapMinutes < 0.5) {
+    if (rangeStartMs > lastClosedMinuteStartMs) {
       try {
         await supabase.from("job_log").insert({
           job_name: "mes-1m-pull",
@@ -122,6 +126,8 @@ Deno.serve(async (req: Request) => {
       } catch { /* ignore */ }
       return jsonResponse({ success: true, pulled_1m: 0, upserted_15m: 0, reason: "no_gap", duration_ms: Date.now() - startMs });
     }
+
+    const gapMinutes = (lastClosedMinuteStartMs - rangeStartMs) / ONE_MINUTE_MS + 1;
 
     // ── Fetch bars ──────────────────────────────────────────────────────
     let bars: OhlcvBar[] = [];
@@ -164,9 +170,11 @@ Deno.serve(async (req: Request) => {
       });
     }
 
+    const lastClosedMinuteSec = Math.floor(lastClosedMinuteStartMs / 1000);
     const dedupedBars = [...new Map(
       bars
         .filter((bar) => !isWeekendBar(bar.time))
+        .filter((bar) => bar.time <= lastClosedMinuteSec)
         .map((bar) => [bar.time, bar] as const),
     ).values()].sort((a, b) => a.time - b.time);
 

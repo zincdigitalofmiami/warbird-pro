@@ -17,7 +17,7 @@ Everything else is archived or reference-only and should not drive current imple
 - Any remaining `1H` wording in old docs, specs, scripts, or comments is legacy and must not drive new work.
 - Pine is the canonical signal surface. The Next.js dashboard is the mirrored operator surface on the same contract, not a separate decision engine.
 - Live model outputs are TP1/TP2/reversal outcome state for the MES 15m fib setup, not predicted-price forecasts.
-- `news_signals` is a derived `BULLISH` / `BEARISH` market-impact surface and must be paired with price action; it is not a standalone trade engine.
+- `news_signals` is retired from the active contract. Do not build new schema, writer logic, dashboard logic, or training assumptions around NEWS unless the user explicitly reopens it.
 - AutoGluon is offline only and may only promote Pine-ready packet outputs.
 
 ## Stack
@@ -35,7 +35,7 @@ Everything else is archived or reference-only and should not drive current imple
 - NEVER use mock, demo, placeholder, or fake data. Every data point must be real.
 - If a feature has no real data yet, show NOTHING.
 - NEVER query inactive symbols from Databento. Only `is_active=true AND data_source='DATABENTO'`.
-- Core historical retention starts at `2018-01-01T00:00:00Z`. Do not preserve, backfill, or train on pre-2018 core rows unless the user explicitly reopens that contract.
+- Core historical retention starts at `2020-01-01T00:00:00Z`. Do not preserve, backfill, or train on pre-2020 core rows unless the user explicitly reopens that contract.
 
 ### Naming
 
@@ -48,6 +48,9 @@ Everything else is archived or reference-only and should not drive current imple
 - Supabase client only. Service role for writes, anon for reads.
 - SQL migrations in `supabase/migrations/`. No Prisma. No Drizzle.
 - RLS on all tables. Admin client: `lib/supabase/admin.ts`
+- Do not trust docs, status notes, prior agent claims, or `npm run build` as proof of schema truth.
+- Before claiming any route, script, table, or view works, verify it against the actual database(s) with direct DB checks (`to_regclass`, `information_schema`, RPC/query checks, migration ledger checks) in the environment that matters.
+- If local and cloud differ, say so explicitly. Do not collapse them into one “current state.”
 
 ### Scheduling
 
@@ -76,6 +79,8 @@ Everything else is archived or reference-only and should not drive current imple
 - NEVER refactor or "improve" code outside the current task.
 - NEVER add or remove dependencies without asking.
 - Before each phase or checkpoint, reread the active plan section that governs that work.
+- Before proposing writer, schema, or training architecture, map every required fact to an exact plan line and an exact persisted home (`table.column`, view field, or explicitly named local research entity). If you cannot point to where a fact lives, mark it missing before proposing implementation.
+- Do not collapse the contract into shorthand like "candidates + signals + outcomes" when the plan requires separate point-in-time setup truth, realized path truth, published signal lineage, and a distinct explanatory/research layer.
 - After each locked phase or checkpoint, update the active plan with findings, validations, blockers, and the next blocking item.
 - Update `WARBIRD_MODEL_SPEC.md` when the model contract changes.
 - Update `CLAUDE.md` when current status or live operational truth changes.
@@ -109,6 +114,6 @@ Everything else is archived or reference-only and should not drive current imple
 
 **Symbology:** All MES Databento calls use `MES.c.0` (calendar front-month continuous) with `stype_in=continuous`. No manual contract-roll logic. The `contract-roll.ts` files are dead code.
 
-**Retention floor:** `2018-01-01T00:00:00Z`.
+**Retention floor:** `2020-01-01T00:00:00Z`.
 
 **Databento schemas (Standard $179/mo):** ohlcv-1s, ohlcv-1m, ohlcv-1h, ohlcv-1d, definition, statistics. Currently using: ohlcv-1s (Live API for real-time), ohlcv-1m (Historical API fallback), ohlcv-1h, ohlcv-1d.
