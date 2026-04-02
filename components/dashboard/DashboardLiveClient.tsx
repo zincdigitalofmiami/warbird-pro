@@ -49,7 +49,6 @@ interface DashboardPayload {
 
 export default function DashboardLiveClient() {
   const [data, setData] = useState<DashboardPayload | null>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,10 +72,6 @@ export default function DashboardLiveClient() {
       } catch {
         if (!cancelled) {
           setData(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
         }
       }
     }
