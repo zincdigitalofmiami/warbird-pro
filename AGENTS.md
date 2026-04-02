@@ -2,6 +2,46 @@
 
 Read this file before any work.
 
+## Agent Bootstrap
+
+Use this root `AGENTS.md` as the workspace instruction surface. Do not add a competing `.github/copilot-instructions.md` unless this file is intentionally retired.
+
+### Read Order
+
+- Start here: `AGENTS.md`
+- Operational truth: `CLAUDE.md`
+- Active architecture: `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+- Model contract: `WARBIRD_MODEL_SPEC.md`
+- Fail-closed execution gates: `docs/agent-safety-gates.md`
+
+### Default Preflight
+
+- Check repo state with `git status --short` before edits.
+- Use `rg --files` and `rg -n` to scope the touched surface before changing code.
+- Treat local Supabase and cloud Supabase as separate environments until verified directly.
+- Never trust prior agent claims, stale docs, or build success as proof of schema truth.
+
+### Default Verification
+
+- `npm run build` is the baseline gate before every push.
+- `npm run lint` is the standard lint gate for TypeScript and Next.js work.
+- If any `.pine` file is touched, run the full Pine verification flow in `CLAUDE.md` and `docs/agent-safety-gates.md`.
+
+### Repo Map
+
+- `app/` and `components/`: Next.js App Router runtime and UI.
+- `supabase/functions/`: active ingestion and cron-owned Edge Functions.
+- `supabase/migrations/`: canonical schema and schedule history.
+- `lib/`: shared market, setup, chart, and Supabase utilities.
+- `indicators/v7-warbird-institutional.pine`: active Pine work surface.
+- `docs/plans/` and `docs/decisions/`: active architecture and locked decisions.
+
+### Common Gotchas
+
+- The canonical contract is MES 15m fib setups keyed to the MES 15m bar-close in `America/Chicago`.
+- Pine is the canonical signal surface; the dashboard mirrors stored engine state and is not a separate decision engine.
+- No mock data, no inactive Databento symbols, no Prisma/ORM paths, and no production dependency on local machines.
+
 ## Active Plan
 
 There is exactly one active architecture plan and one active update area:
@@ -102,7 +142,6 @@ Everything else is archived or reference-only and should not drive current imple
 - Before running `supabase db push`, **verify the remote ledger matches local files** via `list_migrations` or `supabase db diff --linked`.
 - When reconciling drift: audit EVERY object each migration should have created against the live DB. Do not assume "applied directly" — verify each one. Previous sessions incorrectly claimed 018-036 were all applied when 4 of them never ran.
 - After any DDL change, run `get_advisors` (security type) to catch missing RLS or policy issues.
-
 
 ## MES Ingestion — Current State
 
