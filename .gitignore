@@ -55,6 +55,9 @@ __pycache__/
 # tradingview mcp (local tool, not project code)
 .tradingview-mcp/
 .playwright-mcp/
+.kilo/
+.remember/
+data/local-db-backups/
 
 # archived/stale plans (history preserved in git, not tracked going forward)
 docs/plans/archive/
