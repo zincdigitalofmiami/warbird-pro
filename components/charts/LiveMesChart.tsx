@@ -52,6 +52,7 @@ const INITIAL_VISIBLE_BARS = 120;
 const RIGHT_PADDING_BARS = 16;
 const DEFAULT_BAR_SPACING = 10;
 const MIN_BAR_SPACING = 0.5;
+const ENABLE_FORMING_BAR_UPDATES = false;
 const MAX_TOUCH_MARKERS = 1;
 const MAX_HOOK_MARKERS = 1;
 const FIB_TARGET_1_RATIO = 1.236;
@@ -290,6 +291,7 @@ export interface LiveMesChartHandle {
 }
 
 interface LiveMesChartProps {
+  paused?: boolean;
   signal?: WarbirdSignal | null;
   setups?: SetupCandidate[];
   eventPhase?: string;
@@ -297,7 +299,7 @@ interface LiveMesChartProps {
 }
 
 const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
-  function LiveMesChart({ signal, setups, eventPhase, eventLabel }, ref) {
+  function LiveMesChart({ paused = false, signal, setups, eventPhase, eventLabel }, ref) {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const seriesRef = useRef<ISeriesApi<"Candlestick", Time> | null>(null);
@@ -508,6 +510,12 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
 
     // --- Live data: Supabase Realtime subscription ---
     useEffect(() => {
+      if (paused) {
+        setStatus("stale");
+        setError("Live chart pulls are paused until the dashboard/runtime audit is complete.");
+        return;
+      }
+
       const supabase = createClient();
 
       const updateSessionStats = (points: MesPoint[]) => {
@@ -765,94 +773,95 @@ const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
       // Aggregates incoming 1m ticks into the current forming 15m candle
       // so the chart stays current between 15m bar closes.
       let currentFormingBar: { ts: number; open: number; high: number; low: number; close: number; volume: number } | null = null;
+      let channel1m: ReturnType<typeof supabase.channel> | null = null;
 
-      const channel1m = supabase
-        .channel("mes_1m_forming")
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "mes_1m",
-          },
-          (payload) => {
-            if (cancelled || !seriesRef.current) return;
-            const row = payload.new as {
-              ts: string;
-              open: number;
-              high: number;
-              low: number;
-              close: number;
-              volume: number;
-            };
-            if (!row?.ts) return;
+      if (ENABLE_FORMING_BAR_UPDATES) {
+        channel1m = supabase
+          .channel("mes_1m_forming")
+          .on(
+            "postgres_changes",
+            {
+              event: "*",
+              schema: "public",
+              table: "mes_1m",
+            },
+            (payload) => {
+              if (cancelled || !seriesRef.current) return;
+              const row = payload.new as {
+                ts: string;
+                open: number;
+                high: number;
+                low: number;
+                close: number;
+                volume: number;
+              };
+              if (!row?.ts) return;
 
-            const tickTime = Math.floor(new Date(row.ts).getTime() / 1000);
-            // Floor to 15m bucket
-            const barTime = Math.floor(tickTime / BAR_INTERVAL_SEC) * BAR_INTERVAL_SEC;
+              const tickTime = Math.floor(new Date(row.ts).getTime() / 1000);
+              // Floor to 15m bucket
+              const barTime = Math.floor(tickTime / BAR_INTERVAL_SEC) * BAR_INTERVAL_SEC;
 
-            // FIX: Use Date.now() bucket comparison instead of existsAsCompleted.
-            // The old check `realPointsRef.current.some(p => p.time === barTime)`
-            // would skip ticks if the bar existed in the snapshot, even if it was
-            // still the current forming bar. Compare against the current wall-clock
-            // 15m bucket to determine if this is a forming bar.
-            const nowBucket = Math.floor(Date.now() / 1000 / BAR_INTERVAL_SEC) * BAR_INTERVAL_SEC;
-            if (barTime < nowBucket) return; // This bar is in the past — already completed
+              // Compare against the current wall-clock 15m bucket to determine if this is a forming bar.
+              const nowBucket = Math.floor(Date.now() / 1000 / BAR_INTERVAL_SEC) * BAR_INTERVAL_SEC;
+              if (barTime < nowBucket) return; // This bar is in the past — already completed
 
-            const open = Number(row.open);
-            const high = Number(row.high);
-            const low = Number(row.low);
-            const close = Number(row.close);
-            const vol = Number(row.volume);
+              const open = Number(row.open);
+              const high = Number(row.high);
+              const low = Number(row.low);
+              const close = Number(row.close);
+              const vol = Number(row.volume);
 
-            if (currentFormingBar && currentFormingBar.ts === barTime) {
-              // Update existing forming bar with new 1m tick
-              currentFormingBar.high = Math.max(currentFormingBar.high, high);
-              currentFormingBar.low = Math.min(currentFormingBar.low, low);
-              currentFormingBar.close = close;
-              currentFormingBar.volume += vol;
-            } else {
-              // New 15m bucket — start a fresh forming bar
-              currentFormingBar = { ts: barTime, open, high, low, close, volume: vol };
-            }
+              if (currentFormingBar && currentFormingBar.ts === barTime) {
+                // Update existing forming bar with new 1m tick
+                currentFormingBar.high = Math.max(currentFormingBar.high, high);
+                currentFormingBar.low = Math.min(currentFormingBar.low, low);
+                currentFormingBar.close = close;
+                currentFormingBar.volume += vol;
+              } else {
+                // New 15m bucket — start a fresh forming bar
+                currentFormingBar = { ts: barTime, open, high, low, close, volume: vol };
+              }
 
-            const fb = currentFormingBar;
+              const fb = currentFormingBar;
 
-            // Map forming bar to gap-free time and push to chart
-            let gfTime = timeMapRef.current.realToGf.get(barTime);
-            if (gfTime == null && pointsRef.current.length > 0) {
-              // This is a brand-new forming bar — assign next gap-free slot
-              const lastGfTime = pointsRef.current[pointsRef.current.length - 1].time;
-              gfTime = lastGfTime + BAR_INTERVAL_SEC;
-              timeMapRef.current.realToGf.set(barTime, gfTime);
-              timeMapRef.current.gfToReal.set(gfTime, barTime);
-            }
+              // Map forming bar to gap-free time and push to chart
+              let gfTime = timeMapRef.current.realToGf.get(barTime);
+              if (gfTime == null && pointsRef.current.length > 0) {
+                // This is a brand-new forming bar — assign next gap-free slot
+                const lastGfTime = pointsRef.current[pointsRef.current.length - 1].time;
+                gfTime = lastGfTime + BAR_INTERVAL_SEC;
+                timeMapRef.current.realToGf.set(barTime, gfTime);
+                timeMapRef.current.gfToReal.set(gfTime, barTime);
+              }
 
-            if (gfTime != null) {
-              seriesRef.current!.update({
-                time: gfTime as UTCTimestamp,
-                open: fb.open,
-                high: fb.high,
-                low: fb.low,
-                close: fb.close,
-              });
+              if (gfTime != null) {
+                seriesRef.current!.update({
+                  time: gfTime as UTCTimestamp,
+                  open: fb.open,
+                  high: fb.high,
+                  low: fb.low,
+                  close: fb.close,
+                });
 
-              // Update last price for header display
-              setLastPrice(fb.close);
-              setStatus("live");
-            }
-          },
-        )
-        .subscribe();
+                // Update last price for header display
+                setLastPrice(fb.close);
+                setStatus("live");
+              }
+            },
+          )
+          .subscribe();
+      }
 
       startRealtimeFeed();
 
       return () => {
         cancelled = true;
         supabase.removeChannel(channel);
-        supabase.removeChannel(channel1m);
+        if (channel1m) {
+          supabase.removeChannel(channel1m);
+        }
       };
-    }, []);
+    }, [paused]);
 
     // --- Wire Warbird forecast targets to primitive ---
     useEffect(() => {

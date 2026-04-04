@@ -47,10 +47,17 @@ interface DashboardPayload {
   generatedAt: string;
 }
 
+const DASHBOARD_PULLS_PAUSED = true;
+
 export default function DashboardLiveClient() {
   const [data, setData] = useState<DashboardPayload | null>(null);
 
   useEffect(() => {
+    if (DASHBOARD_PULLS_PAUSED) {
+      setData(null);
+      return;
+    }
+
     let cancelled = false;
 
     async function fetchData() {
@@ -90,7 +97,23 @@ export default function DashboardLiveClient() {
 
   return (
     <div className="flex flex-col w-full h-full" style={{ background: "#131722" }}>
-      {data?.runtime.active ? (
+      {DASHBOARD_PULLS_PAUSED ? (
+        <div
+          className="px-4 py-3 text-[11px] leading-5"
+          style={{
+            background: "rgba(245, 158, 11, 0.12)",
+            borderBottom: "1px solid rgba(245, 158, 11, 0.28)",
+            color: "rgba(255,255,255,0.82)",
+          }}
+        >
+          <div className="font-semibold uppercase tracking-[0.18em] text-[10px] text-amber-300">
+            Dashboard Pulls Paused
+          </div>
+          <div className="mt-1 text-white/75">
+            Live dashboard fetches and chart subscriptions are paused until the current Warbird runtime and contract audit is finished.
+          </div>
+        </div>
+      ) : data?.runtime.active ? (
         <div
           className="px-4 py-3 text-[11px] leading-5"
           style={{
@@ -131,7 +154,11 @@ export default function DashboardLiveClient() {
       {/* Middle: Chart (full width) */}
       <div className="flex min-h-0" style={{ height: "80vh" }}>
         <div className="flex-1 min-w-0 min-h-0">
-          <LiveMesChart signal={data?.signal ?? null} setups={setups} />
+          <LiveMesChart
+            paused={DASHBOARD_PULLS_PAUSED}
+            signal={data?.signal ?? null}
+            setups={setups}
+          />
         </div>
       </div>
 
