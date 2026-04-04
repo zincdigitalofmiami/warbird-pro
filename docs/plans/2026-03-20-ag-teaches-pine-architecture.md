@@ -444,7 +444,7 @@ Daily context (NOT gate members, same value all 27 session bars):
 
 **Why CME-only:** AG needs 15m historical data from Databento. NYSE internals (TICK/VOLD), CBOE indices (VIX/VVIX/VIX3M/SKEW), and ETFs (HYG) are NOT on GLBX.MDP3. CFE (VX futures) is $750+/mo separate subscription.
 
-**Data:** `cross_asset_15m` table (migration 039). Backfill from 2020-01-01 via `scripts/backfill-intermarket-15m.py`.
+**Data:** `cross_asset_1h` and `cross_asset_1d` are the current minimum training timeframes for the Locked Basket. `cross_asset_15m` table exists (migration 039), but 15m backfill for NQ/RTY/CL/6E/6J is **intentionally deferred** — gated on the first AG training run + full SHAP validation (see Phase 4 rule 5 below). `scripts/backfill-intermarket-15m.py` is ready but must not run for the Locked Basket until the SHAP gate clears.
 
 Regime gate: grouped weighted scoring → 0-100 with hysteresis. AG decides final group structure, weights, and correlations from data.
 
@@ -799,6 +799,7 @@ Phase 4 decision rule:
 2. SHAP, admission reports, and out-of-sample validation decide which assets, modules, and setting families survive.
 3. Do not expand the live indicator with additional settings or “zoo” modules ahead of that evidence.
 4. Minimal exportability comes before expansion; evidence-driven promotion comes before UI/config sprawl.
+5. **Cross-asset basket minimum training timeframe is 1h until SHAP completes full feature validation.** SHAP scope is the full feature set — EMA lengths, event-response module, session context, pivot state, volume family, intermarket symbols (NQ/RTY/CL/HG/6E/6J), module families, and all parameter settings. Not just the 6 symbols. Only after SHAP returns feature importance across the entire first training run and confirms which features and symbols survive pruning do we schedule 15m or 1m backfills. The surviving symbols and their required training timeframes are determined from that evidence, not assumed in advance.
 
 Phase 4 exact local targets:
 
@@ -922,7 +923,7 @@ Phase 6 closeout must update:
 
 1. Anchor quality scoring: current confluence chooser vs explicit continuation-leg method.
 2. Fib direction stability: hysteresis band vs ordered swing-leg.
-3. Optimal CME intermarket timeframe: 15m vs 60m vs mixed.
+3. Optimal CME intermarket timeframe: 15m vs 60m vs mixed. **GATED on Phase 4 SHAP run** — do not expand below 1h until SHAP returns feature importance across the full feature set and confirms which symbols and timeframes survive. See Phase 4 rule 5.
 4. Whether CL/HG polarity is unconditionally positive or regime-dependent (AG decides from data).
 
 ---

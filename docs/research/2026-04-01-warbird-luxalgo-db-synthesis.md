@@ -247,10 +247,10 @@ This is the approved symbol map after incorporating the current critique.
 
 **Local Supabase Warehouse**
 
-- `cross_asset_15m`
-- `cross_asset_1h`
-- `cross_asset_4h`  **required by the locked direction, currently missing**
+- `cross_asset_1h` ← current minimum training timeframe for the Locked Basket
 - `cross_asset_1d`
+- `cross_asset_4h` **required by the locked direction, currently missing**
+- `cross_asset_15m` **SHAP-gated** — backfill deferred until after the first AG training run returns full SHAP feature importance. SHAP validates the entire feature set (EMA lengths, event-response, session context, pivot state, volume family, intermarket symbols, module families, parameter settings) — not just which of the 6 symbols survive. Only after SHAP confirms the surviving feature set and symbols do we determine which timeframes are warranted for 15m or 1m backfill. See active plan Phase 4 rule 5.
 
 **Cloud Supabase Runtime**
 
@@ -624,7 +624,8 @@ These are the checks that should be treated as non-negotiable.
 9. **Use RR where it is already correct**
    - especially for `1h` / `1d`
 10. **Keep cloud limited to live consumers**
-   - no symbol/timeframe family belongs in cloud just because it exists locally
+
+- no symbol/timeframe family belongs in cloud just because it exists locally
 
 ---
 

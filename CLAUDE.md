@@ -37,7 +37,7 @@ Read and follow AGENTS.md at the repository root.
 - `indicators/v7-warbird-institutional.pine` is the active Pine work surface. Compiles clean, TV-validated. Output budget: 63/64 (60 plot + 3 alertcondition, 1 headroom). 11 `request.security()` calls of 40 budget. TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed. Fib engine hardened (commit `4a25806`): direction logic uses ZigZag swing-sequence (not midpoint-hysteresis), 1H/4H directional agreement gates entry triggers via HTF-native close-vs-EMA(21), exhaustion diamond visual renders via `label.new()` at fib zone interaction.
 - v7 intermarket basket is **CME Globex LIVE**: **NQ**, **RTY**, **CL**, **HG**, **6E**, **6J** — all fetched at 60min via `request.security()`. 6J (JPY) INVERTED at state boundary (safe haven). ES chart-native vol (ATR ratio, range expansion, efficiency, VWAP) fills the VIX/VVIX gap. **Daily context** (SKEW via `CBOE:SKEW`, NYSE A/D via `USI:ADD`) are AG training features, NOT gate members.
 - v7 regime: Leadership(NQ 25%) + Risk-appetite(RTY/CL/HG 40%) + Macro-FX(6E/6J-inv 15%) + Execution(VWAP/range/eff 20%) → 0-100 score with hysteresis (bull >65, bear <35, exit at 50). Persistence (confirmBars), cooldown, neutralize. Override (direct bull↔bear flip) only when leadership AND risk both extreme same direction. No unanimous gate, no decision model dropdown.
-- `cross_asset_15m` table created (migration 039, RLS enabled). HG (Copper) added to symbols (migration 039 + 040). Backfill from 2020-01-01 for all 6 AG symbols via `scripts/backfill-intermarket-15m.py`.
+- `cross_asset_15m` table created (migration 039, RLS enabled). HG (Copper) added to symbols (migration 039 + 040). Local warehouse has 20,553 rows for HG only. 15m backfill for NQ/RTY/CL/6E/6J is **intentionally deferred — SHAP-gated** (see Locked Rules).
 - Intermarket Full Agreement Panel: NQ, RTY, CL, HG, 6E, 6J — 6 boxes from `cross_asset_1h` (Databento 1h, hourly cron). 6J inverted (JPY weakness = MES bullish). Background rule: all six +1 → green, all six -1 → red, otherwise transparent. Weighted IM Score badge: NQ 25%, RTY/CL/HG 13.33% each, 6E/6J 7.5% each. Shows `—` when no data.
 - Cross-asset crons switched from nightly (02:00-02:30 UTC) to **hourly** — 4 shards at `:05/:06/:07/:08` past every hour, Sun-Fri (migration 040). All ~16 active Databento symbols updated within 4 minutes each hour.
 - Chart container height locked to `80vh`.
@@ -50,8 +50,8 @@ Read and follow AGENTS.md at the repository root.
 
 ### What Doesn't Work Yet
 - mes_1s ingestion (table exists, nothing writes to it)
-- Backfill scripts ready but **not yet executed**: `scripts/backfill-cross-asset.py` (1h/1d from 2024-01-01) and `scripts/backfill-intermarket-15m.py` (15m/1h/1d from 2020-01-01). Require local env vars `DATABENTO_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. Can target local Supabase directly for training data.
-- Ongoing 15m ingestion Edge Function not yet built — `cross_asset_15m` is backfill-populated only.
+- `cross_asset_15m` for NQ/RTY/CL/6E/6J not backfilled — SHAP-gated. `scripts/backfill-intermarket-15m.py` is ready but must not run for the Locked Basket until SHAP returns feature importance across the full training feature set and confirms which symbols/timeframes warrant 15m or 1m backfill. Current local minimum is 1h. See Locked Rules.
+- Ongoing 15m ingestion Edge Function not yet built — `cross_asset_15m` is backfill-only (HG only in local warehouse).
 - Companion pane indicator not yet built (regime_score, impulse_quality, exhaustion_score, agreement_velocity — own 64-plot/40-call budget).
 - `econ_inflation_1d` is still stale relative to the live schedule.
 - FRED backfill script (`python scripts/backfill-fred.py`) needs to run AFTER migration 026 is applied to production to populate the 22 new series
@@ -111,6 +111,7 @@ Follow the active architecture plan only.
 - TradingView keeps execution-facing visuals and alerts. Only 3 `alertcondition()` calls are kept: `WARBIRD ENTRY LONG`, `WARBIRD ENTRY SHORT`, and `PIVOT BREAK (against) + Regime Opposed` (the .50 reversal warning). All other alerts move to the dashboard. Dense operator tables, mini charts, and decision diagnostics belong on the dashboard, which must render the same stored engine state instead of recomputing fibs.
 - The current blocking sequence is: ~~Pine indicator recovery~~ (DONE) -> ~~v7 institutional upgrade~~ (DONE, 64/64) -> ~~intermarket pivot to CME Globex~~ (DONE, 63/64, commit `6f3e7a6`) -> ~~fib engine hardening~~ (DONE, commit `4a25806`) -> **canonical writer cutover** -> dashboard/admin reader cutover -> training workbench buildout -> legacy retirement.
 - The 15-metric TA core pack is the canonical ML export surface. Do not re-introduce standalone third-party harnesses (BigBeluga, LuxAlgo MSB/OB, LuxAlgo Luminance are retired).
+- **Cross-asset basket minimum training timeframe is 1h until post-SHAP validation.** SHAP must run across the full feature set — EMA lengths, event-response module, session context, pivot state, volume family, intermarket symbols (NQ/RTY/CL/HG/6E/6J), module families, and parameter settings. Not just which of the 6 symbols survive. Only after the first AG training run + SHAP returns feature importance and confirms surviving features/symbols do we determine which backfills (15m, 1m) are warranted. Do not run `scripts/backfill-intermarket-15m.py` for the Locked Basket before this gate clears.
 
 ## Documentation Discipline
 

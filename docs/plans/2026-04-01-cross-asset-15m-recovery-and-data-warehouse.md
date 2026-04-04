@@ -18,42 +18,42 @@ On 2026-04-01, Phase 1 of the local-db-migration plan truncated `cross_asset_15m
 
 ### What exists on the external drive (`/Volumes/Satechi Hub/`)
 
-| Location | Contents | Format | Notes |
-|----------|----------|--------|-------|
-| `Databento Data Dump/GLBX-20260202-WH33638BK6.zip` | 25 GB batch download — `definition` schema for 20 options parent symbols, 2010-06 → 2026-02 | DBN/zstd, monthly splits | **Options definitions only** — NO OHLCV data |
-| `Databento Data Dump/Options/` | Extracted version of above | `.definition.dbn.zst` files | Same — definitions, not price data |
-| `Historical Data/Databento/raw/databento_futures_ohlcv_1h.parquet` | **4,967,276 rows**, 84 symbols, 1h OHLCV | Parquet | **Includes NQ/RTY/CL/HG/6E/6J from 2010-06 → 2025-12-15** |
-| `Historical Data/Databento/raw/databento_futures_ohlcv_1d.parquet` | **290,174 rows**, 81 symbols, 1d OHLCV | Parquet | Same symbol coverage |
-| `Historical Data/Databento/raw/databento_options_ohlcv_1d.parquet` | Options OHLCV 1d | Parquet | Not yet audited |
-| `Historical Data/Databento/symbols/` | Symbol-partitioned OHLCV (6B, 6E, 6J, CL, ES, HG, NQ, etc.) | Hive-partitioned dirs | Partial — only some years present |
+| Location                                                           | Contents                                                                                    | Format                      | Notes                                                     |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- | --------------------------- | --------------------------------------------------------- |
+| `Databento Data Dump/GLBX-20260202-WH33638BK6.zip`                 | 25 GB batch download — `definition` schema for 20 options parent symbols, 2010-06 → 2026-02 | DBN/zstd, monthly splits    | **Options definitions only** — NO OHLCV data              |
+| `Databento Data Dump/Options/`                                     | Extracted version of above                                                                  | `.definition.dbn.zst` files | Same — definitions, not price data                        |
+| `Historical Data/Databento/raw/databento_futures_ohlcv_1h.parquet` | **4,967,276 rows**, 84 symbols, 1h OHLCV                                                    | Parquet                     | **Includes NQ/RTY/CL/HG/6E/6J from 2010-06 → 2025-12-15** |
+| `Historical Data/Databento/raw/databento_futures_ohlcv_1d.parquet` | **290,174 rows**, 81 symbols, 1d OHLCV                                                      | Parquet                     | Same symbol coverage                                      |
+| `Historical Data/Databento/raw/databento_options_ohlcv_1d.parquet` | Options OHLCV 1d                                                                            | Parquet                     | Not yet audited                                           |
+| `Historical Data/Databento/symbols/`                               | Symbol-partitioned OHLCV (6B, 6E, 6J, CL, ES, HG, NQ, etc.)                                 | Hive-partitioned dirs       | Partial — only some years present                         |
 
 ### What exists in rabid_raccoon (READ-ONLY, DEAD — DO NOT WRITE)
 
-| Table | Rows | Symbols | Range | Quality |
-|-------|------|---------|-------|---------|
-| `mkt_futures_1h` | 546,453 | 20 symbols incl NQ(36,298) RTY(36,281) CL(36,081) 6E(30,869) 6J(26,988) | 2020-01-01 → 2026-03-05 | ✅ 0 NULL OHLC, 0 h<l, 0 neg vol (verified for 5 basket symbols) |
-| `mkt_futures_1d` | 46,443 | NQ(1,923) RTY(1,923) CL(1,919) 6E(1,867) 6J(1,841) | 2020-01-01 → 2026-03-05 | Not yet spot-checked |
-| `mkt_futures_mes_15m` | 159,911 | MES only | 2020+ | N/A — not cross-asset |
-| `mkt_futures_mes_1m` | 3,660 | MES only | 2026-03-04 → 2026-03-09 | Tiny — only ~5 days |
-| `mkt_options_ohlcv_1d` | 27,004 | 15 parent symbols (ES.OPT, NQ.OPT, LO.OPT, etc.) | 2020-01-01 → 2026-02-24 | Aggregated daily — not individual strikes |
-| `mkt_options_statistics_1d` | 56 | Unknown | Unknown | Tiny |
-| **NO `mkt_futures_15m` table** | — | — | — | **CONFIRMED: raccoon has NO 15m cross-asset data** |
+| Table                          | Rows    | Symbols                                                                 | Range                   | Quality                                                          |
+| ------------------------------ | ------- | ----------------------------------------------------------------------- | ----------------------- | ---------------------------------------------------------------- |
+| `mkt_futures_1h`               | 546,453 | 20 symbols incl NQ(36,298) RTY(36,281) CL(36,081) 6E(30,869) 6J(26,988) | 2020-01-01 → 2026-03-05 | ✅ 0 NULL OHLC, 0 h<l, 0 neg vol (verified for 5 basket symbols) |
+| `mkt_futures_1d`               | 46,443  | NQ(1,923) RTY(1,923) CL(1,919) 6E(1,867) 6J(1,841)                      | 2020-01-01 → 2026-03-05 | Not yet spot-checked                                             |
+| `mkt_futures_mes_15m`          | 159,911 | MES only                                                                | 2020+                   | N/A — not cross-asset                                            |
+| `mkt_futures_mes_1m`           | 3,660   | MES only                                                                | 2026-03-04 → 2026-03-09 | Tiny — only ~5 days                                              |
+| `mkt_options_ohlcv_1d`         | 27,004  | 15 parent symbols (ES.OPT, NQ.OPT, LO.OPT, etc.)                        | 2020-01-01 → 2026-02-24 | Aggregated daily — not individual strikes                        |
+| `mkt_options_statistics_1d`    | 56      | Unknown                                                                 | Unknown                 | Tiny                                                             |
+| **NO `mkt_futures_15m` table** | —       | —                                                                       | —                       | **CONFIRMED: raccoon has NO 15m cross-asset data**               |
 
 ### What exists in local Supabase (training warehouse)
 
-| Table | Rows | Source | Notes |
-|-------|------|--------|-------|
-| `cross_asset_15m` | 20,553 | Databento backfill (HG only) | **Missing: NQ, RTY, CL, 6E, 6J** |
-| `cross_asset_1h` | 178,379 | Raccoon migration | 6 symbols, 2020 → 2026-03 |
-| `cross_asset_1d` | 11,098 | Raccoon migration | 6 symbols, 2020 → 2026-03 |
+| Table             | Rows    | Source                       | Notes                            |
+| ----------------- | ------- | ---------------------------- | -------------------------------- |
+| `cross_asset_15m` | 20,553  | Databento backfill (HG only) | **Missing: NQ, RTY, CL, 6E, 6J** |
+| `cross_asset_1h`  | 178,379 | Raccoon migration            | 6 symbols, 2020 → 2026-03        |
+| `cross_asset_1d`  | 11,098  | Raccoon migration            | 6 symbols, 2020 → 2026-03        |
 
 ### What exists in cloud Supabase (production)
 
-| Table | Rows | Notes |
-|-------|------|-------|
-| `cross_asset_15m` | 0 | **TRUNCATED — this is what we're recovering** |
-| `cross_asset_1h` | 167,418 | Live, growing from cron |
-| `cross_asset_1d` | 15 | Small cron re-accumulation |
+| Table             | Rows    | Notes                                         |
+| ----------------- | ------- | --------------------------------------------- |
+| `cross_asset_15m` | 0       | **TRUNCATED — this is what we're recovering** |
+| `cross_asset_1h`  | 167,418 | Live, growing from cron                       |
+| `cross_asset_1d`  | 15      | Small cron re-accumulation                    |
 
 ---
 
@@ -61,12 +61,12 @@ On 2026-04-01, Phase 1 of the local-db-migration plan truncated `cross_asset_15m
 
 ### Why Databento batch download (not streaming)
 
-| Factor | Streaming (`get_range`) | Batch (`submit_job`) |
-|--------|------------------------|---------------------|
-| Duplicate cost | Charged every re-pull | Free re-download for 30 days |
-| Disconnection risk | Yes, for large pulls | No — download at your pace |
-| Archive copy | None | `.dbn.zst` file on external drive |
-| Size suitability | < 5 GB recommended | > 5 GB recommended |
+| Factor             | Streaming (`get_range`) | Batch (`submit_job`)              |
+| ------------------ | ----------------------- | --------------------------------- |
+| Duplicate cost     | Charged every re-pull   | Free re-download for 30 days      |
+| Disconnection risk | Yes, for large pulls    | No — download at your pace        |
+| Archive copy       | None                    | `.dbn.zst` file on external drive |
+| Size suitability   | < 5 GB recommended      | > 5 GB recommended                |
 
 **Source:** [Databento: Streaming vs batch download](https://databento.com/docs/faqs/streaming-vs-batch-download)
 
@@ -111,10 +111,10 @@ Per the user's explicit corrections, the 1m→15m resampling must be:
 
 **Audit checklist for each basket symbol (NQ, RTY, CL, 6E, 6J, HG):**
 
-- [ ] 0 NULLs in OHLCV columns *(DONE for 1h basket-5 — all pass)*
-- [ ] 0 rows where high < low *(DONE for 1h basket-5 — all pass)*
-- [ ] 0 negative volume *(DONE for 1h basket-5 — all pass)*
-- [ ] Date range covers 2020-01-01 → 2026-03-05 *(DONE — confirmed)*
+- [ ] 0 NULLs in OHLCV columns _(DONE for 1h basket-5 — all pass)_
+- [ ] 0 rows where high < low _(DONE for 1h basket-5 — all pass)_
+- [ ] 0 negative volume _(DONE for 1h basket-5 — all pass)_
+- [ ] Date range covers 2020-01-01 → 2026-03-05 _(DONE — confirmed)_
 - [ ] No large gaps during trading hours (check for missing weeks/months)
 - [ ] Spot-check vs known market events (COVID crash, VIX spike, rate hike cycle)
 - [ ] Compare RR 1h counts vs external drive parquet counts for same date range
@@ -123,6 +123,7 @@ Per the user's explicit corrections, the 1m→15m resampling must be:
 - [ ] Audit options data: `mkt_options_ohlcv_1d` — 27,004 rows, 15 parent symbols, check schema compatibility
 
 **Decision gate:**
+
 - If all checks pass → use RR 1h/1d as-is in local Supabase, only batch-download 1m for 15m construction
 - If ANY check fails for a symbol → batch-download that symbol's full OHLCV from Databento and overwrite
 
@@ -133,6 +134,7 @@ Per the user's explicit corrections, the 1m→15m resampling must be:
 **Goal:** Get `ohlcv-1m` data for all 6 basket symbols, 2020-01-01 → present, as archived `.dbn.zst` files on the external drive.
 
 **Batch job parameters:**
+
 ```python
 client.batch.submit_job(
     dataset="GLBX.MDP3",
@@ -155,6 +157,7 @@ client.batch.submit_job(
 **Cost:** $0.00 expected — OHLCV is free on Standard plan. Verify with `client.metadata.get_cost()` before submitting.
 
 **Safety:**
+
 - Estimate cost FIRST — abort if non-zero
 - Download to external drive — safe from any agent touching the repo
 - Keep the `.dbn.zst` files permanently as the canonical archive
@@ -190,6 +193,7 @@ For each symbol:
 **Source:** [Databento: OHLCV Resampling](https://databento.com/docs/examples/basics-historical/ohlcv-resampling) — official interpolation/resampling example using `groupby.resample.agg({open: first, high: max, low: min, close: last, volume: sum})`.
 
 **Schema note:** The current `cross_asset_15m` schema is (ts, symbol_code, open, high, low, close, volume, created_at). The `constituent_1m_count` and `is_complete` fields do NOT exist yet. Options:
+
 - (a) Add columns via migration
 - (b) Store completeness metadata in a separate local-only table
 - (c) Compute on read (count can be derived if 1m data is retained)
@@ -197,10 +201,12 @@ For each symbol:
 **Decision needed from user.**
 
 **Also upsert to 1h and 1d?** Per Phase 0 results:
+
 - If RR data passed audit → skip 1h/1d writes (already loaded from RR)
 - If RR data failed audit → also aggregate 1m → 1h and 1m → 1d, overwrite local tables
 
 **Checkpoint:**
+
 - Row counts per symbol match expected (175,909 / 6 ≈ 29K per symbol, but will vary)
 - Date range: 2020-01-01 → 2026-04-01 for all 6 symbols
 - Spot-check: COVID crash, rate hike values match RR / known truth
@@ -214,10 +220,12 @@ For each symbol:
 **Source:** `mkt_options_ohlcv_1d` — 27,004 rows, 15 parent symbols (ES.OPT, NQ.OPT, LO.OPT, OG.OPT, etc.), 2020-01-01 → 2026-02-24.
 
 **Target:** Need to determine. Options:
+
 - (a) Create new local table `options_ohlcv_1d` (would need migration for local Supabase)
 - (b) Load into existing table if one exists
 
 **Quality audit required:**
+
 - [ ] Check for NULLs
 - [ ] Check date continuity
 - [ ] Verify schema compatibility with local Supabase types
@@ -232,6 +240,7 @@ For each symbol:
 **Goal:** Full data warehouse integrity check.
 
 Using the QA Gatekeeper skill:
+
 - [ ] All 6 symbols present in `cross_asset_15m` with 2020+ data
 - [ ] No duplicates
 - [ ] No NULLs in critical columns
