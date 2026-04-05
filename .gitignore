@@ -44,6 +44,8 @@ next-env.d.ts
 # python
 __pycache__/
 *.pyc
+.venv*/
+venv/
 
 # logs
 /logs/
