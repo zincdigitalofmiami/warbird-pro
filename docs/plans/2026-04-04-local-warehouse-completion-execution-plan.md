@@ -95,6 +95,13 @@ The local warehouse remains research and training only. Cloud Supabase remains t
 ### Checkpoint 2: MES Warehouse Completion
 
 - Canonical source is Databento historical data on `MES.c.0`.
+- Raw MES 1m batch source acquisition is complete.
+  - acquired `2026-04-04`
+  - archived at `/Volumes/Satechi Hub/Historical Data/Databento/warehouse/batch_jobs/GLBX-20260404-WP6H5Y7GH7/GLBX-20260404-WP6H5Y7GH7.zip`
+  - source details: `GLBX.MDP3`, `ohlcv-1m`, `MES.FUT`, `stype_in=parent`, `csv`, `zstd`, monthly splits, `2020-01-01` through `2026-04-03`
+- Remaining MES 1m work is normalization/import, not source retrieval.
+  - filter out non-outright rows such as calendar spreads
+  - convert deterministic parent-level MES history into the canonical local `mes_1m` series before load
 - Do not use feature-enriched CSVs as the primary warehouse source.
 - Patch the backfill path so all MES historical writes use the locked symbol contract.
 - Fill in this order:
