@@ -36,6 +36,67 @@ MES minute-efficiency checkpoint (2026-03-31 locked in repo): the `mes-1m` Edge 
 
 ---
 
+## Reset Context — Why We're Here (2026-04-07)
+
+This section records the causal chain that produced the current blocking order. Future agents must understand this or they will make the same wrong turns.
+
+### The original problem
+
+The project was built on the wrong foundations:
+
+- **Wrong database location** — training and development was running against the wrong Postgres instance (cloud Supabase, Docker, and local machine were all conflated)
+- **Wrong training location** — no clean separation between the production system of record and the offline training environment
+- **Wrong tools** — the toolchain assumed a live-inference server model; the architecture needed to be offline-only AG with a Pine-safe packet
+
+Everything needed a reset.
+
+### The decision: external drive PostgreSQL
+
+The decision was made to put the training PostgreSQL database on the external Satechi drive — not Docker, not the local machine internal disk, not cloud Supabase. This gives a clean dedicated offline training warehouse that survives machine restores and stays physically separate from production.
+
+### The blocker: can't design the warehouse without knowing what we need
+
+As soon as the warehouse move was scoped, a deeper blocker surfaced: **we cannot design the schema, table structure, or data requirements for the training warehouse until we know what the canonical candidate object actually is.** You can't build the warehouse for data you haven't defined.
+
+### The dependency: the indicator defines the schema
+
+To define the canonical candidate object, we had to look at the indicator — because Pine is the canonical signal surface. The indicator defines what a setup IS. The schema follows from that.
+
+### The discovery: the indicator was broken
+
+When we looked at the indicator closely and ran backtests on TradingView, the results were bad across all timeframes:
+
+- 15m: PF 0.903, -8.46%, 374 trades — losing money
+- 1H: PF 0.995 — essentially flat
+- 4H: PF 1.192 — marginally profitable, but only longs work (PF 2.243). Shorts bleed everywhere (PF 0.731).
+
+The root causes (documented fully in `docs/research/2026-04-06-powerdrill-findings.md`):
+
+- Stop-lock bug: `strategy.exit()` used live-recalculating fib prices instead of locked entry prices — stops drifted silently mid-trade
+- Trigger bar laxity: no body filter, no RSI gate, volume threshold too loose — the system took any weak fib touch
+- Structural stop geometry: avg loss was 2× avg win across all timeframes; the -0.236 fib extension stop doesn't adapt to volatility
+- Short side broken: directionally asymmetric in ways the indicator didn't account for
+
+### The correct sequence
+
+This is why the blocking order looks the way it does:
+
+```
+Fix the indicator first
+  → defines what a valid candidate actually IS
+  → defines what data the training warehouse needs to store
+  → defines what schema the canonical tables need
+  → enables the canonical writer to be built correctly
+  → enables AG to train on clean, well-defined candidates
+  → enables the dashboard to mirror real engine state
+```
+
+**Nothing downstream of Pine can be correctly built until the indicator produces valid, reliable candidates.** The warehouse schema, the canonical writer, the AG training pipeline, and the dashboard reader cutover all depend on knowing what the indicator is actually saying.
+
+The PowerDrill research session (2026-04-06) produced the diagnosis and fix specifications. The implementation specs live in `docs/research/2026-04-06-powerdrill-findings.md` Section 11. The three fixes (stop-lock, trigger gate, ATR stop toggle) are the current pre-Step-5 gate.
+
+---
+
 ## Update Log
 
 See [update-log.md](update-log.md) for the full historical record.
