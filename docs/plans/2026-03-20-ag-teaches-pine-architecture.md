@@ -3,6 +3,7 @@
 **Date:** 2026-03-20
 **Status:** Active Plan — Single Source of Truth
 **Scope:** MES 15m fib-outcome contract: indicator + dashboard operator surface + AG training pipeline
+**PowerDrill research baseline:** `docs/research/2026-04-06-powerdrill-findings.md` — 57-artifact synthesis: backtest diagnosis, trigger gate spec, stop families, regime filters, ML packet design.
 
 **THIS IS THE ONLY PLAN TO UPDATE.**
 

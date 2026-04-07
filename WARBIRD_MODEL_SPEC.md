@@ -3,6 +3,7 @@
 **Date:** 2026-03-31
 **Status:** Reference-Only, aligned to the active plan
 **Governing source:** `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+**PowerDrill research baseline:** `docs/research/2026-04-06-powerdrill-findings.md`
 
 This document is a subordinate reference for the model contract. It must not override the active plan. If this file and the active plan ever disagree, the active plan wins immediately.
 

@@ -20,7 +20,7 @@
     },
     "tradingview": {
       "type": "stdio",
-      "command": "node",
+      "command": "/opt/homebrew/bin/node",
       "args": ["/Volumes/Satechi Hub/warbird-pro/.tradingview-mcp/src/server.js"]
     }
   }

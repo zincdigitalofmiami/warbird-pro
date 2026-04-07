@@ -1,0 +1,1206 @@
+// This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Kirk / ZINC Digital
+// Warbird v7 Strategy — Backtesting version of Warbird v7 Institutional
+// Base: v6-warbird-complete.pine (2026-03-26)
+// Upgrade: 6 CME Globex futures (NQ/RTY/CL/HG/6E/6J), Leadership/Risk/MacroFX/Exec regime groups
+// Date: 2026-03-31
+//
+// NO-REPAINT AUDIT:
+// - All structure conditions gated by barstate.isconfirmed — signals fire at bar close only
+// - request.security(): lookahead_off on all calls
+// - Structure conditions: close-based, bar-close semantics
+// - Last verified: 2026-03-30
+//
+// ── FEATURE CONTRACT (locked 2026-03-31) ──
+// SIGN CONVENTION: positive = bullish/risk-on. negative = bearish/risk-off. zero = neutral.
+//   leader_score > 0 = NQ leading ES higher
+//   risk_score > 0 = broad risk appetite (RTY+, CL+, HG+)
+//   macro_fx_score > 0 = supportive FX (EUR up / JPY INVERTED down = USD weak)
+//   exec_score > 0 = supportive execution (above VWAP, expanding range, high efficiency)
+// REGIME STATE MACHINE: NEUTRAL(0)→BULL(1)/BEAR(-1). No direct bull↔bear without override.
+//   Override: leader_score AND risk_score both extreme same direction. Bypasses persistence+cooldown.
+//   Normal transitions: score > upper for confirmBars → BULL. Score < lower for confirmBars → BEAR.
+//   Exit to NEUTRAL: score crosses midline for confirmBars. Neutralize after prolonged mid-range.
+// VWAP CODE: +2=reclaim, +1=above, 0=in-band, -1=below, -2=reject. Band=5% ATR around VWAP.
+// IMPULSE QUALITY: direction-relative. Higher = better for THIS setup direction.
+//   Components: intermarket alignment, range expansion, efficiency, VWAP alignment.
+// AGREEMENT VELOCITY: Δ(net atomic alignment). Level=consensus, Δ=momentum of consensus.
+// GROUP WEIGHTS (AG tunes): leadership(25%) + risk-appetite(40%) + macro-fx(15%) + execution(20%).
+// WITHIN-GROUP: risk(RTY 1/3, CL 1/3, HG 1/3), macro-fx(6E 50%, 6J-inv 50%).
+//
+// REQUEST.SECURITY() BUDGET:
+// Intermarket (60min): NQ, RTY, CL, HG, 6E, 6J         = 6 calls
+// SKEW (D):            close                             = 1 call
+// NYSE A-D Line (D):   close                             = 1 call
+// HTF fib (1H):        [high, low] tuple                 = 1 call
+// HTF fib (4H):        [high, low] tuple                 = 1 call
+// HTF fib (1D):        [high, low] tuple                 = 1 call
+// TOTAL:                                                 = 11 of 40 (28%)
+//
+// PLOT BUDGET: 60 plot + 3 alertcondition = 63/64 (1 headroom)
+// TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed.
+//@version=6
+strategy("Warbird v7 Strategy", shorttitle="WB7 Strat", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100, pyramiding=0, process_orders_on_close=true, default_qty_type=strategy.fixed, default_qty_value=1, initial_capital=50000, currency=currency.USD, commission_type=strategy.commission.cash_per_contract, commission_value=0.62)
+import TradingView/ZigZag/7 as zigzag
+
+//=====================
+// FIBONACCI ENGINE SETTINGS
+//=====================
+string groupFibEngine = "Fibonacci Engine"
+float fibDeviation = input.float(3.0, "ZigZag Deviation (ATR multiplier)", minval=0.5, maxval=10.0, step=0.5, group=groupFibEngine, tooltip="Higher = fewer pivots, more stable anchors. Lower = more pivots, more responsive.")
+int fibDepth = input.int(10, "ZigZag Depth (min bars between pivots)", minval=2, maxval=50, group=groupFibEngine)
+float fibConfluenceTolPct = input.float(0.10, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupFibEngine)
+
+//=====================
+// CANONICAL FIB LEVELS (from lib/fibonacci.ts + FibLinesPrimitive.ts)
+// DO NOT change these — they match the dashboard exactly
+//=====================
+
+// Retracement ratios
+float FIB_ZERO  = 0.0
+float FIB_236   = 0.236
+float FIB_382   = 0.382
+float FIB_PIVOT = 0.5
+float FIB_618   = 0.618
+float FIB_786   = 0.786
+float FIB_ONE   = 1.0
+
+// Extension ratios
+float FIB_T1    = 1.236
+float FIB_W1382 = 1.382  // intermediate waypoint
+float FIB_W150  = 1.5    // intermediate waypoint
+float FIB_T2    = 1.618
+float FIB_W1786 = 1.786  // intermediate waypoint
+float FIB_T3    = 2.0
+
+// Colors (from lib/colors.ts)
+color COLOR_ANCHOR             = #FFFFFF    // white — 0, .5, 1 levels
+color COLOR_RETRACEMENT        = #808080    // mid-gray — .236, .786, waypoints
+color COLOR_RETRACEMENT_ORANGE = #E65100    // dark orange — .382, .618
+color COLOR_PIVOT              = #FF9800    // bright orange — zone fill only
+color COLOR_TARGET             = #4CAF50    // green — TARGET 1, 2, 3
+color COLOR_STOP               = #FF1744    // red — stop loss
+
+// Widths (from FibLinesPrimitive.ts:49-60)
+int WIDTH_ANCHOR      = 1
+int WIDTH_RETRACEMENT = 1
+int WIDTH_PIVOT       = 2
+int WIDTH_TARGET      = 2
+
+//=====================
+// STRUCTURE LOGIC
+//=====================
+string groupLogic = "Structure Logic"
+int retestBars   = input.int(6, "Acceptance Retest Window (bars)", minval=1, group=groupLogic)
+bool rejectWick   = input.bool(true, "Rejection = wick into zone then close back out", group=groupLogic)
+bool oneShotEvent = input.bool(true, "One-shot event markers/alerts", group=groupLogic)
+float rvolMin    = input.float(1.2, "RVOL Minimum for Entry", minval=0.5, maxval=5.0, step=0.1, group=groupLogic, tooltip="Relative volume threshold. 1.2 = 20% above 20-bar avg. Filters low-conviction entries.")
+
+
+//=====================
+// INTERMARKET CONFIRMATION
+//=====================
+string groupIM = "Intermarket Inputs"
+bool useIntermarket = input.bool(true, "Use Intermarket Confirmation", group=groupIM)
+string tfIM           = input.timeframe("60", "Intermarket Timeframe", group=groupIM)
+int maLen          = input.int(20, "Confirm EMA Length", minval=5, group=groupIM)
+int slopeBars      = input.int(2, "Slope Bars", minval=1, maxval=10, group=groupIM)
+float neutralBandPct = input.float(0.15, "Neutral Band Around EMA (%)", minval=0.0, step=0.01, group=groupIM)
+string symNQ   = input.symbol("CME_MINI:NQ1!", "NQ (E-mini Nasdaq 100 — ES leadership)", group=groupIM)
+string symRTY  = input.symbol("CME_MINI:RTY1!", "RTY (Russell 2000 — small-cap risk appetite)", group=groupIM)
+string symCL   = input.symbol("NYMEX:CL1!", "CL (Crude Oil — growth/energy demand)", group=groupIM)
+string symHG   = input.symbol("COMEX:HG1!", "HG (Copper — industrial demand proxy)", group=groupIM)
+string sym6E   = input.symbol("CME:6E1!", "6E (Euro FX — USD weakness = risk-on)", group=groupIM)
+string sym6J   = input.symbol("CME:6J1!", "6J (Japanese Yen — safe haven, INVERTED)", group=groupIM)
+string symSKEW = input.symbol("CBOE:SKEW", "SKEW (tail-risk hedging — daily regime)", group=groupIM)
+
+string groupIMModel = "Intermarket Regime"
+int confirmBars       = input.int(3, "Bars Required To Flip", minval=1, maxval=10, group=groupIMModel)
+int cooldownBars      = input.int(4, "Flip Cooldown (bars)", minval=0, maxval=50, group=groupIMModel)
+int neutralizeBars    = input.int(16, "Neutralize After Inactive Bars (0=off)", minval=0, maxval=200, group=groupIMModel)
+
+//=====================
+// VISUALS (colors/widths locked to spec — see constants above)
+//=====================
+string groupViz = "Visuals"
+int targetLookbackBars = input.int(55, "Target Line Lookback Bars", minval=5, maxval=500, group=groupViz)
+bool extendLevelsRight = input.bool(false, "Extend Levels Right", group=groupViz)
+bool useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window", group=groupViz)
+
+string groupDebug = "Debug Diagnostics"
+bool enableDebugLogs = input.bool(false, "Enable Debug Logs", group=groupDebug, tooltip="Temporary state tracing for regime/probability diagnostics.")
+
+//=====================
+// REGIME DETECTION (from session-checkpoint research: ADX/ER/VIX-vol)
+// These are computed values for sidebar + AG features, NOT chart markers
+//=====================
+
+// --- ADX(14) + signed DI spread + ADX slope ---
+int adxLen = 14
+[diPlus, diMinus, adxVal] = ta.dmi(adxLen, adxLen)
+float diSpread = diPlus - diMinus
+float adxSlope = adxVal - nz(adxVal[3])
+
+// Regime classification: trending vs ranging
+bool regimeTrending = adxVal > 25
+bool regimeRanging  = adxVal < 20
+
+// --- Efficiency Ratio (10, 20) ---
+float er10Direction = math.abs(close - close[10])
+float er10Volatility = math.sum(math.abs(close - close[1]), 10)
+float er10 = er10Volatility != 0 ? er10Direction / er10Volatility : 0.0
+
+float er20Direction = math.abs(close - close[20])
+float er20Volatility = math.sum(math.abs(close - close[1]), 20)
+float er20 = er20Volatility != 0 ? er20Direction / er20Volatility : 0.0
+
+// --- VIX daily calls removed — replaced by VVIX 60min in intermarket section ---
+
+// --- ATR percentage (normalized volatility) ---
+float atrRaw = ta.atr(20)
+float atrPct = close != 0 ? atrRaw / close * 100.0 : 0.0
+
+//=====================
+// TA CORE PACK (15-metric feature set for ML training capture)
+// Deterministic, point-in-time safe, no lookahead, no external dependencies.
+//=====================
+float ema100 = ta.ema(close, 100)
+[_macdFast, _macdSlow, macdHist] = ta.macd(close, 12, 26, 9)
+float rsi14 = ta.rsi(close, 14)
+float atr14 = ta.atr(14)
+float volSma20 = ta.sma(volume, 20)
+float volRatio = volSma20 > 0 ? volume / volSma20 : 0.0
+float volAccel = volRatio - nz(volRatio[1])
+float barSpreadXVol = (high - low) * volume
+float obvChangeRaw = nz(ta.change(close))
+float _obvDelta = obvChangeRaw > 0 ? volume : obvChangeRaw < 0 ? -volume : 0.0
+float obvVal = ta.cum(_obvDelta)
+float mfi14 = ta.mfi(hlc3, 14)
+
+//=====================
+// OPENING RANGE (first 30 min of RTH: 8:30-9:00 CT)
+// State: 1 = above OR, -1 = below OR, 0 = inside OR
+// Distance: (close - OR midpoint) / ATR — normalized
+//=====================
+bool isRTHOpen = (hour == 8 and minute >= 30) or (hour == 9 and minute == 0)
+var float orHigh = na
+var float orLow = na
+var bool orLocked = false
+
+if hour == 8 and minute == 30 and (hour[1] != 8 or minute[1] != 30)
+    orHigh := high
+    orLow := low
+    orLocked := false
+
+if isRTHOpen and not orLocked
+    orHigh := math.max(nz(orHigh, high), high)
+    orLow := math.min(nz(orLow, low), low)
+
+if hour == 9 and minute > 0 and not orLocked
+    orLocked := true
+
+int orState = orLocked ? (close > orHigh ? 1 : close < orLow ? -1 : 0) : 0
+float orMid = orLocked ? (orHigh + orLow) / 2.0 : na
+float orDistNorm = (orLocked and not na(orMid) and atr14 > 0) ? (close - orMid) / atr14 : 0.0
+
+//=====================
+// ECONOMIC EVENT DAY PROXY (NFP / FOMC / CPI approximation)
+// NFP:  first Friday of month (dayofmonth <= 7)
+// FOMC: 8x/year, always a Wednesday — approximate 2nd or 3rd Wed of month (dayofmonth 8-21)
+// CPI:  usually 2nd Tuesday of month (dayofmonth 8-14)
+// Zero security calls. Correctly identifies ~80% of high-impact macro days.
+// For exact dates, join FRED economic calendar server-side in the AG pipeline.
+// Data floor: 2018-01-01. Pre-2018 data excluded from AG training (regime mismatch).
+//=====================
+bool isNFPDay   = dayofweek == dayofweek.friday    and dayofmonth <= 7
+bool isFOMCDay  = dayofweek == dayofweek.wednesday and dayofmonth >= 8 and dayofmonth <= 21
+bool isCPIDay   = dayofweek == dayofweek.tuesday   and dayofmonth >= 8 and dayofmonth <= 14
+bool isEventDay = isNFPDay or isFOMCDay or isCPIDay
+
+//=====================
+// LIQUIDITY SWEEP DETECTION (ICT methodology)
+// Bull sweep: price wicks below prior swing low, closes back above — stop hunt below
+// Bear sweep: price wicks above prior swing high, closes back below — stop hunt above
+//=====================
+int swingLookback = 10
+float swingHigh = ta.highest(high, swingLookback)[1]
+float swingLow = ta.lowest(low, swingLookback)[1]
+bool liqSweepBull = low < swingLow and close > swingLow   // swept below, closed back inside
+bool liqSweepBear = high > swingHigh and close < swingHigh // swept above, closed back inside
+
+//=====================
+// CHANGE OF CHARACTER (CHoCH) — ICT methodology
+// Bullish CHoCH: price was making lower lows, then closes above the last swing high
+// Bearish CHoCH: price was making higher highs, then closes below the last swing low
+// Uses pivot-based swing detection (5-bar left/right)
+//=====================
+int chochPivotLen = 5
+float pvtHi = ta.pivothigh(high, chochPivotLen, chochPivotLen)
+float pvtLo = ta.pivotlow(low, chochPivotLen, chochPivotLen)
+
+var float lastPvtHi = na
+var float lastPvtLo = na
+if not na(pvtHi)
+    lastPvtHi := pvtHi
+if not na(pvtLo)
+    lastPvtLo := pvtLo
+
+// CHoCH fires on confirmed bar close through the opposite swing
+bool chochBull = not na(lastPvtHi) and close > lastPvtHi and close[1] <= lastPvtHi
+bool chochBear = not na(lastPvtLo) and close < lastPvtLo and close[1] >= lastPvtLo
+
+//=====================
+// FAIR VALUE GAP (FVG) — ICT methodology
+// Bull FVG: candle[2].high < candle[0].low (gap up, unfilled demand zone)
+// Bear FVG: candle[2].low > candle[0].high (gap down, unfilled supply zone)
+// Distance: ATR-normalized distance from current close to nearest FVG midpoint
+//=====================
+bool fvgBull = high[2] < low    // gap between bar 2 high and current bar low
+bool fvgBear = low[2] > high    // gap between bar 2 low and current bar high
+
+// Track nearest active FVG midpoint
+var float nearestFvgBullMid = na
+var float nearestFvgBearMid = na
+if fvgBull
+    nearestFvgBullMid := (high[2] + low) / 2.0
+if fvgBear
+    nearestFvgBearMid := (low[2] + high) / 2.0
+
+// Invalidate filled FVGs
+if not na(nearestFvgBullMid) and low < nearestFvgBullMid
+    nearestFvgBullMid := na
+if not na(nearestFvgBearMid) and high > nearestFvgBearMid
+    nearestFvgBearMid := na
+
+// ATR-normalized distance to nearest FVG
+float fvgBullDist = (not na(nearestFvgBullMid) and atr14 > 0) ? (close - nearestFvgBullMid) / atr14 : 0.0
+float fvgBearDist = (not na(nearestFvgBearMid) and atr14 > 0) ? (nearestFvgBearMid - close) / atr14 : 0.0
+
+//=====================
+// EXHAUSTION SCORE (HyperWave oscillator + centered Money Flow)
+// Source: LuxAlgo Oscillator Matrix exact formula
+// HyperWave: ta.ema(ta.linreg((close - avg(hi,lo,av)) / (hi-lo) * 100, len, 0), sL)
+// Money Flow: ta.sma(ta.mfi(hl2, 35) - 50, 6) — centered at zero
+// Exhaustion = both overbought/oversold together
+//=====================
+int hwLen = 7
+int hwSmooth = 3
+float hwHi = ta.highest(high, hwLen)
+float hwLo = ta.lowest(low, hwLen)
+float hwAvg = ta.sma(hl2, hwLen)
+float hwRange = hwHi - hwLo
+float hwRaw = hwRange != 0 ? (close - math.avg(hwHi, hwLo, hwAvg)) / hwRange * 100.0 : 0.0
+float hwOsc = ta.ema(ta.linreg(hwRaw, hwLen, 0), hwSmooth)
+
+// Centered Money Flow (MFI centered at zero)
+float mfCentered = ta.sma(ta.mfi(hl2, 35) - 50, 6)
+
+// Exhaustion score: 0-100, peaks when both HyperWave and MF are extreme in same direction
+float hwNorm = math.max(-100.0, math.min(100.0, hwOsc))  // clamp
+float mfNorm = math.max(-50.0, math.min(50.0, mfCentered))
+float exhaustionScore = math.abs(hwNorm) / 100.0 * 50.0 + math.abs(mfNorm) / 50.0 * 50.0
+
+//=====================
+// HTF FIB CONFLUENCE (1H, 4H, Daily)
+//=====================
+string groupHTF = "HTF Confluence"
+float htfConfTolPct = 0.15
+
+[htf1hHigh, htf1hLow, htf1hClose, htf1hEma21] = request.security(syminfo.tickerid, "60", [ta.highest(high, 55), ta.lowest(low, 55), close, ta.ema(close, 21)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[htf4hHigh, htf4hLow, htf4hClose, htf4hEma21] = request.security(syminfo.tickerid, "240", [ta.highest(high, 55), ta.lowest(low, 55), close, ta.ema(close, 21)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[htf1dHigh, htf1dLow] = request.security(syminfo.tickerid, "D", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+float htf1hRange = nz(htf1hHigh - htf1hLow)
+float htf4hRange = nz(htf4hHigh - htf4hLow)
+float htf1dRange = nz(htf1dHigh - htf1dLow)
+
+// HTF directional agreement: 1H/4H close above own EMA(21) = bullish, below = bearish.
+// Both values are HTF-native (no mixed-timeframe comparison).
+// htfDirAgrees is computed below (after fibBull) and gates entry triggers.
+bool htf1hBull = nz(htf1hClose) > nz(htf1hEma21)
+bool htf4hBull = nz(htf4hClose) > nz(htf4hEma21)
+
+htfFibPrice(float htfHigh, float htfLow, float htfRng, float ratio) =>
+    htfRng <= 0 ? na : htfLow + htfRng * ratio
+
+float htf1hP382 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_382)
+float htf1hP500 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_PIVOT)
+float htf1hP618 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_618)
+
+float htf4hP382 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_382)
+float htf4hP500 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_PIVOT)
+float htf4hP618 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_618)
+
+float htf1dP382 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_382)
+float htf1dP500 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_PIVOT)
+float htf1dP618 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_618)
+
+htfConfluenceCheck(float level15m, float currentFibRange) =>
+    if na(level15m) or na(currentFibRange) or currentFibRange <= 0
+        0
+    else
+        float tol = currentFibRange * htfConfTolPct * 0.01
+        int hits = 0
+        if not na(htf1hP382) and math.abs(level15m - htf1hP382) <= tol
+            hits += 1
+        if not na(htf1hP500) and math.abs(level15m - htf1hP500) <= tol
+            hits += 1
+        if not na(htf1hP618) and math.abs(level15m - htf1hP618) <= tol
+            hits += 1
+        if not na(htf4hP382) and math.abs(level15m - htf4hP382) <= tol
+            hits += 1
+        if not na(htf4hP500) and math.abs(level15m - htf4hP500) <= tol
+            hits += 1
+        if not na(htf4hP618) and math.abs(level15m - htf4hP618) <= tol
+            hits += 1
+        if not na(htf1dP382) and math.abs(level15m - htf1dP382) <= tol
+            hits += 1
+        if not na(htf1dP500) and math.abs(level15m - htf1dP500) <= tol
+            hits += 1
+        if not na(htf1dP618) and math.abs(level15m - htf1dP618) <= tol
+            hits += 1
+        hits
+
+// NOTE: htfConfluenceCheck() is called AFTER fib prices are computed (below the AUTO FIB ENGINE)
+
+//=====================
+// AUTO FIB ENGINE — ZigZag confirmed pivots (non-repainting)
+//=====================
+fibZzUpdate() =>
+    var fibSettings = zigzag.Settings.new(fibDeviation, fibDepth, color(na), false, false, false, false, "Absolute", true)
+    var zigzag.ZigZag fibZZ = zigzag.newInstance(fibSettings)
+    var zigzag.Pivot lastPvt = na
+    fibSettings.devThreshold := ta.atr(10) / close * 100 * fibDeviation
+    bool newPivot = false
+    float pivotHighPrice = na
+    float pivotLowPrice = na
+    int pivotHighBar = na
+    int pivotLowBar = na
+    int swingDir = 0  // +1 = up-swing (low→high, bullish), -1 = down-swing (high→low, bearish), 0 = flat/no pivot
+    if fibZZ.update()
+        lastPvt := fibZZ.lastPivot()
+        if not na(lastPvt)
+            newPivot := true
+            float startP = lastPvt.start.price
+            float endP = lastPvt.end.price
+            pivotHighPrice := math.max(startP, endP)
+            pivotLowPrice  := math.min(startP, endP)
+            swingDir := endP > startP ? 1 : endP < startP ? -1 : 0
+            if startP >= endP
+                pivotHighBar := lastPvt.start.index
+                pivotLowBar  := lastPvt.end.index
+            else
+                pivotHighBar := lastPvt.end.index
+                pivotLowBar  := lastPvt.start.index
+    [newPivot, pivotHighPrice, pivotLowPrice, pivotHighBar, pivotLowBar, swingDir]
+
+[zzNewPivot, zzHighPrice, zzLowPrice, zzHighBar, zzLowBar, zzSwingDir] = fibZzUpdate()
+
+var float fibAnchorHigh = na
+var float fibAnchorLow = na
+var int anchorHighBar = na
+var int anchorLowBar = na
+var int lastBreakBar = na
+
+if zzNewPivot
+    fibAnchorHigh := zzHighPrice
+    fibAnchorLow  := zzLowPrice
+    anchorHighBar := zzHighBar
+    anchorLowBar  := zzLowBar
+    lastBreakBar  := na
+
+// Pre-compute rolling high/low at each confluence period at global scope.
+// ta.highest/ta.lowest require a compile-time-constant length — they cannot
+// be called inside a loop with a variable length argument.
+float _cqH8  = ta.highest(high, 8)
+float _cqL8  = ta.lowest(low,  8)
+float _cqH13 = ta.highest(high, 13)
+float _cqL13 = ta.lowest(low,  13)
+float _cqH21 = ta.highest(high, 21)
+float _cqL21 = ta.lowest(low,  21)
+float _cqH34 = ta.highest(high, 34)
+float _cqL34 = ta.lowest(low,  34)
+float _cqH55 = ta.highest(high, 55)
+float _cqL55 = ta.lowest(low,  55)
+
+float confluenceQuality = na
+if not na(fibAnchorHigh) and not na(fibAnchorLow)
+    float anchorRange = fibAnchorHigh - fibAnchorLow
+    if anchorRange > 0
+        float tol = anchorRange * fibConfluenceTolPct * 0.01
+        int confHits = 0
+        // Iterate over the five pre-computed period pairs
+        array<float> _cqPairs = array.from(_cqH8, _cqL8, _cqH13, _cqL13, _cqH21, _cqL21, _cqH34, _cqL34, _cqH55, _cqL55)
+        for pairIdx = 0 to 4
+            float rollingH = array.get(_cqPairs, pairIdx * 2)
+            float rollingL = array.get(_cqPairs, pairIdx * 2 + 1)
+            float rollingRange = rollingH - rollingL
+            if rollingRange > 0
+                for ratioIdx = 0 to 2
+                    float ratio = ratioIdx == 0 ? 0.382 : ratioIdx == 1 ? 0.5 : 0.618
+                    float anchorLevel = fibAnchorLow + anchorRange * ratio
+                    float rollingLevel = rollingL + rollingRange * ratio
+                    if math.abs(anchorLevel - rollingLevel) <= tol
+                        confHits += 1
+        confluenceQuality := float(confHits) * anchorRange
+
+float fibRange = fibAnchorHigh - fibAnchorLow
+bool isValid = not na(fibAnchorHigh) and not na(fibAnchorLow) and fibRange > 0
+
+// Direction: swing sequence from ZigZag is the primary signal.
+// fibBull only changes when a new pivot confirms a non-flat swing.
+// Between pivots direction holds steady — eliminates spurious flips
+// during consolidation near the midpoint.
+var bool fibBull = true
+if zzNewPivot and zzSwingDir != 0
+    fibBull := zzSwingDir > 0
+
+// HTF directional agreement: 15m fibBull must match both 1H and 4H trend direction.
+// Gates entry triggers per plan requirement: "15m fibs + 1H/4H structure must agree in direction."
+bool htfDirAgrees = (fibBull == htf1hBull) and (fibBull == htf4hBull)
+
+float fibBase = fibBull ? fibAnchorLow : fibAnchorHigh
+float fibDir = fibBull ? 1.0 : -1.0
+fibPrice(float ratio) =>
+    fibRange <= 0 ? na : (fibBase + fibDir * fibRange * ratio)
+
+float pZero   = fibPrice(FIB_ZERO)
+float p236    = fibPrice(FIB_236)
+float p382    = fibPrice(FIB_382)
+float pPivot  = fibPrice(FIB_PIVOT)
+float p618    = fibPrice(FIB_618)
+float p786    = fibPrice(FIB_786)
+float pOne    = fibPrice(FIB_ONE)
+float pT1     = fibPrice(FIB_T1)
+float p1382   = fibPrice(FIB_W1382)
+float p150    = fibPrice(FIB_W150)
+float pT2     = fibPrice(FIB_T2)
+float p1786   = fibPrice(FIB_W1786)
+float pT3     = fibPrice(FIB_T3)
+
+// Internal-only target viability gate used by trigger wiring.
+float minTargetPoints = 20.0
+float targetPathPoints = isValid ? math.abs(pT1 - close) : na
+bool targetEligible20pt = isValid and targetPathPoints >= minTargetPoints
+
+float zoneUpper = math.max(p618, p786)
+float zoneLower = math.min(p618, p786)
+
+float zoneFillUpper = math.max(p382, p618)
+float zoneFillLower = math.min(p382, p618)
+
+int htfConfPivot = htfConfluenceCheck(pPivot, fibRange)
+int htfConf382   = htfConfluenceCheck(p382, fibRange)
+int htfConf618   = htfConfluenceCheck(p618, fibRange)
+int htfConfTotal = htfConfPivot + htfConf382 + htfConf618
+
+//=====================
+// EXHAUSTION DIAMOND (precursor visual at fib interaction)
+// Fires once when exhaustionScore >= threshold while price is in the fib zone (.382–.618).
+// Diamond below bar for bullish setup (selling exhaustion at pullback zone),
+// above bar for bearish setup (buying exhaustion at rally zone).
+// Uses label.new() from the 200-label pool — zero plot budget cost.
+//=====================
+float exhaustionThreshold = 70.0
+bool exhaustionAtFib = exhaustionScore >= exhaustionThreshold and isValid and close >= zoneFillLower and close <= zoneFillUpper
+bool exhaustionEvent = exhaustionAtFib and not exhaustionAtFib[1]
+
+if exhaustionEvent and barstate.isconfirmed
+    label.new(bar_index, na, "◆", color=color(na), textcolor=COLOR_STOP, style=label.style_none, yloc=fibBull ? yloc.belowbar : yloc.abovebar, size=size.small)
+
+//=====================
+// VOLUME DELTA AT FIB TOUCHES
+//=====================
+string groupVolDelta = "Volume Delta"
+int volDeltaLookback = 5
+float volDeltaTolPts = 2.0
+
+float barRange = high - low
+float clv = barRange > 0 ? (close - low) / barRange : 0.5
+float signedVol = volume * (2.0 * clv - 1.0)
+
+fibTouchCheck(float level) =>
+    not na(level) and math.abs(close - level) <= volDeltaTolPts
+
+bool isTouchingFib = fibTouchCheck(p236) or fibTouchCheck(p382) or fibTouchCheck(pPivot) or fibTouchCheck(p618) or fibTouchCheck(p786)
+
+float bullVol = math.sum(volume * math.max(clv, 0), volDeltaLookback)
+float totalVol = math.sum(volume, volDeltaLookback)
+float volDeltaPct = totalVol > 0 ? bullVol / totalVol * 100.0 : 50.0
+float fibTouchVolDelta = isTouchingFib ? volDeltaPct : na
+
+//=====================
+// INTERMARKET SERIES + REGIMES
+//=====================
+imClose(string symbol) =>
+    request.security(symbol, tfIM, close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+trendFlags(float px, float ma, int slopeBars_, float neutralPct_) =>
+    float distPct = ma != 0 ? math.abs(px - ma) / ma * 100.0 : 0.0
+    bool near = distPct <= neutralPct_
+    bool up = not near and px > ma and px >= nz(px[slopeBars_], px)
+    bool down = not near and px < ma and px <= nz(px[slopeBars_], px)
+    [up, down]
+
+f_ema_dir(float emaVal) =>
+    close > emaVal and emaVal > nz(emaVal[1], emaVal) ? 1 : close < emaVal and emaVal < nz(emaVal[1], emaVal) ? -1 : 0
+
+f_ema_dist_pct(float emaVal) =>
+    emaVal != 0 ? (close - emaVal) / emaVal * 100.0 : 0.0
+
+// 6 CME Globex futures — all price instruments, EMA trend detection
+float nqClose  = imClose(symNQ)
+float rtyClose = imClose(symRTY)
+float clClose  = imClose(symCL)
+float hgClose  = imClose(symHG)
+float eurClose = imClose(sym6E)
+float jpyClose = imClose(sym6J)
+float skew = request.security(symSKEW, "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// NYSE Advance-Decline issues (daily breadth): leading exhaustion signal for MES
+// Rising MES + falling AD = breadth divergence (exhaustion). Falling MES + rising AD = accumulation.
+float adLineRaw   = request.security("USI:ADD", "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+float adSlope     = adLineRaw - nz(adLineRaw[3])
+float adSlopeSma  = ta.sma(math.abs(adSlope), 20)
+float adSlopeNorm = adSlopeSma > 0 ? adSlope / adSlopeSma : 0.0
+
+// EMA trend for each CME symbol
+float nqMA  = ta.ema(nqClose, maLen)
+float rtyMA = ta.ema(rtyClose, maLen)
+float clMA  = ta.ema(clClose, maLen)
+float hgMA  = ta.ema(hgClose, maLen)
+float eurMA = ta.ema(eurClose, maLen)
+float jpyMA = ta.ema(jpyClose, maLen)
+
+[nqUp, nqDown]   = trendFlags(nqClose, nqMA, slopeBars, neutralBandPct)
+[rtyUp, rtyDown] = trendFlags(rtyClose, rtyMA, slopeBars, neutralBandPct)
+[clUp, clDown]   = trendFlags(clClose, clMA, slopeBars, neutralBandPct)
+[hgUp, hgDown]   = trendFlags(hgClose, hgMA, slopeBars, neutralBandPct)
+[eurUp, eurDown] = trendFlags(eurClose, eurMA, slopeBars, neutralBandPct)
+[jpyUp, jpyDown] = trendFlags(jpyClose, jpyMA, slopeBars, neutralBandPct)
+
+// Sign convention: 1=bullish/risk-on for MES, -1=bearish/risk-off, 0=neutral
+// NQ: up = ES leadership aligned
+bool nqBull = nqUp
+bool nqBear = nqDown
+// RTY: up = small-cap risk appetite
+bool rtyBull = rtyUp
+bool rtyBear = rtyDown
+// CL: up = growth/energy demand
+bool clBull = clUp
+bool clBear = clDown
+// HG: up = industrial demand
+bool hgBull = hgUp
+bool hgBear = hgDown
+// 6E: up = EUR strength (USD weak) = risk-on
+bool eurBull = eurUp
+bool eurBear = eurDown
+// 6J: INVERTED — up = JPY strength = safe haven = risk-off
+bool jpyBull = jpyDown  // JPY falling = risk-on = MES bullish
+bool jpyBear = jpyUp    // JPY rising = risk-off = MES bearish
+// SKEW: daily-only context — NOT in the 15m regime gate. AG uses as training feature.
+bool skewRiskOn = skew < 140
+bool skewRiskOff = skew > 155
+
+//=====================
+// ES EXECUTION QUALITY (chart-native, zero security calls)
+//=====================
+float vwapVal = ta.vwap(hlc3)
+float vwapBand = atrRaw * 0.05
+// VWAP state: +1 above band, -1 below band, 0 inside tolerance
+int vwapState = close > vwapVal + vwapBand ? 1 : close < vwapVal - vwapBand ? -1 : 0
+int prevVwapSt = nz(vwapState[1], 0)
+// VWAP code: +2 reclaim (was below, now above), -2 reject (was above, now below)
+// Tolerance band ALWAYS outputs 0. Reclaim/reject only fire when close is clearly outside band.
+int vwapCode = vwapState == 0 ? 0 : vwapState == 1 ? (prevVwapSt == -1 ? 2 : 1) : (prevVwapSt == 1 ? -2 : -1)
+// barRange already defined in volume delta section (line ~497)
+float avgRange5 = ta.sma(barRange, 5)
+float rangeExpansion = barRange / math.max(avgRange5, syminfo.mintick)
+float rangeExpClamped = math.min(rangeExpansion, 5.0)
+float barEfficiency = math.abs(close - open) / math.max(barRange, syminfo.mintick)
+
+//=====================
+// GROUPED REGIME SCORING (replaces unanimous gate)
+// Group structure: Leadership / Risk-appetite / Macro-FX / Execution
+// Prevents correlated features from double-counting.
+// Sign convention: positive = bullish/risk-on, negative = bearish/risk-off, zero = neutral.
+//=====================
+// Leadership group (NQ): single instrument, strongest ES correlation
+float nqSignal = nqBull ? 1.0 : nqBear ? -1.0 : 0.0
+float leaderScore = nqSignal
+// Risk-appetite group (RTY + CL + HG): broad growth/demand proxy, equal weight
+float rtySignal = rtyBull ? 1.0 : rtyBear ? -1.0 : 0.0
+float clSignal  = clBull ? 1.0 : clBear ? -1.0 : 0.0
+float hgSignal  = hgBull ? 1.0 : hgBear ? -1.0 : 0.0
+float riskScore = (rtySignal + clSignal + hgSignal) / 3.0
+// Macro-FX group (6E + 6J inverted): currency risk context
+float eurSignal = eurBull ? 1.0 : eurBear ? -1.0 : 0.0
+float jpySignal = jpyBull ? 1.0 : jpyBear ? -1.0 : 0.0
+float macroFxScore = 0.5 * eurSignal + 0.5 * jpySignal
+// Execution group: VWAP direction with quality confirmation (chart-native, zero security calls)
+// Reclaim/reject = full signal, steady state = partial, in-band = zero
+float execDir = vwapCode == 2 ? 1.0 : vwapCode == -2 ? -1.0 : vwapCode == 1 ? 0.5 : vwapCode == -1 ? -0.5 : 0.0
+float execQual = 0.5 * barEfficiency + 0.5 * math.min(rangeExpClamped / 3.0, 1.0)
+float execScore = execDir * (0.5 + 0.5 * execQual)
+// Regime score: weighted group sum → 0-100
+// leadership(25) + risk-appetite(40) + macro-fx(15) + execution(20) = 100
+float regimeRaw = 0.25 * leaderScore + 0.40 * riskScore + 0.15 * macroFxScore + 0.20 * execScore
+float regimeScore = math.max(0.0, math.min(100.0, (regimeRaw + 1.0) * 50.0))
+
+//=====================
+// REGIME STATE MACHINE (score-based with hysteresis)
+// States: NEUTRAL(0), BULL(1), BEAR(-1)
+// No direct bull↔bear without override.
+// Override: flow + vol both extreme in same direction — bypasses persistence and cooldown.
+//=====================
+float overrideHigh = 0.8
+float overrideLow = -0.8
+bool overrideBull = leaderScore > overrideHigh and riskScore > overrideHigh
+bool overrideBear = leaderScore < overrideLow and riskScore < overrideLow
+float upperThresh = 65.0
+float lowerThresh = 35.0
+float midThresh = 50.0
+var int regime = 0
+var int entryBullStreak = 0
+var int entryBearStreak = 0
+var int exitStreak = 0
+var int neutralCount = 0
+var int lastFlipBar = na
+entryBullStreak := regimeScore > upperThresh ? entryBullStreak + 1 : 0
+entryBearStreak := regimeScore < lowerThresh ? entryBearStreak + 1 : 0
+bool wantExit = (regime == 1 and regimeScore < midThresh) or (regime == -1 and regimeScore > midThresh)
+exitStreak := wantExit ? exitStreak + 1 : 0
+bool inNeutralZone = regimeScore >= lowerThresh and regimeScore <= upperThresh
+neutralCount := inNeutralZone ? neutralCount + 1 : 0
+if useIntermarket
+    bool canFlip = na(lastFlipBar) or (bar_index - lastFlipBar >= cooldownBars)
+    if regime == 0
+        if entryBullStreak >= confirmBars or overrideBull
+            regime := 1
+            lastFlipBar := bar_index
+        else if entryBearStreak >= confirmBars or overrideBear
+            regime := -1
+            lastFlipBar := bar_index
+    else if regime == 1
+        if overrideBear and canFlip
+            regime := -1
+            lastFlipBar := bar_index
+        else if exitStreak >= confirmBars
+            regime := 0
+    else if regime == -1
+        if overrideBull and canFlip
+            regime := 1
+            lastFlipBar := bar_index
+        else if exitStreak >= confirmBars
+            regime := 0
+    // Neutralize stale regime if score stays in mid-range too long
+    if neutralizeBars > 0 and neutralCount >= neutralizeBars and regime != 0
+        regime := 0
+else
+    regime := 0
+
+bool riskOnBase = (not useIntermarket) or regime == 1
+bool riskOffBase = (not useIntermarket) or regime == -1
+
+bool riskOn = riskOnBase
+bool riskOff = riskOffBase
+
+// Atomic intermarket states for AG (signed: 1=bull/risk-on, -1=bear/risk-off, 0=neutral)
+// Sign convention matches feature contract: positive = supportive for MES longs
+// 6J INVERTED at state boundary: jpyBull = JPY falling = risk-on
+int eventNqState  = nqBull ? 1 : nqBear ? -1 : 0
+int eventRtyState = rtyBull ? 1 : rtyBear ? -1 : 0
+int eventClState  = clBull ? 1 : clBear ? -1 : 0
+int eventHgState  = hgBull ? 1 : hgBear ? -1 : 0
+int eventEurState = eurBull ? 1 : eurBear ? -1 : 0
+int eventJpyState = jpyBull ? 1 : jpyBear ? -1 : 0
+int eventSkewState = skewRiskOn ? 1 : skewRiskOff ? -1 : 0
+
+if enableDebugLogs and barstate.isconfirmed
+    bool stateFlip = riskOn != riskOn[1] or riskOff != riskOff[1] or regime != regime[1]
+    if stateFlip
+        log.info(str.format("WBDBG_STATE bar={0} useIM={1} regime={2} riskOn={3} riskOff={4} score={5}", bar_index, useIntermarket, regime, riskOn, riskOff, regimeScore))
+    if riskOn == riskOff
+        log.info("WBDBG_CONTRADICTION bar={0} regime={1} riskOn={2} riskOff={3}", bar_index, regime, riskOn, riskOff)
+
+//=====================
+// STRUCTURE CONDITIONS (direction-aware)
+//=====================
+// All signals gated to bar close — no mid-bar firing
+bool confirmed = barstate.isconfirmed
+int dir = fibBull ? 1 : -1
+bool zoneReady = not na(zoneUpper) and not na(zoneLower) and not na(pPivot)
+bool breakInDir = zoneReady and confirmed ? (dir == 1 ? (close > zoneUpper and close[1] <= zoneUpper) : (close < zoneLower and close[1] >= zoneLower)) : false
+if breakInDir
+    lastBreakBar := bar_index
+int barsSinceBreak = na(lastBreakBar) ? int(na) : bar_index - lastBreakBar
+bool acceptInDir = (
+ zoneReady and confirmed and
+ not na(barsSinceBreak) and barsSinceBreak > 0 and barsSinceBreak <= retestBars and
+    (dir == 1 ? (low <= zoneUpper and close > zoneUpper) : (high >= zoneLower and close < zoneLower))
+)
+bool rejectAtZone = (
+ zoneReady and confirmed and
+    (rejectWick ?
+        (dir == 1 ? (high >= zoneLower and close < zoneLower) : (low <= zoneUpper and close > zoneUpper)) :
+        (dir == 1 ? (close < zoneLower) : (close > zoneUpper)))
+)
+bool breakAgainst = zoneReady and confirmed ? (dir == 1 ? (close < pPivot and close[1] >= pPivot) : (close > pPivot and close[1] <= pPivot)) : false
+bool tagT1 = confirmed and not na(pT1) and (dir == 1 ? high >= pT1 : low <= pT1)
+bool tagT2 = confirmed and not na(pT2) and (dir == 1 ? high >= pT2 : low <= pT2)
+bool tagT3 = confirmed and not na(pT3) and (dir == 1 ? high >= pT3 : low <= pT3)
+bool regimeAligned = dir == 1 ? riskOn : riskOff
+bool regimeOpposed = dir == 1 ? riskOff : riskOn
+bool acceptConfirmed = acceptInDir and regimeAligned
+bool rejectConfirmed = rejectAtZone and regimeOpposed
+bool breakAgainstConfirmed = breakAgainst and regimeOpposed
+bool conflictBreak = breakInDir and (dir == 1 ? (nqBear or riskScore < -0.3) : (nqBull or riskScore > 0.3))
+bool acceptEvent = oneShotEvent ? (acceptConfirmed and not acceptConfirmed[1]) : acceptConfirmed
+bool rejectEvent = oneShotEvent ? (rejectConfirmed and not rejectConfirmed[1]) : rejectConfirmed
+bool breakAgainstEvent = oneShotEvent ? (breakAgainstConfirmed and not breakAgainstConfirmed[1]) : breakAgainstConfirmed
+bool conflictEvent = oneShotEvent ? (conflictBreak and not conflictBreak[1]) : conflictBreak
+bool tagT1Event = oneShotEvent ? (tagT1 and not tagT1[1]) : tagT1
+bool tagT2Event = oneShotEvent ? (tagT2 and not tagT2[1]) : tagT2
+bool tagT3Event = oneShotEvent ? (tagT3 and not tagT3[1]) : tagT3
+
+bool pivotNearZone = isValid and close <= zoneUpper and close >= zoneLower
+int eventPivotInteractionCode = breakInDir ? 4 : rejectAtZone ? 3 : acceptInDir ? 1 : breakAgainst ? 2 : pivotNearZone ? 5 : 0
+
+bool setupAcceptContinuation = acceptConfirmed
+bool setupZoneRejection = rejectConfirmed
+bool setupPivotContinuation = breakInDir and regimeAligned and not conflictBreak
+bool setupFailedMoveReversal = breakAgainstConfirmed
+bool setupReentryAfterTp1 = tagT1 and acceptInDir and regimeAligned
+int setupArchetypeCode = setupAcceptContinuation ? 1 : setupZoneRejection ? 2 : setupPivotContinuation ? 3 : setupFailedMoveReversal ? 4 : setupReentryAfterTp1 ? 5 : 0
+
+int fibLevelTouched = 0
+if isValid
+    float nearest = math.abs(close - p236)
+    fibLevelTouched := 236
+    float d382 = math.abs(close - p382)
+    if d382 < nearest
+        nearest := d382
+        fibLevelTouched := 382
+    float d500 = math.abs(close - pPivot)
+    if d500 < nearest
+        nearest := d500
+        fibLevelTouched := 500
+    float d618 = math.abs(close - p618)
+    if d618 < nearest
+        nearest := d618
+        fibLevelTouched := 618
+    float d786 = math.abs(close - p786)
+    if d786 < nearest
+        nearest := d786
+        fibLevelTouched := 786
+    float d100 = math.abs(close - pOne)
+    if d100 < nearest
+        fibLevelTouched := 100
+
+// Shock logic: leadership + risk-appetite alignment determines continuation vs failure
+bool shockContinuation = dir == 1 ? (eventNqState == 1 and riskScore > 0) : (eventNqState == -1 and riskScore < 0)
+bool shockFailure = dir == 1 ? (eventNqState == -1 or riskScore < -0.3) : (eventNqState == 1 or riskScore > 0.3)
+// Alignment count: how many of 6 CME intermarket symbols agree (SKEW excluded — daily only)
+int alignOn  = (nqBull ? 1 : 0) + (rtyBull ? 1 : 0) + (clBull ? 1 : 0) + (hgBull ? 1 : 0) + (eurBull ? 1 : 0) + (jpyBull ? 1 : 0)
+int alignOff = (nqBear ? 1 : 0) + (rtyBear ? 1 : 0) + (clBear ? 1 : 0) + (hgBear ? 1 : 0) + (eurBear ? 1 : 0) + (jpyBear ? 1 : 0)
+float eventShockScore = math.max(0.0, math.min(100.0, math.abs(float(alignOn - alignOff)) * 12.0 + math.abs(ta.roc(close, 1)) / (atrRaw + 0.0001) * 20.0 + (conflictBreak ? 20.0 : 0.0)))
+float eventReversalScore = math.max(0.0, math.min(100.0, (breakAgainstConfirmed ? 45.0 : 0.0) + (rejectConfirmed ? 35.0 : 0.0) + (conflictBreak ? 20.0 : 0.0)))
+int eventModeCode = conflictBreak ? 6 : shockFailure ? 2 : shockContinuation ? 1 : rejectConfirmed ? 3 : 0
+
+// Agreement velocity: Δ of net atomic alignment count (level=consensus, change=momentum)
+int netAlignment = alignOn - alignOff
+int agreementVelocity = netAlignment - nz(netAlignment[1], 0)
+
+float confidenceRaw = 50.0 + float(alignOn - alignOff) * 5.0 + (setupAcceptContinuation ? 12.0 : 0.0) - (setupZoneRejection ? 8.0 : 0.0) - (conflictBreak ? 12.0 : 0.0) + (targetEligible20pt ? 8.0 : -12.0)
+float confidenceScore = math.max(0.0, math.min(100.0, confidenceRaw))
+
+// Impulse quality: direction-relative composite (higher = better quality for this setup's direction)
+// Components: intermarket alignment, range expansion, efficiency, VWAP alignment
+// Normalized to [0, 1], combined as weighted sum → 0-100
+float iqAlign = 0.0
+float iqVwap = 0.0
+if dir == 1
+    iqAlign := math.max(0.0, float(alignOn - alignOff)) / 6.0
+    iqVwap := vwapState == 1 ? 1.0 : vwapState == 0 ? 0.5 : 0.0
+else
+    iqAlign := math.max(0.0, float(alignOff - alignOn)) / 6.0
+    iqVwap := vwapState == -1 ? 1.0 : vwapState == 0 ? 0.5 : 0.0
+float impulseQuality = math.min(100.0, (0.30 * iqAlign + 0.25 * math.min(rangeExpClamped / 3.0, 1.0) + 0.25 * barEfficiency + 0.20 * iqVwap) * 100.0)
+
+// RVOL gate: require volume confirmation on entry (volRatio = volume / SMA(volume, 20))
+bool rvolOK = volRatio >= rvolMin
+bool entryLongTrigger = acceptEvent and dir == 1 and targetEligible20pt and not conflictBreak and not breakAgainstConfirmed and rvolOK and htfDirAgrees
+bool entryShortTrigger = acceptEvent and dir == -1 and targetEligible20pt and not conflictBreak and not breakAgainstConfirmed and rvolOK and htfDirAgrees
+
+if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or conflictEvent or entryLongTrigger or entryShortTrigger)
+    log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent) + str.format(" conflict={0} longTrig={1} shortTrig={2} aligned={3} opposed={4}", conflictEvent, entryLongTrigger, entryShortTrigger, regimeAligned, regimeOpposed))
+
+//=====================
+// TRADE STATE MACHINE (SL / ENTRY / TP1 / TP2)
+//=====================
+var int TRADE_NONE    = 0
+var int TRADE_SETUP   = 1
+var int TRADE_ACTIVE  = 2
+var int TRADE_HIT_TP1 = 3
+var int TRADE_HIT_TP2 = 4
+var int TRADE_STOPPED = 5
+var int TRADE_EXPIRED = 6
+
+var int tradeState = TRADE_NONE
+var float entryPrice = na
+var float slPrice = na
+var float tp1Price = na
+var float tp2Price = na
+var int setupBar = na
+var int entryBar = na
+var int lastExitBar = na
+var int lastExitDir = 0       // direction of last completed trade — for contrarian CHoCH
+var int tradeDir = 0          // direction captured at SETUP→ACTIVE (safe: not affected by anchor updates at exit)
+// AG LABEL SOURCE: 0=none, 1=TP1_HIT, 2=TP2_HIT, 3=STOPPED, 4=EXPIRED
+// This is the only reliable label export — trade_state collapses to NONE on the same bar as exit.
+var int lastExitOutcome = 0
+int cooldownLen = 8 // bars to wait after exit (8 × 15m = 2h minimum; 4 was too short — consecutive entries corrupt AG samples)
+int barsSinceExit = not na(lastExitBar) ? bar_index - lastExitBar : 999
+bool cooldownActive = barsSinceExit < cooldownLen
+
+// slLevel: fibPrice(-0.236) is symmetric — bull=below anchor low, bear=above anchor high (fib invalidation in both directions)
+// tp1Level/tp2Level: use canonical pT1/pT2 directly — already direction-aware via fibPrice(1.236)/fibPrice(1.618)
+float slLevel    = fibPrice(-0.236)
+float entryLevel = fibBull ? p618 : p382
+float tp1Level   = pT1
+float tp2Level   = pT2
+
+// Vol-adjusted SL distance: how far SL is in ATR units (AG learns when distance is too tight/wide)
+float slDistPts = math.abs(entryLevel - slLevel)
+float slDistAtr = atr14 > 0 ? slDistPts / atr14 : 0.0
+
+if confirmed
+    if tradeState == TRADE_NONE and zoneReady and not cooldownActive
+        if fibBull and close <= entryLevel and close >= zoneLower
+            tradeState := TRADE_SETUP
+            setupBar := bar_index
+        if not fibBull and close >= entryLevel and close <= zoneUpper
+            tradeState := TRADE_SETUP
+            setupBar := bar_index
+
+    if tradeState == TRADE_SETUP and regimeAligned
+        entryPrice := close
+        slPrice := slLevel
+        tp1Price := tp1Level
+        tp2Price := tp2Level
+        tradeDir  := dir      // lock direction here — anchor may shift by exit bar
+        tradeState := TRADE_ACTIVE
+        entryBar := bar_index
+
+    if tradeState == TRADE_ACTIVE
+        if fibBull
+            if low <= slPrice
+                tradeState := TRADE_STOPPED
+            else if high >= tp2Price
+                tradeState := TRADE_HIT_TP2
+            else if high >= tp1Price
+                tradeState := TRADE_HIT_TP1
+        else
+            if high >= slPrice
+                tradeState := TRADE_STOPPED
+            else if low <= tp2Price
+                tradeState := TRADE_HIT_TP2
+            else if low <= tp1Price
+                tradeState := TRADE_HIT_TP1
+
+    if tradeState == TRADE_SETUP and not na(setupBar) and bar_index - setupBar > 12
+        lastExitOutcome := 4  // EXPIRED — setup timed out, no fill
+        tradeState := TRADE_EXPIRED
+
+    if tradeState >= TRADE_HIT_TP1
+        // Resolve outcome BEFORE resetting state — trade_state collapses to NONE same bar
+        lastExitOutcome := tradeState == TRADE_HIT_TP2 ? 2 : tradeState == TRADE_STOPPED ? 3 : tradeState == TRADE_EXPIRED ? 4 : 1
+        lastExitDir := tradeDir  // use direction locked at entry, not current dir (anchor may have shifted)
+        lastExitBar := bar_index
+        tradeState := TRADE_NONE
+        entryPrice := na
+        slPrice := na
+        tp1Price := na
+        tp2Price := na
+        setupBar := na
+        entryBar := na
+
+// Contrarian reversal setup: CHoCH fires opposite to last completed trade direction
+// within 10 bars of exit. Flags mean-reversion opportunity after TP2 tag or SL stop-out.
+// AG decides whether to act — this is a feature, not an entry trigger.
+bool contrChoch = barsSinceExit > 0 and barsSinceExit <= 10 and (
+    (lastExitDir == 1  and chochBear) or
+    (lastExitDir == -1 and chochBull))
+
+var line slLine = line.new(na, na, na, na, color=color(na))
+var line entryLine = line.new(na, na, na, na, color=color(na))
+var line tp1LineTrade = line.new(na, na, na, na, color=color(na))
+var line tp2LineTrade = line.new(na, na, na, na, color=color(na))
+var label slLabel = label.new(na, na, "", style=label.style_none)
+var label entryLabel = label.new(na, na, "", style=label.style_none)
+var label tp1LblTrade = label.new(na, na, "", style=label.style_none)
+var label tp2LblTrade = label.new(na, na, "", style=label.style_none)
+
+if tradeState == TRADE_SETUP or tradeState == TRADE_ACTIVE
+    int leftBar = nz(setupBar, bar_index - 10)
+    line.set_xy1(slLine, leftBar, nz(slPrice, slLevel))
+    line.set_xy2(slLine, bar_index, nz(slPrice, slLevel))
+    line.set_color(slLine, COLOR_STOP)
+    line.set_width(slLine, 2)
+    label.set_xy(slLabel, bar_index, nz(slPrice, slLevel))
+    label.set_text(slLabel, "SL")
+    label.set_textcolor(slLabel, COLOR_STOP)
+
+    line.set_xy1(entryLine, leftBar, nz(entryPrice, entryLevel))
+    line.set_xy2(entryLine, bar_index, nz(entryPrice, entryLevel))
+    line.set_color(entryLine, #FF9800)
+    line.set_width(entryLine, 2)
+    label.set_xy(entryLabel, bar_index, nz(entryPrice, entryLevel))
+    label.set_text(entryLabel, "ENTRY")
+    label.set_textcolor(entryLabel, #FF9800)
+
+    line.set_xy1(tp1LineTrade, leftBar, nz(tp1Price, tp1Level))
+    line.set_xy2(tp1LineTrade, bar_index, nz(tp1Price, tp1Level))
+    line.set_color(tp1LineTrade, #00C853)
+    line.set_width(tp1LineTrade, 2)
+    label.set_xy(tp1LblTrade, bar_index, nz(tp1Price, tp1Level))
+    label.set_text(tp1LblTrade, "TP1")
+    label.set_textcolor(tp1LblTrade, #00C853)
+
+    line.set_xy1(tp2LineTrade, leftBar, nz(tp2Price, tp2Level))
+    line.set_xy2(tp2LineTrade, bar_index, nz(tp2Price, tp2Level))
+    line.set_color(tp2LineTrade, #69F0AE)
+    line.set_width(tp2LineTrade, 2)
+    label.set_xy(tp2LblTrade, bar_index, nz(tp2Price, tp2Level))
+    label.set_text(tp2LblTrade, "TP2")
+    label.set_textcolor(tp2LblTrade, #69F0AE)
+else
+    line.set_color(slLine, color(na))
+    line.set_color(entryLine, color(na))
+    line.set_color(tp1LineTrade, color(na))
+    line.set_color(tp2LineTrade, color(na))
+    label.set_textcolor(slLabel, color(na))
+    label.set_textcolor(entryLabel, color(na))
+    label.set_textcolor(tp1LblTrade, color(na))
+    label.set_textcolor(tp2LblTrade, color(na))
+
+//=====================
+// DRAW ALL 10 FIB LEVELS
+//=====================
+var line lineZero  = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line line236   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line line382   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line linePivot = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line line618   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line line786   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineOne   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineT1    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line line1382  = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line line150   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineT2    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line line1786  = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineT3    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+
+var box zoneBox = box.new(bar_index, close, bar_index, close, bgcolor=color(na), border_color=color(na))
+
+int fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
+int anchorLeftBar = int(math.max(0, na(anchorHighBar) or na(anchorLowBar) ? fallbackLeftBar : math.min(anchorHighBar, anchorLowBar)))
+int drawLeftBar = useConfluenceAnchorSpan ? anchorLeftBar : fallbackLeftBar
+
+drawAnchoredLine(line id, bool visible, float price, color col, int width_, int leftBar) =>
+    if visible and not na(price)
+        line.set_xy1(id, leftBar, price)
+        line.set_xy2(id, bar_index, price)
+        line.set_color(id, col)
+        line.set_width(id, width_)
+        line.set_style(id, line.style_solid)
+        line.set_extend(id, extendLevelsRight ? extend.right : extend.none)
+    else
+        line.set_color(id, color(na))
+
+drawAnchoredLine(lineZero,  true, pZero,  COLOR_ANCHOR,             WIDTH_ANCHOR,      drawLeftBar)
+drawAnchoredLine(line236,   true, p236,   COLOR_RETRACEMENT,         WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(line382,   true, p382,   COLOR_RETRACEMENT_ORANGE,  WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(linePivot, true, pPivot, COLOR_ANCHOR,              WIDTH_PIVOT,       drawLeftBar)
+drawAnchoredLine(line618,   true, p618,   COLOR_RETRACEMENT_ORANGE,  WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(line786,   true, p786,   COLOR_RETRACEMENT,         WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(lineOne,   true, pOne,   COLOR_ANCHOR,              WIDTH_ANCHOR,      drawLeftBar)
+drawAnchoredLine(lineT1,    true, pT1,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
+drawAnchoredLine(line1382,  true, p1382,  COLOR_RETRACEMENT,         WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(line150,   true, p150,   COLOR_RETRACEMENT,         WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(lineT2,    true, pT2,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
+drawAnchoredLine(line1786,  true, p1786,  COLOR_RETRACEMENT,         WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(lineT3,    true, pT3,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
+
+if not na(zoneFillUpper) and not na(zoneFillLower)
+    box.set_left(zoneBox, drawLeftBar)
+    box.set_right(zoneBox, bar_index)
+    box.set_top(zoneBox, zoneFillUpper)
+    box.set_bottom(zoneBox, zoneFillLower)
+    box.set_bgcolor(zoneBox, color.new(COLOR_PIVOT, 86))
+    box.set_border_color(zoneBox, color.new(COLOR_PIVOT, 100))
+else
+    box.set_bgcolor(zoneBox, color(na))
+    box.set_border_color(zoneBox, color(na))
+
+// bgcolor regime tint removed — never used, frees 1 output slot (now 63/64)
+
+// trendStr / corrStr removed — monotonic rescalings of adxVal and im_score_on/off.
+// Collinear with existing ADX and IM score exports. Zero new information for AG.
+
+float ema21 = ta.ema(close, 21)
+float ema50 = ta.ema(close, 50)
+float ema200 = ta.ema(close, 200)
+int ema21Dir = f_ema_dir(ema21)
+int ema50Dir = f_ema_dir(ema50)
+int ema200Dir = f_ema_dir(ema200)
+float ema21DistPct = f_ema_dist_pct(ema21)
+float ema50DistPct = f_ema_dist_pct(ema50)
+float ema200DistPct = f_ema_dist_pct(ema200)
+
+//=====================
+// AG FEATURE EXPORT (hidden plots — display=display.none)
+//=====================
+// adx_14 removed — same data exported as ml_adx_14 in TA Core Pack
+plot(diSpread, "di_spread_14", display=display.none)
+plot(adxSlope, "adx_slope_14", display=display.none)
+plot(er10, "er_10", display=display.none)
+// er_20 removed — AG computes from mes_15m OHLCV server-side
+// vix_pct_252d removed — AG computes from FRED VIX data server-side
+plot(atrPct, "atr_pct_20", display=display.none)
+// vix_close removed — VVIX replaces VIX, no daily calls needed
+
+plot(clv, "clv", display=display.none)
+plot(signedVol, "signed_vol_proxy", display=display.none)
+plot(volDeltaPct, "vol_delta_pct", display=display.none)
+plot(nz(fibTouchVolDelta), "fib_touch_vol_delta", display=display.none)
+
+plot(float(htfConfPivot), "htf_conf_pivot", display=display.none)
+plot(float(htfConf382), "htf_conf_382", display=display.none)
+plot(float(htfConf618), "htf_conf_618", display=display.none)
+plot(float(htfConfTotal), "htf_conf_total", display=display.none)
+
+plot(float(regime), "im_regime", display=display.none)
+plot(float(alignOn), "im_align_on", display=display.none)
+plot(float(alignOff), "im_align_off", display=display.none)
+
+plot(fibRange, "fib_range", display=display.none)
+// fib_direction removed — same data exported as ml_direction_code in model contract
+plot(nz(confluenceQuality), "confluence_quality", display=display.none)
+
+plot(float(tradeState), "trade_state", display=display.none)
+plot(tradeState == TRADE_ACTIVE and not na(entryBar) ? float(bar_index - entryBar) : 0.0, "bars_in_trade", display=display.none)
+
+// trend_strength / correlation_strength removed — collinear with adx/IM score exports, zero new signal for AG
+
+// v6 minimum model contract + simplified trigger contract
+// ── REGIME / STRUCTURE / MODEL CONTRACT ──
+plot(confidenceScore, "ml_confidence_score", display=display.none)
+plot(float(dir), "ml_direction_code", display=display.none)
+plot(float(setupArchetypeCode), "ml_setup_archetype_code", display=display.none)
+plot(float(fibLevelTouched), "ml_fib_level_touched", display=display.none)
+// ml_stop_family_code removed — was hardcoded constant 1 everywhere, zero variance for AG
+plot(float(eventModeCode), "ml_event_mode_code", display=display.none)
+plot(eventShockScore, "ml_event_shock_score", display=display.none)
+plot(eventReversalScore, "ml_event_reversal_score", display=display.none)
+
+// ── INTERMARKET ATOMIC STATES (7 signals, signed: 1=bull/risk-on, -1=bear/risk-off, 0=neutral) ──
+// 6 CME Globex futures + daily SKEW. AG decides weights and correlations.
+// 6J sign already inverted at state boundary: eventJpyState +1 = JPY falling = risk-on.
+plot(float(eventNqState), "ml_event_nq_state", display=display.none)
+plot(float(eventRtyState), "ml_event_rty_state", display=display.none)
+plot(float(eventClState), "ml_event_cl_state", display=display.none)
+plot(float(eventHgState), "ml_event_hg_state", display=display.none)
+plot(float(eventEurState), "ml_event_eur_state", display=display.none)
+plot(float(eventJpyState), "ml_event_jpy_state", display=display.none)
+plot(float(eventSkewState), "ml_event_skew_state", display=display.none)
+plot(float(eventPivotInteractionCode), "ml_event_pivot_interaction_code", display=display.none)
+
+// ── ES EXECUTION QUALITY + REGIME SCORE + AGREEMENT + IMPULSE (6 new exports) ──
+plot(float(vwapCode), "ml_vwap_code", display=display.none)
+plot(rangeExpClamped, "ml_range_expansion", display=display.none)
+plot(barEfficiency, "ml_efficiency", display=display.none)
+plot(float(agreementVelocity), "ml_agreement_velocity", display=display.none)
+plot(impulseQuality, "ml_impulse_quality", display=display.none)
+plot(regimeScore, "ml_regime_score", display=display.none)
+
+// ── EMA DISTANCE (3 magnitudes — direction codes dropped, collinear with IM regime) ──
+// ml_ema21_dir / ml_ema50_dir / ml_ema200_dir removed — collinear with IM regime and dist_pct.
+// Distance % carries both sign and magnitude; direction codes are a strict subset.
+plot(ema21DistPct, "ml_ema21_dist_pct", display=display.none)
+plot(ema50DistPct, "ml_ema50_dist_pct", display=display.none)
+plot(ema200DistPct, "ml_ema200_dist_pct", display=display.none)
+
+// ── VOLUME / ENTRY QUALITY ──
+plot(volRatio, "ml_rvol", display=display.none)
+plot(float(orState), "ml_or_state", display=display.none)
+plot(orDistNorm, "ml_or_dist_norm", display=display.none)
+// ml_liq_sweep_bull + ml_liq_sweep_bear merged into single signed feature (saves 1 slot, no info loss)
+plot(liqSweepBull ? 1.0 : liqSweepBear ? -1.0 : 0.0, "ml_liq_sweep", display=display.none)
+plot(chochBull ? 1.0 : chochBear ? -1.0 : 0.0, "ml_choch", display=display.none)
+// PIT NOTE: chochBull/chochBear fire at bar N+5 (ta.pivothigh rightbars=5).
+// AG pipeline MUST timestamp these at the emit bar, not the pivot bar, to avoid 5-bar forward shift.
+plot(fvgBullDist, "ml_fvg_bull_dist", display=display.none)
+plot(fvgBearDist, "ml_fvg_bear_dist", display=display.none)
+plot(cooldownActive ? 1.0 : 0.0, "ml_cooldown_active", display=display.none)
+plot(math.min(float(barsSinceExit), 999.0), "ml_bars_since_exit", display=display.none)
+plot(slDistAtr, "ml_sl_dist_atr", display=display.none)
+plot(exhaustionScore, "ml_exhaustion_score", display=display.none)
+// ml_entry_long/short_trigger removed — all constituent features already exported separately.
+// Within the AG training set (rows = entry bars), these are constant=1, zero predictive variance.
+
+// ── AG LABEL SURFACE ──
+// ml_last_exit_outcome: 0=none, 1=TP1_HIT, 2=TP2_HIT, 3=STOPPED, 4=EXPIRED
+// This is the PRIMARY AG label source. trade_state collapses to NONE on the same bar as exit —
+// it cannot be used to reconstruct outcome. This plot holds the outcome for exactly 1 bar at exit.
+plot(float(lastExitOutcome), "ml_last_exit_outcome", display=display.none)
+// ml_tp1_hit_event / ml_tp2_hit_event: price-tag events (fire regardless of trade state).
+// Use ml_last_exit_outcome for label construction; use these as secondary confirmation.
+plot(tagT1Event ? 1.0 : 0.0, "ml_tp1_hit_event", display=display.none)
+plot(tagT2Event ? 1.0 : 0.0, "ml_tp2_hit_event", display=display.none)
+
+// ── MACRO CONTEXT ──
+// ml_event_day: calendar heuristic (~80% accuracy). Use FRED server-side join for AG training labels.
+// This plot is correct for live alerting; for AG training, prefer the exact server-side calendar.
+plot(isEventDay ? 1.0 : 0.0, "ml_event_day", display=display.none)
+// ml_adline_slope: NYSE A-D daily slope, same value for all 15m bars within a day.
+// PIT NOTE: Lag by 1 day in AG preprocessing — current-day A-D is not available at bar open.
+// Feature is cross-day breadth divergence context, not intra-day signal.
+plot(adSlopeNorm, "ml_adline_slope", display=display.none)
+plot(contrChoch ? 1.0 : 0.0, "ml_contrarian_choch", display=display.none)
+
+// ── TA Core Pack: computation stays (used by AG packet gates), plot exports
+// ── offloaded to server-side (AG computes from Databento OHLCV) ──
+// ── PLOT BUDGET: 60 plots + 3 alertconditions = 63/64 (1 headroom) ──
+// ── TA Core Pack exports (7 plots: di_spread, adx_slope, er_10, atr_pct, clv, signed_vol, vol_delta) ──
+// ── are AG server-side computable — cut candidates if budget slots needed ──
+
+//=====================
+// STRATEGY EXECUTION
+//=====================
+bool levelsValid = not na(slLevel) and not na(tp1Level) and not na(tp2Level)
+bool canTradeBar = levelsValid and barstate.isconfirmed
+
+if entryLongTrigger and canTradeBar
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long TP1", from_entry="Long", qty_percent=50, stop=slLevel, limit=tp1Level)
+    strategy.exit("Long TP2", from_entry="Long", qty_percent=100, stop=slLevel, limit=tp2Level)
+    strategy.close("Short")
+
+if entryShortTrigger and canTradeBar
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short TP1", from_entry="Short", qty_percent=50, stop=slLevel, limit=tp1Level)
+    strategy.exit("Short TP2", from_entry="Short", qty_percent=100, stop=slLevel, limit=tp2Level)
+    strategy.close("Long")
+
+//=====================
+// ALERTS
+// Kept: ENTRY LONG, ENTRY SHORT, PIVOT BREAK (.50 reversal warning)
+// All other alerts moved to dashboard (dashboard handles operator notifications)
+//=====================
+if entryLongTrigger
+    alert("WARBIRD ENTRY LONG. Close=" + str.tostring(close), alert.freq_once_per_bar_close)
+if entryShortTrigger
+    alert("WARBIRD ENTRY SHORT. Close=" + str.tostring(close), alert.freq_once_per_bar_close)
+if breakAgainstEvent
+    alert("PIVOT BREAK against + Regime Opposed. Close=" + str.tostring(close), alert.freq_once_per_bar_close)

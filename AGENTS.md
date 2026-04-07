@@ -13,6 +13,7 @@ Use this root `AGENTS.md` as the workspace instruction surface. Do not add a com
 - Active architecture: `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
 - Model contract: `WARBIRD_MODEL_SPEC.md`
 - Fail-closed execution gates: `docs/agent-safety-gates.md`
+- PowerDrill research baseline: `docs/research/2026-04-06-powerdrill-findings.md`
 
 ### Default Preflight
 

@@ -3,6 +3,7 @@ Read and follow AGENTS.md at the repository root.
 ## Quick Reference
 
 - **Active architecture plan:** `/Volumes/Satechi Hub/warbird-pro/docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+- **PowerDrill research baseline:** `docs/research/2026-04-06-powerdrill-findings.md`
 - **Live:** deployment URL managed in project operations docs
 - **Repo:** github.com/zincdigitalofmiami/warbird-pro
 - **DB:** Supabase cloud (production) + local Supabase via Docker (training/dev). No Prisma.
