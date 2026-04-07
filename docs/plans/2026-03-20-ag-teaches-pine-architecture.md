@@ -95,6 +95,278 @@ Fix the indicator first
 
 The PowerDrill research session (2026-04-06) produced the diagnosis and fix specifications. The implementation specs live in `docs/research/2026-04-06-powerdrill-findings.md` Section 11. The three fixes (stop-lock, trigger gate, ATR stop toggle) are the current pre-Step-5 gate.
 
+## PowerDrill Consolidated Execution Sequence (2026-04-07)
+
+This section consolidates the active plan, the 2026-04-06 PowerDrill findings, the canonical schema drafts, and the current repo/runtime reality into one execution order. Use this section to sequence work across Pine, cloud Supabase, the local training warehouse, and the AG publish-up path. If a subordinate plan or scratch note disagrees with this section, this section wins immediately.
+
+### Current Repo-Truth Blockers
+
+These blockers were re-verified from the repository before writing this sequence:
+
+- the pre-Step-5 PowerDrill strategy repairs are still open on `indicators/v7-warbird-strategy.pine`; `strategy.exit()` still uses drifting `slLevel` / `tp1Level` / `tp2Level` instead of the locked `slPrice` / `tp1Price` / `tp2Price`
+- the legacy writer surfaces still target dropped or retired schema:
+  - `app/api/cron/detect-setups/route.ts` still reads `trump_effect_1d`, `econ_vol_1d` and writes `warbird_triggers_15m`, `warbird_conviction`, `warbird_risk`, `warbird_setups`, `warbird_setup_events`, `measured_moves`
+  - `app/api/cron/score-trades/route.ts` still reads and writes `warbird_setups`, `warbird_setup_events`, `measured_moves`
+  - `lib/warbird/queries.ts` still reads the same legacy Warbird tables
+- the local ML workbench surface is not built yet; `scripts/ag/` currently contains only `local_warehouse_schema.sql`
+- the current local dataset/training scripts are still bridge assets, not the target Phase 4 implementation:
+  - `scripts/warbird/build-warbird-dataset.ts` still depends on retired sources such as `news_signals`, `trump_effect_1d`, and `warbird_setups`
+  - `scripts/warbird/train-warbird.py` still trains against legacy local-only target names
+- local warehouse direction has conflicting subordinate docs; the active contract for the end-state remains:
+  - cloud Supabase = runtime system of record
+  - local training warehouse = explicit offline training store on the external drive
+  - local Docker Supabase must not be treated as proof of training-schema truth without direct verification
+
+### Phase 0: Contract And Storage Freeze
+
+Purpose:
+
+- freeze the MES 15m fib contract before any more writer, admin, or training buildout
+- freeze cloud runtime vs local training responsibilities
+- prevent the project from drifting back into `candidates + signals + outcomes` shorthand or mixed cloud/local assumptions
+
+Entry criteria:
+
+- active plan, `CLAUDE.md`, `WARBIRD_MODEL_SPEC.md`, and `docs/research/2026-04-06-powerdrill-findings.md` re-read
+- migration `20260331000045` remains reconciled and replay-verified
+
+Deliverables:
+
+- canonical contract restatement: `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`
+- explicit storage boundary restatement:
+  - cloud Supabase owns runtime truth, operators, packets, and publish-up views
+  - the external-drive local warehouse owns offline training, diagnostics, and feature research
+  - local Docker Supabase is only a checked environment when directly verified, not assumed truth
+- audited inventory of all legacy writer and reader dependencies that must be removed
+
+Exit gate:
+
+- no open ambiguity remains about the canonical key, outcome vocabulary, or cloud/local boundary
+
+Risk gate:
+
+- stop immediately if any proposed schema, API, or dashboard path collapses the contract back into a narrow legacy table story
+
+### Phase 1: PowerDrill Entry-Surface Repair
+
+Purpose:
+
+- finish the pre-Step-5 gate by fixing the strategy/backtest surface that defines what a valid candidate is
+
+Scope:
+
+- apply and re-test the PowerDrill Section 11 repairs on `indicators/v7-warbird-strategy.pine`
+- keep the live indicator contract aligned with the resulting candidate semantics
+
+Required work:
+
+- fix the stop-lock bug so exits use the frozen entry-time prices
+- add the four-factor trigger gate and bar-close acceptance requirement
+- add the bounded ATR stop-family toggle for comparative testing
+- keep `PASS` / `WAIT` / `TAKE_TRADE` as the policy vocabulary and preserve long/short asymmetry as a first-class test axis
+
+Deliverables:
+
+- a clean pre/post backtest comparison against the 2026-04-06 baseline
+- documented trade-count, win-rate, PF, and loss-geometry changes on `15m`
+- narrowed stop-family decision set for later AG admission
+
+Exit gate:
+
+- one candidate definition is selected as the post-PowerDrill baseline for writer design
+
+Risk gate:
+
+- do not start canonical writer work while the strategy surface still has drifting exits or unresolved candidate semantics
+
+### Phase 2: Canonical Cloud Schema And Writer Cutover
+
+Purpose:
+
+- replace the legacy cron-owned writer path with canonical recording against the reconciled cloud schema
+
+Scope:
+
+- activate and use the canonical table families defined in migrations `037` and `038`
+- move writer behavior into Supabase-owned paths only: Edge Functions and the TradingView webhook receiver
+
+Required work:
+
+- port or replace `detect-setups` and `score-trades` as canonical writers
+- record frozen fib snapshots, candidates, outcomes, decisions, published signals, and signal events
+- preserve idempotency on the natural contract key
+- fix CME continuity-gap handling before any writer is called live
+- keep cron auth, `maxDuration = 60`, `job_log`, and RLS discipline intact
+
+Deliverables:
+
+- runtime writers that write only to:
+  - `warbird_fib_engine_snapshots_15m`
+  - `warbird_fib_candidates_15m`
+  - `warbird_candidate_outcomes_15m`
+  - `warbird_signals_15m`
+  - `warbird_signal_events`
+- direct DB verification that the canonical objects exist in the environment being claimed
+- removal of all writer dependence on retired sources such as `trump_effect_1d`, `news_signals`, `warbird_setups`, and `measured_moves`
+
+Exit gate:
+
+- the cloud runtime can produce canonical rows without touching any legacy Warbird operational table
+
+Risk gate:
+
+- no writer claim is valid until direct DB checks prove the target tables, constraints, and views exist in the exact environment being tested
+
+### Phase 3: Dashboard, Admin, And API Reader Cutover
+
+Purpose:
+
+- migrate every reader surface off the stale legacy tables and onto the canonical views plus packet publish-up views
+
+Scope:
+
+- `/admin`
+- `/api/admin/status`
+- `/api/warbird/dashboard`
+- `/api/warbird/signal`
+- `/api/warbird/history`
+- dashboard realtime consumers
+
+Required work:
+
+- rewire readers to canonical snapshot/candidate/outcome/signal views
+- keep TradingView as the signal source and the dashboard as the render surface
+- keep the dashboard from recomputing fib geometry locally
+- surface packet metrics, feature drivers, setting hypotheses, and recommendations via structured publish-up views only
+
+Deliverables:
+
+- reader cutover to `warbird_admin_candidate_rows_v`, `warbird_active_signals_v`, and the active packet/training views
+- webhook-to-Realtime path functioning for live dashboard updates
+- removal of runtime degradation as the normal operating path
+
+Exit gate:
+
+- the operator surfaces render the canonical stored engine state and no longer depend on legacy Warbird tables
+
+Risk gate:
+
+- do not publish fallback aliases for deleted outcome names or legacy table semantics on new reader surfaces
+
+### Phase 4: Local Training Warehouse And Feature Pipeline
+
+Purpose:
+
+- stand up the offline training store and feature pipeline required for AG without reintroducing cloud/local confusion
+
+Scope:
+
+- build the local warehouse as the explicit offline research/training surface on the external drive
+- treat Databento batches, TradingView exports/capture, and verified cloud snapshots as source inputs, not as the final training contract themselves
+
+Required work:
+
+- create the durable local training store for the Phase 4 entities already named in this plan, including:
+  - source snapshot surfaces for MES, cross-asset, and approved daily context
+  - research child tables from `scripts/ag/local_warehouse_schema.sql`
+- build the source-loading and feature-computation path under `scripts/ag/*`
+- normalize all joins to the MES 15m bar-close contract
+- keep `cross_asset_1h` / `cross_asset_1d` as the minimum locked basket training surfaces until SHAP clears any lower-timeframe expansion
+
+Deliverables:
+
+- working Phase 4 scripts for:
+  - loading source snapshots
+  - building fib snapshots
+  - building the canonical training dataset
+  - computing features
+- a verified local warehouse with 2020-forward retained history and no reliance on repaint-prone live chart reads
+
+Exit gate:
+
+- the local warehouse can build a deterministic training dataset from canonical point-in-time rows plus approved local-only research tables
+
+Risk gate:
+
+- no recurring cloud-to-local sync layer
+- no training truth sourced from local dashboard recomputation
+- no `cross_asset_15m` or `cross_asset_1m` expansion before the first SHAP pass proves it is warranted
+
+### Phase 5: AutoGluon Training, Evaluation, And Packet Publish-Up
+
+Purpose:
+
+- train the offline selector and publish a Pine-safe packet only after the candidate and warehouse contracts are stable
+
+Required work:
+
+- train the staged baseline in this order:
+  1. fib + event-response + TA core pack baseline
+  2. parameter admission inside surviving feature families
+  3. joint configuration on surviving feature families only
+- treat TP1, TP2-conditional, and runner-quality as separate learning problems where required by the data
+- generate a compact, versioned packet with bounded stop-family decisions, calibrated bucket outputs, and publish-up metadata
+
+Deliverables:
+
+- `warbird_training_runs`
+- `warbird_training_run_metrics`
+- `warbird_packets`
+- `warbird_packet_activations`
+- `warbird_packet_metrics`
+- `warbird_packet_feature_importance`
+- `warbird_packet_setting_hypotheses`
+- `warbird_packet_recommendations`
+
+Exit gate:
+
+- at least one packet candidate exists with stable sample counts, calibration evidence, and documented fallback-bucket coverage
+
+Risk gate:
+
+- AutoGluon remains offline only
+- packet refresh remains batch-promoted, not live-served
+- AG chooses among the bounded stop family; it does not emit arbitrary per-trade stop floats
+
+### Phase 6: Integration, Walk-Forward Validation, And Legacy Retirement
+
+Purpose:
+
+- prove the end-to-end path works and only then remove the dead legacy surfaces
+
+Required work:
+
+- verify the full live path:
+  - Pine alert
+  - webhook receiver
+  - canonical cloud write
+  - Realtime push
+  - dashboard render
+- run out-of-sample and walk-forward validation against the post-PowerDrill baseline
+- promote only additive changes over the fib + event-response baseline
+- retire legacy tables only after all readers and writers are migrated
+
+Deliverables:
+
+- end-to-end validation report
+- promoted or rejected packet decision with reasons
+- legacy retirement migration for:
+  - `warbird_triggers_15m`
+  - `warbird_conviction`
+  - `warbird_risk`
+  - `warbird_setups`
+  - `warbird_setup_events`
+  - `measured_moves`
+  - `warbird_forecasts_1h`
+
+Exit gate:
+
+- the canonical path is live, validated, and the legacy path is fully removable
+
+Risk gate:
+
+- if walk-forward validation fails, leave the packet unpromoted and keep the legacy retirement blocked
+
 ---
 
 ## Update Log
