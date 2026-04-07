@@ -1045,6 +1045,7 @@ Required implementation:
    - SHAP summaries
    - approved feature metrics
 6. Cloud Supabase remains the production system of record for recurring ingestion, cron ownership, dashboard state, and operator-facing live tables.
+7. Training-only data must **not** be maintained through daily, hourly, or standing cron pulls. Refresh training data only by batch pull on the scheduled retrain day or explicit research run, unless that dataset is also required for the frontend, live indicator contract, or runtime/operator surfaces.
 
 #### Third-Party Pine Admission Gate
 
@@ -1152,6 +1153,12 @@ Phase 4 exact training order:
 1. fib + event-response + TA core pack baseline
 2. parameter admission inside surviving feature families
 3. joint configuration on surviving feature families only
+
+Phase 4 training refresh rule:
+
+1. Do **not** add daily or hourly recurring ingestion for training-only datasets.
+2. Training refreshes are batch-only on the day the AG retrain runs, or on an explicit research rebuild.
+3. Recurring cloud ingestion is justified only when the data is needed by the frontend, live indicator/runtime contract, dashboard state, or operator-facing surfaces.
 
 Historical note: the original order included 3 standalone harness admission steps (BigBeluga, MSB/OB, Luminance) — those harnesses were retired on 2026-03-28 and replaced by the embedded TA core pack.
 

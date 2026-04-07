@@ -40,6 +40,7 @@ This is the intended steady-state authority map. Do not create multiple live wri
 
 - Local machines are for training, heavy calculations, and research processing only.
 - Production ingestion, cron jobs, reconciliation, and chart-serving must not depend on local machines.
+- Training-only data must not be maintained by daily/hourly cron pulls. Refresh training data by batch pull on retrain day unless the same dataset is needed for the frontend or live indicator/runtime path.
 - If bar continuity is not provable, fib/model/setup logic is not safe.
 - Retained core historical data starts at `2020-01-01T00:00:00Z`. Pre-2020 core rows are out of scope.
 

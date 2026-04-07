@@ -322,6 +322,8 @@ This is the order PowerDrill should assume unless it can justify a better one wi
 
 - build the offline source-loading and feature pipeline
 - keep the local training surface separate from cloud runtime
+- do not use daily, hourly, or standing cron pulls for training-only data
+- refresh training data by batch pull on retrain day or explicit research rebuild only
 - defer lower-timeframe intermarket expansion until SHAP justifies it
 
 ### Phase 5 — AutoGluon training and packet publish-up
@@ -361,6 +363,8 @@ PowerDrill must stay inside these constraints:
 - Pine remains the live signal source
 - cloud Supabase remains the runtime system of record
 - local training remains offline only
+- training-only data is batch-refreshed on retrain day; do not create recurring daily/hourly pulls for it
+- recurring cloud ingestion is allowed only when the data is needed for the frontend, live indicator/runtime contract, dashboard state, or operator-facing surfaces
 - the dashboard must mirror stored engine state, not compute a second fib engine
 - the canonical trade object stays MES 15m
 - `news_signals` is retired from the active contract
