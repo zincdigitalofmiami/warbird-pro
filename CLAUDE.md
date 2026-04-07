@@ -6,7 +6,7 @@ Read and follow AGENTS.md at the repository root.
 - **PowerDrill research baseline:** `docs/research/2026-04-06-powerdrill-findings.md`
 - **Live:** deployment URL managed in project operations docs
 - **Repo:** github.com/zincdigitalofmiami/warbird-pro
-- **DB:** Supabase cloud (production) + local Supabase via Docker (training/dev). No Prisma.
+- **DB:** Supabase cloud for runtime truth + external-drive offline data/warehouse for training and research. No Prisma.
 
 ## Current Status
 
@@ -60,7 +60,7 @@ Read and follow AGENTS.md at the repository root.
 - ML model training (target `scripts/ag/*` path not built yet)
 - Python feature computation layer (not built yet)
 - AG training pipeline (not built yet)
-- Local Supabase is available via Docker on external drive, but it is not a trusted schema mirror right now. Use direct DB verification before treating local as usable for training or runtime assumptions.
+- The old Docker-local Supabase assumption is retired. Direct checks on 2026-04-07 showed no listener on `localhost:54322`, `psql` returned `Connection refused`, and `docker ps` could not reach a running daemon. Treat the external-drive offline data/warehouse as the local truth instead.
 - DB-side aggregation (all TypeScript, zero Postgres functions)
 - Type generation (manual types, no supabase gen types)
 - No active `pinescript-server`, TradingView chart MCP, or TradingView CLI is configured in the current Codex profile, so live-chart read / install / edit / deep-test flows described in older docs are not available from this terminal session
@@ -70,7 +70,7 @@ Read and follow AGENTS.md at the repository root.
 - `/admin` reads candidates from `warbird_admin_candidate_rows_v` (canonical view from migration 038). The canonical candidate surface is currently empty because no canonical writer is active yet. Separately, the legacy warbird operational tables read by `/api/warbird/signal`, `/api/warbird/history`, `/api/warbird/dashboard` do NOT exist in local or cloud, so those legacy reader paths are schema-stale right now. Runtime containment is now in place: those three routes run a service-role guard first and return `200` with an explicit `runtime` degradation payload plus empty Warbird state when the legacy objects are absent, and `DashboardLiveClient.tsx` surfaces that degraded mode visibly. This is not the reader cutover in plan step 6.
 - `scripts/warbird/fib-engine.ts` still reflects a legacy 1H helper path and is not the target point-in-time fib snapshot surface for AG training
 - The next step is intentionally PAUSED after Checkpoint 1. Do not continue canonical writer design, dashboard/admin cutover, schema/table recording design, or action/event recording design from a narrow `candidates + signals + outcomes` framing. The active plan already requires a larger contract: point-in-time setup truth, realized path truth, published signal lineage, and a separate explanatory/research layer. Admin page assumptions, schema assumptions, and action/event recording assumptions are not design-locked yet and must be re-audited against the plan before Checkpoint 2 resumes.
-- Local Supabase running via Docker on external drive. Do not assume it matches cloud or repo state. Prove schema and table existence from the DB before using it for training or runtime claims.
+- Do not model the local side as "local Supabase." The current local contract is offline external-drive data/warehouse, separate from cloud Supabase.
 - News infrastructure removed (migration 042): finnhub tables, news_signals matview, all_news_articles view, news types, news crons. Keeping: FRED, GPR, econ_calendar, executive_orders. NEWS is retired from the active contract and must not drive new schema, writer, admin, or training design unless explicitly reopened.
 - 14 legacy tables dropped (migration 043): trade_scores, vol_states, models, sources, coverage_log, symbol_mappings, options_stats_1d, macro_reports_1d, 6x legacy backup tables.
 - Stale code still references dropped/renamed schema: `lib/warbird/queries.ts` reads missing legacy warbird tables, `app/api/cron/detect-setups/route.ts` still queries `trump_effect_1d`, `app/api/cron/score-trades/route.ts` still reads missing legacy setup tables, `scripts/warbird/build-warbird-dataset.ts` still reads `news_signals`, `trump_effect_1d`, and `warbird_setups`, and `scripts/build-dataset.py` still references `news_signals` and `trump_effect_1d` even though it hard-exits as deprecated.

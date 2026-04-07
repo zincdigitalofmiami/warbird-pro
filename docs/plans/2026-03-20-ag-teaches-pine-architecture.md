@@ -115,7 +115,7 @@ These blockers were re-verified from the repository before writing this sequence
 - local warehouse direction has conflicting subordinate docs; the active contract for the end-state remains:
   - cloud Supabase = runtime system of record
   - local training warehouse = explicit offline training store on the external drive
-  - local Docker Supabase must not be treated as proof of training-schema truth without direct verification
+  - local Docker Supabase is not part of the active local contract; direct checks on 2026-04-07 showed port `54322` closed, `psql` connection refused, and Docker daemon unavailable
 
 ### Phase 0: Contract And Storage Freeze
 
@@ -136,7 +136,7 @@ Deliverables:
 - explicit storage boundary restatement:
   - cloud Supabase owns runtime truth, operators, packets, and publish-up views
   - the external-drive local warehouse owns offline training, diagnostics, and feature research
-  - local Docker Supabase is only a checked environment when directly verified, not assumed truth
+  - local Docker Supabase is not the active local data surface and must not be used as shorthand for local truth
 - audited inventory of all legacy writer and reader dependencies that must be removed
 
 Exit gate:

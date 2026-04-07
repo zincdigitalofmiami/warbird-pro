@@ -35,6 +35,10 @@ Public raw URLs:
 - `econ-calendar` Edge Function: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/functions/econ-calendar/index.ts`
 - `exec-orders` Edge Function: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/functions/exec-orders/index.ts`
 
+Local file to attach directly to PowerDrill:
+
+- `/Volumes/Satechi Hub/warbird-pro/docs/research/2026-04-07-current-cloud-db-and-offline-data-state.md`
+
 Primary files:
 
 1. `/Volumes/Satechi Hub/warbird-pro/indicators/v7-warbird-institutional.pine`
@@ -59,14 +63,18 @@ Optional supporting reference:
 
 12. `/Volumes/Satechi Hub/warbird-pro/WARBIRD_MODEL_SPEC.md`
 
+Current-state audit to attach directly:
+
+13. `/Volumes/Satechi Hub/warbird-pro/docs/research/2026-04-07-current-cloud-db-and-offline-data-state.md`
+
 Runtime wiring files:
 
-13. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/mes-1m/index.ts`
-14. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/mes-hourly/index.ts`
-15. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/cross-asset/index.ts`
-16. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/fred/index.ts`
-17. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/econ-calendar/index.ts`
-18. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/exec-orders/index.ts`
+14. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/mes-1m/index.ts`
+15. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/mes-hourly/index.ts`
+16. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/cross-asset/index.ts`
+17. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/fred/index.ts`
+18. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/econ-calendar/index.ts`
+19. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/exec-orders/index.ts`
 
 Use this brief as the cover memo. The source files above are the actual authority.
 
@@ -80,7 +88,13 @@ Warbird is a MES 15m fib-outcome system with:
 - a dashboard as the mirrored operator surface
 - AutoGluon offline only
 - Supabase cloud as the runtime system of record
-- a separate local training warehouse for offline research and model work
+- an external-drive offline training warehouse/data root for research and model work
+
+Important storage boundary:
+
+- public GitHub is the code/docs surface
+- offline local data lives on the external drive and is not assumed available from GitHub
+- local Docker Supabase is not the active local data contract
 
 The canonical trade object is the **MES 15m fib setup** keyed by the MES 15m bar-close timestamp in `America/Chicago`.
 
@@ -235,7 +249,19 @@ Legacy reference only:
   - contains legacy pre-canonical surfaces such as `warbird_setups`, `trade_scores`, `measured_moves`, `forecasts`, `job_log`, and `models`
   - this file is useful to explain historical code debt, but it is not the target schema authority for new work
 
-### 3.6 Active Edge Functions
+### 3.6 Current state audit
+
+Use `2026-04-07-current-cloud-db-and-offline-data-state.md` as the live storage-boundary memo.
+
+It records directly verified facts that matter for architecture:
+
+- cloud Supabase is the live DB truth
+- offline external-drive files are the local data truth
+- local Docker Supabase is not active and is not the current local contract
+- canonical Warbird lifecycle tables exist in cloud but are still empty
+- runtime market/context ingestion tables are populated in cloud
+- most offline training data artifacts are intentionally not on GitHub
+### 3.7 Active Edge Functions
 
 Current active Supabase function surfaces in the repo:
 
