@@ -12,6 +12,29 @@ Repo link:
 
 - `https://github.com/zincdigitalofmiami/warbird-pro`
 
+Public raw URLs:
+
+- README: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/README.md`
+- Model spec: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/WARBIRD_MODEL_SPEC.md`
+- Handoff brief: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/docs/research/2026-04-07-powerdrill-handoff-brief.md`
+- Active plan: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+- PowerDrill findings: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/docs/research/2026-04-06-powerdrill-findings.md`
+- Raw backtest report: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/docs/backtest-reports/2026-04-06-wb7-strat-backtest.md`
+- Live indicator: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/indicators/v7-warbird-institutional.pine`
+- Canonical Warbird tables migration: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/migrations/20260330000037_canonical_warbird_tables.sql`
+- Canonical Warbird compat views migration: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/migrations/20260330000038_canonical_warbird_compat_views.sql`
+- MES runtime schema migration: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/migrations/20260315000003_mes_data.sql`
+- Cross-asset runtime schema migration: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/migrations/20260315000004_cross_asset.sql`
+- Econ runtime schema migration: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/migrations/20260315000005_econ.sql`
+- RLS migration: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/migrations/20260315000008_rls.sql`
+- Legacy trading schema migration: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/migrations/20260315000007_trading.sql`
+- `mes-1m` Edge Function: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/functions/mes-1m/index.ts`
+- `mes-hourly` Edge Function: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/functions/mes-hourly/index.ts`
+- `cross-asset` Edge Function: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/functions/cross-asset/index.ts`
+- `fred` Edge Function: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/functions/fred/index.ts`
+- `econ-calendar` Edge Function: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/functions/econ-calendar/index.ts`
+- `exec-orders` Edge Function: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/supabase/functions/exec-orders/index.ts`
+
 Primary files:
 
 1. `/Volumes/Satechi Hub/warbird-pro/indicators/v7-warbird-institutional.pine`
