@@ -2,12 +2,12 @@
 
 **Date:** 2026-03-31
 **Status:** Reference-Only, aligned to the active plan
-**Governing source:** `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+**Governing source:** `docs/MASTER_PLAN.md`
 **PowerDrill research baseline:** `docs/research/2026-04-06-powerdrill-findings.md`
 
-This document is a subordinate reference for the model contract. It must not override the active plan. If this file and the active plan ever disagree, the active plan wins immediately.
+This document is a subordinate reference for the model contract. It must not override `docs/MASTER_PLAN.md`, `docs/contracts/`, or `docs/cloud_scope.md`. If this file disagrees with those authority docs, the authority docs win immediately.
 
-Status note (2026-03-31): this file is not implementation authority for the pending writer/admin/schema/action-event recording work. Checkpoint 1 (migration `045`) is locked, but phases 5-7 are paused until the active plan's broader contract is re-audited and explicitly locked across point-in-time setup truth, realized path truth, published signal lineage, admin surfaces, and the explanatory/research layer.
+Status note (2026-04-07): this file is not implementation authority for schema placement, runtime scope, or packet-serving topology. The canonical source for those decisions is now the master plan plus the contract set.
 
 ---
 
@@ -17,21 +17,24 @@ Status note (2026-03-31): this file is not implementation authority for the pend
 2. The canonical key is the MES 15m **bar-close timestamp** in `America/Chicago`.
 3. Pine is the canonical live signal surface.
 4. The Next.js dashboard is the richer mirrored operator surface using the same MES 15m fib contract; it is not a separate decision engine and must not recompute fib geometry locally.
-5. AutoGluon is offline only. It trains, calibrates, and emits a Pine-ready packet.
-6. The adaptive fib engine snapshot is the canonical base object. The model does **not** invent raw entries from scratch. The Pine fib engine creates the candidate setup first.
-7. The model output is MES 15m setup-outcome state: TP1 probability, TP2 probability, reversal risk, and bounded stop-family selection. It is **not** a predicted-price forecast surface.
-8. AG and offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close, not repaint-prone live chart reads.
-9. The retained core historical window for training/support data starts at `2020-01-01T00:00:00Z`. Pre-2020 core rows are out of scope and must not be reintroduced into the canonical dataset.
-10. The fib engine must preserve lookback/confluence intelligence; a simple zigzag-only anchor path is insufficient for Warbird.
-11. Pivot distance and pivot-state are critical trigger/reversal inputs, but not the sole final decision maker.
-12. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
-13. Overlapping MA / volume / trend features across base logic and admitted harnesses must be de-duplicated by feature family.
-14. The minimal Pine export surface for training capture is fib lines/state, pivot state/distance, and admitted indicator/harness outputs from the canonical indicator surface.
-15. The canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`.
-16. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
-17. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
-18. Cloud core support data starts at `2020-01-01T00:00:00Z`. All Databento ingestion uses `.c.0` continuous front-month contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic. `contract-roll.ts` is dead code. MES uses `MES.c.0` via Live API (real-time) and Historical API (backfill). Cross-asset symbols (NQ, RTY, CL, HG, 6E, 6J, etc.) use `{SYMBOL}.c.0` via Historical API `ohlcv-1h`, pulled hourly by the `cross-asset` Edge Function.
-19. The operator-approved fib visual spec is a contract. Colors, line widths, line styles, and visible level-label presentation must be reproduced exactly across Pine and dashboard renderers unless explicitly reapproved.
+5. The external-drive local PostgreSQL warehouse is the canonical database truth. It owns the retained market history, research features, labels, experiments, SHAP artifacts, and all non-serving zoo data.
+6. Cloud Supabase is the reduced runtime/published serving database for frontend, indicator-support tables, packet distribution, curated SHAP/admin report surfaces, and other explicitly plan-approved published outputs. It must not become a mirror of local.
+7. There are only two databases in scope: the local PostgreSQL warehouse and cloud Supabase.
+8. AutoGluon is offline only. It trains, calibrates, and emits a Pine-ready packet.
+9. The adaptive fib engine snapshot is the canonical base object. The model does **not** invent raw entries from scratch. The Pine fib engine creates the candidate setup first.
+10. The model output is MES 15m setup-outcome state: TP1 probability, TP2 probability, reversal risk, and bounded stop-family selection. It is **not** a predicted-price forecast surface.
+11. AG and offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close, not repaint-prone live chart reads.
+12. The retained core historical window for training/support data starts at `2020-01-01T00:00:00Z`. Pre-2020 core rows are out of scope and must not be reintroduced into the canonical dataset.
+13. The fib engine must preserve lookback/confluence intelligence; a simple zigzag-only anchor path is insufficient for Warbird.
+14. Pivot distance and pivot-state are critical trigger/reversal inputs, but not the sole final decision maker.
+15. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
+16. Overlapping MA / volume / trend features across base logic and admitted harnesses must be de-duplicated by feature family.
+17. The minimal Pine export surface for training capture is fib lines/state, pivot state/distance, and admitted indicator/harness outputs from the canonical indicator surface.
+18. The canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`.
+19. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
+20. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
+21. Cloud core support data starts at `2020-01-01T00:00:00Z`. All Databento ingestion uses `.c.0` continuous front-month contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic. `contract-roll.ts` is dead code. MES uses `MES.c.0` via Live API (real-time) and Historical API (backfill). Cross-asset symbols (NQ, RTY, CL, HG, 6E, 6J, etc.) use `{SYMBOL}.c.0` via Historical API `ohlcv-1h`, pulled hourly by the `cross-asset` Edge Function.
+22. The operator-approved fib visual spec is a contract. Colors, line widths, line styles, and visible level-label presentation must be reproduced exactly across Pine and dashboard renderers unless explicitly reapproved.
 
 ---
 
@@ -148,53 +151,48 @@ These semantics are now binding for the next schema rewrite:
 
 Existing `GO` / `NO_GO` vocabulary is legacy and must not drive the next schema.
 
-### 3.2 Locked Canonical Table Families
+### 3.2 Locked Cloud Runtime Subset Families
 
-The canonical operational base remains:
+The canonical warehouse remains local. Cloud is restricted to ingress plus curated serving and publish-up surfaces only.
 
-1. `warbird_fib_engine_snapshots_15m`
-   - one row per `symbol_code + timeframe + bar_close_ts + fib_engine_version`
-   - stores the frozen adaptive fib engine state that existed at the MES 15m bar close
-2. `warbird_fib_candidates_15m`
-   - one row per tradable candidate derived from a snapshot
-   - carries candidate geometry, deterministic Pine score, packet-linked model outputs, and the policy decision code
-3. `warbird_candidate_outcomes_15m`
-   - one row per candidate, regardless of whether the candidate was published as a signal
-   - stores realized path truth, event timestamps, and excursion measurements
-4. `warbird_signals_15m`
-   - one row per published signal where `decision_code = TAKE_TRADE`
-5. `warbird_signal_events`
-   - lifecycle events for published signals only
-6. `warbird_packets`
-   - AG scoring/model packet registry
-7. `warbird_packet_activations`
-   - immutable activation and rollback log for packet promotion
-8. `warbird_training_runs`
-   - published run registry for packet lineage and Admin-page metrics
-9. `warbird_training_run_metrics`
-   - full training/evaluation metric rows for Admin and model review
-10. `warbird_packet_metrics`
-   - structured packet KPIs rendered on the Admin page
-11. `warbird_packet_feature_importance`
-   - published top drivers for the active packet
-12. `warbird_packet_setting_hypotheses`
-   - structured indicator / entry-definition suggestions for review
-13. `warbird_packet_recommendations`
-   - structured AI-generated Admin guidance, rendered in UI rather than stored as Markdown
+Allowed cloud families:
 
-Draft status:
+1. ingress intake, dedupe, retry, and DLQ surfaces
+   - receive Pine alerts
+   - expose runtime health
+   - must not become canonical candidate truth
+2. curated frontend and admin read models
+   - recent candidate stream
+   - recent signal stream
+   - runtime status and health
+   - operator-facing packet state
+3. packet distribution surfaces
+   - active packet pointer
+   - minimal published packet metadata
+   - packet download reference when required
+4. curated SHAP and report serving surfaces
+   - top feature summaries
+   - report metadata
+   - artifact URL or path references
+5. operational logging
+   - `job_log`
+   - ingress and publish-job health aggregates
 
-1. `supabase/migrations/20260330000037_canonical_warbird_tables.sql`
-2. `supabase/migrations/20260330000038_canonical_warbird_compat_views.sql`
+The following families remain canonical local-only:
 
-These drafts are now reconciled against the locked 2026-03-28 truth semantics and validated in a disposable Postgres 17 instance, but remain draft/unapplied assets until remote ledger drift is resolved and the canonical writer/API cutover is approved.
+- `warbird_fib_engine_snapshots_15m`
+- `warbird_fib_candidates_15m`
+- `warbird_candidate_outcomes_15m`
+- `warbird_signals_15m`
+- `warbird_signal_events`
+- `warbird_packets`
+- `warbird_packet_activations`
+- `warbird_training_runs`
+- `warbird_training_run_metrics`
+- raw SHAP artifacts
+- wide experiment, feature, and label tables
 
-Raw research explainability remains local-only:
-
-- `warbird_shap_results`
-- `warbird_shap_indicator_settings`
-
-The dashboard/Admin page may read only the distilled cloud publish-up surfaces above, not raw SHAP matrices or Markdown report blobs.
+The dashboard and Admin page may read only the distilled cloud runtime subset, not raw SHAP matrices, the full zoo, or local canonical base tables directly.
 
 ### 3.3 Non-Canonical Surfaces
 
@@ -214,7 +212,7 @@ As of 2026-03-31 DB-truth audit, the legacy operational tables above do not exis
 
 These references will be retired once the canonical tables above have active writers and all dashboard/API consumers are migrated.
 
-Dashboard/Admin compatibility surfaces such as `warbird_active_signals_v`, `warbird_admin_candidate_rows_v`, `warbird_active_training_run_metrics_v`, `warbird_active_packet_metrics_v`, `warbird_active_packet_feature_importance_v`, `warbird_active_packet_setting_hypotheses_v`, and `warbird_active_packet_recommendations_v` should be derived views over these canonical and publish-up tables, not independent writer-owned base tables.
+Dashboard and Admin compatibility surfaces should be derived over the cloud runtime subset or other explicitly published read models, not over hidden duplicate warehouse tables.
 
 The following local-only families are research surfaces, not canonical cloud schema:
 
@@ -504,7 +502,8 @@ The following are legacy and must not drive any new implementation:
 
 Primary live planning source:
 
-- `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+- `docs/MASTER_PLAN.md`
+- `docs/contracts/README.md`
 
 Primary current Pine target:
 

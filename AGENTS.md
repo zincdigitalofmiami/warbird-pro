@@ -9,17 +9,27 @@ Use this root `AGENTS.md` as the workspace instruction surface. Do not add a com
 ### Read Order
 
 - Start here: `AGENTS.md`
+- Canonical docs index: `docs/INDEX.md`
 - Operational truth: `CLAUDE.md`
-- Active architecture: `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+- Active architecture: `docs/MASTER_PLAN.md`
+- Interface authority: `docs/contracts/README.md`
+- Cloud whitelist: `docs/cloud_scope.md`
 - Model contract: `WARBIRD_MODEL_SPEC.md`
 - Fail-closed execution gates: `docs/agent-safety-gates.md`
 - PowerDrill research baseline: `docs/research/2026-04-06-powerdrill-findings.md`
+
+### PowerDrill MCP
+
+- Tracked `/.mcp.json` is the shared non-secret MCP bootstrap only (`memory`, `sequentialthinking`, `pinescript-server`, `tradingview`).
+- PowerDrill secret remote config must stay out of tracked files. Kilo uses gitignored `/.kilo/kilo.json`.
+- For Claude Code / Cursor after clone, add the PowerDrill MCP entry only to the local untracked `.mcp.json`. Do not commit PowerDrill keys or remote URLs with embedded secrets.
+- When PowerDrill-grounded work is requested, use the PowerDrill memorylake first. Treat that memorylake as the PowerDrill retrieval surface before relying on summarized repo notes.
 
 ### Default Preflight
 
 - Check repo state with `git status --short` before edits.
 - Use `rg --files` and `rg -n` to scope the touched surface before changing code.
-- Treat the external-drive local PostgreSQL warehouse and cloud Supabase as separate environments until verified directly.
+- Treat the external-drive local PostgreSQL warehouse and cloud Supabase as separate databases until verified directly.
 - Never trust prior agent claims, stale docs, or build success as proof of schema truth.
 
 ### Default Verification
@@ -35,22 +45,25 @@ Use this root `AGENTS.md` as the workspace instruction surface. Do not add a com
 - `supabase/migrations/`: canonical schema and schedule history.
 - `lib/`: shared market, setup, chart, and Supabase utilities.
 - `indicators/v7-warbird-institutional.pine`: active Pine work surface.
-- `docs/plans/` and `docs/decisions/`: active architecture and locked decisions.
+- `docs/MASTER_PLAN.md`, `docs/contracts/`, and `docs/cloud_scope.md`: active architecture, interfaces, and cloud-scope authority.
+- `docs/research/`: tracked research baselines and current-state audits that remain referenced by the canonical docs index.
 
 ### Common Gotchas
 
 - The canonical contract is MES 15m fib setups keyed to the MES 15m bar-close in `America/Chicago`.
 - Pine is the canonical signal surface; the dashboard mirrors stored engine state and is not a separate decision engine.
-- Supabase is the lean runtime canonical store. The external-drive local PostgreSQL warehouse plus `/Volumes/Satechi Hub/warbird-pro/data/` are offline only and must not become a runtime mirror.
-- No mock data, no inactive Databento symbols, no Prisma/ORM paths, and no production dependency on local machines.
+- The external-drive local PostgreSQL warehouse is the canonical database truth and owns the full zoo of retained market, research, feature, label, SHAP, and training data.
+- Supabase is the reduced cloud serving database for frontend, indicator/runtime, packet distribution, curated SHAP/admin reports, and other explicitly plan-approved published surfaces. It must not become a mirror of local.
+- No mock data, no inactive Databento symbols, no Prisma/ORM paths, and no hidden third-database dependency outside the local warehouse and cloud Supabase.
 
 ## Active Plan
 
-There is exactly one active architecture plan and one active update area:
+There is exactly one active architecture plan and one active documentation entrypoint:
 
-- `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+- `docs/INDEX.md`
+- `docs/MASTER_PLAN.md`
 
-Everything else is archived or reference-only and should not drive current implementation unless explicitly reopened.
+Everything else is archived or reference-only and should not drive current implementation unless explicitly reopened through the index.
 
 ## Contract First
 
@@ -90,7 +103,8 @@ Everything else is archived or reference-only and should not drive current imple
 - Supabase client only. Service role for writes, anon for reads.
 - SQL migrations in `supabase/migrations/`. No Prisma. No Drizzle.
 - RLS on all tables. Admin client: `lib/supabase/admin.ts`
-- The only allowed local database role is the external-drive PostgreSQL training warehouse. It is not a Supabase mirror, not a runtime dependency, and not a third live environment.
+- There are exactly two databases in scope: the external-drive local PostgreSQL warehouse (canonical) and cloud Supabase (serving/published). No local Supabase, no Docker-local runtime DB, and no third database.
+- Any cloud table that does not serve frontend, indicator/runtime, packet distribution, curated SHAP/admin reports, or another explicitly locked plan surface is retirement debt and should be removed.
 - Do not trust docs, status notes, prior agent claims, or `npm run build` as proof of schema truth.
 - Before claiming any route, script, table, or view works, verify it against the actual database(s) with direct DB checks (`to_regclass`, `information_schema`, RPC/query checks, migration ledger checks) in the environment that matters.
 - If local and cloud differ, say so explicitly. Do not collapse them into one “current state.”
@@ -104,9 +118,10 @@ Everything else is archived or reference-only and should not drive current imple
 
 ### Production Boundary
 
-- Local machines: training, calculations, research only.
-- Production ingestion/crons/chart-serving must NOT depend on local machines.
-- No continuous local runtime for live market data.
+- The external-drive local PostgreSQL warehouse is the canonical long-horizon warehouse and must hold the full zoo of non-serving data.
+- Cloud frontend, indicator/runtime, and admin surfaces may read only the reduced Supabase surfaces explicitly published there.
+- Cloud ingress may queue or retry delivery to the local canonical writer, but cloud intake rows must never be promoted into warehouse truth.
+- No local Supabase, no Docker-local runtime DB, and no third database.
 
 ### Build & Deploy
 

@@ -9,10 +9,13 @@ This document exists for one reason: agents in this repo must not self-certify. 
 Resolve instruction conflicts in this exact order:
 
 1. `AGENTS.md`
-2. `CLAUDE.md`
-3. `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
-4. `WARBIRD_MODEL_SPEC.md`
-5. `docs/agent-safety-gates.md`
+2. `docs/INDEX.md`
+3. `CLAUDE.md`
+4. `docs/MASTER_PLAN.md`
+5. `docs/contracts/README.md`
+6. `docs/cloud_scope.md`
+7. `WARBIRD_MODEL_SPEC.md`
+8. `docs/agent-safety-gates.md`
 
 If a task touches one specific phase or checkpoint, reread that exact active-plan section before editing.
 

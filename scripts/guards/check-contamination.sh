@@ -16,7 +16,7 @@ if [ -n "$HITS" ]; then
     exit 1
 fi
 
-# Known safe comment-only references (documented in legacy-lineage-audit.md):
+# Known safe comment-only references (legacy lineage note retained in git history):
 #   lib/setup-engine.ts:7    — "Ported from rabid-raccoon" comment
 #   lib/fibonacci.ts:23      — "Matches rabid-raccoon.pine" comment
 

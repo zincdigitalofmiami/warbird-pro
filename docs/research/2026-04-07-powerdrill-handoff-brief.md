@@ -15,9 +15,12 @@ Repo link:
 Public raw URLs:
 
 - README: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/README.md`
+- Docs index: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/docs/INDEX.md`
+- Master plan: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/docs/MASTER_PLAN.md`
+- Cloud scope: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/docs/cloud_scope.md`
+- Contracts index: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/docs/contracts/README.md`
 - Model spec: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/WARBIRD_MODEL_SPEC.md`
 - Handoff brief: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/docs/research/2026-04-07-powerdrill-handoff-brief.md`
-- Active plan: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
 - PowerDrill findings: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/docs/research/2026-04-06-powerdrill-findings.md`
 - Raw backtest report: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/docs/backtest-reports/2026-04-06-wb7-strat-backtest.md`
 - Live indicator: `https://raw.githubusercontent.com/zincdigitalofmiami/warbird-pro/main/indicators/v7-warbird-institutional.pine`
@@ -44,37 +47,40 @@ Primary files:
 1. `/Volumes/Satechi Hub/warbird-pro/indicators/v7-warbird-institutional.pine`
 2. `/Volumes/Satechi Hub/warbird-pro/docs/backtest-reports/2026-04-06-wb7-strat-backtest.md`
 3. `/Volumes/Satechi Hub/warbird-pro/docs/research/2026-04-06-powerdrill-findings.md`
-4. `/Volumes/Satechi Hub/warbird-pro/docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+4. `/Volumes/Satechi Hub/warbird-pro/docs/INDEX.md`
+5. `/Volumes/Satechi Hub/warbird-pro/docs/MASTER_PLAN.md`
+6. `/Volumes/Satechi Hub/warbird-pro/docs/cloud_scope.md`
+7. `/Volumes/Satechi Hub/warbird-pro/docs/contracts/README.md`
 
 Cloud schema and runtime files:
 
-5. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260330000037_canonical_warbird_tables.sql`
-6. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260330000038_canonical_warbird_compat_views.sql`
-7. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260315000003_mes_data.sql`
-8. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260315000004_cross_asset.sql`
-9. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260315000005_econ.sql`
-10. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260315000008_rls.sql`
+8. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260330000037_canonical_warbird_tables.sql`
+9. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260330000038_canonical_warbird_compat_views.sql`
+10. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260315000003_mes_data.sql`
+11. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260315000004_cross_asset.sql`
+12. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260315000005_econ.sql`
+13. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260315000008_rls.sql`
 
 Historical legacy-reference schema:
 
-11. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260315000007_trading.sql`
+14. `/Volumes/Satechi Hub/warbird-pro/supabase/migrations/20260315000007_trading.sql`
 
 Optional supporting reference:
 
-12. `/Volumes/Satechi Hub/warbird-pro/WARBIRD_MODEL_SPEC.md`
+15. `/Volumes/Satechi Hub/warbird-pro/WARBIRD_MODEL_SPEC.md`
 
 Current-state audit to attach directly:
 
-13. `/Volumes/Satechi Hub/warbird-pro/docs/research/2026-04-07-current-cloud-db-and-offline-data-state.md`
+16. `/Volumes/Satechi Hub/warbird-pro/docs/research/2026-04-07-current-cloud-db-and-offline-data-state.md`
 
 Runtime wiring files:
 
-14. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/mes-1m/index.ts`
-15. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/mes-hourly/index.ts`
-16. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/cross-asset/index.ts`
-17. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/fred/index.ts`
-18. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/econ-calendar/index.ts`
-19. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/exec-orders/index.ts`
+17. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/mes-1m/index.ts`
+18. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/mes-hourly/index.ts`
+19. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/cross-asset/index.ts`
+20. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/fred/index.ts`
+21. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/econ-calendar/index.ts`
+22. `/Volumes/Satechi Hub/warbird-pro/supabase/functions/exec-orders/index.ts`
 
 Use this brief as the cover memo. The source files above are the actual authority.
 
@@ -87,7 +93,7 @@ Warbird is a MES 15m fib-outcome system with:
 - Pine as the canonical live signal surface
 - a dashboard as the mirrored operator surface
 - AutoGluon offline only
-- Supabase cloud as the lean runtime canonical store
+- Supabase cloud as the strict runtime subset for ingress and published operator surfaces
 - an external-drive local PostgreSQL warehouse for structured research/training data
 - an external-drive `/data/` root for raw snapshots, parquet archives, datasets, and AG artifacts
 
@@ -389,7 +395,7 @@ PowerDrill must stay inside these constraints:
 - no mock or placeholder data
 - no live server-side inference path
 - Pine remains the live signal source
-- cloud Supabase remains the lean runtime canonical store
+- cloud Supabase remains the strict runtime subset, not the warehouse of record
 - local training remains offline only
 - training-only data is batch-refreshed on retrain day; do not create recurring daily/hourly pulls for it
 - recurring cloud ingestion is allowed only when the data is needed for the frontend, live indicator/runtime contract, dashboard state, or operator-facing surfaces

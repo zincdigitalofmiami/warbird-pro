@@ -4,15 +4,19 @@ Canonical Warbird v1 MES trading platform on Next.js, Supabase, Databento, Light
 
 **Live:** deployment URL managed in project operations docs  
 **Repo:** [github.com/zincdigitalofmiami/warbird-pro](https://github.com/zincdigitalofmiami/warbird-pro)  
-**Active plan:** `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
+**Canonical docs index:** `docs/INDEX.md`
+**Active plan:** `docs/MASTER_PLAN.md`
 
 ## Source Of Truth
 
 Use these in order:
 
-1. `docs/plans/2026-03-20-ag-teaches-pine-architecture.md`
-2. Live Supabase migrations in `supabase/migrations`
-3. Active implementation code
+1. `docs/INDEX.md`
+2. `docs/MASTER_PLAN.md`
+3. `docs/contracts/README.md`
+4. `docs/cloud_scope.md`
+5. Live Supabase migrations in `supabase/migrations`
+6. Active implementation code
 
 Older plans, audits, checkpoints, and archived specs are not authoritative.
 
@@ -39,8 +43,9 @@ This is the intended steady-state authority map. Do not create multiple live wri
 ### Production Boundary
 
 - Local machines are for training, heavy calculations, and research processing only.
-- Supabase is the runtime canonical store, not a mirror of the local training warehouse.
-- The external-drive local PostgreSQL warehouse is for deep history, features, labels, experiments, and AG artifacts only.
+- The external-drive local PostgreSQL warehouse is the single canonical warehouse of record.
+- Supabase is the strict runtime subset for ingress, dashboard/operator reads, packet distribution, and curated SHAP/report serving only.
+- The external-drive local PostgreSQL warehouse holds deep history, features, labels, experiments, SHAP math, and AG artifacts.
 - `/Volumes/Satechi Hub/warbird-pro/data/` is the external-drive raw/archive/artifact surface feeding the local warehouse; it is not GitHub-hosted data.
 - Production ingestion, cron jobs, reconciliation, and chart-serving must not depend on local machines.
 - Training-only data must not be maintained by daily/hourly cron pulls. Refresh training data by batch pull on retrain day unless the same dataset is needed for the frontend or live indicator/runtime path.
@@ -52,7 +57,7 @@ This is the intended steady-state authority map. Do not create multiple live wri
 - Canonical schema is in place, but canonical writer cutover is still pending; the normalized `warbird_*` lifecycle tables exist in cloud and remain empty until the canonical writer lands.
 - Active API surface exists at `app/api/warbird/signal`, `app/api/warbird/history`, `app/api/warbird/dashboard`, and `app/api/admin/status`, but the reader cutover is not complete yet.
 - `mes-1m` is the primary MES data path — owned by Supabase pg_cron (`warbird_mes_1m_pull`). Edge Functions handle market-closed skips internally. No sidecar dependency.
-- The repo still contains archived/stale pre-cutover plan docs. Only the active plan and the current audit/handoff docs are authoritative.
+- The active authority lives in `docs/INDEX.md`, `docs/MASTER_PLAN.md`, `docs/contracts/`, and `docs/cloud_scope.md`.
 
 ## Immediate Priorities
 
