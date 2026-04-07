@@ -13,7 +13,7 @@
 
 Historical note: any remaining references below to the paired strategy, parity-only checkpoints, or Deep Backtesting are archived execution history unless a newer update-log entry explicitly reactivates them.
 
-Historical retention note: cloud core data window is `2024-01-01T00:00:00Z` forward only. Local offline training warehouse extends to `2020-01-01T00:00:00Z` per 2026-04-01 directive (5-year training window) — 6 years of comparable electronic futures data for AG training depth, covering COVID crash, recovery, inflation cycle, and rate hike cycle.
+Historical retention note: cloud runtime storage stays lean and runtime-driven, while the external-drive local PostgreSQL warehouse plus the external-drive `/data/` archive extend to `2020-01-01T00:00:00Z` for offline AG training depth, covering COVID crash, recovery, inflation cycle, and rate hike cycle.
 
 Binding note: the 2026-03-28 update-log entries supersede older references below to right-side TradingView tables, `LONG READY` / `SHORT READY` action labels, dashboard-local fib computation, Markdown report blobs, and any schema language that still treats `EXPIRED` / `NO_REACTION` as canonical economic model truth.
 
@@ -25,7 +25,7 @@ Binding note: the 2026-03-28 update-log entries supersede older references below
 4. ~~**Fib engine hardening**~~ — **DONE.** Commit `4a25806`. Three changes: (a) direction logic replaced midpoint-hysteresis with ZigZag swing-sequence — fibBull only changes on confirmed pivots, eliminates spurious flips; (b) HTF directional agreement gate — 1H/4H security tuples expanded to `[high, low, close, ema21]` (0 extra calls), entry triggers gated on `htfDirAgrees`; (c) exhaustion diamond visual via `label.new()` with `label.style_none` + `"◆"` at fib zone interaction. Plot budget unchanged at 63/64. Anchor quality, left/right bar space, anchor-span visual gap, and waypoint lines (1.382/1.50/1.786) confirmed correct — no changes needed. Forensic review passed. Known residual: `htfDirAgrees` gates alerts only, not the trade state machine (pre-existing architecture split). Header comments (HTF tuple shape, no-repaint audit date) are stale — documentation-only nits.
 5. **Canonical writer checkpoint** — port or replace the legacy `detect-setups` / `score-trades` Vercel routes as Supabase Edge Functions that write to the reconciled canonical tables. Fix CME continuity-gap handling before calling the writer live.
 6. **Dashboard/admin/API reader cutover** — cut `/admin`, `/api/admin/status`, and dashboard consumers off legacy tables and onto the canonical snapshot/candidate surfaces plus the new Admin packet views. TradingView webhook alerts (entry long, entry short, pivot break reversal) can drive real-time dashboard state via Supabase Edge Function webhook receiver.
-7. **Local warehouse / selector buildout** — stand up the AG workbench (`scripts/ag/*`), local PostgreSQL snapshot mirror, diagnostic tables, and packet publish-up lifecycle.
+7. **Local warehouse / selector buildout** — stand up the AG workbench (`scripts/ag/*`), the external-drive local PostgreSQL training warehouse, the `/data/` raw/archive surface, diagnostic tables, and the packet publish-up lifecycle. Do not build a full cloud mirror.
 8. **Legacy table retirement** — drop `warbird_triggers_15m`, `warbird_conviction`, `warbird_risk`, `warbird_setups`, `warbird_setup_events`, `measured_moves`, `warbird_forecasts_1h` only after all readers/writers are migrated.
 
 Runtime-truth gate (2026-03-31, updated after Checkpoint 1): migration `20260331000045` is now reconciled and replay-verified, but phases 5-7 remain blocked. Do not proceed with canonical writer design, dashboard/admin cutover, schema/table recording design, action/event recording design, or local training buildout from a narrow `candidates + signals + outcomes` framing. The active plan already requires a larger contract: point-in-time setup truth, realized path truth, published signal lineage, and a distinct explanatory/research layer. Admin page assumptions, schema assumptions, and action/event recording assumptions must be re-audited against the plan before Checkpoint 2 resumes.
@@ -113,8 +113,9 @@ These blockers were re-verified from the repository before writing this sequence
   - `scripts/warbird/build-warbird-dataset.ts` still depends on retired sources such as `news_signals`, `trump_effect_1d`, and `warbird_setups`
   - `scripts/warbird/train-warbird.py` still trains against legacy local-only target names
 - local warehouse direction has conflicting subordinate docs; the active contract for the end-state remains:
-  - cloud Supabase = runtime system of record
-  - local training warehouse = explicit offline training store on the external drive
+  - cloud Supabase = lean runtime canonical store, not a mirror
+  - external-drive local PostgreSQL = heavy offline training/feature warehouse
+  - external-drive `/data/` = raw snapshots, parquet archives, datasets, manifests, and AG run artifacts feeding the local warehouse
   - local Docker Supabase is not part of the active local contract; direct checks on 2026-04-07 showed port `54322` closed, `psql` connection refused, and Docker daemon unavailable
 
 ### Phase 0: Contract And Storage Freeze
@@ -134,10 +135,55 @@ Deliverables:
 
 - canonical contract restatement: `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`
 - explicit storage boundary restatement:
-  - cloud Supabase owns runtime truth, operators, packets, and publish-up views
-  - the external-drive local warehouse owns offline training, diagnostics, and feature research
+  - cloud Supabase owns runtime truth, symbol registry, operator surfaces, canonical signal state, and publish-up views
+  - the external-drive local PostgreSQL warehouse owns deep historical OHLCV, feature engineering, labels, folds, experiments, and AG artifacts
+  - the external-drive `/data/` root owns raw batch exports, parquet snapshots, manifests, and run outputs that feed the local warehouse
   - local Docker Supabase is not the active local data surface and must not be used as shorthand for local truth
 - audited inventory of all legacy writer and reader dependencies that must be removed
+
+### Data Residency Matrix (Locked 2026-04-07)
+
+Cloud Required:
+
+- `symbols`, `symbol_roles`, `symbol_role_members`
+- runtime-required market/context tables and slices used by Pine support surfaces or dashboards
+- canonical Warbird runtime truth:
+  - `warbird_fib_engine_snapshots_15m`
+  - `warbird_fib_candidates_15m`
+  - `warbird_candidate_outcomes_15m`
+  - `warbird_signals_15m`
+  - `warbird_signal_events`
+- packet publish-up and operator views:
+  - `warbird_training_runs`
+  - `warbird_training_run_metrics`
+  - `warbird_packets`
+  - `warbird_packet_activations`
+  - `warbird_packet_metrics`
+  - `warbird_packet_feature_importance`
+  - `warbird_packet_setting_hypotheses`
+  - `warbird_packet_recommendations`
+  - compat/admin views derived from them
+
+Local Required:
+
+- external-drive PostgreSQL database `warbird_training`
+- deep OHLCV history
+- wide feature tables
+- label tables, folds, diagnostics, SHAP outputs, and experiment tables
+- AG artifacts and run manifests on the external drive
+
+Published / Promoted Only:
+
+- versioned packet rows
+- run metrics and curated publish-up summaries
+- activation / rollback records
+
+Rules:
+
+- Supabase is not a full mirror of the local warehouse
+- local PostgreSQL is not a second runtime environment
+- recurring cloud ingestion is justified only for runtime-critical datasets
+- training-only refreshes remain explicit batch rebuilds
 
 Exit gate:
 
@@ -261,7 +307,7 @@ Purpose:
 
 Scope:
 
-- build the local warehouse as the explicit offline research/training surface on the external drive
+- build the local PostgreSQL warehouse as the explicit offline research/training surface on the external drive, fed by explicit exports and local raw archives instead of full cloud mirroring
 - treat Databento batches, TradingView exports/capture, and verified cloud snapshots as source inputs, not as the final training contract themselves
 
 Required work:
@@ -280,11 +326,11 @@ Deliverables:
   - building fib snapshots
   - building the canonical training dataset
   - computing features
-- a verified local warehouse with 2020-forward retained history and no reliance on repaint-prone live chart reads
+- a verified local PostgreSQL warehouse with 2020-forward retained history and no reliance on repaint-prone live chart reads
 
 Exit gate:
 
-- the local warehouse can build a deterministic training dataset from canonical point-in-time rows plus approved local-only research tables
+- the local PostgreSQL warehouse can build a deterministic training dataset from canonical point-in-time export snapshots plus approved local-only research tables
 
 Risk gate:
 
@@ -1032,12 +1078,12 @@ Required implementation:
 1. Production ownership is cloud-first:
    - `provider -> cloud Supabase -> live routes/dashboard`
 2. Local work is training/research only:
-   - `cloud snapshots + TradingView exports/capture -> local warehouse -> publish approved artifacts back to cloud`
+   - `explicit cloud export snapshots + TradingView exports/capture + /data raw archives -> local PostgreSQL warehouse -> publish approved artifacts back to cloud`
 3. Do **not** build or extend a standing cloud-to-local sync subsystem or a local-first production ingestion path.
 4. Use local capture only for explicit training inputs:
    - TradingView chart exports
    - validated local TradingView CLI / MCP capture only after the exact server or binary is installed and documented in the active environment
-   - explicit cloud snapshot loads into the local warehouse
+   - explicit cloud snapshot loads into the local PostgreSQL warehouse
    - local research datasets
 5. Publish promoted artifacts **from local to cloud** only:
    - promoted packets
@@ -1139,6 +1185,7 @@ Phase 4 decision rule:
 Phase 4 exact local targets:
 
 - local PostgreSQL database: `warbird_training`
+- local raw/archive root: `/Volumes/Satechi Hub/warbird-pro/data/`
 - local AG scripts:
   - `scripts/ag/build-fib-snapshots.py`
   - `scripts/ag/load-source-snapshots.py`
@@ -1159,6 +1206,7 @@ Phase 4 training refresh rule:
 1. Do **not** add daily or hourly recurring ingestion for training-only datasets.
 2. Training refreshes are batch-only on the day the AG retrain runs, or on an explicit research rebuild.
 3. Recurring cloud ingestion is justified only when the data is needed by the frontend, live indicator/runtime contract, dashboard state, or operator-facing surfaces.
+4. Do **not** build a full runtime-to-local mirror. Load only named cloud export snapshots and approved local raw files into `warbird_training`.
 
 Historical note: the original order included 3 standalone harness admission steps (BigBeluga, MSB/OB, Luminance) — those harnesses were retired on 2026-03-28 and replaced by the embedded TA core pack.
 

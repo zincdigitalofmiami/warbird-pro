@@ -2,7 +2,15 @@
 
 Historical record of all plan changes. Extracted from the active plan on 2026-03-31.
 
+Important:
+
+- Entries before `2026-04-07` include retired architectures such as local Supabase / Docker-local warehouse language, full mirror thinking, and cloud-dashboard-only experiments.
+- Use the active plan plus the 2026-04-07 current-state audit for the live storage model.
+- This file is historical only and must not override the active plan.
+
 ---
+
+- 2026-04-07: **Storage model correction locked.** Supabase cloud is the lean runtime canonical store, not a full mirror of the local warehouse. The external-drive local PostgreSQL database `warbird_training` is the heavy offline training/feature warehouse. `/Volumes/Satechi Hub/warbird-pro/data/` is the raw/archive/artifact surface feeding that warehouse. Local Docker Supabase is retired. Root plan docs that encoded local Supabase, mirror thinking, or cloud-dashboard-only wording were moved into archive to stop future drift.
 
 - 2026-04-01: **Phase 4 final verification PASS. Full migration complete.** Local: mes_15m 144,540 | mes_1h 36,321 | mes_1d 1,919 | cross_asset_15m 20,553 (HG only) | cross_asset_1h 178,379 (6 symbols) | cross_asset_1d 11,098 (6 symbols) | econ_yields_1d 21,839 | econ_rates_1d 3,914 | econ_fx_1d 4,674 | econ_inflation_1d 5,547 | econ_vol_1d 6,309 | econ_indexes_1d 6,823 | econ_labor_1d 943 | econ_activity_1d 623 | econ_money_1d 400 | econ_commodities_1d 3,131. No pre-2020 leak. Cloud: 13 training tables = 0, live tables intact. Punch list: (1) retry PCE + JTSJOL (FRED 500, transient); (2) investigate BOPBCA (returned empty — quarterly BEA series); (3) migration needed: `BAMLHYH0A0HYM2EY` → `BAMLH0A0HYM2OAS` in series_catalog (wrong FRED ID). Cross_asset_15m: NQ/RTY/CL/6E/6J not yet backfilled to 15m — only HG from this session.
 

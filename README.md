@@ -1,6 +1,6 @@
 # Warbird Pro
 
-Canonical Warbird v1 MES trading platform on Next.js, Supabase, Databento, and Lightweight Charts.
+Canonical Warbird v1 MES trading platform on Next.js, Supabase, Databento, Lightweight Charts, and an external-drive local PostgreSQL training warehouse.
 
 **Live:** deployment URL managed in project operations docs  
 **Repo:** [github.com/zincdigitalofmiami/warbird-pro](https://github.com/zincdigitalofmiami/warbird-pro)  
@@ -39,6 +39,9 @@ This is the intended steady-state authority map. Do not create multiple live wri
 ### Production Boundary
 
 - Local machines are for training, heavy calculations, and research processing only.
+- Supabase is the runtime canonical store, not a mirror of the local training warehouse.
+- The external-drive local PostgreSQL warehouse is for deep history, features, labels, experiments, and AG artifacts only.
+- `/Volumes/Satechi Hub/warbird-pro/data/` is the external-drive raw/archive/artifact surface feeding the local warehouse; it is not GitHub-hosted data.
 - Production ingestion, cron jobs, reconciliation, and chart-serving must not depend on local machines.
 - Training-only data must not be maintained by daily/hourly cron pulls. Refresh training data by batch pull on retrain day unless the same dataset is needed for the frontend or live indicator/runtime path.
 - If bar continuity is not provable, fib/model/setup logic is not safe.
@@ -46,10 +49,10 @@ This is the intended steady-state authority map. Do not create multiple live wri
 
 ## Current Repo Reality
 
-- Canonical cutover is in place: legacy `forecasts` is gone and Warbird v1 writes to normalized `warbird_*` tables.
-- Active API surface: `app/api/warbird/signal`, `app/api/warbird/history`, `app/api/warbird/dashboard`, `app/api/admin/status`.
+- Canonical schema is in place, but canonical writer cutover is still pending; the normalized `warbird_*` lifecycle tables exist in cloud and remain empty until the canonical writer lands.
+- Active API surface exists at `app/api/warbird/signal`, `app/api/warbird/history`, `app/api/warbird/dashboard`, and `app/api/admin/status`, but the reader cutover is not complete yet.
 - `mes-1m` is the primary MES data path — owned by Supabase pg_cron (`warbird_mes_1m_pull`). Edge Functions handle market-closed skips internally. No sidecar dependency.
-- The repo still contains some stale legacy scaffolding and documentation from the pre-cutover build plan.
+- The repo still contains archived/stale pre-cutover plan docs. Only the active plan and the current audit/handoff docs are authoritative.
 
 ## Immediate Priorities
 
@@ -63,9 +66,10 @@ This is the intended steady-state authority map. Do not create multiple live wri
 
 - App runtime: Next.js App Router (dashboard/API surface)
 - Database: Supabase Postgres + Auth + Realtime + RLS
+- Local training warehouse: external-drive PostgreSQL on the Satechi drive
 - Live market data: Databento
 - MES ingestion: Supabase pg_cron `warbird_mes_1m_pull` (every minute Sun-Fri) via Databento Live API, falls back to Historical API for gaps
-- Historical backfill: [scripts/backfill.py](/Volumes/Satechi%20Hub/warbird-pro/scripts/backfill.py) (local research only, `2024-01-01` forward)
+- Historical backfill: [scripts/backfill.py](/Volumes/Satechi%20Hub/warbird-pro/scripts/backfill.py) (local research only; use explicit ranges, with retained core history `2020-01-01` forward)
 - Canonical Warbird engine: [scripts/warbird](/Volumes/Satechi%20Hub/warbird-pro/scripts/warbird)
 
 ## Local Development

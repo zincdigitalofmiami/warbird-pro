@@ -19,7 +19,7 @@ Use this root `AGENTS.md` as the workspace instruction surface. Do not add a com
 
 - Check repo state with `git status --short` before edits.
 - Use `rg --files` and `rg -n` to scope the touched surface before changing code.
-- Treat local Supabase and cloud Supabase as separate environments until verified directly.
+- Treat the external-drive local PostgreSQL warehouse and cloud Supabase as separate environments until verified directly.
 - Never trust prior agent claims, stale docs, or build success as proof of schema truth.
 
 ### Default Verification
@@ -41,6 +41,7 @@ Use this root `AGENTS.md` as the workspace instruction surface. Do not add a com
 
 - The canonical contract is MES 15m fib setups keyed to the MES 15m bar-close in `America/Chicago`.
 - Pine is the canonical signal surface; the dashboard mirrors stored engine state and is not a separate decision engine.
+- Supabase is the lean runtime canonical store. The external-drive local PostgreSQL warehouse plus `/Volumes/Satechi Hub/warbird-pro/data/` are offline only and must not become a runtime mirror.
 - No mock data, no inactive Databento symbols, no Prisma/ORM paths, and no production dependency on local machines.
 
 ## Active Plan
@@ -89,6 +90,7 @@ Everything else is archived or reference-only and should not drive current imple
 - Supabase client only. Service role for writes, anon for reads.
 - SQL migrations in `supabase/migrations/`. No Prisma. No Drizzle.
 - RLS on all tables. Admin client: `lib/supabase/admin.ts`
+- The only allowed local database role is the external-drive PostgreSQL training warehouse. It is not a Supabase mirror, not a runtime dependency, and not a third live environment.
 - Do not trust docs, status notes, prior agent claims, or `npm run build` as proof of schema truth.
 - Before claiming any route, script, table, or view works, verify it against the actual database(s) with direct DB checks (`to_regclass`, `information_schema`, RPC/query checks, migration ledger checks) in the environment that matters.
 - If local and cloud differ, say so explicitly. Do not collapse them into one “current state.”

@@ -87,13 +87,15 @@ Warbird is a MES 15m fib-outcome system with:
 - Pine as the canonical live signal surface
 - a dashboard as the mirrored operator surface
 - AutoGluon offline only
-- Supabase cloud as the runtime system of record
-- an external-drive offline training warehouse/data root for research and model work
+- Supabase cloud as the lean runtime canonical store
+- an external-drive local PostgreSQL warehouse for structured research/training data
+- an external-drive `/data/` root for raw snapshots, parquet archives, datasets, and AG artifacts
 
 Important storage boundary:
 
 - public GitHub is the code/docs surface
-- offline local data lives on the external drive and is not assumed available from GitHub
+- cloud Supabase is not a mirror of the local training warehouse
+- offline local training data lives on the external drive and is not assumed available from GitHub
 - local Docker Supabase is not the active local data contract
 
 The canonical trade object is the **MES 15m fib setup** keyed by the MES 15m bar-close timestamp in `America/Chicago`.
@@ -256,7 +258,7 @@ Use `2026-04-07-current-cloud-db-and-offline-data-state.md` as the live storage-
 It records directly verified facts that matter for architecture:
 
 - cloud Supabase is the live DB truth
-- offline external-drive files are the local data truth
+- the external-drive PostgreSQL warehouse plus `/data/` raw archives define the local training side
 - local Docker Supabase is not active and is not the current local contract
 - canonical Warbird lifecycle tables exist in cloud but are still empty
 - runtime market/context ingestion tables are populated in cloud
@@ -387,7 +389,7 @@ PowerDrill must stay inside these constraints:
 - no mock or placeholder data
 - no live server-side inference path
 - Pine remains the live signal source
-- cloud Supabase remains the runtime system of record
+- cloud Supabase remains the lean runtime canonical store
 - local training remains offline only
 - training-only data is batch-refreshed on retrain day; do not create recurring daily/hourly pulls for it
 - recurring cloud ingestion is allowed only when the data is needed for the frontend, live indicator/runtime contract, dashboard state, or operator-facing surfaces

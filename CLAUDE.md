@@ -6,7 +6,7 @@ Read and follow AGENTS.md at the repository root.
 - **PowerDrill research baseline:** `docs/research/2026-04-06-powerdrill-findings.md`
 - **Live:** deployment URL managed in project operations docs
 - **Repo:** github.com/zincdigitalofmiami/warbird-pro
-- **DB:** Supabase cloud for runtime truth + external-drive offline data/warehouse for training and research. No Prisma.
+- **DB:** Supabase cloud is the lean runtime canonical store. The external-drive local PostgreSQL warehouse plus `/Volumes/Satechi Hub/warbird-pro/data/` are the offline training/research surfaces. No Prisma.
 
 ## Current Status
 
@@ -60,7 +60,7 @@ Read and follow AGENTS.md at the repository root.
 - ML model training (target `scripts/ag/*` path not built yet)
 - Python feature computation layer (not built yet)
 - AG training pipeline (not built yet)
-- The old Docker-local Supabase assumption is retired. Direct checks on 2026-04-07 showed no listener on `localhost:54322`, `psql` returned `Connection refused`, and `docker ps` could not reach a running daemon. Treat the external-drive offline data/warehouse as the local truth instead.
+- The old Docker-local Supabase assumption is retired. Direct checks on 2026-04-07 showed no listener on `localhost:54322`, `psql` returned `Connection refused`, and `docker ps` could not reach a running daemon. Treat the external-drive local PostgreSQL warehouse plus the `/data/` raw/archive surface as the local truth instead.
 - DB-side aggregation (all TypeScript, zero Postgres functions)
 - Type generation (manual types, no supabase gen types)
 - No active `pinescript-server`, TradingView chart MCP, or TradingView CLI is configured in the current Codex profile, so live-chart read / install / edit / deep-test flows described in older docs are not available from this terminal session
@@ -70,7 +70,7 @@ Read and follow AGENTS.md at the repository root.
 - `/admin` reads candidates from `warbird_admin_candidate_rows_v` (canonical view from migration 038). The canonical candidate surface is currently empty because no canonical writer is active yet. Separately, the legacy warbird operational tables read by `/api/warbird/signal`, `/api/warbird/history`, `/api/warbird/dashboard` do NOT exist in local or cloud, so those legacy reader paths are schema-stale right now. Runtime containment is now in place: those three routes run a service-role guard first and return `200` with an explicit `runtime` degradation payload plus empty Warbird state when the legacy objects are absent, and `DashboardLiveClient.tsx` surfaces that degraded mode visibly. This is not the reader cutover in plan step 6.
 - `scripts/warbird/fib-engine.ts` still reflects a legacy 1H helper path and is not the target point-in-time fib snapshot surface for AG training
 - The next step is intentionally PAUSED after Checkpoint 1. Do not continue canonical writer design, dashboard/admin cutover, schema/table recording design, or action/event recording design from a narrow `candidates + signals + outcomes` framing. The active plan already requires a larger contract: point-in-time setup truth, realized path truth, published signal lineage, and a separate explanatory/research layer. Admin page assumptions, schema assumptions, and action/event recording assumptions are not design-locked yet and must be re-audited against the plan before Checkpoint 2 resumes.
-- Do not model the local side as "local Supabase." The current local contract is offline external-drive data/warehouse, separate from cloud Supabase.
+- Do not model the local side as "local Supabase." The current local contract is an external-drive PostgreSQL training warehouse plus the external-drive `/data/` raw/archive surface, separate from cloud Supabase.
 - News infrastructure removed (migration 042): finnhub tables, news_signals matview, all_news_articles view, news types, news crons. Keeping: FRED, GPR, econ_calendar, executive_orders. NEWS is retired from the active contract and must not drive new schema, writer, admin, or training design unless explicitly reopened.
 - 14 legacy tables dropped (migration 043): trade_scores, vol_states, models, sources, coverage_log, symbol_mappings, options_stats_1d, macro_reports_1d, 6x legacy backup tables.
 - Stale code still references dropped/renamed schema: `lib/warbird/queries.ts` reads missing legacy warbird tables, `app/api/cron/detect-setups/route.ts` still queries `trump_effect_1d`, `app/api/cron/score-trades/route.ts` still reads missing legacy setup tables, `scripts/warbird/build-warbird-dataset.ts` still reads `news_signals`, `trump_effect_1d`, and `warbird_setups`, and `scripts/build-dataset.py` still references `news_signals` and `trump_effect_1d` even though it hard-exits as deprecated.
@@ -90,7 +90,7 @@ Follow the active architecture plan only.
 - The adaptive fib engine snapshot is the canonical base object. It is not a simple zigzag-only anchor path.
 - The architecture hierarchy is now locked: objective -> candidate/outcome contract -> canonical schema -> research feature layer -> model stack -> deployment packet.
 - Warbird is split into `Generator` (Pine with embedded TA core pack), `Selector` (offline models scoring frozen candidates), and `Diagnostician` (research explaining wins, losses, and improvement paths).
-- Cloud Supabase is the production system of record; the local warehouse is explicit-snapshot training/research only.
+- Cloud Supabase is the lean runtime canonical store; the external-drive local PostgreSQL warehouse is explicit-snapshot training/research only. No full cloud mirror.
 - Do not trust docs, prior agent summaries, or build success as proof of schema truth. Verify table/view existence, row reality, and migration ledger directly against the actual database(s) first.
 - Local and cloud must be described separately when their schema or data differs.
 - Do not reduce the active contract to the current admin page columns or to shorthand like `candidates + signals + outcomes`. The plan requires separate point-in-time setup truth, realized path truth, published signal lineage, and a distinct explanatory/research layer for why trades reached TP1/TP2/SL.

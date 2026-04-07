@@ -8,10 +8,10 @@
 
 ## 1. Boundary Lock
 
-This audit replaces the old "local Supabase via Docker" shorthand with the verified current boundary:
+This audit replaces the old "local Supabase via Docker" shorthand with the verified current boundary and the corrected local-warehouse target:
 
 - **Cloud runtime DB truth:** Supabase cloud Postgres, verified directly via `POSTGRES_URL_NON_POOLING`.
-- **Offline local data truth:** the external-drive working copy at `/Volumes/Satechi Hub/warbird-pro/data/`.
+- **Offline local warehouse truth:** the external-drive local PostgreSQL warehouse for structured training data, plus the external-drive working copy at `/Volumes/Satechi Hub/warbird-pro/data/` for raw snapshots, parquet archives, datasets, and AG artifacts.
 - **Public GitHub is not the offline data surface.** Most heavy local datasets are intentionally ignored from Git and are not part of the public repo.
 - **Local Docker Supabase is not part of the active local data contract.**
 
@@ -25,7 +25,7 @@ Implication:
 
 - Do not describe the current local side as "local Supabase."
 - Do not assume PowerDrill can discover the offline training data from GitHub.
-- When discussing local storage, say **offline external-drive data/warehouse**.
+- When discussing local storage, distinguish the **external-drive PostgreSQL warehouse** from the `/data/` raw/archive/artifact surface.
 
 ---
 
@@ -42,7 +42,7 @@ Within `data/`, only these files are currently tracked:
 
 ### 2.2 Offline external-drive surface
 
-The heavyweight local datasets are present in the working copy on the external drive and are intentionally ignored from GitHub by `.gitignore`.
+The heavyweight local datasets are present in the working copy on the external drive and are intentionally ignored from GitHub by `.gitignore`. This raw/archive surface feeds the local PostgreSQL training warehouse; it is not a substitute runtime mirror.
 
 Verified ignored patterns:
 
@@ -254,12 +254,14 @@ Operational conclusion:
 
 ---
 
-## 4. Offline External-Drive Data State
+## 4. Offline External-Drive Raw Data State
 
 Verification method:
 
 - direct filesystem inspection under `/Volumes/Satechi Hub/warbird-pro/data/`
 - `du -sh`, `find`, `git ls-files`, `.gitignore`, `duckdb`, `wc -l`, and direct metadata reads from Databento export folders
+
+This section inventories the directly verified raw file surface on the external drive. The locked local architecture pairs this raw/archive layer with the external-drive PostgreSQL warehouse for structured training tables. The warehouse is training-only and must not become a runtime mirror of Supabase.
 
 ### 4.1 Root size and composition
 
@@ -365,7 +367,7 @@ Verified files under `data/local-db-backups/`:
 ### 5.1 What is true right now
 
 - cloud Supabase is the live runtime DB truth
-- offline external-drive files are the local research/training truth
+- the external-drive local PostgreSQL warehouse is the structured training truth, fed by the raw `/data/` surface inventoried here
 - the old Docker-local Supabase path is not active and must not be described as the local store
 - the canonical Warbird lifecycle schema exists in cloud but is still unpopulated
 - cloud runtime ingestion tables are populated and active
@@ -373,7 +375,7 @@ Verified files under `data/local-db-backups/`:
 ### 5.2 What PowerDrill must not assume
 
 - do not assume offline training data is available from GitHub
-- do not assume local data lives in a running local Supabase
+- do not assume the local warehouse is a running local Supabase or a runtime mirror
 - do not assume daily/hourly cron pulls are wanted for training-only data
 
 ### 5.3 Binding training-data rule
@@ -394,7 +396,7 @@ The current architecture is now clear:
 
 - **Public code/docs:** GitHub repo
 - **Cloud runtime truth:** Supabase cloud Postgres
-- **Offline local truth:** external-drive working-copy data under `/Volumes/Satechi Hub/warbird-pro/data/`
+- **Offline local truth:** external-drive PostgreSQL warehouse plus raw/archive data under `/Volumes/Satechi Hub/warbird-pro/data/`
 - **Not active / not trusted as local truth:** Docker-local Supabase
 
-The repo already has the cloud schema and ingestion layer. The missing implementation path is the canonical writer and the offline AG training pipeline that reads from the correct offline store instead of inventing a Docker-local DB assumption.
+The repo already has the cloud schema and ingestion layer. The missing implementation path is the canonical writer and the offline AG training pipeline that reads from the external-drive PostgreSQL warehouse and `/data/` archive instead of inventing a Docker-local Supabase mirror.
