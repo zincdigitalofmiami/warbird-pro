@@ -101,7 +101,8 @@ If any other plan, decision note, scratch doc, or archived checkpoint disagrees 
   - Core zone (.382, .618): `#E65100` dark orange, width 1
   - Waypoints (.236, .786, 1.382, 1.50, 1.786): `#808080` mid-gray, width 1
   - Pivot (.50): `#FFFFFF` white, width 2
-  - Targets (TP1, TP2, TP3): `#4CAF50` green, width 2
+  - Targets (TP1=1.236, TP2=1.618): `#4CAF50` green, width 2
+  - Targets (TP3=2.0, TP4=2.236, TP5=2.618): `#00E676` / `#69F0AE` / `#B9F6CA` (lighter greens), width 2
   - Stop loss: `#FF1744` red, width 2
   - Zone fill: `#FF9800` at 86% transparency, invisible border
 - Any refactor of the indicator must preserve this exact visual output unless explicitly reapproved.
@@ -387,16 +388,15 @@ Validate the PowerDrill entry bar quality research as AG feature priors:
 
 #### Phase 1E: Regime, Intermarket, And Confluence As AG Features
 
-Regime, intermarket, and confluence are AG training features, not Pine live gates. Pine computes and exports the raw regime and intermarket state for AG; AG decides what matters and at what thresholds.
+**STATUS: DONE** — Pine AG export surface cull and TP3/TP4/TP5 targets complete. Budget: 35/64 (32 plot + 3 alertcondition, 29 headroom). All server-side-computable features removed from Pine.
 
-- Export the regime score and its grouped components as separate AG features:
-  - `leader_score` (NQ leadership)
-  - `risk_score` (RTY, CL, HG risk appetite)
-  - `macrofx_score` (6E, 6J macro-FX flow)
-  - `exec_score` (VWAP, range expansion, efficiency)
-- Export the 7 atomic intermarket states (NQ, RTY, CL, HG, 6E, 6J, SKEW) as individual signed features
-- Export HTF confluence counts as AG features
-- Pine may keep a visual regime state machine for chart display, but the regime state must NOT gate the candidate trigger
+Regime, intermarket, and confluence are AG training features, not Pine live gates. Pine carries only IM state stubs for packet identity; all live `request.security()` IM calls were removed.
+
+- Regime components exported as AG features (server-side from `cross_asset_1h`): `leader_score`, `risk_score`, `macrofx_score`, `exec_score`
+- Intermarket states (NQ/RTY/CL/HG/6E/6J) sourced from `cross_asset_1h` — not Pine `request.security()` calls
+- Pine keeps visual regime state machine for chart display only; regime must NOT gate the candidate trigger
+- TA core pack (15 metrics) is AG-owned, computed from Databento OHLCV server-side — not Pine plot exports
+- Five exit targets tracked: T1=1.236, T2=1.618, T3=2.0, T4=2.236, T5=2.618 — all full state-machine exit states with AG label encoding (0=none, 1=TP1, 2=TP2, 3=STOPPED, 4=EXPIRED, 5=TP3, 6=TP4, 7=TP5)
 - The PowerDrill regime tradeoff data (Section 6.5: 1H trend → 58% WR, +VIX<20 → 61% WR, +NQ corr → 64% WR) is AG feature prior input, not Pine gate configuration
 - SHAP determines which regime components actually matter and at what thresholds
 - Session, time-window, VIX, and ATR regime context stay as exported features and labeling dimensions, not as live suppression rules

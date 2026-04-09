@@ -8,6 +8,9 @@ Defines how canonical outcomes and model labels are resolved from point-in-time 
 
 ## Canonical Economic Outcomes
 
+- `TP5_HIT`
+- `TP4_HIT`
+- `TP3_HIT`
 - `TP2_HIT`
 - `TP1_ONLY`
 - `STOPPED`
@@ -15,6 +18,21 @@ Defines how canonical outcomes and model labels are resolved from point-in-time 
 - `OPEN`
 
 `OPEN` is operational-only and excluded from completed training targets.
+
+## Exit Target Levels
+
+Five targets tracked by Pine state machine (highest checked first):
+
+| Label | Fib Extension | Pine `ml_last_exit_outcome` code |
+|---|---|---|
+| TP1 | 1.236 | 1 |
+| TP2 | 1.618 | 2 |
+| TP3 | 2.0 | 5 |
+| TP4 | 2.236 | 6 |
+| TP5 | 2.618 | 7 |
+| STOPPED | SL | 3 |
+| EXPIRED | timeout | 4 |
+| none | none | 0 |
 
 ## Required Model Labels
 
@@ -38,8 +56,10 @@ The active training horizon must be versioned alongside the dataset manifest. Ho
 
 ## Partial Progress Rule
 
-- `TP1_ONLY` means TP1 was reached and TP2 was not reached before stop or resolution cutoff
-- `TP2_HIT` implies TP1 was reached first or on the same resolved path
+- `TP1_ONLY` means TP1 was reached and no higher target was reached before stop or resolution cutoff
+- `TP2_HIT` implies TP1 was reached first on the same resolved path; TP3/TP4/TP5 were not reached
+- `TP3_HIT` / `TP4_HIT` / `TP5_HIT` imply all lower targets were reached on the same path first
+- State machine checks highest target first (TP5 → TP4 → TP3 → TP2 → TP1 → SL) to correctly record first-crossed exit level
 
 ## Derived Metrics
 

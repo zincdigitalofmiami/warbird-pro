@@ -22,7 +22,7 @@ Status note (2026-04-07): this file is not implementation authority for schema p
 7. There are only two databases in scope: the local PostgreSQL warehouse and cloud Supabase.
 8. AutoGluon is offline only. It trains, calibrates, and emits a Pine-ready packet.
 9. The adaptive fib engine snapshot is the canonical base object. The model does **not** invent raw entries from scratch. The Pine fib engine creates the candidate setup first.
-10. The model output is MES 15m setup-outcome state: TP1 probability, TP2 probability, reversal risk, and bounded stop-family selection. It is **not** a predicted-price forecast surface.
+10. The model output is MES 15m setup-outcome state: TP1–TP5 probability distribution, reversal risk, and bounded stop-family selection. It is **not** a predicted-price forecast surface.
 11. AG and offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close, not repaint-prone live chart reads.
 12. The retained core historical window for training/support data starts at `2020-01-01T00:00:00Z`. Pre-2020 core rows are out of scope and must not be reintroduced into the canonical dataset.
 13. The fib engine must preserve lookback/confluence intelligence; a simple zigzag-only anchor path is insufficient for Warbird.
@@ -140,6 +140,9 @@ These semantics are now binding for the next schema rewrite:
   - `WAIT`
   - `PASS`
 - realized economic truth is locked to:
+  - `TP5_HIT`
+  - `TP4_HIT`
+  - `TP3_HIT`
   - `TP2_HIT`
   - `TP1_ONLY`
   - `STOPPED`
@@ -234,8 +237,11 @@ Each training row is keyed to one MES 15m bar-close setup event and must produce
 |------|------|---------|
 | `tp1_before_sl` | Binary | TP1 reached before stop |
 | `tp2_before_sl` | Binary | TP2 reached before stop |
+| `tp3_before_sl` | Binary | TP3 reached before stop |
+| `tp4_before_sl` | Binary | TP4 reached before stop |
+| `tp5_before_sl` | Binary | TP5 reached before stop |
 | `sl_before_tp1` | Binary | stop hit before TP1 |
-| `path_outcome` | Categorical | one of `TP2_HIT`, `TP1_ONLY`, `STOPPED`, `REVERSAL`, `OPEN` |
+| `path_outcome` | Categorical | one of `TP5_HIT`, `TP4_HIT`, `TP3_HIT`, `TP2_HIT`, `TP1_ONLY`, `STOPPED`, `REVERSAL`, `OPEN` |
 | `mae_pts` | Continuous | max adverse excursion in points |
 | `mfe_pts` | Continuous | max favorable excursion in points |
 
@@ -255,9 +261,9 @@ The stop family is bounded to formula-specific IDs:
 
 Each ID binds to a deterministic formula. See `docs/contracts/stop_families.md` for exact formulas.
 
-If the expected stop heat required to survive the setup is too wide relative to the expected TP1 / TP2 edge, the correct decision is `PASS`.
+If the expected stop heat required to survive the setup is too wide relative to the expected TP1–TP5 edge, the correct decision is `PASS`.
 
-The first selector baseline should train on resolved rows only (`TP2_HIT`, `TP1_ONLY`, `STOPPED`, `REVERSAL`) and exclude `OPEN`.
+The first selector baseline should train on resolved rows only (`TP5_HIT`, `TP4_HIT`, `TP3_HIT`, `TP2_HIT`, `TP1_ONLY`, `STOPPED`, `REVERSAL`) and exclude `OPEN`.
 
 ---
 
@@ -370,29 +376,29 @@ It must not become a separate trade engine detached from the fib contract.
 
 ---
 
-## 7. TA Core Pack (Replaces Third-Party Harnesses)
+## 7. TA Core Pack (AG Server-Side, Not Pine Exports)
 
-The three standalone harnesses (BigBeluga Pivot Levels, LuxAlgo MSB/OB Toolkit, LuxAlgo Luminance Engine) have been retired. The decision surface now uses a deterministic 15-metric TA core pack embedded directly in the active indicator (`v7-warbird-institutional.pine`; v6 is legacy baseline):
+The three standalone harnesses (BigBeluga Pivot Levels, LuxAlgo MSB/OB Toolkit, LuxAlgo Luminance Engine) have been retired. The 15-metric TA core pack is now **AG-owned and computed server-side from Databento OHLCV**. These metrics are NOT Pine plot exports and must not be re-added to the Pine output budget.
 
-| Export Name | Metric |
+| Metric | Formula |
 |---|---|
-| `ml_ema_21` | EMA(close, 21) |
-| `ml_ema_50` | EMA(close, 50) |
-| `ml_ema_100` | EMA(close, 100) |
-| `ml_ema_200` | EMA(close, 200) |
-| `ml_macd_hist` | MACD histogram (12, 26, 9) |
-| `ml_rsi_14` | RSI(close, 14) |
-| `ml_atr_14` | ATR(14) |
-| `ml_adx_14` | ADX(14) |
-| `ml_volume_raw` | Raw bar volume |
-| `ml_vol_sma_20` | SMA(volume, 20) |
-| `ml_vol_ratio` | volume / SMA(volume, 20) |
-| `ml_vol_acceleration` | Change in vol_ratio bar-over-bar |
-| `ml_bar_spread_x_vol` | (high - low) × volume |
-| `ml_obv` | On-Balance Volume (cumulative) |
-| `ml_mfi_14` | Money Flow Index(hlc3, 14) |
+| EMA(close, 21) | Exponential MA, 21 bar |
+| EMA(close, 50) | Exponential MA, 50 bar |
+| EMA(close, 100) | Exponential MA, 100 bar |
+| EMA(close, 200) | Exponential MA, 200 bar |
+| MACD histogram (12, 26, 9) | MACD diff histogram |
+| RSI(close, 14) | Relative Strength Index |
+| ATR(14) | Average True Range |
+| ADX(14) | Average Directional Index |
+| Raw bar volume | Volume |
+| SMA(volume, 20) | Volume SMA |
+| volume / SMA(volume, 20) | Volume ratio |
+| Change in vol_ratio bar-over-bar | Volume acceleration |
+| (high - low) × volume | Bar spread × volume |
+| On-Balance Volume (cumulative) | OBV |
+| Money Flow Index(hlc3, 14) | MFI |
 
-All metrics are deterministic, point-in-time safe, and require no external dependencies.
+All metrics are deterministic, point-in-time safe, and computed from MES 15m OHLCV — no Pine plot budget cost. AG discovers thresholds, weights, and interactions from these primitives via SHAP.
 
 ---
 
@@ -404,61 +410,59 @@ TradingView enforces a hard maximum of `64` plot counts per script, and hidden `
 
 Any live Pine export surface that exceeds `64` plot counts is invalid even if local parity passes.
 
+**Current v7 budget: 32 plot + 3 alertcondition = 35/64 (29 headroom).** All server-side-computable features were removed from Pine in the Phase 1E cull. AG owns TA core pack, EMA dist, RVOL, exhaustion, range expansion, efficiency, event_day, and constant-stub IM states — these must NOT be re-added to Pine.
+
 Legacy hidden fields `ml_fib_regime`, the `.786` / `1.0` fib-level export families, and session-activity booleans (`ml_session_*_active`) are retired from the canonical packet. Hidden plots are unconditional `display.none`; there is no `showMLData` gating path in the canonical contract.
 
-The inventory below is the desired Warbird export family set. The actual live Pine subset must be prioritized to stay within the `64` plot-count cap.
-
-AG-eligible hidden fields (primitive features only):
+AG-eligible hidden fields emitted by Pine (primitive features only):
 
 - `ml_direction_code`
 - `ml_setup_archetype_code`
 - `ml_fib_level_touched`
 - `ml_stop_family_code`
 - `ml_event_mode_code`
-- `ml_event_nq_state`
-- `ml_event_rty_state`
-- `ml_event_cl_state`
-- `ml_event_hg_state`
-- `ml_event_eur_state`
-- `ml_event_jpy_state`
+- `ml_event_nq_state` (stub — value from `cross_asset_1h` server-side)
+- `ml_event_rty_state` (stub — value from `cross_asset_1h` server-side)
+- `ml_event_cl_state` (stub — value from `cross_asset_1h` server-side)
+- `ml_event_hg_state` (stub — value from `cross_asset_1h` server-side)
+- `ml_event_eur_state` (stub — value from `cross_asset_1h` server-side)
+- `ml_event_jpy_state` (stub — value from `cross_asset_1h` server-side)
 - `ml_event_pivot_interaction_code`
 - `ml_ema21_dir`
 - `ml_ema50_dir`
 - `ml_ema200_dir`
-- `ml_ema21_dist_pct`
-- `ml_ema50_dist_pct`
-- `ml_ema200_dist_pct`
 - `ml_entry_long_trigger`
 - `ml_entry_short_trigger`
 - `ml_tp1_hit_event`
 - `ml_tp2_hit_event`
-- `ml_ema_21`
-- `ml_ema_50`
-- `ml_ema_100`
-- `ml_ema_200`
-- `ml_macd_hist`
-- `ml_rsi_14`
-- `ml_atr_14`
-- `ml_adx_14`
-- `ml_volume_raw`
-- `ml_vol_sma_20`
-- `ml_vol_ratio`
-- `ml_vol_acceleration`
-- `ml_bar_spread_x_vol`
-- `ml_obv`
-- `ml_mfi_14`
+- `ml_tp3_hit_event`
+- `ml_tp4_hit_event`
+- `ml_tp5_hit_event`
+- `ml_last_exit_outcome` (7-class: 0=none, 1=TP1, 2=TP2, 3=STOPPED, 4=EXPIRED, 5=TP3, 6=TP4, 7=TP5)
+- `ml_vwap_code`
+- `ml_or_state` (opening range state)
+- `ml_add_slope` (NYSE A/D daily slope)
+- (HTF confluence fields — 3 `request.security()` fib calls)
 
-Chart-visual/debug-only hidden fields (NOT AG training surface):
+AG-owned features (NOT Pine plot exports — computed server-side from Databento OHLCV):
+
+- TA core pack: EMA(21/50/100/200), MACD hist, RSI(14), ATR(14), ADX(14), volume raw/SMA/ratio/acceleration, bar_spread×vol, OBV, MFI(14)
+- EMA dist_pct (21/50/200)
+- RVOL, range expansion, intrabar efficiency, exhaustion primitives
+- IM basket states: NQ/RTY/CL/HG/6E/6J EMA trend and relative strength (from `cross_asset_1h`)
+- Regime components: leader_score, risk_score, macrofx_score, exec_score
+- Impulse quality, agreement velocity, regime score (AG learns weights from primitives)
+- event_day
+
+Chart-visual/debug-only fields (NOT AG training surface):
 
 - `ml_confidence_score` — hand-coded heuristic composite; operator confidence must come from calibrated AG packet output per binding rule 0.10
-- `ml_event_shock_score` — pre-composed from alignment, ROC, and conflict; AG should see the component primitives instead
-- `ml_event_reversal_score` — pre-composed from breakAgainst, reject, and conflict booleans; same rule
-- `ml_impulse_quality` — hand-coded 30/25/25/20 weighted composite of alignment, range expansion, bar efficiency, and VWAP; AG should learn those weights from primitives
-- `ml_exhaustion_score` — retired (HyperWave-based); replacement exhaustion features are server-side computable primitives per binding rule 0.7
+- `ml_event_shock_score` — pre-composed from alignment, ROC, and conflict
+- `ml_event_reversal_score` — pre-composed from breakAgainst, reject, and conflict booleans
+- `ml_impulse_quality` — hand-coded composite; AG learns weights from OHLCV primitives instead
+- `ml_exhaustion_score` — retired (HyperWave-based); exhaustion features are server-side computable
 
-These composites may remain in Pine for chart display, but they must NOT appear in the AG training matrix. Their constituent primitives are either already exported individually or are server-side computable from OHLCV data.
-
-The live `v7` indicator exports the minimum subset above. Research-only diagnostics outside this list stay out of the live Pine packet until a later checkpoint re-admits them without breaking the TradingView plot budget.
+These composites may remain in Pine for chart display, but they must NOT appear in the AG training matrix.
 
 The export contract must remain always-on and schema-stable for training capture.
 
@@ -476,7 +480,7 @@ The packet must include:
 4. module keep/remove decisions
 5. stop-family decisions
 6. confidence-bin calibration tables
-7. bucket-level TP1 / TP2 / reversal statistics
+7. bucket-level TP1–TP5 / reversal statistics
 8. event-response thresholds and suppression rules
 9. fib snapshot / lookback-family decisions when they are part of the admitted contract
 10. decision-policy thresholds for `TAKE_TRADE` / `WAIT` / `PASS`

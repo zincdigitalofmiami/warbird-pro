@@ -87,6 +87,8 @@ float FIB_W150  = 1.5    // intermediate waypoint
 float FIB_T2    = 1.618
 float FIB_W1786 = 1.786  // intermediate waypoint
 float FIB_T3    = 2.0
+float FIB_T4    = 2.236
+float FIB_T5    = 2.618
 
 // Colors (from lib/colors.ts)
 color COLOR_ANCHOR             = #FFFFFF    // white — 0, .5, 1 levels
@@ -464,6 +466,8 @@ float p150    = fibPrice(FIB_W150)
 float pT2     = fibPrice(FIB_T2)
 float p1786   = fibPrice(FIB_W1786)
 float pT3     = fibPrice(FIB_T3)
+float pT4     = fibPrice(FIB_T4)
+float pT5     = fibPrice(FIB_T5)
 
 // Internal-only target viability gate used by trigger wiring.
 float minTargetPoints = 20.0
@@ -619,6 +623,10 @@ bool conflictEvent = false
 bool tagT1Event = oneShotEvent ? (tagT1 and not tagT1[1]) : tagT1
 bool tagT2Event = oneShotEvent ? (tagT2 and not tagT2[1]) : tagT2
 bool tagT3Event = oneShotEvent ? (tagT3 and not tagT3[1]) : tagT3
+bool tagT4 = confirmed and not na(pT4) and (dir == 1 ? high >= pT4 : low <= pT4)
+bool tagT5 = confirmed and not na(pT5) and (dir == 1 ? high >= pT5 : low <= pT5)
+bool tagT4Event = oneShotEvent ? (tagT4 and not tagT4[1]) : tagT4
+bool tagT5Event = oneShotEvent ? (tagT5 and not tagT5[1]) : tagT5
 
 bool pivotNearZone = isValid and close <= zoneUpper and close >= zoneLower
 int eventPivotInteractionCode = breakInDir ? 4 : rejectAtZone ? 3 : acceptInDir ? 1 : breakAgainst ? 2 : pivotNearZone ? 5 : 0
@@ -669,18 +677,24 @@ var int TRADE_HIT_TP1 = 3
 var int TRADE_HIT_TP2 = 4
 var int TRADE_STOPPED = 5
 var int TRADE_EXPIRED = 6
+var int TRADE_HIT_TP3 = 7
+var int TRADE_HIT_TP4 = 8
+var int TRADE_HIT_TP5 = 9
 
 var int tradeState = TRADE_NONE
 var float entryPrice = na
 var float slPrice = na
 var float tp1Price = na
 var float tp2Price = na
+var float tp3Price = na
+var float tp4Price = na
+var float tp5Price = na
 var int setupBar = na
 var int entryBar = na
 var int lastExitBar = na
 var int lastExitDir = 0       // direction of last completed trade — for contrarian CHoCH
 var int tradeDir = 0          // direction captured at SETUP→ACTIVE (safe: not affected by anchor updates at exit)
-// AG LABEL SOURCE: 0=none, 1=TP1_HIT, 2=TP2_HIT, 3=STOPPED, 4=EXPIRED
+// AG LABEL SOURCE: 0=none, 1=TP1_HIT, 2=TP2_HIT, 3=STOPPED, 4=EXPIRED, 5=TP3_HIT, 6=TP4_HIT, 7=TP5_HIT
 // This is the only reliable label export — trade_state collapses to NONE on the same bar as exit.
 var int lastExitOutcome = 0
 int cooldownLen = 8 // bars to wait after exit (8 × 15m = 2h minimum; 4 was too short — consecutive entries corrupt AG samples)
@@ -693,6 +707,9 @@ float slLevel    = fibPrice(-0.236)
 float entryLevel = fibBull ? p618 : p382
 float tp1Level   = pT1
 float tp2Level   = pT2
+float tp3Level   = pT3
+float tp4Level   = pT4
+float tp5Level   = pT5
 
 // Vol-adjusted SL distance: how far SL is in ATR units (AG learns when distance is too tight/wide)
 float slDistPts = math.abs(entryLevel - slLevel)
@@ -718,6 +735,9 @@ if confirmed
         slPrice := slLevel
         tp1Price := tp1Level
         tp2Price := tp2Level
+        tp3Price := tp3Level
+        tp4Price := tp4Level
+        tp5Price := tp5Level
         tradeDir  := dir      // lock direction here — anchor may shift by exit bar
         tradeState := TRADE_ACTIVE
         entryBar := bar_index
@@ -726,6 +746,12 @@ if confirmed
         if fibBull
             if low <= slPrice
                 tradeState := TRADE_STOPPED
+            else if high >= tp5Price
+                tradeState := TRADE_HIT_TP5
+            else if high >= tp4Price
+                tradeState := TRADE_HIT_TP4
+            else if high >= tp3Price
+                tradeState := TRADE_HIT_TP3
             else if high >= tp2Price
                 tradeState := TRADE_HIT_TP2
             else if high >= tp1Price
@@ -733,6 +759,12 @@ if confirmed
         else
             if high >= slPrice
                 tradeState := TRADE_STOPPED
+            else if low <= tp5Price
+                tradeState := TRADE_HIT_TP5
+            else if low <= tp4Price
+                tradeState := TRADE_HIT_TP4
+            else if low <= tp3Price
+                tradeState := TRADE_HIT_TP3
             else if low <= tp2Price
                 tradeState := TRADE_HIT_TP2
             else if low <= tp1Price
@@ -744,7 +776,7 @@ if confirmed
 
     if tradeState >= TRADE_HIT_TP1
         // Resolve outcome BEFORE resetting state — trade_state collapses to NONE same bar
-        lastExitOutcome := tradeState == TRADE_HIT_TP2 ? 2 : tradeState == TRADE_STOPPED ? 3 : tradeState == TRADE_EXPIRED ? 4 : 1
+        lastExitOutcome := tradeState == TRADE_HIT_TP5 ? 7 : tradeState == TRADE_HIT_TP4 ? 6 : tradeState == TRADE_HIT_TP3 ? 5 : tradeState == TRADE_HIT_TP2 ? 2 : tradeState == TRADE_STOPPED ? 3 : tradeState == TRADE_EXPIRED ? 4 : 1
         lastExitDir := tradeDir  // use direction locked at entry, not current dir (anchor may have shifted)
         lastExitBar := bar_index
         tradeState := TRADE_NONE
@@ -752,6 +784,9 @@ if confirmed
         slPrice := na
         tp1Price := na
         tp2Price := na
+        tp3Price := na
+        tp4Price := na
+        tp5Price := na
         setupBar := na
         entryBar := na
 
@@ -766,10 +801,16 @@ var line slLine = line.new(na, na, na, na, color=color(na))
 var line entryLine = line.new(na, na, na, na, color=color(na))
 var line tp1LineTrade = line.new(na, na, na, na, color=color(na))
 var line tp2LineTrade = line.new(na, na, na, na, color=color(na))
+var line tp3LineTrade = line.new(na, na, na, na, color=color(na))
+var line tp4LineTrade = line.new(na, na, na, na, color=color(na))
+var line tp5LineTrade = line.new(na, na, na, na, color=color(na))
 var label slLabel = label.new(na, na, "", style=label.style_none)
 var label entryLabel = label.new(na, na, "", style=label.style_none)
 var label tp1LblTrade = label.new(na, na, "", style=label.style_none)
 var label tp2LblTrade = label.new(na, na, "", style=label.style_none)
+var label tp3LblTrade = label.new(na, na, "", style=label.style_none)
+var label tp4LblTrade = label.new(na, na, "", style=label.style_none)
+var label tp5LblTrade = label.new(na, na, "", style=label.style_none)
 
 if tradeState == TRADE_SETUP or tradeState == TRADE_ACTIVE
     int leftBar = nz(setupBar, bar_index - 10)
@@ -804,6 +845,30 @@ if tradeState == TRADE_SETUP or tradeState == TRADE_ACTIVE
     label.set_xy(tp2LblTrade, bar_index, nz(tp2Price, tp2Level))
     label.set_text(tp2LblTrade, "TP2")
     label.set_textcolor(tp2LblTrade, #69F0AE)
+
+    line.set_xy1(tp3LineTrade, leftBar, nz(tp3Price, tp3Level))
+    line.set_xy2(tp3LineTrade, bar_index, nz(tp3Price, tp3Level))
+    line.set_color(tp3LineTrade, #00E676)
+    line.set_width(tp3LineTrade, 2)
+    label.set_xy(tp3LblTrade, bar_index, nz(tp3Price, tp3Level))
+    label.set_text(tp3LblTrade, "TP3")
+    label.set_textcolor(tp3LblTrade, #00E676)
+
+    line.set_xy1(tp4LineTrade, leftBar, nz(tp4Price, tp4Level))
+    line.set_xy2(tp4LineTrade, bar_index, nz(tp4Price, tp4Level))
+    line.set_color(tp4LineTrade, #69F0AE)
+    line.set_width(tp4LineTrade, 2)
+    label.set_xy(tp4LblTrade, bar_index, nz(tp4Price, tp4Level))
+    label.set_text(tp4LblTrade, "TP4")
+    label.set_textcolor(tp4LblTrade, #69F0AE)
+
+    line.set_xy1(tp5LineTrade, leftBar, nz(tp5Price, tp5Level))
+    line.set_xy2(tp5LineTrade, bar_index, nz(tp5Price, tp5Level))
+    line.set_color(tp5LineTrade, #B9F6CA)
+    line.set_width(tp5LineTrade, 2)
+    label.set_xy(tp5LblTrade, bar_index, nz(tp5Price, tp5Level))
+    label.set_text(tp5LblTrade, "TP5")
+    label.set_textcolor(tp5LblTrade, #B9F6CA)
 else
     line.set_color(slLine, color(na))
     line.set_color(entryLine, color(na))
@@ -813,9 +878,15 @@ else
     label.set_textcolor(entryLabel, color(na))
     label.set_textcolor(tp1LblTrade, color(na))
     label.set_textcolor(tp2LblTrade, color(na))
+    line.set_color(tp3LineTrade, color(na))
+    line.set_color(tp4LineTrade, color(na))
+    line.set_color(tp5LineTrade, color(na))
+    label.set_textcolor(tp3LblTrade, color(na))
+    label.set_textcolor(tp4LblTrade, color(na))
+    label.set_textcolor(tp5LblTrade, color(na))
 
 //=====================
-// DRAW ALL 10 FIB LEVELS
+// DRAW ALL FIB LEVELS
 //=====================
 var line lineZero  = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
 var line line236   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
@@ -830,6 +901,8 @@ var line line150   = line.new(bar_index, close, bar_index, close, color=color(na
 var line lineT2    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 var line line1786  = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
 var line lineT3    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line lineT4    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line lineT5    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 
 var box zoneBox = box.new(bar_index, close, bar_index, close, bgcolor=color(na), border_color=color(na))
 
@@ -861,6 +934,8 @@ drawAnchoredLine(line150,   true, p150,   COLOR_RETRACEMENT,         WIDTH_RETRA
 drawAnchoredLine(lineT2,    true, pT2,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
 drawAnchoredLine(line1786,  true, p1786,  COLOR_RETRACEMENT,         WIDTH_RETRACEMENT, drawLeftBar)
 drawAnchoredLine(lineT3,    true, pT3,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
+drawAnchoredLine(lineT4,    true, pT4,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
+drawAnchoredLine(lineT5,    true, pT5,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
 
 if not na(zoneFillUpper) and not na(zoneFillLower)
     box.set_left(zoneBox, drawLeftBar)
@@ -889,121 +964,74 @@ float ema50DistPct = f_ema_dist_pct(ema50)
 float ema200DistPct = f_ema_dist_pct(ema200)
 
 //=====================
-// AG FEATURE EXPORT (hidden plots — display=display.none)
+// AG FEATURE EXPORT (Pine-exclusive hidden plots — display=display.none)
+// AG OWNS (server-side computable from Databento OHLCV — not emitted here):
+//   TA Core Pack (di_spread, adx_slope, er_10, atr_pct, clv, signed_vol, vol_delta),
+//   EMA dist_pct (21/50/200), RVOL, exhaustion_score, range_expansion, efficiency,
+//   event_day (date-based), IM atomic states (stubs=0), regime/confidence/shock/reversal scores (stubs).
+// PINE OWNS (emit here — cannot be reconstructed server-side without Pine state):
+//   fib engine geometry, trade state machine, HTF confluence, structure/ICT, VWAP code,
+//   OR state, NYSE A/D slope.
 //=====================
-// adx_14 removed — same data exported as ml_adx_14 in TA Core Pack
-plot(diSpread, "di_spread_14", display=display.none, editable=false)
-plot(adxSlope, "adx_slope_14", display=display.none, editable=false)
-plot(er10, "er_10", display=display.none, editable=false)
-// er_20 removed — AG computes from mes_15m OHLCV server-side
-// vix_pct_252d removed — AG computes from FRED VIX data server-side
-plot(atrPct, "atr_pct_20", display=display.none, editable=false)
-// vix_close removed — VVIX replaces VIX, no daily calls needed
 
-plot(clv, "clv", display=display.none, editable=false)
-plot(signedVol, "signed_vol_proxy", display=display.none, editable=false)
-plot(volDeltaPct, "vol_delta_pct", display=display.none, editable=false)
-plot(nz(fibTouchVolDelta), "fib_touch_vol_delta", display=display.none, editable=false)
-
+// ── FIB ENGINE ──
+plot(fibRange, "fib_range", display=display.none, editable=false)
+plot(nz(confluenceQuality), "confluence_quality", display=display.none, editable=false)
 plot(float(htfConfPivot), "htf_conf_pivot", display=display.none, editable=false)
 plot(float(htfConf382), "htf_conf_382", display=display.none, editable=false)
 plot(float(htfConf618), "htf_conf_618", display=display.none, editable=false)
 plot(float(htfConfTotal), "htf_conf_total", display=display.none, editable=false)
 
-plot(float(regime), "im_regime", display=display.none, editable=false)
-plot(float(alignOn), "im_align_on", display=display.none, editable=false)
-plot(float(alignOff), "im_align_off", display=display.none, editable=false)
-
-plot(fibRange, "fib_range", display=display.none, editable=false)
-// fib_direction removed — same data exported as ml_direction_code in model contract
-plot(nz(confluenceQuality), "confluence_quality", display=display.none, editable=false)
-
-plot(float(tradeState), "trade_state", display=display.none, editable=false)
-plot(tradeState == TRADE_ACTIVE and not na(entryBar) ? float(bar_index - entryBar) : 0.0, "bars_in_trade", display=display.none, editable=false)
-
-// trend_strength / correlation_strength removed — collinear with adx/IM score exports, zero new signal for AG
-
-// v6 minimum model contract + simplified trigger contract
-// ── REGIME / STRUCTURE / MODEL CONTRACT ──
-plot(confidenceScore, "ml_confidence_score", display=display.none, editable=false)
+// ── STRUCTURE / MODEL CONTRACT ──
 plot(float(dir), "ml_direction_code", display=display.none, editable=false)
 plot(float(setupArchetypeCode), "ml_setup_archetype_code", display=display.none, editable=false)
 plot(float(fibLevelTouched), "ml_fib_level_touched", display=display.none, editable=false)
-// ml_stop_family_code removed — was hardcoded constant 1 everywhere, zero variance for AG
 plot(float(eventModeCode), "ml_event_mode_code", display=display.none, editable=false)
-plot(eventShockScore, "ml_event_shock_score", display=display.none, editable=false)
-plot(eventReversalScore, "ml_event_reversal_score", display=display.none, editable=false)
-
-// ── INTERMARKET ATOMIC STATES (7 signals, signed: 1=bull/risk-on, -1=bear/risk-off, 0=neutral) ──
-// 6 CME Globex futures + daily SKEW. AG decides weights and correlations.
-// 6J sign already inverted at state boundary: eventJpyState +1 = JPY falling = risk-on.
-plot(float(eventNqState), "ml_event_nq_state", display=display.none, editable=false)
-plot(float(eventRtyState), "ml_event_rty_state", display=display.none, editable=false)
-plot(float(eventClState), "ml_event_cl_state", display=display.none, editable=false)
-plot(float(eventHgState), "ml_event_hg_state", display=display.none, editable=false)
-plot(float(eventEurState), "ml_event_eur_state", display=display.none, editable=false)
-plot(float(eventJpyState), "ml_event_jpy_state", display=display.none, editable=false)
-plot(float(eventSkewState), "ml_event_skew_state", display=display.none, editable=false)
 plot(float(eventPivotInteractionCode), "ml_event_pivot_interaction_code", display=display.none, editable=false)
 
-// ── ES EXECUTION QUALITY + REGIME SCORE + AGREEMENT + IMPULSE (6 new exports) ──
-plot(float(vwapCode), "ml_vwap_code", display=display.none, editable=false)
-plot(rangeExpClamped, "ml_range_expansion", display=display.none, editable=false)
-plot(barEfficiency, "ml_efficiency", display=display.none, editable=false)
-plot(float(agreementVelocity), "ml_agreement_velocity", display=display.none, editable=false)
-plot(impulseQuality, "ml_impulse_quality", display=display.none, editable=false)
-plot(regimeScore, "ml_regime_score", display=display.none, editable=false)
+// ── TRADE STATE MACHINE ──
+plot(float(tradeState), "trade_state", display=display.none, editable=false)
+plot(tradeState == TRADE_ACTIVE and not na(entryBar) ? float(bar_index - entryBar) : 0.0, "bars_in_trade", display=display.none, editable=false)
+plot(cooldownActive ? 1.0 : 0.0, "ml_cooldown_active", display=display.none, editable=false)
+plot(math.min(float(barsSinceExit), 999.0), "ml_bars_since_exit", display=display.none, editable=false)
+plot(slDistAtr, "ml_sl_dist_atr", display=display.none, editable=false)
 
-// ── EMA DISTANCE (3 magnitudes — direction codes dropped, collinear with IM regime) ──
-// ml_ema21_dir / ml_ema50_dir / ml_ema200_dir removed — collinear with IM regime and dist_pct.
-// Distance % carries both sign and magnitude; direction codes are a strict subset.
-plot(ema21DistPct, "ml_ema21_dist_pct", display=display.none, editable=false)
-plot(ema50DistPct, "ml_ema50_dist_pct", display=display.none, editable=false)
-plot(ema200DistPct, "ml_ema200_dist_pct", display=display.none, editable=false)
+// ── AG LABEL SURFACE ──
+// ml_last_exit_outcome: 0=none, 1=TP1_HIT, 2=TP2_HIT, 3=STOPPED, 4=EXPIRED, 5=TP3_HIT, 6=TP4_HIT, 7=TP5_HIT
+// PRIMARY AG label. trade_state collapses to NONE on the same bar as exit.
+plot(float(lastExitOutcome), "ml_last_exit_outcome", display=display.none, editable=false)
+// Price-tag events (fire regardless of trade state — secondary confirmation)
+plot(tagT1Event ? 1.0 : 0.0, "ml_tp1_hit_event", display=display.none, editable=false)
+plot(tagT2Event ? 1.0 : 0.0, "ml_tp2_hit_event", display=display.none, editable=false)
+plot(tagT3Event ? 1.0 : 0.0, "ml_tp3_hit_event", display=display.none, editable=false)
+plot(tagT4Event ? 1.0 : 0.0, "ml_tp4_hit_event", display=display.none, editable=false)
+plot(tagT5Event ? 1.0 : 0.0, "ml_tp5_hit_event", display=display.none, editable=false)
 
 // ── VOLUME / ENTRY QUALITY ──
-plot(volRatio, "ml_rvol", display=display.none, editable=false)
-plot(float(orState), "ml_or_state", display=display.none, editable=false)
-plot(orDistNorm, "ml_or_dist_norm", display=display.none, editable=false)
-// ml_liq_sweep_bull + ml_liq_sweep_bear merged into single signed feature (saves 1 slot, no info loss)
+plot(nz(fibTouchVolDelta), "fib_touch_vol_delta", display=display.none, editable=false)
+// ml_liq_sweep: signed (1=bull sweep, -1=bear sweep, 0=none)
 plot(liqSweepBull ? 1.0 : liqSweepBear ? -1.0 : 0.0, "ml_liq_sweep", display=display.none, editable=false)
+
+// ── STRUCTURE / ICT ──
 plot(chochBull ? 1.0 : chochBear ? -1.0 : 0.0, "ml_choch", display=display.none, editable=false)
 // PIT NOTE: chochBull/chochBear fire at bar N+5 (ta.pivothigh rightbars=5).
 // AG pipeline MUST timestamp these at the emit bar, not the pivot bar, to avoid 5-bar forward shift.
 plot(fvgBullDist, "ml_fvg_bull_dist", display=display.none, editable=false)
 plot(fvgBearDist, "ml_fvg_bear_dist", display=display.none, editable=false)
-plot(cooldownActive ? 1.0 : 0.0, "ml_cooldown_active", display=display.none, editable=false)
-plot(math.min(float(barsSinceExit), 999.0), "ml_bars_since_exit", display=display.none, editable=false)
-plot(slDistAtr, "ml_sl_dist_atr", display=display.none, editable=false)
-plot(exhaustionScore, "ml_exhaustion_score", display=display.none, editable=false)
-// ml_entry_long/short_trigger removed — all constituent features already exported separately.
-// Within the AG training set (rows = entry bars), these are constant=1, zero predictive variance.
-
-// ── AG LABEL SURFACE ──
-// ml_last_exit_outcome: 0=none, 1=TP1_HIT, 2=TP2_HIT, 3=STOPPED, 4=EXPIRED
-// This is the PRIMARY AG label source. trade_state collapses to NONE on the same bar as exit —
-// it cannot be used to reconstruct outcome. This plot holds the outcome for exactly 1 bar at exit.
-plot(float(lastExitOutcome), "ml_last_exit_outcome", display=display.none, editable=false)
-// ml_tp1_hit_event / ml_tp2_hit_event: price-tag events (fire regardless of trade state).
-// Use ml_last_exit_outcome for label construction; use these as secondary confirmation.
-plot(tagT1Event ? 1.0 : 0.0, "ml_tp1_hit_event", display=display.none, editable=false)
-plot(tagT2Event ? 1.0 : 0.0, "ml_tp2_hit_event", display=display.none, editable=false)
-
-// ── MACRO CONTEXT ──
-// ml_event_day: calendar heuristic (~80% accuracy). Use FRED server-side join for AG training labels.
-// This plot is correct for live alerting; for AG training, prefer the exact server-side calendar.
-plot(isEventDay ? 1.0 : 0.0, "ml_event_day", display=display.none, editable=false)
-// ml_adline_slope: NYSE A-D daily slope, same value for all 15m bars within a day.
-// PIT NOTE: Lag by 1 day in AG preprocessing — current-day A-D is not available at bar open.
-// Feature is cross-day breadth divergence context, not intra-day signal.
-plot(adSlopeNorm, "ml_adline_slope", display=display.none, editable=false)
 plot(contrChoch ? 1.0 : 0.0, "ml_contrarian_choch", display=display.none, editable=false)
 
-// ── TA Core Pack: computation stays (used by AG packet gates), plot exports
-// ── offloaded to server-side (AG computes from Databento OHLCV) ──
-// ── PLOT BUDGET: 60 plots + 3 alertconditions = 63/64 (1 headroom) ──
-// ── TA Core Pack exports (7 plots: di_spread, adx_slope, er_10, atr_pct, clv, signed_vol, vol_delta) ──
-// ── are AG server-side computable — cut candidates if budget slots needed ──
+// ── SESSION / TIMING ──
+plot(float(orState), "ml_or_state", display=display.none, editable=false)
+plot(orDistNorm, "ml_or_dist_norm", display=display.none, editable=false)
+
+// ── ES EXECUTION QUALITY (Pine-native session anchor) ──
+plot(float(vwapCode), "ml_vwap_code", display=display.none, editable=false)
+
+// ── MACRO CONTEXT ──
+// ml_adline_slope: NYSE A-D daily slope via security call. Lag by 1 day in AG preprocessing.
+plot(adSlopeNorm, "ml_adline_slope", display=display.none, editable=false)
+
+// ── PLOT BUDGET: 32 plots + 3 alertconditions = 35/64 (29 headroom) ──
 
 //=====================
 // ALERTS
