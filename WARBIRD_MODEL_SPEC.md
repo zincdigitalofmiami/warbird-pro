@@ -3,7 +3,7 @@
 **Date:** 2026-03-31
 **Status:** Reference-Only, aligned to the active plan
 **Governing source:** `docs/MASTER_PLAN.md`
-**PowerDrill research baseline:** `docs/research/2026-04-06-powerdrill-findings.md`
+**PowerDrill research baseline:** `Powerdrill/reports/2026-04-06-powerdrill-findings.md`
 
 This document is a subordinate reference for the model contract. It must not override `docs/MASTER_PLAN.md`, `docs/contracts/`, or `docs/cloud_scope.md`. If this file disagrees with those authority docs, the authority docs win immediately.
 
@@ -30,7 +30,7 @@ Status note (2026-04-07): this file is not implementation authority for schema p
 15. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
 16. Overlapping MA / volume / trend features across base logic and admitted harnesses must be de-duplicated by feature family.
 17. The minimal Pine export surface for training capture is fib lines/state, pivot state/distance, and admitted indicator/harness outputs from the canonical indicator surface.
-18. The canonical flow is `fib_engine_snapshot -> candidate -> outcome -> decision -> signal`.
+18. The canonical live flow is `fib_engine_snapshot -> candidate -> AG_decision (against active packet) -> signal -> outcome`. The training flow is `fib_engine_snapshot -> candidate -> outcome -> learn_decision_policy`. Live and training flows are distinct.
 19. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
 20. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
 21. Cloud core support data starts at `2020-01-01T00:00:00Z`. All Databento ingestion uses `.c.0` continuous front-month contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic. `contract-roll.ts` is dead code. MES uses `MES.c.0` via Live API (real-time) and Historical API (backfill). Cross-asset symbols (NQ, RTY, CL, HG, 6E, 6J, etc.) use `{SYMBOL}.c.0` via Historical API `ohlcv-1h`, pulled hourly by the `cross-asset` Edge Function.
@@ -84,7 +84,7 @@ The snapshot must carry the resolved adaptive engine state, including the chosen
 - resolved anchor lookback / spacing policy
 - target-eligibility state
 - fib / pivot / zone interaction state
-- exhaustion precursor state
+- exhaustion precursor context (proven primitives: bar quality, momentum/volume divergence, range compression, centered MFI — no untested oscillators)
 - engine version and packet version
 
 The exact table/enum contract for these fields is the next schema checkpoint in the active plan.
@@ -103,9 +103,9 @@ The setup engine must expose, at minimum:
 - fib level touched
 - setup archetype
 - stop-family candidate
-- confidence score
+- confidence score (chart-visual only in Pine; operator-facing confidence must come from calibrated AG packet output)
 - event-response state
-- exhaustion precursor state
+- exhaustion precursor context (proven primitives: bar quality, momentum/volume divergence, range compression, centered MFI — no untested oscillators)
 - EMA context (distance + direction)
 - decision-support state for `TAKE_TRADE` / `WAIT` / `PASS`
 - entry trigger state plus TP hit events
@@ -244,12 +244,16 @@ Legacy note:
 - the old local-only `hit_sl_first`, `hit_pt1_first`, and `hit_pt2_after_pt1` names are scheduled for deletion during the AG workbench rebuild
 - no fallback aliasing of those names is allowed in active shared types, API responses, packets, or dashboard/Admin contracts
 
-The stop family is bounded to:
+The stop family is bounded to formula-specific IDs:
 
-1. `fib_invalidation`
-2. `fib_atr`
-3. `structure`
-4. `fixed_atr`
+1. `FIB_NEG_0236` — fib negative 0.236 extension from active range
+2. `FIB_NEG_0382` — fib negative 0.382 extension from active range
+3. `ATR_1_0` — 1.0× ATR from entry
+4. `ATR_1_5` — 1.5× ATR from entry
+5. `ATR_STRUCTURE_1_25` — max of structure and 1.25× ATR
+6. `FIB_0236_ATR_COMPRESS_0_50` — compressed fib + 0.5× ATR buffer
+
+Each ID binds to a deterministic formula. See `docs/contracts/stop_families.md` for exact formulas.
 
 If the expected stop heat required to survive the setup is too wide relative to the expected TP1 / TP2 edge, the correct decision is `PASS`.
 
@@ -403,16 +407,13 @@ Legacy hidden fields `ml_fib_regime`, the `.786` / `1.0` fib-level export famili
 
 The inventory below is the desired Warbird export family set. The actual live Pine subset must be prioritized to stay within the `64` plot-count cap.
 
-Minimum required hidden fields:
+AG-eligible hidden fields (primitive features only):
 
-- `ml_confidence_score`
 - `ml_direction_code`
 - `ml_setup_archetype_code`
 - `ml_fib_level_touched`
 - `ml_stop_family_code`
 - `ml_event_mode_code`
-- `ml_event_shock_score`
-- `ml_event_reversal_score`
 - `ml_event_nq_state`
 - `ml_event_rty_state`
 - `ml_event_cl_state`
@@ -445,6 +446,16 @@ Minimum required hidden fields:
 - `ml_bar_spread_x_vol`
 - `ml_obv`
 - `ml_mfi_14`
+
+Chart-visual/debug-only hidden fields (NOT AG training surface):
+
+- `ml_confidence_score` — hand-coded heuristic composite; operator confidence must come from calibrated AG packet output per binding rule 0.10
+- `ml_event_shock_score` — pre-composed from alignment, ROC, and conflict; AG should see the component primitives instead
+- `ml_event_reversal_score` — pre-composed from breakAgainst, reject, and conflict booleans; same rule
+- `ml_impulse_quality` — hand-coded 30/25/25/20 weighted composite of alignment, range expansion, bar efficiency, and VWAP; AG should learn those weights from primitives
+- `ml_exhaustion_score` — retired (HyperWave-based); replacement exhaustion features are server-side computable primitives per binding rule 0.7
+
+These composites may remain in Pine for chart display, but they must NOT appear in the AG training matrix. Their constituent primitives are either already exported individually or are server-side computable from OHLCV data.
 
 The live `v7` indicator exports the minimum subset above. Research-only diagnostics outside this list stay out of the live Pine packet until a later checkpoint re-admits them without breaking the TradingView plot budget.
 

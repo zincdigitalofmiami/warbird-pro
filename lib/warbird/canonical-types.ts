@@ -58,12 +58,14 @@ export type CanonicalSetupArchetype =
   | "FAILED_MOVE_REVERSAL"
   | "REENTRY_AFTER_TP1";
 
-/** Stop placement family for the candidate. */
+/** Stop placement family for the candidate — formula-specific IDs. */
 export type CanonicalStopFamily =
-  | "FIB_INVALIDATION"
-  | "FIB_ATR"
-  | "STRUCTURE"
-  | "FIXED_ATR";
+  | "FIB_NEG_0236"
+  | "FIB_NEG_0382"
+  | "ATR_1_0"
+  | "ATR_1_5"
+  | "ATR_STRUCTURE_1_25"
+  | "FIB_0236_ATR_COMPRESS_0_50";
 
 /** Named fib level touched at candidate entry. */
 export type CanonicalFibLevel =

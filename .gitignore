@@ -74,6 +74,10 @@ data/cross_asset*/
 # large binary research exports (PDFs/PNGs from PowerDrill sessions)
 docs/backtest-reports/PowerDrill Research/
 
+# PowerDrill reference material and local audit bundles (keep on disk, not in git)
+Powerdrill/
+docs/audits/
+
 # archived/stale plans (history preserved in git, not tracked going forward)
 docs/plans/archive/
 docs/plans/2026-03-22-*.md

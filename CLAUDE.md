@@ -6,7 +6,7 @@ Read and follow AGENTS.md at the repository root.
 - **Active architecture plan:** `/Volumes/Satechi Hub/warbird-pro/docs/MASTER_PLAN.md`
 - **Interface authority:** `/Volumes/Satechi Hub/warbird-pro/docs/contracts/README.md`
 - **Cloud whitelist:** `/Volumes/Satechi Hub/warbird-pro/docs/cloud_scope.md`
-- **PowerDrill research baseline:** `docs/research/2026-04-06-powerdrill-findings.md`
+- **PowerDrill research baseline:** `Powerdrill/reports/2026-04-06-powerdrill-findings.md`
 - **PowerDrill MCP access:** shared tracked `/.mcp.json` keeps only non-secret MCP servers; Kilo uses gitignored `/.kilo/kilo.json` for the PowerDrill remote entry; Claude Code / Cursor users add PowerDrill to local untracked `.mcp.json` after clone
 - **Live:** deployment URL managed in project operations docs
 - **Repo:** github.com/zincdigitalofmiami/warbird-pro

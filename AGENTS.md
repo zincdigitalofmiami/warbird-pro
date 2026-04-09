@@ -16,7 +16,7 @@ Use this root `AGENTS.md` as the workspace instruction surface. Do not add a com
 - Cloud whitelist: `docs/cloud_scope.md`
 - Model contract: `WARBIRD_MODEL_SPEC.md`
 - Fail-closed execution gates: `docs/agent-safety-gates.md`
-- PowerDrill research baseline: `docs/research/2026-04-06-powerdrill-findings.md`
+- PowerDrill research baseline: `Powerdrill/reports/2026-04-06-powerdrill-findings.md`
 
 ### PowerDrill MCP
 

@@ -17,7 +17,7 @@ Ignore all other plans, decisions, scratch notes, and historical architecture do
 6. `WARBIRD_MODEL_SPEC.md`
 7. `CLAUDE.md`
 8. `docs/agent-safety-gates.md`
-9. `docs/research/2026-04-06-powerdrill-findings.md`
+9. `Powerdrill/reports/2026-04-06-powerdrill-findings.md`
 
 ## Authority Split
 

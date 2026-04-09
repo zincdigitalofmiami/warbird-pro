@@ -42,7 +42,7 @@ Across the entire pack, the strongest repeated conclusions are:
 This synthesis reviewed every artifact in:
 
 - `docs/backtest-reports/2026-04-06-wb7-strat-backtest.md`
-- `docs/backtest-reports/PowerDrill Research/`
+- `Powerdrill/raw-assets/`
 
 Method:
 
@@ -630,68 +630,68 @@ Findings from the PowerDrill session that require separate work:
 
 ### A.2 Named PDFs and PNGs
 
-- `docs/backtest-reports/PowerDrill Research/CalibrateFibs.pdf`
-- `docs/backtest-reports/PowerDrill Research/entries.pdf`
-- `docs/backtest-reports/PowerDrill Research/PASS:WAIT:TAKE logic.pdf`
-- `docs/backtest-reports/PowerDrill Research/Refine regime filters and confluence requirements.pdf`
-- `docs/backtest-reports/PowerDrill Research/fibscreencapture-powerdrill-ai-session-uc-1f13206993956522a8b848649b61e16c-2026-04-06-17_39_28.pdf`
-- `docs/backtest-reports/PowerDrill Research/Intermarketscreencapture-powerdrill-ai-session-uc-1f13206993956522a8b848649b61e16c-2026-04-06-17_38_42.pdf`
-- `docs/backtest-reports/PowerDrill Research/preview.png`
-- `docs/backtest-reports/PowerDrill Research/Equity chart_2026-04-06_14-52-16_e2ced.png`
+- `Powerdrill/raw-assets/indicator-and-entry-research/CalibrateFibs.pdf`
+- `Powerdrill/raw-assets/indicator-and-entry-research/entries.pdf`
+- `Powerdrill/raw-assets/indicator-and-entry-research/PASS:WAIT:TAKE logic.pdf`
+- `Powerdrill/raw-assets/regime-and-intermarket/Refine regime filters and confluence requirements.pdf`
+- `Powerdrill/raw-assets/indicator-and-entry-research/fibscreencapture-powerdrill-ai-session-uc-1f13206993956522a8b848649b61e16c-2026-04-06-17_39_28.pdf`
+- `Powerdrill/raw-assets/regime-and-intermarket/Intermarketscreencapture-powerdrill-ai-session-uc-1f13206993956522a8b848649b61e16c-2026-04-06-17_38_42.pdf`
+- `Powerdrill/raw-assets/screenshots-and-previews/preview.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Equity chart_2026-04-06_14-52-16_e2ced.png`
 
 ### A.3 Early PowerDrill export sequence
 
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-16_47_43.png`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-16_48_15.png`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-16_48_34.png`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-16_48_50.png`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-16_49_11.png`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-16_54_56.png`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_00_44.png`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_05_33.png`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_08_10.png`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_15_47.pdf`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_16_12.pdf`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_16_28.pdf`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_16_46.pdf`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_17_04.pdf`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-16_47_43.png`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-16_48_15.png`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-16_48_34.png`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-16_48_50.png`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-16_49_11.png`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-16_54_56.png`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_00_44.png`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_05_33.png`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_08_10.png`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_15_47.pdf`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_16_12.pdf`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_16_28.pdf`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_16_46.pdf`
+- `Powerdrill/raw-assets/session-export-sequences/early-session/screencapture-powerdrill-ai-session-uc-1f132006b21c64c28405e4e51ba9050e-2026-04-06-17_17_04.pdf`
 
 ### A.4 Later PowerDrill export sequence
 
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f13206993956522a8b848649b61e16c-2026-04-06-17_40_39.pdf`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f1320a6eb9a6d029d633e67d411d723-2026-04-06-18_01_12.pdf`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f1320a6eb9a6d029d633e67d411d723-2026-04-06-18_08_10.pdf`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f1320a6eb9a6d029d633e67d411d723-2026-04-06-18_10_01.pdf`
-- `docs/backtest-reports/PowerDrill Research/screencapture-powerdrill-ai-session-uc-1f1320a6eb9a6d029d633e67d411d723-2026-04-06-18_10_18.pdf`
+- `Powerdrill/raw-assets/session-export-sequences/later-session/screencapture-powerdrill-ai-session-uc-1f13206993956522a8b848649b61e16c-2026-04-06-17_40_39.pdf`
+- `Powerdrill/raw-assets/session-export-sequences/later-session/screencapture-powerdrill-ai-session-uc-1f1320a6eb9a6d029d633e67d411d723-2026-04-06-18_01_12.pdf`
+- `Powerdrill/raw-assets/session-export-sequences/later-session/screencapture-powerdrill-ai-session-uc-1f1320a6eb9a6d029d633e67d411d723-2026-04-06-18_08_10.pdf`
+- `Powerdrill/raw-assets/session-export-sequences/later-session/screencapture-powerdrill-ai-session-uc-1f1320a6eb9a6d029d633e67d411d723-2026-04-06-18_10_01.pdf`
+- `Powerdrill/raw-assets/session-export-sequences/later-session/screencapture-powerdrill-ai-session-uc-1f1320a6eb9a6d029d633e67d411d723-2026-04-06-18_10_18.pdf`
 
 ### A.5 Screenshot PNG set
 
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 1.10.26 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 2.23.12 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 2.29.02 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 3.01.23 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 4.36.43 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 4.45.50 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 5.20.57 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 5.21.51 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 5.22.08 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 5.22.14 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 5.26.33 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 5.26.59 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 5.27.05 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 5.47.00 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 5.47.08 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 5.47.11 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 5.47.15 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 6.07.06 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 6.07.20 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 6.07.30 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 6.07.44 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 6.07.49 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 6.08.32 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 6.08.40 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 6.09.14 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 6.09.22 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 6.09.38 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 6.09.49 PM.png`
-- `docs/backtest-reports/PowerDrill Research/Screenshot 2026-04-06 at 6.12.16 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 1.10.26 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 2.23.12 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 2.29.02 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 3.01.23 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 4.36.43 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 4.45.50 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 5.20.57 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 5.21.51 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 5.22.08 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 5.22.14 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 5.26.33 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 5.26.59 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 5.27.05 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 5.47.00 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 5.47.08 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 5.47.11 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 5.47.15 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 6.07.06 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 6.07.20 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 6.07.30 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 6.07.44 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 6.07.49 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 6.08.32 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 6.08.40 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 6.09.14 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 6.09.22 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 6.09.38 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 6.09.49 PM.png`
+- `Powerdrill/raw-assets/screenshots-and-previews/Screenshot 2026-04-06 at 6.12.16 PM.png`
