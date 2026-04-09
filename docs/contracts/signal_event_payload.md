@@ -1,7 +1,7 @@
 # Signal Event Payload Contract
 
 **Status:** Active
-**Updated:** 2026-04-08 — separated Pine candidate transport from AG decision fields
+**Updated:** 2026-04-09 — separated Pine candidate transport from AG decision fields and deferred execution-model-dependent stop geometry
 
 ## Purpose
 
@@ -36,11 +36,16 @@ This is the structured candidate event emitted by Pine at bar close. It feeds th
 - `fib_level_touched`
 - `target_viable_20pt`
 
-### Required Stop Surface Fields
+### Required Stop Identity Field
 
 - `stop_family_id`
+
+### Server-Reconstructed / Deferred Stop Geometry Fields
+
 - `stop_level_price`
 - `stop_distance_ticks`
+
+These fields depend on the canonical execution model and are server-reconstructed or deferred until that contract is locked. They are not required Pine-emitted Tier 1 fields in the current phase.
 
 ### Optional Audit Fields
 
@@ -51,6 +56,8 @@ This is the structured candidate event emitted by Pine at bar close. It feeds th
 ## Tier 2 — AG Decision Fields (Server-Side Only)
 
 These fields are assigned after AG scores the candidate against the active packet. They are NOT emitted by Pine.
+
+The `gate_reason_bucket` taxonomy is currently locked to the values below.
 
 - `gate_decision` — one of `TAKE_TRADE`, `WAIT`, `PASS`
 - `gate_reason_bucket` — one of `REGIME_BLOCK`, `CONFLUENCE_TOO_LOW`, `VOLATILITY_BLOCK`, `SESSION_TIME_BLOCK`, `STRUCTURE_INVALID`
@@ -67,4 +74,4 @@ These fields are assigned after AG scores the candidate against the active packe
 - confirmed-bar emission only
 - no repaint-prone or post-outcome fields
 - unknown fields must be rejected or explicitly version-gated
-- Pine must NOT emit `gate_decision`, `gate_reason_bucket`, or calibrated probabilities — those come from AG
+- Pine must NOT emit `gate_decision`, `gate_reason_bucket`, calibrated probabilities, or execution-model-dependent stop geometry fields unless a future contract version explicitly promotes them

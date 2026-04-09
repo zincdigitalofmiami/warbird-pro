@@ -66,6 +66,7 @@ If any other plan, decision note, scratch doc, or archived checkpoint disagrees 
 - Core retained history starts at `2020-01-01T00:00:00Z`.
 - Pine emits the live candidate surface.
 - AutoGluon is offline only and may publish only Pine-safe packet outputs.
+- NEWS and sentiment aggregates are retired from the active contract unless explicitly reopened. Retained macro or policy context must come from approved non-NEWS sources.
 
 ### 0.6 Indicator-first and known-data-first dependency rule
 
@@ -96,7 +97,7 @@ If any other plan, decision note, scratch doc, or archived checkpoint disagrees 
 - No chart-wide background color or regime tint on the indicator.
 - The existing fib zone fill box (`.382–.618` zone) remains exactly as currently defined.
 - The fib line color, width, label, and styling contract is locked:
-  - Anchors (0, .50, 1.0): `#FFFFFF` white, width 1
+  - Anchors (0, 1.0): `#FFFFFF` white, width 1
   - Core zone (.382, .618): `#E65100` dark orange, width 1
   - Waypoints (.236, .786, 1.382, 1.50, 1.786): `#808080` mid-gray, width 1
   - Pivot (.50): `#FFFFFF` white, width 2
@@ -366,7 +367,7 @@ Validate the PowerDrill entry bar quality research as AG feature priors:
   - pure indicator logic
   - server-reconstructed from exported primitives
   - or a hybrid where Pine emits only the minimal ingredients
-- Lock one reason-bucket taxonomy so `PASS`, `WAIT`, and `TAKE_TRADE` always carry auditable cause codes.
+- Use the locked reason-bucket taxonomy defined in `docs/contracts/signal_event_payload.md` so `PASS`, `WAIT`, and `TAKE_TRADE` always carry auditable cause codes.
 
 #### Phase 1D: Stop-Loss Geometry, MAE-to-Risk, And Position Geometry
 
@@ -376,13 +377,13 @@ Validate the PowerDrill entry bar quality research as AG feature priors:
   - compressed `0.236 fib + 0.5 ATR`
   - ATR-scaled structure stops
   - short-side-specific wider or differently anchored stops
-- Lock one production stop family baseline for v1 and push alternatives into controlled A/B research.
+- Lock the bounded formula-specific stop-family set for v1 and validate the deterministic geometry for each admitted family in parallel. Do not collapse the contract back to a single stop baseline.
 - Define how MAE and MFE affect:
   - stop placement
   - sizing confidence
   - `PASS / WAIT / TAKE_TRADE`
   - later outcome analysis
-- Do not let packet, schema, or writer work invent stop-family semantics before this phase resolves them.
+- Do not let packet, schema, or writer work invent stop-family semantics outside the admitted bounded set before this phase resolves the implementation details.
 
 #### Phase 1E: Regime, Intermarket, And Confluence As AG Features
 
@@ -434,21 +435,10 @@ Regime, intermarket, and confluence are AG training features, not Pine live gate
 
 #### Phase 1H: Indicator Contract, Export Surface, And Alert Architecture
 
-- Produce one explicit indicator contract document from the stabilized candidate-generator design.
-- The Pine candidate payload must lock:
-  - payload version and indicator version
-  - symbol and timeframe
-  - bar-close timestamp (UTC) — the ingress timestamp authority
-  - direction and setup archetype
-  - fib anchor high/low prices and timestamps
-  - fib level touched
-  - stop-family identity (formula-specific ID)
-  - candidate idempotency key material
-- The Pine candidate payload must NOT include:
-  - `gate_decision` or `gate_reason_bucket` — these are AG-assigned after scoring, not Pine-emitted
-  - pre-composed confidence, impulse, shock, or reversal scores
-  - research-only confluence fields
-  - any field that cannot be guaranteed point-in-time at confirmed bar close
+- Produce one explicit indicator contract document from the stabilized candidate-generator design under `docs/contracts/`.
+- The Tier 1 candidate transport contract, owned by `docs/contracts/`, must minimally carry the version, identity, setup snapshot, stop-family identity, and idempotency material required for canonical candidate transport.
+- Execution-model-dependent stop geometry fields remain server-reconstructed or deferred until the execution model is locked in the contract set.
+- The contract-owned Tier 1 payload must exclude AG-assigned decisions and calibrated probabilities, pre-composed Pine heuristic scores, research-only confluence fields, and any field that cannot be guaranteed point-in-time at confirmed bar close.
 - Implement the two-tier alert architecture (binding rule 0.9):
   - Tier 1: Pine emits a structured candidate event for every structural candidate at bar close. This feeds the ingress pipeline only.
   - Tier 2: Server-side scoring promotes candidates to TAKE_TRADE and emits operator-visible signals. Confidence comes from calibrated AG packet output.

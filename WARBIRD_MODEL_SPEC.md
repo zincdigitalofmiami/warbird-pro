@@ -107,7 +107,7 @@ The setup engine must expose, at minimum:
 - event-response state
 - exhaustion precursor context (proven primitives: bar quality, momentum/volume divergence, range compression, centered MFI — no untested oscillators)
 - EMA context (distance + direction)
-- decision-support state for `TAKE_TRADE` / `WAIT` / `PASS`
+- candidate/context support fields consumed downstream when AG assigns `TAKE_TRADE` / `WAIT` / `PASS`
 - entry trigger state plus TP hit events
 
 Target viability remains a required internal gate in Pine trigger logic, but it is not a required exported `ml_*` field.
@@ -280,11 +280,12 @@ Only Tier 1 features can become live production logic.
 
 These are local-research features used by AG for discovery:
 
-- full FRED context from Supabase extracts
+- full FRED context from approved retained macro tables
 - GPR / geopolitical risk
-- Trump Effect / policy uncertainty
-- bullish/bearish news event and sentiment aggregates
-- any other macro or event context without an exact Pine analogue
+- approved policy-event context from retained non-NEWS sources
+- any other approved macro or event context without an exact Pine analogue and without reopening retired NEWS or sentiment surfaces
+
+NEWS and sentiment aggregates are retired from the active contract unless explicitly reopened. They are not part of the default Tier 2 surface.
 
 Tier 2 can influence the research conclusion, but it cannot enter the live Pine path unless Phase 4 proves an exact Pine analogue.
 
@@ -349,10 +350,10 @@ These are daily-only — same value for all 27 bars in a session. Exported as AG
 3. lower-timeframe volume shock / expansion state
 4. pivot interaction state
 
-### 6d. Macro/News Context (server-side)
+### 6d. Macro/Policy Context (server-side)
 
 5. scheduled macro proximity / release window state
-6. breaking-news / narrative shock state paired with MES price reaction
+6. approved policy-event shock state from retained non-NEWS sources paired with MES price reaction
 
 ### Purpose
 
@@ -362,7 +363,7 @@ The regime gate and context layer exist to:
 - delay entries via hysteresis and persistence requirements
 - confirm high-quality setups via impulse quality filtering
 - detect shock-failure or de-escalation reversals
-- tie macro/news catalysts to observed MES reaction instead of treating text as a separate trade engine
+- tie approved macro or policy catalysts to observed MES reaction instead of treating text as a separate trade engine
 - use pivot-state and pivot-distance as serious exhaustion / reversal context without turning pivots into the only decision surface
 
 It must not become a separate trade engine detached from the fib contract.
