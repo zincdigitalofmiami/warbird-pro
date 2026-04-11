@@ -95,8 +95,14 @@ warehouse execution. It blocks only the Pine indicator implementation work strea
 
 ### Pine Budget Baseline (v7-warbird-institutional.pine)
 
-  Plot budget:    35 / 64
-  Request budget:  4 / 40
+Verified 2026-04-11 by full file audit (Python parser, comment-stripped):
+
+  Output budget:   38 / 64   (34 plot + 1 plotshape + 3 alertcondition, 26 headroom)
+  Request budget:   4 / 40   (3 HTF fib security + 1 A-D line, 36 headroom)
+  request.footprint(): 0      (not yet implemented — Phase 0.5 scope)
+
+Header comment in the Pine file is stale (says 63/64, 11/40). Do not use header as authority.
+This audit is the authoritative baseline.
 
 All additions must be priced against these baselines before any code is written.
 Any implementation exceeding 64 plots or 40 request calls is invalid without
@@ -172,14 +178,39 @@ After one-time historical seed ingest, recurring manual TV CSV export is removed
 - Commission/slippage floors required in all reported strategy results.
 - Parameter sweeps must report trade frequency and precision jointly.
 
-## Phase 1: Local Warehouse Creation
-- Create a clean local database named `warbird`.
-- Use a dedicated local migration system in `local_warehouse/migrations/`.
-- Add a local migration ledger table named `local_schema_migrations`.
-- Keep cloud migrations in `supabase/migrations/` only.
-- Default schema choice is locked to `public` with canonical snake_case table names and no secondary schema split.
+## Phase 1: Local Warehouse Creation — COMPLETE 2026-04-11
 
-## Phase 2: One-Time Bootstrap from `rabid_raccoon`
+**Verified:** `warbird` database live on PG17 (`127.0.0.1:5432`). Owner: `zincdigital`. UTF8.
+**Migrations applied:** 001–006 via `local_warehouse/migrations/`. Ledger: `local_schema_migrations`.
+**Tables created (18):** `mes_15m`, `mes_1h`, `mes_4h`, `mes_1d`, `cross_asset_1h`,
+  `economic_series`, 10 FRED families (`econ_rates_1d` through `econ_indexes_1d`), `econ_calendar`.
+
+Original requirements:
+- ~~Create a clean local database named `warbird`.~~ Done.
+- ~~Use a dedicated local migration system in `local_warehouse/migrations/`.~~ Done.
+- ~~Add a local migration ledger table named `local_schema_migrations`.~~ Done.
+- Keep cloud migrations in `supabase/migrations/` only. (Invariant maintained.)
+- Default schema choice is locked to `public` with canonical snake_case table names and no secondary schema split. (Applied.)
+
+## Phase 2: One-Time Bootstrap from `rabid_raccoon` — COMPLETE 2026-04-11
+
+**Verified row counts (warbird post-bootstrap):**
+- `mes_15m`:       144,540 rows  (2020-01-01 → 2026-03-09)
+- `mes_1h`:         36,321 rows  (2020-01-01 → 2026-03-09)
+- `mes_4h`:          9,513 rows  (2020-01-01 → 2026-03-09, derived from mes_1h)
+- `mes_1d`:          1,919 rows  (2020-01-01 → 2026-03-08)
+- `cross_asset_1h`: 221,954 rows, all 6 symbols (6E/6J/CL/HG/NQ/RTY, 2020-01-01 → 2026-04-03)
+  - HG sourced from `data/cross_asset_1h.parquet` (not in rabid_raccoon). **HG blocker resolved.**
+- `economic_series`: 141 series
+- All 10 FRED families: see CLAUDE.md for per-table counts
+- `econ_calendar`:   3,227 events (2020-01-02 → 2026-12-16)
+
+**Bootstrap script:** `local_warehouse/bootstrap/bootstrap_from_rabid_raccoon.sh`
+**HG source:** `data/cross_asset_1h.parquet` (Databento intermarket export, continuous front-month)
+
+`rabid_raccoon` is now legacy reference only. Do not treat it as canonical.
+
+Original requirements:
 - Bootstrap source is `rabid_raccoon` on the same PG instance, one time only.
 - After bootstrap, `rabid_raccoon` becomes legacy reference only and must not be treated as canonical again.
 - Import only approved `2020+` core surfaces into `warbird`:

@@ -38,7 +38,7 @@ Phase execution order:
 - Cross-asset pipeline: `cross-asset` Edge Function pulls `ohlcv-1h` from Databento Historical API for all active DATABENTO symbols. 4 shards fire hourly at `:05/:06/:07/:08` Sun-Fri (migration 040).
 - All Databento calls use `.c.0` continuous front-month contracts with `stype_in=continuous`. No manual contract-roll logic.
 - Live core retention floor is `2020-01-01T00:00:00Z`.
-- `indicators/v7-warbird-institutional.pine` is the active Pine work surface. Compiles clean, TV-validated. Output budget: 35/64 (32 plot + 3 alertcondition, 29 headroom). 4 `request.security()` calls of 40 budget.
+- `indicators/v7-warbird-institutional.pine` is the active Pine work surface. Compiles clean, TV-validated. Output budget: 38/64 (34 plot + 1 plotshape + 3 alertcondition, 26 headroom). 4 `request.security()` calls of 40 budget. `request.footprint()` = 0 (not yet implemented). Budget verified 2026-04-11.
 - ESLint gate passes clean (`npm run lint` = 0 errors, 0 warnings).
 - Migration reconciliation through `045` is verified local↔remote.
 - Security advisor: 0 code warnings.
@@ -55,10 +55,10 @@ Phase execution order:
   (revenge re-entry clustering, premature exits, session-quality degradation, sizing in drawdown).
 
 ### What Doesn't Work Yet (v5 Execution)
-- Local `warbird` PG17 database: not yet created (Phase 1)
-- `local_warehouse/migrations/` directory: not yet created (Phase 1)
-- `local_schema_migrations` ledger table: not yet created (Phase 1)
-- One-time bootstrap from `rabid_raccoon`: not yet run (Phase 2)
+- ~~Local `warbird` PG17 database: not yet created (Phase 1)~~ **DONE 2026-04-11** — `warbird` created on PG17.
+- ~~`local_warehouse/migrations/` directory: not yet created (Phase 1)~~ **DONE 2026-04-11** — 6 migrations applied (001-006). 18 tables + ledger live.
+- ~~`local_schema_migrations` ledger table: not yet created (Phase 1)~~ **DONE 2026-04-11**
+- ~~One-time bootstrap from `rabid_raccoon`: not yet run (Phase 2)~~ **DONE 2026-04-11** — All surfaces bootstrapped. HG loaded from `data/cross_asset_1h.parquet`. All 6 cross-asset symbols live. 221,954 cross-asset rows through 2026-04-03.
 - Three canonical local AG tables and one canonical training view (`ag_training`): not yet created (Phase 3)
 - Python pipeline in `scripts/ag/`: not yet built (Phase 4)
 - Full-surface SHAP program: not yet built (Phase 5)
@@ -71,8 +71,7 @@ Phase execution order:
 - `indicator-capture` Edge Function: not yet built.
 - `indicator_snapshots_15m`: not yet created (cloud or local).
 - TV alert webhook for indicator capture: not yet configured.
-- S/R feature contract: locked in `docs/contracts/ag_local_training_schema.md`
-  (pending full Phase 0 landing in git).
+- S/R feature contract: locked in `docs/contracts/ag_local_training_schema.md`. Phase 0 fully landed in git (commit 92ea751).
 - Per-level Fib ladder AG exports: not yet in indicator. Required in Phase 0.5.
 - Historical seed ingest for indicator snapshots: not yet executed.
 - Trade-review timestamp join into feature lineage surfaces: not yet executed.
