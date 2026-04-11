@@ -34,7 +34,6 @@ This is the structured candidate event emitted by Pine at bar close. It feeds th
 - `fib_anchor_high_price`
 - `fib_anchor_low_price`
 - `fib_level_touched`
-- `target_viable_20pt`
 
 ### Required Stop Identity Field
 

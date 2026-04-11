@@ -1,13 +1,11 @@
-# WARBIRD MODEL SPEC — v3
+# WARBIRD MODEL SPEC — v4
 
-**Date:** 2026-03-31
-**Status:** Reference-Only, aligned to the active plan
+**Date:** 2026-04-10
+**Status:** Active, aligned to Warbird Full Reset Plan v5
 **Governing source:** `docs/MASTER_PLAN.md`
 **PowerDrill research baseline:** `Powerdrill/reports/2026-04-06-powerdrill-findings.md`
 
 This document is a subordinate reference for the model contract. It must not override `docs/MASTER_PLAN.md`, `docs/contracts/`, or `docs/cloud_scope.md`. If this file disagrees with those authority docs, the authority docs win immediately.
-
-Status note (2026-04-07): this file is not implementation authority for schema placement, runtime scope, or packet-serving topology. The canonical source for those decisions is now the master plan plus the contract set.
 
 ---
 
@@ -15,43 +13,78 @@ Status note (2026-04-07): this file is not implementation authority for schema p
 
 1. The canonical trade object is the **MES 15m fib setup**.
 2. The canonical key is the MES 15m **bar-close timestamp** in `America/Chicago`.
-3. Pine is the canonical live signal surface.
-4. The Next.js dashboard is the richer mirrored operator surface using the same MES 15m fib contract; it is not a separate decision engine and must not recompute fib geometry locally.
-5. The external-drive local PostgreSQL warehouse is the canonical database truth. It owns the retained market history, research features, labels, experiments, SHAP artifacts, and all non-serving zoo data.
-6. Cloud Supabase is the reduced runtime/published serving database for frontend, indicator-support tables, packet distribution, curated SHAP/admin report surfaces, and other explicitly plan-approved published outputs. It must not become a mirror of local.
-7. There are only two databases in scope: the local PostgreSQL warehouse and cloud Supabase.
-8. AutoGluon is offline only. It trains, calibrates, and emits a Pine-ready packet.
-9. The adaptive fib engine snapshot is the canonical base object. The model does **not** invent raw entries from scratch. The Pine fib engine creates the candidate setup first.
-10. The model output is MES 15m setup-outcome state: TP1–TP5 probability distribution, reversal risk, and bounded stop-family selection. It is **not** a predicted-price forecast surface.
-11. AG and offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close, not repaint-prone live chart reads.
-12. The retained core historical window for training/support data starts at `2020-01-01T00:00:00Z`. Pre-2020 core rows are out of scope and must not be reintroduced into the canonical dataset.
-13. The fib engine must preserve lookback/confluence intelligence; a simple zigzag-only anchor path is insufficient for Warbird.
-14. Pivot distance and pivot-state are critical trigger/reversal inputs, but not the sole final decision maker.
-15. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
-16. Overlapping MA / volume / trend features across base logic and admitted harnesses must be de-duplicated by feature family.
-17. The minimal Pine export surface for training capture is fib lines/state, pivot state/distance, and admitted indicator/harness outputs from the canonical indicator surface.
-18. The canonical live flow is `fib_engine_snapshot -> candidate -> AG_decision (against active packet) -> signal -> outcome`. The training flow is `fib_engine_snapshot -> candidate -> outcome -> learn_decision_policy`. Live and training flows are distinct.
-19. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
-20. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
-21. Cloud core support data starts at `2020-01-01T00:00:00Z`. All Databento ingestion uses `.c.0` continuous front-month contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic. `contract-roll.ts` is dead code. MES uses `MES.c.0` via Live API (real-time) and Historical API (backfill). Cross-asset symbols (NQ, RTY, CL, HG, 6E, 6J, etc.) use `{SYMBOL}.c.0` via Historical API `ohlcv-1h`, pulled hourly by the `cross-asset` Edge Function.
-22. The operator-approved fib visual spec is a contract. Colors, line widths, line styles, and visible level-label presentation must be reproduced exactly across Pine and dashboard renderers unless explicitly reapproved.
+3. Pine is the canonical **live generator** (signal surface).
+4. The **training generator** is the Python reconstruction pipeline in `scripts/ag/`. It reconstructs snapshots/interactions/outcomes from local warehouse OHLCV/context and is the only local AG training population path.
+5. The Next.js dashboard is the richer mirrored operator surface using the same MES 15m fib contract; it is not a separate decision engine and must not recompute fib geometry locally.
+6. The local `warbird` database on PG17 (`127.0.0.1:5432`) is the canonical warehouse truth. It owns the full data zoo: market history, AG lineage tables, the canonical training view, features, labels, SHAP artifacts, and all non-serving data.
+7. Cloud Supabase (`qhwgrzqjcdtdqppvhhme`) is the reduced runtime/published serving database for frontend, indicator-support tables, packet distribution, curated SHAP/admin report surfaces, and other explicitly plan-approved published outputs. It must not become a mirror of local.
+8. There are only two databases in scope: the local `warbird` PG17 warehouse and cloud Supabase.
+9. AutoGluon is offline only. It trains, calibrates, and emits a Pine-ready packet.
+10. The adaptive fib engine snapshot is the canonical base object. Live/runtime candidate semantics are defined by Pine on chart, while offline/training rows are reconstructed in Python from warehouse OHLCV/context with no Pine dependency.
+11. The model output is MES 15m setup-outcome state: TP1–TP5 probability distribution, reversal risk, and bounded stop-family selection. It is **not** a predicted-price forecast surface.
+12. AG and offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close, not repaint-prone live chart reads.
+13. The retained core historical window for training/support data starts at `2020-01-01T00:00:00Z`. Pre-2020 core rows are out of scope and must not be reintroduced into the canonical dataset.
+14. The fib engine must preserve lookback/confluence intelligence; a simple zigzag-only anchor path is insufficient for Warbird.
+15. Pivot distance and pivot-state are critical trigger/reversal inputs, but not the sole final decision maker.
+16. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
+17. Overlapping MA / volume / trend features across base logic and admitted harnesses must be de-duplicated by feature family.
+18. Canonical AG contract is **three canonical local AG tables and one canonical training view.**
+19. Exact local AG schema authority is `docs/contracts/ag_local_training_schema.md`.
+20. The canonical live flow is `fib_engine_snapshot -> candidate -> AG_decision (against active packet) -> signal -> outcome`. The training flow is Python reconstruction over local OHLCV/context into AG lineage tables -> `ag_training` view -> model training. Live and training flows are distinct.
+21. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
+22. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
+23. Cloud core support data starts at `2020-01-01T00:00:00Z`. All Databento ingestion uses `.c.0` continuous front-month contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic. `contract-roll.ts` is dead code. MES uses `MES.c.0` via Live API (real-time) and Historical API (backfill). Cross-asset symbols (NQ, RTY, CL, HG, 6E, 6J) use `{SYMBOL}.c.0` via Historical API `ohlcv-1h`, pulled hourly by the `cross-asset` Edge Function.
+24. The operator-approved fib visual spec is a contract. Colors, line widths, line styles, and visible level-label presentation must be reproduced exactly across Pine and dashboard renderers unless explicitly reapproved.
+25. First model target is locked to multiclass `outcome_label`.
+26. First feature scope is locked to `MES + cross-asset + macro`.
+27. Macro scope is locked to `FRED + econ_calendar` only. No news or narrative sources.
+28. Exhaustion context is exported as `ml_*` hidden features in `ag_fib_interactions`.
+    It is not a hard gate suppressing candidate row emission.
+    Broad candidate emission is preserved. AG discovers the weights.
+29. S/R feature architecture is locked to per-type wide numeric families
+    (`dist_*`, `at_*`, `above_*`, `flip_*`, `reject_*`, `vol_at_*`, `*_is_missing`).
+    All values normalized by ATR or percent. Raw absolute level prices are
+    never used as model features. Consolidated string columns, JSON/list-in-cell
+    columns, and single nearest-level columns without type are prohibited.
+30. kNN in Pine is not an AutoGluon replacement. If built, it is display-layer
+    approximation only. It does not replace the offline AG training pipeline.
+31. TV footprint history is not bulk-exportable. Footprint-derived features are
+    captured via confirmed-bar alert/webhook from the indicator going forward.
+32. Pine v6 capabilities required for exhaustion and hold logic include enums,
+    strict boolean chains, dynamic loop boundaries, dynamic request strings,
+    `request.footprint()`, and `polyline`-based rendering.
+33. Behavioral features are first-class AG inputs. Phase 0.5 behavioral modules
+    produce `ml_*` columns in `ag_fib_interactions` encoding session quality,
+    momentum state, sizing context, and consecutive-loss context.
+34. Live trade loss drivers are model-context inputs. AG must discover directional
+    and execution asymmetries from features. They must not be hardcoded as direction gates.
+35. Hard stop discipline is a model input, not just an execution rule.
+    `ml_adverse_excursion_pts` encodes how far each trade went against the position
+    before exit. Trades with excessive adverse excursion form a distinct label-quality signal.
+36. Indicator snapshot features are sourced from `indicator_snapshots_15m`, populated
+    by the automated Pine alert -> webhook -> Supabase -> local sync pipeline.
+    Manual TV CSV export is a one-time historical seed operation only.
 
 ---
 
 ## 2. What The Model Is
 
-The model evaluates the quality of a **candidate 15m fib setup** that Pine has already identified.
+The model evaluates the quality of canonical MES 15m interaction rows from `ag_fib_interactions`.
 
 It does **not** forecast a future MES price level or produce a standalone `1H` price prediction.
 
 For each candidate setup, the model estimates:
 
+- `highest_tp_hit`
+- `hit_tp1` through `hit_tp5`
+- `hit_sl`
 - `tp1_before_sl`
-- `tp2_before_sl`
-- `sl_before_tp1`
+- `bars_to_tp1`
+- `bars_to_sl`
+- `bars_to_resolution`
 - expected `mae_pts`
 - expected `mfe_pts`
-- reversal risk
+- `outcome_label`
 
 The model also selects from a **bounded stop family**. It does not emit an unconstrained stop price.
 
@@ -62,142 +95,142 @@ The model does **not** define the schema. The outcome contract defines the schem
 Warbird is split into three separate engines:
 
 1. **Generator**
-   - Pine defines the candidate entry object using the embedded TA core pack
+   - **Live generator:** Pine defines the live candidate/signal object on chart runtime
+   - **Training generator:** Python reconstruction pipeline in `scripts/ag/` reconstructs snapshots/interactions/outcomes from local warehouse OHLCV/context and populates the three canonical local AG tables; `ag_training` is the read view
 2. **Selector**
    - offline models score whether a frozen candidate is worth taking
 3. **Diagnostician**
    - local research explains why trades won/lost and what should change in features, settings, or entry definition
+   - query key is `run_id + interaction_id`
+   - resolves raw SHAP artifact via `ag_artifacts`
+   - returns per-trade waterfall and top interaction-pair contributions
 
 The same model must not be treated as all three at once.
 
 ---
 
-## 3. Fib Engine Snapshot And Candidate Definition
+## 3. Canonical AG Schema
 
-Every training row and live decision must trace back to a frozen MES 15m fib engine snapshot taken at bar close.
+### 3.1 Canonical Local AG Contract
 
-The snapshot must carry the resolved adaptive engine state, including the chosen anchor result plus the adaptive decisions that produced it. At minimum, the snapshot family must preserve:
+Canonical AG contract is **three canonical local AG tables and one canonical training view.**
 
-- anchor high / low and anchor timestamps
-- direction state and reversal mode
-- resolved left / right pivot lookback values
-- resolved anchor lookback / spacing policy
-- target-eligibility state
-- fib / pivot / zone interaction state
-- exhaustion precursor context (proven primitives: bar quality, momentum/volume divergence, range compression, centered MFI — no untested oscillators)
-- engine version and packet version
+- **`ag_fib_snapshots`** — frozen fib engine state at bar close
+- **`ag_fib_interactions`** — candidate setups from fib-price interactions
+- **`ag_fib_outcomes`** — realized forward path outcomes per interaction
+- **`ag_training`** — canonical training view with `WHERE outcome_label != 'CENSORED'`
 
-The exact table/enum contract for these fields is the next schema checkpoint in the active plan.
+The exact column/type contract, PK/FK constraints, and full `ag_training` SQL definition are authoritative in `docs/contracts/ag_local_training_schema.md`.
 
-A setup candidate exists only when all of the following are true:
+Canonical names never use version suffixes.
 
-1. A valid 15m fib engine snapshot exists with a non-degenerate range.
-2. A structural leg direction exists and is not midpoint-flip logic.
-3. Price touches or crosses one of the tracked retracement levels on the 15m bar.
-4. The candidate still has a `20pt+` path to TP1.
-5. The live Pine context can compute all required Tier 1 states without violating request limits or lookahead rules.
+The canonical warehouse truth remains the three local AG tables plus supporting market/macro source tables, with `ag_training` as the canonical view for model reads. Stop-family comparisons and SHAP lineage expand around this base contract; they do not replace it.
 
-The setup engine must expose, at minimum:
+### 3.2 Fib Engine Snapshot And Candidate Definition
 
-- direction
-- fib level touched
-- setup archetype
-- stop-family candidate
-- confidence score (chart-visual only in Pine; operator-facing confidence must come from calibrated AG packet output)
-- event-response state
-- exhaustion precursor context (proven primitives: bar quality, momentum/volume divergence, range compression, centered MFI — no untested oscillators)
-- EMA context (distance + direction)
-- candidate/context support fields consumed downstream when AG assigns `TAKE_TRADE` / `WAIT` / `PASS`
-- entry trigger state plus TP hit events
+Canonical local training schema is the exact contract in `docs/contracts/ag_local_training_schema.md`.
 
-Target viability remains a required internal gate in Pine trigger logic, but it is not a required exported `ml_*` field.
+`ag_fib_snapshots` holds point-in-time snapshot fields keyed by `ts`, including:
 
-The live indicator trigger predicate may only fire when the shared setup archetype is direction-aligned:
+- `anchor_high`, `anchor_low`
+- `anchor_high_bar_ts`, `anchor_low_bar_ts`
+- `fib_range`, `fib_bull`
+- `zz_deviation`, `zz_depth`
+- `anchor_swing_bars`, `anchor_swing_velocity`, `time_since_anchor`
+- `atr14`, `atr_pct`
 
-- `1` = accept continuation
-- `2` = zone rejection
-- `3` = pivot continuation
-- `5` = reentry after TP1
+`ag_fib_interactions` holds candidate interaction and bar-context fields, including:
 
-Setup archetype `4` is reversal context only. It must not authorize a same-direction continuation entry.
+- `snapshot_ts`, `direction`, `fib_level_touched`, `fib_level_price`
+- `touch_distance_pts`, `touch_distance_norm`, `interaction_state`, `archetype`
+- `entry_price`, `sl_price`, `tp1_price`, `tp2_price`, `tp3_price`, `tp4_price`, `tp5_price`
+- `sl_dist_pts`, `sl_dist_atr`, `tp1_dist_pts`, `rr_to_tp1`
+- `open`, `high`, `low`, `close`, `volume`
+- `body_pct`, `upper_wick_pct`, `lower_wick_pct`, `rvol`
+- `rsi14`, `ema9`, `ema21`, `ema50`, `ema200`
+- `ema_stacked_bull`, `ema_stacked_bear`, `ema9_dist_pct`, `macd_hist`, `adx`, `energy`, `confluence_quality`
 
-The candidate setup must come from a snapshot-stable fib state that would have existed at that bar close. Historical anchors may not be retro-rewritten for training.
+`ag_fib_outcomes` holds realized path/outcome fields, including:
 
-Each candidate must later receive:
+- `highest_tp_hit`
+- `hit_tp1`, `hit_tp2`, `hit_tp3`, `hit_tp4`, `hit_tp5`, `hit_sl`
+- `tp1_before_sl`
+- `bars_to_tp1`, `bars_to_sl`, `bars_to_resolution`
+- `mae_pts`, `mfe_pts`
+- `outcome_label`, `observation_window`
 
-- a realized outcome label
-- MAE / MFE measurements
-- a decision code (`TAKE_TRADE` / `WAIT` / `PASS`)
+Offline/training semantics are reconstructed in Python from warehouse OHLCV/context into these canonical local AG tables; local training tables are written by Python only.
 
-The model learns from the candidate/outcome truth. The policy layer maps those model outputs into the decision code.
+### 3.3 Locked Truth Semantics
 
-### 3.1 Locked Truth Semantics
-
-These semantics are now binding for the next schema rewrite:
+These semantics are now binding:
 
 - `warbird_decision_code`
   - `TAKE_TRADE`
   - `WAIT`
   - `PASS`
-- realized economic truth is locked to:
-  - `TP5_HIT`
-  - `TP4_HIT`
-  - `TP3_HIT`
-  - `TP2_HIT`
-  - `TP1_ONLY`
-  - `STOPPED`
-  - `REVERSAL`
-  - `OPEN` (operational-only; exclude from training targets)
+- canonical warehouse outcomes are the exact columns in `ag_fib_outcomes` from `docs/contracts/ag_local_training_schema.md`
+- `outcome_label` is the locked first target field for training
+- `ag_training` excludes rows where `outcome_label = 'CENSORED'`
 - `EXPIRED` and `NO_REACTION` are not canonical economic outcome labels for model truth
 - legacy `hit_*_first` / `prob_hit_*` names in `scripts/warbird/*` are deletion-only local-script debt and must not appear in shared TypeScript types, active APIs, Admin surfaces, packet payloads, or new schema work
 - signal lifecycle and UI state are separate from economic truth and may use different vocabulary
 
 Existing `GO` / `NO_GO` vocabulary is legacy and must not drive the next schema.
 
-### 3.2 Locked Cloud Runtime Subset Families
+### 3.4 Cloud Serving Surfaces
 
-The canonical warehouse remains local. Cloud is restricted to ingress plus curated serving and publish-up surfaces only.
+The canonical warehouse remains local. Cloud is restricted to curated serving and publish-up surfaces only.
 
-Allowed cloud families:
+Cloud receives only these named published surfaces after manual promotion:
 
-1. ingress intake, dedupe, retry, and DLQ surfaces
-   - receive Pine alerts
-   - expose runtime health
-   - must not become canonical candidate truth
-2. curated frontend and admin read models
-   - recent candidate stream
-   - recent signal stream
-   - runtime status and health
-   - operator-facing packet state
-3. packet distribution surfaces
-   - active packet pointer
-   - minimal published packet metadata
-   - packet download reference when required
-4. curated SHAP and report serving surfaces
-   - top feature summaries
-   - report metadata
-   - artifact URL or path references
-5. operational logging
-   - `job_log`
-   - ingress and publish-job health aggregates
-
-The following families remain canonical local-only:
-
-- `warbird_fib_engine_snapshots_15m`
-- `warbird_fib_candidates_15m`
-- `warbird_candidate_outcomes_15m`
 - `warbird_signals_15m`
 - `warbird_signal_events`
 - `warbird_packets`
 - `warbird_packet_activations`
-- `warbird_training_runs`
-- `warbird_training_run_metrics`
-- raw SHAP artifacts
-- wide experiment, feature, and label tables
+- `warbird_packet_metrics`
+- `warbird_packet_feature_importance`
+- `warbird_packet_recommendations`
+- `warbird_packet_setting_hypotheses`
+- `warbird_active_packet_metrics_v`
+- `warbird_active_training_run_metrics_v`
+- `warbird_active_packet_feature_importance_v`
+- `warbird_active_packet_recommendations_v`
+- `warbird_active_packet_setting_hypotheses_v`
+- `warbird_active_signals_v`
+- `warbird_admin_candidate_rows_v`
+- `warbird_candidate_stats_by_bucket_v`
+- `job_log`
+- `mes_1m`, `mes_15m`, `mes_1h`, `mes_4h`, `mes_1d`
+- `cross_asset_1h`, `cross_asset_15m`
+- `econ_calendar`
+- `econ_rates_1d`, `econ_yields_1d`, `econ_fx_1d`, `econ_vol_1d`, `econ_inflation_1d`, `econ_labor_1d`, `econ_activity_1d`, `econ_money_1d`, `econ_commodities_1d`, `econ_indexes_1d`
+
+Cloud receives only derived/published read-model outputs; it does not receive direct copies of local lineage tables.
+
+Cloud never receives:
+
+- `ag_fib_snapshots`
+- `ag_fib_interactions`
+- `ag_fib_outcomes`
+- `ag_training`
+- `ag_training_runs`
+- `ag_training_run_metrics`
+- `ag_artifacts`
+- `ag_shap_feature_summary`
+- `ag_shap_cohort_summary`
+- `ag_shap_interaction_summary`
+- `ag_shap_temporal_stability`
+- `ag_shap_feature_decisions`
+- `ag_shap_run_drift`
+- raw features
+- raw labels
+- raw SHAP matrices
+- raw SHAP interaction matrices
 
 The dashboard and Admin page may read only the distilled cloud runtime subset, not raw SHAP matrices, the full zoo, or local canonical base tables directly.
 
-### 3.3 Non-Canonical Surfaces
+### 3.5 Non-Canonical Surfaces
 
 The following names are legacy bridge surfaces in code and docs, but they are **not** the canonical AG training truth and must not drive new architecture:
 
@@ -209,46 +242,44 @@ The following names are legacy bridge surfaces in code and docs, but they are **
 - `measured_moves`
 - `warbird_daily_bias`
 - `warbird_structure_4h`
-- `warbird_forecasts_1h` — forecast route deleted; this is explicit retirement debt, not future architecture; the table may still exist remotely until drift reconciliation and final retirement, but must not drive any new work
+- `warbird_forecasts_1h` — forecast route deleted; explicit retirement debt
+- `warbird_fib_engine_snapshots_15m` — replaced by `ag_fib_snapshots`
+- `warbird_fib_candidates_15m` — replaced by `ag_fib_interactions`
+- `warbird_candidate_outcomes_15m` — replaced by `ag_fib_outcomes`
 
-As of 2026-03-31 DB-truth audit, the legacy operational tables above do not exist on either checked DB. Any remaining code references to them are schema-stale debt, not proof that the tables are still live.
-
-These references will be retired once the canonical tables above have active writers and all dashboard/API consumers are migrated.
-
-Dashboard and Admin compatibility surfaces should be derived over the cloud runtime subset or other explicitly published read models, not over hidden duplicate warehouse tables.
-
-The following local-only families are research surfaces, not canonical cloud schema:
-
-- `warbird_snapshot_pine_features`
-- `warbird_candidate_macro_context`
-- `warbird_candidate_microstructure`
-- stop-out attribution tables
-- feature ablation tables
-- entry-definition experiment tables
-- SHAP and report artifacts
+These references will be retired once the canonical AG tables have active writers and all dashboard/API consumers are migrated.
 
 ---
 
 ## 4. Target Labels
 
-Each training row is keyed to one MES 15m bar-close setup event and must produce these labels:
+The locked first training target is `outcome_label` from `ag_fib_outcomes`.
 
-| Label | Type | Meaning |
-|------|------|---------|
-| `tp1_before_sl` | Binary | TP1 reached before stop |
-| `tp2_before_sl` | Binary | TP2 reached before stop |
-| `tp3_before_sl` | Binary | TP3 reached before stop |
-| `tp4_before_sl` | Binary | TP4 reached before stop |
-| `tp5_before_sl` | Binary | TP5 reached before stop |
-| `sl_before_tp1` | Binary | stop hit before TP1 |
-| `path_outcome` | Categorical | one of `TP5_HIT`, `TP4_HIT`, `TP3_HIT`, `TP2_HIT`, `TP1_ONLY`, `STOPPED`, `REVERSAL`, `OPEN` |
-| `mae_pts` | Continuous | max adverse excursion in points |
-| `mfe_pts` | Continuous | max favorable excursion in points |
+### 4.1 Canonical Warehouse Outcome Columns (`ag_fib_outcomes`)
 
-Legacy note:
+| Column | Type | Contract Role |
+|---|---|---|
+| `highest_tp_hit` | `int` | Highest target reached in the observation window |
+| `hit_tp1` | `boolean` | Target-1 hit flag |
+| `hit_tp2` | `boolean` | Target-2 hit flag |
+| `hit_tp3` | `boolean` | Target-3 hit flag |
+| `hit_tp4` | `boolean` | Target-4 hit flag |
+| `hit_tp5` | `boolean` | Target-5 hit flag |
+| `hit_sl` | `boolean` | Stop-loss hit flag |
+| `tp1_before_sl` | `boolean` | Path fact: TP1 before stop |
+| `bars_to_tp1` | `int` | Bars from interaction to TP1 |
+| `bars_to_sl` | `int` | Bars from interaction to SL |
+| `bars_to_resolution` | `int` | Bars from interaction to resolved state |
+| `mae_pts` | `float8` | Max adverse excursion |
+| `mfe_pts` | `float8` | Max favorable excursion |
+| `outcome_label` | `text` | Primary multiclass training target |
+| `observation_window` | `int` | Window used for label resolution |
 
-- the old local-only `hit_sl_first`, `hit_pt1_first`, and `hit_pt2_after_pt1` names are scheduled for deletion during the AG workbench rebuild
-- no fallback aliasing of those names is allowed in active shared types, API responses, packets, or dashboard/Admin contracts
+`ag_training` excludes censored rows with `WHERE outcome_label != 'CENSORED'`.
+
+### 4.2 Derived Model-Stage Labels (Not Canonical Warehouse Columns)
+
+Additional policy or research labels can be derived downstream, but they are explicitly non-canonical and outside the warehouse schema contract.
 
 The stop family is bounded to formula-specific IDs:
 
@@ -261,9 +292,9 @@ The stop family is bounded to formula-specific IDs:
 
 Each ID binds to a deterministic formula. See `docs/contracts/stop_families.md` for exact formulas.
 
-If the expected stop heat required to survive the setup is too wide relative to the expected TP1–TP5 edge, the correct decision is `PASS`.
+If the expected stop heat required to survive the setup is too wide relative to the expected TP1-TP5 edge, the correct decision is `PASS`.
 
-The first selector baseline should train on resolved rows only (`TP5_HIT`, `TP4_HIT`, `TP3_HIT`, `TP2_HIT`, `TP1_ONLY`, `STOPPED`, `REVERSAL`) and exclude `OPEN`.
+The first selector baseline should train on resolved rows according to the active `outcome_label` policy and `observation_window` handling in the pipeline configuration.
 
 ---
 
@@ -287,9 +318,8 @@ Only Tier 1 features can become live production logic.
 These are local-research features used by AG for discovery:
 
 - full FRED context from approved retained macro tables
-- GPR / geopolitical risk
-- approved policy-event context from retained non-NEWS sources
-- any other approved macro or event context without an exact Pine analogue and without reopening retired NEWS or sentiment surfaces
+- `econ_calendar` event proximity and impact states
+- any other approved macro or event context without an exact Pine analogue
 
 NEWS and sentiment aggregates are retired from the active contract unless explicitly reopened. They are not part of the default Tier 2 surface.
 
@@ -301,6 +331,7 @@ Tier 2 can influence the research conclusion, but it cannot enter the live Pine 
   - first selector layer for resolved candidate quality
 - **SHAP**
   - diagnostics and promotion gate for feature families and indicator-setting changes
+  - full-surface SHAP is mandatory (see Section 8)
 - **Quantile / pinball models**
   - excursion and uncertainty-band modeling such as `mae_pts` and `mfe_pts`
 - **Monte Carlo**
@@ -329,15 +360,11 @@ All 6 symbols use `.c.0` continuous contracts with `stype_in=continuous`. Databe
 | Macro-FX | 6E (`CME:6E1!`), 6J (`CME:6J1!`) | EMA trend, risk-on/risk-off flow | 6E.c.0, 6J.c.0 | `cross-asset` Edge Function → `cross_asset_1h` (hourly) |
 | Execution | ES VWAP state/event, range expansion, efficiency | Chart-native, zero security calls | N/A | Computed from MES OHLCV directly |
 
-**Dashboard symbol bar:** HG, NQ, 6E, CL displayed as green/red tiles from `cross_asset_1h` (latest 2 rows → hourly change). All positive polarity (up = MES-aligned = green).
-
-**ES chart-native vol fills VIX/VVIX gap:** ATR ratio, range expansion, intrabar efficiency, VWAP state/event — all computed from MES OHLCV directly.
-
 State machine: NEUTRAL(0) → BULL(1) / BEAR(-1). Score > 65 for N bars → BULL. Score < 35 for N bars → BEAR. Exit to NEUTRAL at 50. Override (direct bull↔bear) only when multiple groups extreme same direction.
 
 **Why CME-only:** AG training needs 15m historical data from Databento. NYSE internals (TICK, VOLD), CBOE indices (VIX, VVIX, VIX3M), and ETFs (HYG) are only available on separate exchanges not covered by the CME Standard plan.
 
-**Data tables:** `cross_asset_1h` (hourly, Edge Function), `cross_asset_15m` (15m, backfill script for AG training), `cross_asset_1d` (daily, derived from 1h).
+**Data tables:** `cross_asset_1h` (hourly, Edge Function), `cross_asset_15m` (15m, backfill script for AG training).
 
 ### 6b. Daily Context Exports (NOT gate members)
 
@@ -358,8 +385,8 @@ These are daily-only — same value for all 27 bars in a session. Exported as AG
 
 ### 6d. Macro/Policy Context (server-side)
 
-5. scheduled macro proximity / release window state
-6. approved policy-event shock state from retained non-NEWS sources paired with MES price reaction
+5. scheduled macro proximity / release window state (from `econ_calendar`)
+6. FRED daily families admitted by the current contract
 
 ### Purpose
 
@@ -402,73 +429,120 @@ All metrics are deterministic, point-in-time safe, and computed from MES 15m OHL
 
 ---
 
-## 8. Hidden Export Contract
+## 8. Full-Surface SHAP Program
 
-The active `v7` indicator (`indicators/v7-warbird-institutional.pine`) must expose stable machine-readable outputs for local training capture.
+Full SHAP is mandatory and local-only at raw level.
 
-TradingView enforces a hard maximum of `64` plot counts per script, and hidden `display.none` plots still count toward that limit.
+### 8.1 Local Lineage Tables
 
-Any live Pine export surface that exceeds `64` plot counts is invalid even if local parity passes.
+- `ag_training_runs`
+- `ag_training_run_metrics`
+- `ag_artifacts`
+- `ag_shap_feature_summary`
+- `ag_shap_cohort_summary`
+- `ag_shap_interaction_summary`
+- `ag_shap_temporal_stability`
+- `ag_shap_feature_decisions`
+- `ag_shap_run_drift`
 
-**Current v7 budget: 32 plot + 3 alertcondition = 35/64 (29 headroom).** All server-side-computable features were removed from Pine in the Phase 1E cull. AG owns TA core pack, EMA dist, RVOL, exhaustion, range expansion, efficiency, event_day, and constant-stub IM states — these must NOT be re-added to Pine.
+### 8.2 Raw SHAP Storage
 
-Legacy hidden fields `ml_fib_regime`, the `.786` / `1.0` fib-level export families, and session-activity booleans (`ml_session_*_active`) are retired from the canonical packet. Hidden plots are unconditional `display.none`; there is no `showMLData` gating path in the canonical contract.
+Store append-only raw artifacts in `artifacts/shap/{run_id}/`:
 
-AG-eligible hidden fields emitted by Pine (primitive features only):
+- `shap_values_{fold}_{split}.parquet` — per-row SHAP values
+- `shap_interactions_{fold}_{split}.parquet` — per-row SHAP interaction values
 
-- `ml_direction_code`
-- `ml_setup_archetype_code`
-- `ml_fib_level_touched`
-- `ml_stop_family_code`
-- `ml_event_mode_code`
-- `ml_event_nq_state` (stub — value from `cross_asset_1h` server-side)
-- `ml_event_rty_state` (stub — value from `cross_asset_1h` server-side)
-- `ml_event_cl_state` (stub — value from `cross_asset_1h` server-side)
-- `ml_event_hg_state` (stub — value from `cross_asset_1h` server-side)
-- `ml_event_eur_state` (stub — value from `cross_asset_1h` server-side)
-- `ml_event_jpy_state` (stub — value from `cross_asset_1h` server-side)
-- `ml_event_pivot_interaction_code`
-- `ml_ema21_dir`
-- `ml_ema50_dir`
-- `ml_ema200_dir`
-- `ml_entry_long_trigger`
-- `ml_entry_short_trigger`
-- `ml_tp1_hit_event`
-- `ml_tp2_hit_event`
-- `ml_tp3_hit_event`
-- `ml_tp4_hit_event`
-- `ml_tp5_hit_event`
-- `ml_last_exit_outcome` (7-class: 0=none, 1=TP1, 2=TP2, 3=STOPPED, 4=EXPIRED, 5=TP3, 6=TP4, 7=TP5)
-- `ml_vwap_code`
-- `ml_or_state` (opening range state)
-- `ml_add_slope` (NYSE A/D daily slope)
-- (HTF confluence fields — 3 `request.security()` fib calls)
+Each artifact must include: `interaction_id`, `run_id`, `target_name`, `split_code`, `fold_code`.
 
-AG-owned features (NOT Pine plot exports — computed server-side from Databento OHLCV):
+### 8.3 SHAP Coverage
 
-- TA core pack: EMA(21/50/100/200), MACD hist, RSI(14), ATR(14), ADX(14), volume raw/SMA/ratio/acceleration, bar_spread×vol, OBV, MFI(14)
-- EMA dist_pct (21/50/200)
-- RVOL, range expansion, intrabar efficiency, exhaustion primitives
-- IM basket states: NQ/RTY/CL/HG/6E/6J EMA trend and relative strength (from `cross_asset_1h`)
-- Regime components: leader_score, risk_score, macrofx_score, exec_score
-- Impulse quality, agreement velocity, regime score (AG learns weights from primitives)
-- event_day
+SHAP coverage is locked to the full surface:
 
-Chart-visual/debug-only fields (NOT AG training surface):
+- all 16 fib levels
+- all indicators/features
+- both directions
+- all outcome classes
+- all stop families
+- all sessions
+- all volatility regimes
+- all walk-forward folds
 
-- `ml_confidence_score` — hand-coded heuristic composite; operator confidence must come from calibrated AG packet output per binding rule 0.10
-- `ml_event_shock_score` — pre-composed from alignment, ROC, and conflict
-- `ml_event_reversal_score` — pre-composed from breakAgainst, reject, and conflict booleans
-- `ml_impulse_quality` — hand-coded composite; AG learns weights from OHLCV primitives instead
-- `ml_exhaustion_score` — retired (HyperWave-based); exhaustion features are server-side computable
+### 8.4 Mandatory Cohort Dimensions
 
-These composites may remain in Pine for chart display, but they must NOT appear in the AG training matrix.
+For `ag_shap_cohort_summary`:
 
-The export contract must remain always-on and schema-stable for training capture.
+- fib level
+- direction
+- outcome class
+- stop family
+- session
+- volatility regime
+- fold
+
+### 8.5 Mandatory Analyses
+
+**SHAP interaction analysis:**
+- global pairwise interaction importance
+- fold-specific interaction importance
+- cohort-specific interaction importance
+- prior-run vs current-run interaction drift
+
+**Temporal stability analysis:**
+- fold-over-fold rank correlation
+- normalized importance drift
+- stability bucket per feature
+
+**Baseline drift analysis:**
+- compare each retrain's SHAP against the prior approved run
+- record rank deltas, importance deltas, cohort deltas, and interaction deltas
+
+### 8.6 Feature Decision Protocol
+
+- First run includes every point-in-time-safe available feature
+- No auto-drop after first run
+- `REVIEW_DROP` only after 3 consecutive runs of negligible global importance, no cohort prominence, and no strong interaction role
+- Actual removal requires explicit approval after SHAP evidence is recorded
 
 ---
 
-## 9. Packet Output
+## 9. Training Discipline
+
+Training discipline is locked:
+
+- walk-forward splits only
+- one-session embargo minimum
+- no shuffle
+- no fit on full dataset
+- no tuning on test
+- naive baseline required
+- full run metadata required
+
+---
+
+## 10. Pine Live-Runtime Output Contract
+
+Pine output fields are live/runtime telemetry for chart behavior, alerting, and runtime compatibility only.
+
+Pine output fields are **NOT** the local AG training ingestion path.
+
+The local AG training ingestion path is only: `scripts/ag/` Python reconstruction from local warehouse OHLCV/context -> `ag_fib_snapshots` / `ag_fib_interactions` / `ag_fib_outcomes` -> `ag_training`.
+
+TradingView enforces a hard maximum of `64` output calls per script, and hidden `display.none` plots count toward that limit.
+
+**Current v7 budget: 32 plot + 3 alertcondition = 35/64 (29 headroom).** Any change that exceeds `64` is invalid.
+
+Runtime output families that may remain in Pine:
+
+- live direction/archetype/fib interaction state for chart and alerts
+- entry/exit event flags and TP hit event flags for runtime lifecycle tracking
+- runtime-only context codes required by the active packet and dashboard compatibility surfaces
+- chart-visual diagnostics that are explicitly marked non-training and non-canonical for warehouse ingestion
+
+AG-owned features remain server-side from Databento OHLCV and local warehouse context; they are not Pine plot exports and must not be backfilled into Pine output budget.
+
+---
+
+## 11. Packet Output
 
 AutoGluon must terminate in a Pine-ready packet, not a notebook-only conclusion.
 
@@ -500,7 +574,7 @@ Allowed packet statuses:
 
 ---
 
-## 10. What Is Legacy And Must Not Drive New Work
+## 12. What Is Legacy And Must Not Drive New Work
 
 The following are legacy and must not drive any new implementation:
 
@@ -511,26 +585,31 @@ The following are legacy and must not drive any new implementation:
 - unconstrained model-generated stop prices
 - BigBeluga, LuxAlgo MSB/OB, and LuxAlgo Luminance standalone harness files
 - `ml_pivot_*`, `ml_msb_*`, `ml_ob_*`, and `ml_luminance_*` export families
+- `warbird_fib_engine_snapshots_15m`, `warbird_fib_candidates_15m`, `warbird_candidate_outcomes_15m` — replaced by canonical AG tables
+- all news/options surfaces
+- any versioned canonical name
 
 ---
 
-## 11. File Surfaces
+## 13. File Surfaces
 
 Primary live planning source:
 
 - `docs/MASTER_PLAN.md`
 - `docs/contracts/README.md`
+- `docs/contracts/ag_local_training_schema.md`
 
 Primary current Pine target:
 
 - `indicators/v7-warbird-institutional.pine` (active work surface, v6 is legacy baseline)
 
-Planned AG build surfaces:
+AG build surfaces:
 
-- `scripts/ag/build-fib-snapshots.py`
-- `scripts/ag/build-fib-dataset.py`
-- `scripts/ag/train-fib-model.py`
-- `scripts/ag/evaluate-configs.py`
-- `scripts/ag/generate-packet.py`
+- `scripts/ag/` — full offline pipeline (extract, reconstruct, generate, label, train, SHAP, publish-up)
+
+Artifact surfaces:
+
+- `artifacts/` — append-only model outputs, reports
+- `artifacts/shap/{run_id}/` — raw SHAP parquet artifacts
 
 This file exists to summarize the model contract cleanly. It is not permission to ignore the active plan.

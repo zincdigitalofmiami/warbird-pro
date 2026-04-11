@@ -11,24 +11,29 @@ These rules are NON-NEGOTIABLE. Violations break the project.
 
 ## Database
 
-- Supabase client ONLY. No Prisma. No Drizzle. No ORM.
-- Service role for writes, anon for reads.
-- SQL migrations in `supabase/migrations/`. Sequential numbering.
-- RLS on ALL tables. Admin client: `lib/supabase/admin.ts`.
-- Table prefix: `mes_`, `cross_asset_`, `econ_`, `warbird_`
+- There are exactly two databases in scope:
+  - **Local `warbird`** on PG17 (`127.0.0.1:5432`) — canonical warehouse, training, artifacts, raw SHAP, diagnostics
+  - **Cloud Supabase** (`qhwgrzqjcdtdqppvhhme`) — serving-only for frontend, indicator/runtime, packets, dashboard/admin read models, curated SHAP/report surfaces
+- Supabase client for cloud. Service role for writes, anon for reads.
+- No Prisma. No Drizzle. No ORM.
+- Cloud DDL in `supabase/migrations/`. Local warehouse DDL in `local_warehouse/migrations/`.
+- RLS on ALL cloud tables. Admin client: `lib/supabase/admin.ts`.
+- Table prefix: `mes_`, `cross_asset_`, `econ_`, `warbird_`, `ag_`
 - NEVER use `bhg_`, `BHG`, `mkt_futures_`, or rabid-raccoon legacy naming.
 - All database columns: snake_case.
+- Canonical names never use version suffixes.
 
 ## Scheduling / Crons
 
 - All cron routes validate `CRON_SECRET` and log to `job_log`.
 - All cron routes: `export const maxDuration = 60`
-- Dead schedules must be removed from `vercel.json`.
-- Minimize Vercel function invocations — they run the bill up fast.
+- Supabase pg_cron is the sole schedule producer for cloud ingestion.
+- Dead schedules must be removed by updating the corresponding Supabase cron migration files.
 
 ## Production Boundary
 
-- Local machines: training, calculations, research ONLY.
+- The local `warbird` PG17 warehouse is the canonical long-horizon warehouse. It holds the full data zoo, AG lineage tables and training view, raw SHAP, and all non-serving data.
+- Cloud Supabase receives only published serving surfaces after manual promotion.
 - Production ingestion/crons/chart-serving must NOT depend on local machines.
 - No continuous local runtime for live market data.
 - NEVER use a local Python sidecar for production MES ingestion.
@@ -38,14 +43,14 @@ These rules are NON-NEGOTIABLE. Violations break the project.
 - `npm run build` must pass before every push.
 - No `/* */` block comments to disable code. Use `//` only.
 - No `--no-verify` on git hooks.
-- Push to repo, merge to main, Vercel auto-deploys. NEVER run `npx vercel --prod`.
+- Push to repo, merge to main, deployment pipeline auto-deploys.
 
-## Architecture — TradingView First
+## Architecture — v5 Reset Lock
 
-- TradingView is the UI. No custom frontend.
-- AutoGluon is the brain. AG trains offline, discovers rules/thresholds, bakes into Pine Script.
-- Rabid Raccoon v2 is the indicator — pure display layer + alerts.
+- Cloud serves frontend/dashboard/admin read models and packet/runtime surfaces; cloud is serving-only and must not become a warehouse mirror.
+- Pine is the canonical live generator surface for runtime chart/alert state.
+- Python in `scripts/ag/` is the training generator and populates the local AG lineage contract.
+- Packet promotion is manual: local training and SHAP complete first, then explicit publish-up.
 - 15m is the primary model/chart/setup timeframe.
-- The model is an entry GATE (CLEAN/SURVIVED/STOPPED/REVERSAL), NOT a price predictor.
-- Fibs/decision zones are training FEATURES, not signals.
-- AG decides ALL correlations/weights/importance. No hand-coded logic.
+- The model is an entry gate (`TP1`-`TP5`/`STOPPED`/`REVERSAL` outcome state), not a predicted-price surface.
+- First model target is multiclass `outcome_label`; first feature scope is `MES + cross-asset + macro`.

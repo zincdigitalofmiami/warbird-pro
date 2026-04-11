@@ -21,7 +21,7 @@
 
 - Read AGENTS.md at repo root before any project work.
 - Check the active architecture plan before making architectural decisions.
-- WARBIRD_CANONICAL.md is outdated in places — treat as reference, not ground truth.
+- `docs/MASTER_PLAN.md` (Warbird Full Reset Plan v5) is the only planning authority.
 - Ground decisions in actual repo code/migrations/routes, not docs. Audit first, decide second.
 - Save decisions, plans, and progress to plan files continuously. Never let context loss destroy work.
 

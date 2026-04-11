@@ -1,7 +1,8 @@
 # Warbird Documentation Index
 
-**Date:** 2026-04-07
+**Date:** 2026-04-10
 **Status:** Active Documentation Authority
+**Active Plan:** Warbird Full Reset Plan v5
 
 This file is the single entrypoint for Warbird architecture, contract, and operations documentation.
 
@@ -9,22 +10,25 @@ Ignore all other plans, decisions, scratch notes, and historical architecture do
 
 ## Read Order
 
-1. `docs/MASTER_PLAN.md`
+1. `docs/MASTER_PLAN.md` — Warbird Full Reset Plan v5
 2. `docs/contracts/README.md`
-3. `docs/runbooks/README.md`
-4. `docs/contracts/schema_migration_policy.md`
-5. `docs/cloud_scope.md`
-6. `WARBIRD_MODEL_SPEC.md`
-7. `CLAUDE.md`
-8. `docs/agent-safety-gates.md`
-9. `Powerdrill/reports/2026-04-06-powerdrill-findings.md`
+3. `docs/contracts/ag_local_training_schema.md`
+4. `docs/runbooks/README.md`
+5. `docs/contracts/schema_migration_policy.md`
+6. `docs/cloud_scope.md`
+7. `WARBIRD_MODEL_SPEC.md`
+8. `CLAUDE.md`
+9. `docs/agent-safety-gates.md`
+10. `Powerdrill/reports/2026-04-06-powerdrill-findings.md`
 
 ## Authority Split
 
 - `docs/MASTER_PLAN.md`
-  - the only planning authority
+  - the only planning authority — Warbird Full Reset Plan v5
 - `docs/contracts/`
   - the only interface and payload authority
+- `docs/contracts/ag_local_training_schema.md`
+  - exact local AG column-level schema authority (three tables + `ag_training` view)
 - `docs/cloud_scope.md`
   - the only cloud-whitelist authority
 - `docs/runbooks/README.md`
@@ -32,7 +36,16 @@ Ignore all other plans, decisions, scratch notes, and historical architecture do
 - `CLAUDE.md`
   - current operational truth and runtime status
 - `WARBIRD_MODEL_SPEC.md`
-  - subordinate model contract and packet semantics
+  - subordinate model contract, canonical AG schema, SHAP program, and packet semantics
+
+## Canonical Split
+
+- **Local `warbird`** on PG17 (`127.0.0.1:5432`) = canonical warehouse, training, artifacts, raw SHAP, diagnostics
+- **Cloud Supabase** (`qhwgrzqjcdtdqppvhhme`) + Vercel `warbird-pro` = serving-only for frontend, TradingView/indicator support, packets, dashboard/admin read models, curated SHAP/report surfaces
+- Local warehouse DDL: `local_warehouse/migrations/`
+- Cloud DDL: `supabase/migrations/`
+- AG pipeline: `scripts/ag/`
+- Raw artifacts: `artifacts/`
 
 ## Historical Material
 

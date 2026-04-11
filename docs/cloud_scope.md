@@ -1,101 +1,101 @@
 # Warbird Cloud Scope
 
-**Date:** 2026-04-07
+**Date:** 2026-04-10
 **Status:** Active Cloud Whitelist
+**Governing plan:** Warbird Full Reset Plan v5
 
-This document is the only authority for what may exist in cloud Supabase.
+This document is the only authority for what may exist in cloud Supabase (`qhwgrzqjcdtdqppvhhme`).
 
 If a cloud table, view, function, or blob-serving surface is not listed here, it is out of scope until explicitly approved here first.
 
-## 1. Allowed Cloud Categories
+Cloud promotion is manual. Local training and SHAP must complete first; publish-up happens only after explicit approval.
 
-### 1.1 Ingress
+## 1. Allowed Cloud Surfaces (Named)
 
-Allowed purpose:
+Only the surfaces listed below are allowed in cloud Supabase.
 
-- receive TradingView or Pine alerts
-- validate payloads
-- record minimal runtime intake and error state
+### 1.1 Runtime Signal and Operator Read Surfaces
 
-Allowed object families:
+- `warbird_signals_15m`
+- `warbird_signal_events`
+- `warbird_active_signals_v`
+- `warbird_admin_candidate_rows_v`
+- `warbird_candidate_stats_by_bucket_v`
 
-- ingress intake tables
-- ingress idempotency ledgers
-- retry and DLQ tables
-- ingress health views
+### 1.2 Packet Distribution Surfaces
 
-### 1.2 Frontend Runtime Read Models
+- `warbird_packets`
+- `warbird_packet_activations`
+- `warbird_packet_metrics`
+- `warbird_packet_feature_importance`
+- `warbird_packet_recommendations`
+- `warbird_packet_setting_hypotheses`
 
-Allowed purpose:
+### 1.3 Published Model Diagnostics and Admin Read Models
 
-- power dashboard and operator UX
-- expose live and recent runtime state
-- support admin status views
+- `warbird_active_packet_metrics_v`
+- `warbird_active_training_run_metrics_v`
+- `warbird_active_packet_feature_importance_v`
+- `warbird_active_packet_recommendations_v`
+- `warbird_active_packet_setting_hypotheses_v`
 
-Allowed object families:
+These are published/read-model surfaces. They are not permission to copy local AG lineage tables directly.
 
-- current candidate stream views
-- recent signal stream views
-- runtime status and health views
-- slim operator aggregates
-- compat views required by the active UI
+### 1.4 Market Data Serving Surfaces
 
-### 1.3 Packet Distribution
+- `mes_1m`, `mes_15m`, `mes_1h`, `mes_4h`, `mes_1d`
+- `cross_asset_1h`, `cross_asset_15m`
+- `econ_calendar`
+- `econ_rates_1d`, `econ_yields_1d`, `econ_fx_1d`, `econ_vol_1d`, `econ_inflation_1d`, `econ_labor_1d`, `econ_activity_1d`, `econ_money_1d`, `econ_commodities_1d`, `econ_indexes_1d`
 
-Allowed purpose:
-
-- serve the current active packet and minimal lineage needed by runtime operators
-
-Allowed object families:
-
-- active packet pointer
-- minimal published packet metadata
-- packet blob reference or download location
-- packet activation surface needed by runtime operators
-
-### 1.4 Curated SHAP And Report Serving
-
-Allowed purpose:
-
-- serve report summaries and operator-friendly model diagnostics
-
-Allowed object families:
-
-- SHAP summary tables
-- feature-importance summaries
-- report metadata
-- artifact URL or path references
-
-Raw SHAP matrices, wide experiment outputs, and research-only diagnostics are local-only.
-
-### 1.5 Operational Logging
-
-Allowed purpose:
-
-- support runtime monitoring, retries, failures, and publish-job health
-
-Allowed object families:
+### 1.5 Operational Logging Surfaces
 
 - `job_log`
-- ingress and publish job status tables
-- runtime health aggregates
+
+### 1.6 Real-Time Capture Relay Surfaces
+
+These surfaces exist in cloud solely as automated capture relay points.
+They are NOT serving surfaces, NOT mirrors of local warehouse truth, and
+NOT permanent cloud storage. They exist only to bridge the gap between
+the always-on TradingView server-side alert system and the local warehouse
+nightly sync. Rolling retention only — local warbird holds full history.
+
+- `indicator_snapshots_15m`
+  Populated by: Supabase Edge Function `indicator-capture` receiving Pine alert webhooks
+  Written: once per 15m bar close at `barstate.isconfirmed`
+  Retention: rolling ~90 days (sufficient for nightly sync lag tolerance)
+  Consumed by: nightly Python sync job pulling to local warbird
+  Scope exception rationale: TV alerts are server-side and require a reachable
+  endpoint. Cloud Edge Function is the only reliable always-on receiver.
+  Local warbird is the canonical truth. Cloud holds the relay window only.
+
+Review rule override for section 1.6 surfaces:
+  These surfaces answer Yes to question 1 (they serve the automated training
+  data pipeline which is required for live indicator support) and Yes to
+  question 2 (local canonical truth remains complete — local holds full history).
+  They are approved as capture relay surfaces, not as warehouse extensions.
 
 ## 2. Explicitly Out Of Scope For Cloud
 
-These belong in the local canonical warehouse unless explicitly reapproved:
+These belong in the local canonical `warbird` warehouse unless explicitly reapproved:
 
-- large historical bar warehouses
-- research-only macro or context warehouses
-- canonical lifecycle history beyond the slim runtime subset
-- feature tables
-- label tables
+- `ag_fib_snapshots`
+- `ag_fib_interactions`
+- `ag_fib_outcomes`
+- `ag_training`
+- raw features
+- raw labels
+- raw SHAP matrices
+- raw SHAP interaction matrices
 - training datasets
 - fold tables
 - experiment tables
-- raw SHAP artifacts
 - full packet registry history
 - full activation or rollback lineage used only for research or audit
 - abandoned experiment or agent-created warehouse tables
+- large historical bar warehouses beyond the cloud serving window
+- research-only macro or context warehouses
+- SHAP lineage tables (`ag_training_runs`, `ag_training_run_metrics`, `ag_artifacts`, `ag_shap_feature_summary`, `ag_shap_cohort_summary`, `ag_shap_interaction_summary`, `ag_shap_temporal_stability`, `ag_shap_feature_decisions`, `ag_shap_run_drift`)
 
 ## 3. Candidate Retirement Backlog
 

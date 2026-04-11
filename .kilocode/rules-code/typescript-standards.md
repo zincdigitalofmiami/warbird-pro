@@ -23,4 +23,4 @@
 - Database columns: snake_case always.
 - TypeScript variables: camelCase.
 - API route files: kebab-case matching the URL path.
-- Table prefixes: `mes_`, `cross_asset_`, `econ_`, `warbird_`
+- Table prefixes: `mes_`, `cross_asset_`, `econ_`, `warbird_`, `ag_`
