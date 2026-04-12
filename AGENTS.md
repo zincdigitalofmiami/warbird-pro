@@ -163,17 +163,17 @@ These are explicitly excluded from the canonical `warbird` warehouse:
   in the current session. State intent, wait for approval, then edit.
 - NEVER push Pine changes to TradingView Pine Editor without explicit approval.
 - Pine budget baselines (`v7-warbird-institutional.pine`):
-    Plot budget:    35 / 64
-    Request budget:  4 / 40
+  Plot budget: 37 / 64 (33 plot + 1 plotshape + 3 alertcondition; strategy: 34/64)
+  Request budget: 4 / 40
   Any implementation must be priced against these baselines before code is written.
 - `request.footprint()` must be treated as a tightly budgeted call path.
   All footprint-derived features must be computed from one cached object per bar.
 - Pine verification pipeline is mandatory before every Pine commit:
-    1. pine-facade curl compiler check (authoritative compiler, run first)
-    2. pine-lint.sh (0 errors required, errors block commit)
-    3. check-contamination.sh
-    4. npm run build
-  All four must pass. STATUS: INCOMPLETE if any fail.
+  1. pine-facade curl compiler check (authoritative compiler, run first)
+  2. pine-lint.sh (0 errors required, errors block commit)
+  3. check-contamination.sh
+  4. npm run build
+     All four must pass. STATUS: INCOMPLETE if any fail.
 - Indicator data capture is automated via Pine alert -> webhook -> Supabase.
   Do not use manual TV CSV export as an ongoing process.
   Manual export is one-time historical seed only.

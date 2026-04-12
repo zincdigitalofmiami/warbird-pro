@@ -1,6 +1,7 @@
 # Warbird Full Reset Plan v5: External-Drive Local Warehouse, AG Training View, Full SHAP
 
 ## Summary
+
 - This plan is decision complete. No further repo-level architecture locks remain before execution.
 - Canonical split is fixed:
   - local `warbird` on PG17 `127.0.0.1:5432` = full data zoo, canonical warehouse, training, artifacts, raw SHAP, diagnostics
@@ -20,6 +21,7 @@
 - Cloud promotion is locked to `manual promote`.
 
 ## Repository and Storage Layout
+
 - Everything is rooted on `/Volumes/Satechi Hub/warbird-pro/`.
 - Repo layout is locked to:
   - `local_warehouse/migrations/` = local-only DDL and migration ledger management
@@ -32,6 +34,7 @@
 - PG17 data directory being on the external drive is an infrastructure fact, not a repo contract. The repo only assumes a reachable local PG17 instance at `127.0.0.1:5432`.
 
 ## 2026-04-10 Execution Checkpoint
+
 - Verified directly from the worktree and local PG17:
   - `rabid_raccoon` exists; `warbird` does not yet exist.
   - `local_warehouse/` is absent, so `local_warehouse/migrations/` and `local_schema_migrations` are still pending.
@@ -56,10 +59,10 @@
 - Automated indicator capture pipeline designed: Pine alert -> webhook -> Supabase Edge
   Function -> cloud relay table -> nightly local sync. Recurring manual TV CSV exports
   are removed after one-time historical seed ingest.
-- Phase 0 completion remains blocked until `docs/contracts/ag_local_training_schema.md`
-  is staged in git.
+- Phase 0 complete — `ag_local_training_schema.md` landed at commit 92ea751.
 
 ## Phase 0: Authority Rewrite Order
+
 - Rewrite order is fixed:
   1. `AGENTS.md`
   2. `WARBIRD_MODEL_SPEC.md`
@@ -97,12 +100,11 @@ warehouse execution. It blocks only the Pine indicator implementation work strea
 
 Verified 2026-04-11 by full file audit (Python parser, comment-stripped):
 
-  Output budget:   38 / 64   (34 plot + 1 plotshape + 3 alertcondition, 26 headroom)
-  Request budget:   4 / 40   (3 HTF fib security + 1 A-D line, 36 headroom)
-  request.footprint(): 0      (not yet implemented — Phase 0.5 scope)
+Output budget: 37 / 64 (33 plot + 1 plotshape + 3 alertcondition, 27 headroom)
+Request budget: 4 / 40 (3 HTF fib security + 1 A-D line, 36 headroom)
+request.footprint(): 0 (not yet implemented — Phase 0.5 scope)
 
-Header comment in the Pine file is stale (says 63/64, 11/40). Do not use header as authority.
-This audit is the authoritative baseline.
+Header comment corrected at 2026-04-12 session and now matches this audit.
 
 All additions must be priced against these baselines before any code is written.
 Any implementation exceeding 64 plots or 40 request calls is invalid without
@@ -114,9 +116,9 @@ an explicit approved recount.
 source per bar for all footprint-derived features.
 
 Two confidence tiers are required for all exhaustion-dependent outputs:
-  Tier 1 (full):    geometry + Z-score + footprint confirmed
-  Tier 2 (reduced): geometry + Z-score only, footprint returned `na` or unavailable
-  Both tiers are first-class signal states with distinct visual rendering.
+Tier 1 (full): geometry + Z-score + footprint confirmed
+Tier 2 (reduced): geometry + Z-score only, footprint returned `na` or unavailable
+Both tiers are first-class signal states with distinct visual rendering.
 
 `polyline.new()` replaces multi-line Fibonacci grid construction where equivalent.
 Pine v6 strict booleans are required for exhaustion and hold-state logic.
@@ -133,6 +135,7 @@ Pine v6 strict booleans are required for exhaustion and hold-state logic.
 ### Indicator Implementation Scope — Primary Modules
 
 The indicator update must prioritize these loss-driver corrections:
+
 - Consecutive loss context and cooldown state to prevent revenge re-entry clustering.
 - Exhaustion hold logic to reduce premature exits before structural extension completes.
 - Session-quality labeling and maintenance-window suppression.
@@ -144,29 +147,31 @@ The indicator update must prioritize these loss-driver corrections:
 
 Confluence logic (short side, mirrored for long):
 
-  exhaustion_short =
-    (price >= fib_1272 OR price >= fib_1618)
-    AND (zscore >= 2.5)
-    AND (delta_diverging)
-    AND NOT (stacked_imbalance)
+exhaustion_short =
+(price >= fib_1272 OR price >= fib_1618)
+AND (zscore >= 2.5)
+AND (delta_diverging)
+AND NOT (stacked_imbalance)
 
 Patterns:
+
 - Pattern A (required): delta divergence at extension target.
 - Pattern B (Tier 1 elevation): absorption node near extreme with rejection.
 - Pattern C (Tier 1 elevation): zero-print / finished auction with regime-conditioned threshold.
 
 Tier rendering:
+
 - Tier 1: full confluence and footprint confirmation.
 - Tier 2: geometry + statistics only when footprint unavailable.
 
 ### Automated Indicator Capture Pipeline (Required Before Phase 4)
 
 Pipeline:
-  Pine `alert()` at `barstate.isconfirmed`
-  -> Supabase Edge Function (`indicator-capture`)
-  -> `indicator_snapshots_15m` cloud relay
-  -> nightly sync to local `warbird`
-  -> AG weekly training from local warehouse
+Pine `alert()` at `barstate.isconfirmed`
+-> Supabase Edge Function (`indicator-capture`)
+-> `indicator_snapshots_15m` cloud relay
+-> nightly sync to local `warbird`
+-> AG weekly training from local warehouse
 
 After one-time historical seed ingest, recurring manual TV CSV export is removed.
 
@@ -183,9 +188,10 @@ After one-time historical seed ingest, recurring manual TV CSV export is removed
 **Verified:** `warbird` database live on PG17 (`127.0.0.1:5432`). Owner: `zincdigital`. UTF8.
 **Migrations applied:** 001–006 via `local_warehouse/migrations/`. Ledger: `local_schema_migrations`.
 **Tables created (18):** `mes_15m`, `mes_1h`, `mes_4h`, `mes_1d`, `cross_asset_1h`,
-  `economic_series`, 10 FRED families (`econ_rates_1d` through `econ_indexes_1d`), `econ_calendar`.
+`economic_series`, 10 FRED families (`econ_rates_1d` through `econ_indexes_1d`), `econ_calendar`.
 
 Original requirements:
+
 - ~~Create a clean local database named `warbird`.~~ Done.
 - ~~Use a dedicated local migration system in `local_warehouse/migrations/`.~~ Done.
 - ~~Add a local migration ledger table named `local_schema_migrations`.~~ Done.
@@ -195,15 +201,16 @@ Original requirements:
 ## Phase 2: One-Time Bootstrap from `rabid_raccoon` — COMPLETE 2026-04-11
 
 **Verified row counts (warbird post-bootstrap):**
-- `mes_15m`:       144,540 rows  (2020-01-01 → 2026-03-09)
-- `mes_1h`:         36,321 rows  (2020-01-01 → 2026-03-09)
-- `mes_4h`:          9,513 rows  (2020-01-01 → 2026-03-09, derived from mes_1h)
-- `mes_1d`:          1,919 rows  (2020-01-01 → 2026-03-08)
+
+- `mes_15m`: 144,540 rows (2020-01-01 → 2026-03-09)
+- `mes_1h`: 36,321 rows (2020-01-01 → 2026-03-09)
+- `mes_4h`: 9,513 rows (2020-01-01 → 2026-03-09, derived from mes_1h)
+- `mes_1d`: 1,919 rows (2020-01-01 → 2026-03-08)
 - `cross_asset_1h`: 221,954 rows, all 6 symbols (6E/6J/CL/HG/NQ/RTY, 2020-01-01 → 2026-04-03)
   - HG sourced from `data/cross_asset_1h.parquet` (not in rabid_raccoon). **HG blocker resolved.**
 - `economic_series`: 141 series
 - All 10 FRED families: see CLAUDE.md for per-table counts
-- `econ_calendar`:   3,227 events (2020-01-02 → 2026-12-16)
+- `econ_calendar`: 3,227 events (2020-01-02 → 2026-12-16)
 
 **Bootstrap script:** `local_warehouse/bootstrap/bootstrap_from_rabid_raccoon.sh`
 **HG source:** `data/cross_asset_1h.parquet` (Databento intermarket export, continuous front-month)
@@ -211,6 +218,7 @@ Original requirements:
 `rabid_raccoon` is now legacy reference only. Do not treat it as canonical.
 
 Original requirements:
+
 - Bootstrap source is `rabid_raccoon` on the same PG instance, one time only.
 - After bootstrap, `rabid_raccoon` becomes legacy reference only and must not be treated as canonical again.
 - Import only approved `2020+` core surfaces into `warbird`:
@@ -238,7 +246,8 @@ Original requirements:
   - `HG` is mandatory; if missing in `rabid_raccoon`, source it from the raw drive files before bootstrap signoff
 - Retention floor is locked to `2020-01-01T00:00:00Z` for canonical training surfaces.
 
-## Phase 3: Canonical AG Schema
+## Phase 3: Canonical AG Schema — COMPLETE 2026-04-11
+
 - Implement **three canonical local AG tables and one canonical training view.**
 - Implement the three canonical local AG tables exactly as provided:
   - `ag_fib_snapshots`
@@ -249,7 +258,10 @@ Original requirements:
 - No versioned canonical name is allowed.
 - The canonical warehouse truth remains these three tables plus the supporting market/macro source tables, with `ag_training` as the canonical view over them. Stop-family comparisons and SHAP lineage expand around this base contract; they do not replace it.
 
+**Verified 2026-04-11:** Migration `007_ag_schema.sql` applied. Tables `ag_fib_snapshots`, `ag_fib_interactions`, `ag_fib_outcomes` and view `ag_training` live in `warbird`. Censored filter (`WHERE outcome_label != 'CENSORED'`) present.
+
 ## Phase 4: Python Pipeline in `scripts/ag/`
+
 - Python owns the full offline pipeline:
   - extract from local `warbird`
   - reconstruct fib snapshots
@@ -287,6 +299,7 @@ Original requirements:
   - full run metadata required
 
 ## Phase 5: Full-Surface SHAP Program
+
 - Full SHAP is mandatory and local-only at raw level.
 - Add local lineage tables:
   - `ag_training_runs`
@@ -347,6 +360,7 @@ Original requirements:
   - actual removal requires explicit approval after SHAP evidence is recorded
 
 ## Phase 6: Cloud Serving and Manual Promotion
+
 - Keep current linked projects:
   - Vercel project `warbird-pro`
   - Supabase project `qhwgrzqjcdtdqppvhhme`
@@ -388,6 +402,7 @@ Original requirements:
 - Current known drift remains an execution check, not an architecture blocker.
 
 ## Validation and Acceptance
+
 - Doc acceptance:
   - all three authority docs reflect the new architecture
   - no stale version-suffix canonical naming remains
@@ -418,6 +433,7 @@ Original requirements:
   - no local warehouse truth is exposed directly to cloud consumers
 
 ## Operational Sources
+
 - Vercel environment workflow: [vercel env pull](https://vercel.com/docs/cli/env)
 - Supabase migration workflow: [database migrations](https://supabase.com/docs/guides/deployment/database-migrations)
 - Supabase local/CLI reference: [CLI local development](https://supabase.com/docs/guides/cli/local-development)

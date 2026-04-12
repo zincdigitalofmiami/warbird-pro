@@ -42,6 +42,11 @@ count_plot_calls() {
     rg 'plot(shape|char|arrow|bar|candle)?\(' "$source_file" | rg -v '^\s*//' | wc -l | tr -d ' '
 }
 
+count_alertcondition_calls() {
+    local source_file="$1"
+    rg 'alertcondition\(' "$source_file" | rg -v '^\s*//' | wc -l | tr -d ' '
+}
+
 # ── 1. Hidden ml_* export field parity ──
 extract_ml_fields "$INDICATOR_FILE" "$TMP_DIR/ml_indicator.txt"
 extract_ml_fields "$STRATEGY_FILE" "$TMP_DIR/ml_strategy.txt"
@@ -56,12 +61,17 @@ else
 fi
 
 # ── 2. Plot budget ──
+# TV counts plot*, plotshape, plotchar, plotarrow, plotbar, plotcandle, AND alertcondition()
+# against the 64-call cap. Strategy files use alert() (uncapped), not alertcondition().
 INDICATOR_PLOT_COUNT=$(count_plot_calls "$INDICATOR_FILE")
+INDICATOR_ALERT_COUNT=$(count_alertcondition_calls "$INDICATOR_FILE")
+INDICATOR_TOTAL=$((INDICATOR_PLOT_COUNT + INDICATOR_ALERT_COUNT))
 STRATEGY_PLOT_COUNT=$(count_plot_calls "$STRATEGY_FILE")
-echo "INFO: Total plot-style calls -> indicator=${INDICATOR_PLOT_COUNT}, strategy=${STRATEGY_PLOT_COUNT}"
+echo "INFO: Indicator output calls -> plot*=${INDICATOR_PLOT_COUNT}, alertcondition=${INDICATOR_ALERT_COUNT}, total=${INDICATOR_TOTAL}/64"
+echo "INFO: Strategy output calls  -> plot*=${STRATEGY_PLOT_COUNT}/64"
 
-if [[ "$INDICATOR_PLOT_COUNT" -gt 64 ]]; then
-    echo "FAIL: Indicator exceeds TradingView's 64 plot-count cap (${INDICATOR_PLOT_COUNT}/64)"
+if [[ "$INDICATOR_TOTAL" -gt 64 ]]; then
+    echo "FAIL: Indicator exceeds TradingView's 64 output-call cap (${INDICATOR_TOTAL}/64)"
     FAIL=1
 fi
 

@@ -13,3 +13,6 @@ Until dedicated runbooks are split out further, use these runbook sources:
   - fail-closed execution and verification gates
 
 Future operational procedures should be added here instead of being spread across sidecar notes.
+
+- `docs/runbooks/strategy_tuning.md`
+  - local parameter-search harness for TradingView strategy settings before AG training

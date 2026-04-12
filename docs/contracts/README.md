@@ -17,6 +17,7 @@ Ignore interface definitions in old plans, scratch notes, and historical decisio
 - `packet_schema.md`
 - `schema_migration_policy.md`
 - `ag_local_training_schema.md`
+- `v7_interface_divergence.md`
 
 ## Working Rule
 
