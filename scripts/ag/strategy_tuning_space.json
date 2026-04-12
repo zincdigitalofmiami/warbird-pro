@@ -1,0 +1,139 @@
+{
+  "profile_name": "mes15m_locked_fib_v1",
+  "locked_parameters": {
+    "Acceptance Retest Window (bars)": 6,
+    "Anchor Span = Active Fib Window": true,
+    "Auto-tune ZigZag by Timeframe": false,
+    "Confluence Tolerance (%)": 0.05,
+    "Extend Levels Right": false,
+    "Min Fib Range (ATR)": 0.5,
+    "One-shot event markers/alerts": true,
+    "Rejection = wick into zone then close back out": true,
+    "Show Footprint Audit Table": false,
+    "Target Line Lookback Bars": 40,
+    "ZigZag Depth (manual)": 5,
+    "ZigZag Deviation (manual)": 2.0,
+    "ZigZag Threshold Floor (%)": 0.25
+  },
+  "objective": {
+    "trade_count_bounds": {
+      "max": 2200,
+      "min": 200
+    },
+    "weights": {
+      "drawdown": 0.8,
+      "long_pf": 0.35,
+      "net_pnl": 1.0,
+      "profit_factor": 1.25,
+      "short_pf": 0.85,
+      "survival": 0.35,
+      "trade_penalty": 0.75
+    }
+  },
+  "runtime_context": {
+    "bar_magnifier": true,
+    "commission_per_contract_usd": 1.0,
+    "initial_capital": 50000,
+    "report_window": "FULL",
+    "slippage_ticks": 1,
+    "symbol": "CME_MINI:MES1!",
+    "timeframe": "15"
+  },
+  "search_parameters": {
+    "Exhaustion ATR Multiplier": {
+      "max": 1.0,
+      "min": 0.45,
+      "step": 0.05,
+      "type": "float"
+    },
+    "Exhaustion Z Length": {
+      "type": "int",
+      "values": [10, 14, 20, 30, 50]
+    },
+    "Exhaustion Z Threshold": {
+      "max": 3.2,
+      "min": 1.8,
+      "step": 0.1,
+      "type": "float"
+    },
+    "Extension ATR Tolerance": {
+      "max": 0.2,
+      "min": 0.05,
+      "step": 0.01,
+      "type": "float"
+    },
+    "Extreme Rows To Inspect": {
+      "type": "int",
+      "values": [
+        2,
+        3,
+        4,
+        5,
+        6
+      ]
+    },
+    "Fallback Stop Family": {
+      "type": "categorical",
+      "values": [
+        "ATR_1_0",
+        "ATR_1_5",
+        "ATR_STRUCTURE_1_25",
+        "FIB_NEG_0236",
+        "FIB_NEG_0382",
+        "FIB_0236_ATR_COMPRESS_0_50"
+      ]
+    },
+    "Footprint Imbalance %": {
+      "max": 400,
+      "min": 200,
+      "step": 25,
+      "type": "float"
+    },
+    "Footprint Ticks Per Row": {
+      "type": "int",
+      "values": [
+        2,
+        4,
+        6
+      ]
+    },
+    "Footprint VA %": {
+      "max": 80,
+      "min": 60,
+      "step": 5,
+      "type": "float"
+    },
+    "Gate Shorts In Bull Trend": {
+      "type": "bool"
+    },
+    "Short Gate ADX Floor": {
+      "max": 30,
+      "min": 14,
+      "step": 1,
+      "type": "float"
+    },
+    "Tier 1 Hold Bars": {
+      "type": "int",
+      "values": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        8
+      ]
+    },
+    "Tier 1 Hold Stop ATR": {
+      "max": 3.5,
+      "min": 1.25,
+      "step": 0.25,
+      "type": "float"
+    },
+    "Zero-Print Volume Ratio": {
+      "max": 0.25,
+      "min": 0.05,
+      "step": 0.01,
+      "type": "float"
+    }
+  }
+}

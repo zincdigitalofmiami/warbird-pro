@@ -13,14 +13,15 @@
 //
 // VWAP CODE: +2=reclaim, +1=above, 0=in-band, -1=below, -2=reject. Band=5% ATR around VWAP.
 //
-// REQUEST.SECURITY() BUDGET:
+// REQUEST BUDGET:
 // HTF fib (1H):        [high, low] tuple                 = 1 call
 // HTF fib (4H):        [high, low] tuple                 = 1 call
 // HTF fib (1D):        [high, low] tuple                 = 1 call
 // NYSE A-D Line (D):   close                             = 1 call
-// TOTAL:                                                 = 4 of 40 (10%)
+// Footprint (chart):    request.footprint()              = 1 call
+// TOTAL:                                                 = 5 request.* paths
 //
-// PLOT BUDGET: 33 plot + 1 plotshape + 3 alertcondition = 37/64 (27 headroom)
+// PLOT BUDGET: 46 plot + 2 plotshape + 3 alertcondition = 51/64 (13 headroom)
 // TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed.
 //@version=6
 indicator("Warbird v7 Institutional", shorttitle="WB v7", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100)
@@ -31,7 +32,7 @@ import TradingView/ZigZag/7 as zigzag
 //=====================
 string groupFibEngine = "Fibonacci Engine"
 bool autoTuneZZ = input.bool(true, "Auto-tune ZigZag by Timeframe", group=groupFibEngine,
-  tooltip="ON: 4H+ uses Deviation=4/Depth=20, 1H uses Deviation=3.5/Depth=15, 15m and below uses Deviation=3/Depth=10. Turn OFF to set values manually.")
+  tooltip="ON: 4H+ uses Deviation=4/Depth=20, 1H uses Deviation=3.5/Depth=15, 15m and below uses Deviation=3/Depth=15. Turn OFF to set values manually.")
 float fibDeviationManual = input.float(3.0, "ZigZag Deviation (manual)",
   minval=0.5, maxval=10.0, step=0.5, group=groupFibEngine,
   tooltip="Only used when Auto-tune is OFF.")
@@ -39,13 +40,16 @@ int fibDepthManual = input.int(10, "ZigZag Depth (manual)",
   minval=2, maxval=50, group=groupFibEngine,
   tooltip="Only used when Auto-tune is OFF.")
 float fibConfluenceTolPct = input.float(0.10, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupFibEngine)
+float fibThresholdFloorPct = input.float(0.25, "ZigZag Threshold Floor (%)", minval=0.0, maxval=5.0, step=0.05, group=groupFibEngine,
+  tooltip="Minimum percent move required by the ZigZag after ATR scaling. Lower this if 15m anchors stay too wide even when manual deviation/depth are reduced.")
+float minFibRangeAtr = input.float(1.5, "Min Fib Range (ATR)", minval=0.5, maxval=10.0, step=0.1, group=groupFibEngine)
 
 int _tfSec = timeframe.in_seconds()
 float fibDeviation = autoTuneZZ
   ? (_tfSec >= 14400 ? 4.0 : _tfSec >= 3600 ? 3.5 : 3.0)
   : fibDeviationManual
 int fibDepth = autoTuneZZ
-  ? (_tfSec >= 14400 ? 20 : _tfSec >= 3600 ? 15 : 10)
+  ? (_tfSec >= 14400 ? 20 : 15)
   : fibDepthManual
 
 //=====================
@@ -64,6 +68,7 @@ float FIB_ONE   = 1.0
 
 // Extension ratios
 float FIB_T1    = 1.236
+float FIB_1272  = 1.272  // exhaustion geometry gate only — not drawn on chart
 float FIB_W1382 = 1.382  // intermediate waypoint
 float FIB_W150  = 1.5    // intermediate waypoint
 float FIB_T2    = 1.618
@@ -94,10 +99,27 @@ int retestBars   = input.int(6, "Acceptance Retest Window (bars)", minval=1, gro
 bool rejectWick   = input.bool(true, "Rejection = wick into zone then close back out", group=groupLogic)
 bool oneShotEvent = input.bool(true, "One-shot event markers/alerts", group=groupLogic)
 float exhAtrMult = input.float(0.7, "Exhaustion ATR Multiplier", minval=0.3, maxval=1.0, step=0.05, group=groupLogic)
+bool gateShortsInBullTrend = input.bool(true, "Gate Shorts In Bull Trend", group=groupLogic,
+  tooltip="Blocks bearish accept-entry triggers when the broader trend context is bullish and rising. Keeps the engine from bleeding into obvious countertrend shorts.")
+float shortTrendGateAdx = input.float(18.0, "Short Gate ADX Floor", minval=5.0, maxval=50.0, step=0.5, group=groupLogic,
+  tooltip="Minimum ADX required before the bullish-trend short gate activates.")
 
 string groupStops = "Stop Logic"
 string stopFamilyId = input.string("ATR_1_5", "Fallback Stop Family", options=["FIB_NEG_0236", "FIB_NEG_0382", "ATR_1_0", "ATR_1_5", "ATR_STRUCTURE_1_25", "FIB_0236_ATR_COMPRESS_0_50"], group=groupStops,
   tooltip="Local fallback stop family for the indicator overlay and hidden stop export. Use this until the AG packet runtime can publish a live stop-family decision back to TradingView.")
+float continuationHoldStopAtrMult = input.float(2.0, "Tier 1 Hold Stop ATR", minval=1.0, maxval=4.0, step=0.25, group=groupStops,
+  tooltip="When a same-direction Tier 1 continuation signal fires during an active trade, temporarily widen the stop to entry +/- ATR x this multiplier for the configured hold bars.")
+
+string groupFootprint = "Footprint Exhaustion"
+int footprintTicksPerRow = input.int(4, "Footprint Ticks Per Row", minval=1, group=groupFootprint)
+float footprintVaPercent = input.float(70.0, "Footprint VA %", minval=1.0, maxval=100.0, step=1.0, group=groupFootprint)
+float footprintImbalancePercent = input.float(300.0, "Footprint Imbalance %", minval=100.0, maxval=1000.0, step=10.0, group=groupFootprint)
+int exhaustionZLen = input.int(20, "Exhaustion Z Length", minval=10, maxval=100, group=groupFootprint)
+float exhaustionZThreshold = input.float(2.5, "Exhaustion Z Threshold", minval=1.0, maxval=5.0, step=0.1, group=groupFootprint)
+float exhaustionLevelAtrTol = input.float(0.10, "Extension ATR Tolerance", minval=0.01, maxval=0.50, step=0.01, group=groupFootprint)
+float zeroPrintVolRatio = input.float(0.12, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
+int stackedImbalanceRows = input.int(3, "Extreme Rows To Inspect", minval=1, maxval=10, group=groupFootprint)
+int continuationHoldBars = input.int(4, "Tier 1 Hold Bars", minval=1, maxval=20, group=groupFootprint)
 
 //=====================
 // VISUALS (colors/widths locked to spec — see constants above)
@@ -341,7 +363,7 @@ fibZzUpdate() =>
     var fibSettings = zigzag.Settings.new(fibDeviation, fibDepth, color(na), false, false, false, false, "Absolute", true)
     var zigzag.ZigZag fibZZ = zigzag.newInstance(fibSettings)
     var zigzag.Pivot lastPvt = na
-    fibSettings.devThreshold := ta.atr(10) / close * 100 * fibDeviation
+    fibSettings.devThreshold := math.max(ta.atr(10) / close * 100 * fibDeviation, fibThresholdFloorPct)
     bool newPivot = false
     float pivotHighPrice = na
     float pivotLowPrice = na
@@ -416,17 +438,16 @@ if not na(fibAnchorHigh) and not na(fibAnchorLow)
         confluenceQuality := float(confHits) * anchorRange
 
 float fibRange = fibAnchorHigh - fibAnchorLow
-bool isValid = not na(fibAnchorHigh) and not na(fibAnchorLow) and fibRange > 0
-float fibMidpoint = fibAnchorLow + fibRange * 0.5
-float hystBand = fibRange * 0.02
+float minFibRange = minFibRangeAtr * atr14
+bool isValid = not na(fibAnchorHigh) and not na(fibAnchorLow) and fibRange >= minFibRange
 
-// v6 midpoint hysteresis kept fib orientation stable on the chart and
-// avoided the upside-down grid behavior caused by leg-only direction flips.
+// Structural direction follows anchor seniority. The grid only flips when
+// a new anchor relationship is confirmed, not when price chops around a midpoint.
 var bool fibBull = true
-if fibRange > 0
-    if close >= fibMidpoint + hystBand
+if isValid
+    if anchorHighBar > anchorLowBar
         fibBull := true
-    else if close <= fibMidpoint - hystBand
+    else if anchorLowBar > anchorHighBar
         fibBull := false
 else
     fibBull := true
@@ -536,6 +557,13 @@ float barEfficiency = math.abs(close - open) / math.max(barRange, syminfo.mintic
 float execDir = vwapCode == 2 ? 1.0 : vwapCode == -2 ? -1.0 : vwapCode == 1 ? 0.5 : vwapCode == -1 ? -0.5 : 0.0
 float execQual = 0.5 * barEfficiency + 0.5 * math.min(rangeExpClamped / 3.0, 1.0)
 float execScore = execDir * (0.5 + 0.5 * execQual)
+bool bullishTrendBlocksShorts = gateShortsInBullTrend and (
+    adxVal >= shortTrendGateAdx and
+    diPlus > diMinus and
+    close > ema100 and
+    ema100 > nz(ema100[1], ema100) and
+    vwapCode >= 0 and
+    adSlopeNorm >= 0)
 
 //=====================
 // STRUCTURE CONDITIONS (direction-aware)
@@ -577,6 +605,12 @@ bool tagT5 = confirmed and not na(pT5) and (dir == 1 ? high >= pT5 : low <= pT5)
 bool tagT4Event = oneShotEvent ? (tagT4 and not tagT4[1]) : tagT4
 bool tagT5Event = oneShotEvent ? (tagT5 and not tagT5[1]) : tagT5
 
+var bool ladderInvalidated = false
+if zzNewPivot
+    ladderInvalidated := false
+if breakAgainstConfirmed
+    ladderInvalidated := true
+
 bool pivotNearZone = isValid and close <= zoneUpper and close >= zoneLower
 int eventPivotInteractionCode = breakInDir ? 4 : rejectAtZone ? 3 : acceptInDir ? 1 : breakAgainst ? 2 : pivotNearZone ? 5 : 0
 
@@ -612,6 +646,81 @@ if isValid
         fibLevelTouched := 100
 
 //=====================
+// FOOTPRINT EXHAUSTION (full v6 footprint path)
+// Geometry + signed Z-score + footprint divergence.
+// Tier 1 requires live footprint confirmation.
+// Tier 2 is geometry + statistics only when footprint is unavailable.
+//=====================
+float p1272 = fibPrice(FIB_1272)
+float exhaustionTol = atr14 * exhaustionLevelAtrTol
+bool exhAt1272 = not na(p1272) and (dir == 1 ? high >= p1272 - exhaustionTol : low <= p1272 + exhaustionTol)
+bool exhAt1618 = not na(pT2) and (dir == 1 ? high >= pT2 - exhaustionTol : low <= pT2 + exhaustionTol)
+bool mlExhGeomConfluence = isValid and confirmed and (exhAt1272 or exhAt1618)
+float exhaustionTriggerPrice = exhAt1618 ? pT2 : exhAt1272 ? p1272 : na
+
+float exhaustionProbePrice = dir == 1 ? high : low
+float exhaustionMean = ta.sma(close, exhaustionZLen)
+float exhaustionStd = ta.stdev(close, exhaustionZLen)
+float mlExhZScore = exhaustionStd > 0 ? (exhaustionProbePrice - exhaustionMean) / exhaustionStd : 0.0
+bool mlExhZExtreme = math.abs(mlExhZScore) >= exhaustionZThreshold
+bool exhZDirectional = dir == 1 ? mlExhZScore >= exhaustionZThreshold : mlExhZScore <= -exhaustionZThreshold
+
+int hourEt = hour(time, "America/New_York")
+bool mlExhSessionValid = hourEt != 17
+
+footprint reqFootprint = request.footprint(footprintTicksPerRow, footprintVaPercent, footprintImbalancePercent)
+bool mlExhFootprintAvailable = not na(reqFootprint)
+float footprintRowSize = footprintTicksPerRow * syminfo.mintick
+float footprintDelta = mlExhFootprintAvailable ? footprint.delta(reqFootprint) : na
+
+volume_row pocRow = mlExhFootprintAvailable ? footprint.poc(reqFootprint) : na
+volume_row triggerRow = mlExhFootprintAvailable and not na(exhaustionTriggerPrice) ? footprint.get_row_by_price(reqFootprint, exhaustionTriggerPrice) : na
+volume_row extremeRow = mlExhFootprintAvailable ? footprint.get_row_by_price(reqFootprint, dir == 1 ? high : low) : na
+
+float pocRowTop = not na(pocRow) ? volume_row.up_price(pocRow) : na
+float pocRowBottom = not na(pocRow) ? volume_row.down_price(pocRow) : na
+float pocRowVol = not na(pocRow) ? volume_row.total_volume(pocRow) : na
+float triggerRowDelta = not na(triggerRow) ? volume_row.delta(triggerRow) : na
+float extremeRowVol = not na(extremeRow) ? volume_row.total_volume(extremeRow) : na
+float extremeRowVolRatio = not na(pocRowVol) and pocRowVol > 0 and not na(extremeRowVol) ? extremeRowVol / pocRowVol : na
+
+int stackedImbalanceCount = 0
+if mlExhFootprintAvailable
+    array<volume_row> footprintRows = footprint.rows(reqFootprint)
+    int rowCount = array.size(footprintRows)
+    int rowsToInspect = math.min(stackedImbalanceRows, rowCount)
+    if rowsToInspect > 0
+        if dir == 1
+            for offset = 0 to rowsToInspect - 1
+                volume_row row = array.get(footprintRows, rowCount - 1 - offset)
+                if volume_row.has_buy_imbalance(row)
+                    stackedImbalanceCount += 1
+        else
+            for offset = 0 to rowsToInspect - 1
+                volume_row row = array.get(footprintRows, offset)
+                if volume_row.has_sell_imbalance(row)
+                    stackedImbalanceCount += 1
+bool stackedImbalance = stackedImbalanceCount >= 2
+
+bool mlExhDeltaDiv = mlExhFootprintAvailable and not na(triggerRowDelta) and not na(footprintDelta) and (
+    dir == 1 ? (triggerRowDelta <= 0 and footprintDelta <= 0) : (triggerRowDelta >= 0 and footprintDelta >= 0)
+)
+bool mlExhAbsorption = mlExhFootprintAvailable and not na(exhaustionTriggerPrice) and not na(pocRowTop) and not na(pocRowBottom) and (
+    dir == 1 ?
+        (high - pocRowTop <= footprintRowSize and close < open and close <= exhaustionTriggerPrice) :
+        (pocRowBottom - low <= footprintRowSize and close > open and close >= exhaustionTriggerPrice)
+)
+bool mlExhZeroPrint = mlExhFootprintAvailable and not na(extremeRowVolRatio) and extremeRowVolRatio <= zeroPrintVolRatio and not na(extremeRow) and (volume_row.buy_volume(extremeRow) == 0 or volume_row.sell_volume(extremeRow) == 0)
+int footprintEvidenceCount = (mlExhDeltaDiv ? 1 : 0) + (mlExhAbsorption ? 1 : 0) + (mlExhZeroPrint ? 1 : 0)
+
+bool tier1Exhaustion = mlExhSessionValid and mlExhGeomConfluence and exhZDirectional and mlExhFootprintAvailable and footprintEvidenceCount >= 2 and not stackedImbalance
+bool tier2Exhaustion = mlExhSessionValid and mlExhGeomConfluence and exhZDirectional and not mlExhFootprintAvailable
+int mlExhConfidenceTier = tier1Exhaustion ? 1 : tier2Exhaustion ? 2 : 0
+bool bearishExhaustion = confirmed and dir == 1 and mlExhConfidenceTier > 0
+bool bullishExhaustion = confirmed and dir == -1 and mlExhConfidenceTier > 0
+int exhaustionSignalDir = bearishExhaustion ? -1 : bullishExhaustion ? 1 : 0
+
+//=====================
 // TRADE STATE MACHINE (setup -> active -> TP progress -> final resolution)
 //=====================
 var int TRADE_NONE    = 0
@@ -633,6 +742,7 @@ var float tp2Price = na
 var float tp3Price = na
 var float tp4Price = na
 var float tp5Price = na
+var float entryAtr = na
 var int setupBar = na
 var int entryBar = na
 var int lastExitBar = na
@@ -642,6 +752,13 @@ var int tradeDir = 0          // direction captured at SETUP→ACTIVE (safe: not
 // This remains the resolved-path export. trade_state can stay in TP1-TP4 progress while the trade is still live.
 var int lastExitOutcome = 0
 var int highestTargetHit = 0   // 0=none, 1=TP1, 2=TP2, 3=TP3, 4=TP4, 5=TP5
+var int lastExhTriggerBar = na
+var int lastExhTriggerDir = 0
+var int lastTier1ExhBar = na
+var int lastTier1ExhDir = 0
+var int lastContTriggerBar = na
+var int lastContTriggerDir = 0
+var int mlContConfidenceTier = 0
 int cooldownLen = 8 // bars to wait after exit (8 × 15m = 2h minimum; 4 was too short — consecutive entries corrupt AG samples)
 int barsSinceExit = not na(lastExitBar) ? bar_index - lastExitBar : 999
 bool cooldownActive = barsSinceExit < cooldownLen
@@ -685,24 +802,21 @@ float tp5Level   = pT5
 // Stop geometry is exported for AG and diagnostics, but not used as a live Pine gate.
 float slDistPts = math.abs(entryLevel - slLevel)
 float slDistAtr = atr14 > 0 ? slDistPts / atr14 : 0.0
-bool fibExhFlag = barstate.isconfirmed and energy < 40 and (
-    math.abs(close - pPivot) < atr14 * 0.1 or
-    math.abs(close - p618) < atr14 * 0.1 or
-    math.abs(close - p382) < atr14 * 0.1 or
-    math.abs(close - pT1) < atr14 * 0.1 or
-    math.abs(close - pT2) < atr14 * 0.1 or
-    math.abs(close - pT3) < atr14 * 0.1 or
-    math.abs(close - pT4) < atr14 * 0.1 or
-    math.abs(close - pT5) < atr14 * 0.1 or
-    math.abs(close - slLevel) < atr14 * 0.1)
-bool entryLongTrigger  = acceptEvent and dir == 1
-bool entryShortTrigger = acceptEvent and dir == -1
+bool entryLongTrigger  = acceptEvent and dir == 1 and not ladderInvalidated
+bool entryShortTrigger = acceptEvent and dir == -1 and not ladderInvalidated and not bullishTrendBlocksShorts
 
 if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or entryLongTrigger or entryShortTrigger)
-    log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} longTrig={5} shortTrig={6}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, entryLongTrigger, entryShortTrigger))
+    log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} longTrig={5} shortTrig={6} shortGate={7} fpCount={8}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, entryLongTrigger, entryShortTrigger, bullishTrendBlocksShorts, footprintEvidenceCount))
 
 if confirmed
-    if tradeState == TRADE_NONE and pivotNearZone and not cooldownActive
+    if exhaustionSignalDir != 0
+        lastExhTriggerBar := bar_index
+        lastExhTriggerDir := exhaustionSignalDir
+        if mlExhConfidenceTier == 1
+            lastTier1ExhBar := bar_index
+            lastTier1ExhDir := exhaustionSignalDir
+
+    if tradeState == TRADE_NONE and pivotNearZone and not cooldownActive and not ladderInvalidated
         tradeState := TRADE_SETUP
         setupBar := bar_index
 
@@ -714,6 +828,7 @@ if confirmed
         tp3Price := tp3Level
         tp4Price := tp4Level
         tp5Price := tp5Level
+        entryAtr := atr14
         tradeDir  := dir      // lock direction here — anchor may shift by exit bar
         highestTargetHit := 0
         tradeState := TRADE_ACTIVE
@@ -721,17 +836,53 @@ if confirmed
 
     bool tradeInFlight = tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
 
-    if tradeInFlight
+    // ── CONTINUATION EVIDENCE (same-direction absorption during active trade) ──
+    // Separate from reversal exhaustion path. Evaluated against tradeDir, not exh dir.
+    int contStackedSameDirCount = 0
+    if mlExhFootprintAvailable and tradeInFlight and tradeDir != 0
+        array<volume_row> fpRowsCont = footprint.rows(reqFootprint)
+        int rowCntCont = array.size(fpRowsCont)
+        int rowsChk = math.min(stackedImbalanceRows, rowCntCont)
+        if rowsChk > 0
+            if tradeDir == 1
+                for ri = 0 to rowsChk - 1
+                    volume_row rw = array.get(fpRowsCont, rowCntCont - 1 - ri)
+                    if volume_row.has_buy_imbalance(rw)
+                        contStackedSameDirCount += 1
+            else
+                for ri = 0 to rowsChk - 1
+                    volume_row rw = array.get(fpRowsCont, ri)
+                    if volume_row.has_sell_imbalance(rw)
+                        contStackedSameDirCount += 1
+    bool contDeltaAligned = tradeInFlight and mlExhFootprintAvailable and not na(footprintDelta) and (tradeDir == 1 ? footprintDelta >= 0 : footprintDelta <= 0)
+    bool contImbalanceAligned = contStackedSameDirCount >= 2
+    bool continuationTier1Fired = mlExhSessionValid and mlExhFootprintAvailable and tradeInFlight and contDeltaAligned and contImbalanceAligned
+    bool continuationTier2Fired = mlExhSessionValid and not mlExhFootprintAvailable and tradeInFlight
+    mlContConfidenceTier := continuationTier1Fired ? 1 : continuationTier2Fired ? 2 : 0
+    if continuationTier1Fired
+        lastContTriggerBar := bar_index
+        lastContTriggerDir := tradeDir
+
+    bool continuationHoldActiveLocal = tradeInFlight and not na(lastContTriggerBar) and bar_index - lastContTriggerBar <= continuationHoldBars and lastContTriggerDir == tradeDir
+    float holdEmergencyStopPriceLocal = not na(entryPrice) and not na(entryAtr) and tradeDir != 0 ? roundToTick(tradeDir == 1 ? entryPrice - entryAtr * continuationHoldStopAtrMult : entryPrice + entryAtr * continuationHoldStopAtrMult) : na
+    float activeTradeStopPrice = tradeInFlight ? (
+         continuationHoldActiveLocal and not na(holdEmergencyStopPriceLocal)
+             ? (tradeDir == 1 ? math.min(slPrice, holdEmergencyStopPriceLocal) : math.max(slPrice, holdEmergencyStopPriceLocal))
+             : slPrice
+    ) : na
+
+    bool canResolveTrade = tradeInFlight and not na(entryBar) and bar_index > entryBar
+    if canResolveTrade
         if tradeDir == 1
             int targetHitNow = high >= tp5Price ? 5 : high >= tp4Price ? 4 : high >= tp3Price ? 3 : high >= tp2Price ? 2 : high >= tp1Price ? 1 : 0
-            if low <= slPrice
+            if low <= activeTradeStopPrice
                 tradeState := TRADE_STOPPED
             else if targetHitNow > highestTargetHit
                 highestTargetHit := targetHitNow
                 tradeState := targetHitNow == 5 ? TRADE_HIT_TP5 : targetHitNow == 4 ? TRADE_HIT_TP4 : targetHitNow == 3 ? TRADE_HIT_TP3 : targetHitNow == 2 ? TRADE_HIT_TP2 : TRADE_HIT_TP1
         else
             int targetHitNow = low <= tp5Price ? 5 : low <= tp4Price ? 4 : low <= tp3Price ? 3 : low <= tp2Price ? 2 : low <= tp1Price ? 1 : 0
-            if high >= slPrice
+            if high >= activeTradeStopPrice
                 tradeState := TRADE_STOPPED
             else if targetHitNow > highestTargetHit
                 highestTargetHit := targetHitNow
@@ -755,9 +906,24 @@ if confirmed
         tp3Price := na
         tp4Price := na
         tp5Price := na
+        entryAtr := na
         setupBar := na
         entryBar := na
         highestTargetHit := 0
+
+bool tradeInFlightNow = tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
+bool continuationHoldActive = tradeInFlightNow and not na(lastContTriggerBar) and bar_index - lastContTriggerBar <= continuationHoldBars and lastContTriggerDir == tradeDir
+float holdEmergencyStopPrice = not na(entryPrice) and not na(entryAtr) and tradeDir != 0 ? roundToTick(tradeDir == 1 ? entryPrice - entryAtr * continuationHoldStopAtrMult : entryPrice + entryAtr * continuationHoldStopAtrMult) : na
+float activeStopPrice = tradeInFlightNow ? (
+     continuationHoldActive and not na(holdEmergencyStopPrice)
+         ? (tradeDir == 1 ? math.min(slPrice, holdEmergencyStopPrice) : math.max(slPrice, holdEmergencyStopPrice))
+         : slPrice
+) : na
+float mlExhBarsSinceTrigger = not na(lastExhTriggerBar) ? float(bar_index - lastExhTriggerBar) : na
+bool showBearishExhaustion = bearishExhaustion
+bool showBullishExhaustion = bullishExhaustion
+color bearishExhaustionColor = mlExhConfidenceTier == 1 ? COLOR_STOP : color.new(COLOR_STOP, 35)
+color bullishExhaustionColor = mlExhConfidenceTier == 1 ? COLOR_TARGET : color.new(COLOR_TARGET, 35)
 
 // Contrarian reversal setup: CHoCH fires opposite to last completed trade direction
 // within 10 bars of exit. Flags mean-reversion opportunity after TP2 tag or SL stop-out.
@@ -825,7 +991,8 @@ drawAnchoredLine(lineT3,    true, pT3,    COLOR_TARGET,              WIDTH_TARGE
 drawAnchoredLine(lineT4,    true, pT4,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
 drawAnchoredLine(lineT5,    true, pT5,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
 
-plotshape(fibExhFlag, "Exhaustion", shape.diamond, location.abovebar, COLOR_PIVOT, 0, "EXH", color.white, true, size.tiny, force_overlay=true)
+plotshape(showBearishExhaustion, "Bearish Exhaustion", shape.diamond, location.abovebar, bearishExhaustionColor, 0, "", color.white, true, size.small, force_overlay=true)
+plotshape(showBullishExhaustion, "Bullish Exhaustion", shape.diamond, location.belowbar, bullishExhaustionColor, 0, "", color.white, true, size.small, force_overlay=true)
 
 if not na(zoneFillUpper) and not na(zoneFillLower)
     box.set_left(zoneBox, drawLeftBar)
@@ -898,6 +1065,21 @@ plot(nz(fibTouchVolDelta), "fib_touch_vol_delta", display=display.none, editable
 // ml_liq_sweep: signed (1=bull sweep, -1=bear sweep, 0=none)
 plot(liqSweepBull ? 1.0 : liqSweepBear ? -1.0 : 0.0, "ml_liq_sweep", display=display.none, editable=false)
 
+// ── FOOTPRINT EXHAUSTION ──
+plot(mlExhGeomConfluence ? 1.0 : 0.0, "ml_exh_geom_confluence", display=display.none, editable=false)
+plot(mlExhZScore, "ml_exh_z_score", display=display.none, editable=false)
+plot(mlExhZExtreme ? 1.0 : 0.0, "ml_exh_z_extreme", display=display.none, editable=false)
+plot(mlExhDeltaDiv ? 1.0 : 0.0, "ml_exh_delta_div", display=display.none, editable=false)
+plot(mlExhAbsorption ? 1.0 : 0.0, "ml_exh_absorption", display=display.none, editable=false)
+plot(mlExhZeroPrint ? 1.0 : 0.0, "ml_exh_zero_print", display=display.none, editable=false)
+plot(float(mlExhConfidenceTier), "ml_exh_confidence_tier", display=display.none, editable=false)
+plot(mlExhFootprintAvailable ? 1.0 : 0.0, "ml_exh_footprint_available", display=display.none, editable=false)
+plot(mlExhSessionValid ? 1.0 : 0.0, "ml_exh_session_valid", display=display.none, editable=false)
+plot(mlExhBarsSinceTrigger, "ml_exh_bars_since_trigger", display=display.none, editable=false)
+plot(float(mlContConfidenceTier), "ml_cont_confidence_tier", display=display.none, editable=false)
+plot(not na(lastContTriggerBar) ? float(bar_index - lastContTriggerBar) : na, "ml_cont_bars_since_trigger", display=display.none, editable=false)
+plot(mlExhConfidenceTier > 0 and tradeInFlightNow and exhaustionSignalDir != tradeDir ? 1.0 : 0.0, "ml_reversal_warning_in_trade", display=display.none, editable=false)
+
 // ── STRUCTURE / ICT ──
 plot(chochBull ? 1.0 : chochBear ? -1.0 : 0.0, "ml_choch", display=display.none, editable=false)
 // PIT NOTE: chochBull/chochBear fire at bar N+5 (ta.pivothigh rightbars=5).
@@ -917,7 +1099,7 @@ plot(float(vwapCode), "ml_vwap_code", display=display.none, editable=false)
 // ml_adline_slope: NYSE A-D daily slope via security call. Lag by 1 day in AG preprocessing.
 plot(adSlopeNorm, "ml_adline_slope", display=display.none, editable=false)
 
-// ── PLOT BUDGET: 33 plot + 1 plotshape + 3 alertcondition = 37/64 (27 headroom) ──
+// ── PLOT BUDGET: 43 plot + 2 plotshape + 3 alertcondition = 48/64 (16 headroom) ──
 
 //=====================
 // ALERTS
