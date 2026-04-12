@@ -19,18 +19,20 @@ Read and follow AGENTS.md at the repository root.
 
 ### Active Plan Phase
 
-**Warbird Full Reset Plan v5** is active. Phase 0 (Authority Rewrite Order) reconciliation is complete in working tree, including cloud-surface whitelist reconciliation across `docs/cloud_scope.md`, `docs/MASTER_PLAN.md`, and `WARBIRD_MODEL_SPEC.md`, and read-order reconciliation between `AGENTS.md` and `docs/INDEX.md`, but Phase 0 is not yet landed because `docs/contracts/ag_local_training_schema.md` is still untracked in git. Active execution remains blocked before Phase 1 kickoff until authority docs are landed.
+**Warbird Full Reset Plan v5** is active. Phases 0–3 are complete and landed. Phase 4 (Python Pipeline) is the current execution front.
 
 Phase execution order:
-- Phase 0: Authority Rewrite Order — complete (`AGENTS.md`, `WARBIRD_MODEL_SPEC.md`, `docs/MASTER_PLAN.md`, `docs/contracts/ag_local_training_schema.md`, `docs/cloud_scope.md`, `.kilocode/rules/warbird-hard-rules.md`)
-- Phase 1: Local Warehouse Creation — `warbird` database, `local_warehouse/migrations/`, `local_schema_migrations` ledger
-- Phase 2: One-Time Bootstrap from `rabid_raccoon` — approved 2020+ core surfaces
-- Phase 3: Canonical AG Schema — three canonical local AG tables plus the `ag_training` view
+
+- Phase 0: Authority Rewrite Order — COMPLETE (landed commit 92ea751)
+- Phase 1: Local Warehouse Creation — COMPLETE 2026-04-11
+- Phase 2: One-Time Bootstrap from `rabid_raccoon` — COMPLETE 2026-04-11
+- Phase 3: Canonical AG Schema — COMPLETE 2026-04-11 (migration 007)
 - Phase 4: Python Pipeline in `scripts/ag/` — extract, reconstruct, generate, label, train, SHAP, publish-up
 - Phase 5: Full-Surface SHAP Program — lineage tables, raw artifacts, cohort/interaction/temporal/drift analysis
 - Phase 6: Cloud Serving and Manual Promotion
 
 ### What Works (Cloud Side)
+
 - MES chart pipeline end-to-end (Databento Live API → cron → Supabase → Realtime → chart)
 - Real-time MES minute path: Edge Function `mes-1m` connects to Databento Live API (TCP gateway), streams `ohlcv-1s` for `MES.c.0` (continuous), aggregates 1s → 1m, upserts `mes_1m`, rolls up touched 15m buckets into `mes_15m`. Zero lag — data arrives within the current minute. Falls back to Historical API for gaps > 60 min.
 - `mes-hourly` Edge Function pulls `ohlcv-1h` and `ohlcv-1d` directly from Databento Historical API. Rolls 1h → 4h locally.
@@ -38,7 +40,9 @@ Phase execution order:
 - Cross-asset pipeline: `cross-asset` Edge Function pulls `ohlcv-1h` from Databento Historical API for all active DATABENTO symbols. 4 shards fire hourly at `:05/:06/:07/:08` Sun-Fri (migration 040).
 - All Databento calls use `.c.0` continuous front-month contracts with `stype_in=continuous`. No manual contract-roll logic.
 - Live core retention floor is `2020-01-01T00:00:00Z`.
-- `indicators/v7-warbird-institutional.pine` is the active Pine work surface. Compiles clean, TV-validated. Output budget: 38/64 (34 plot + 1 plotshape + 3 alertcondition, 26 headroom). 4 `request.security()` calls of 40 budget. `request.footprint()` = 0 (not yet implemented). Budget verified 2026-04-11.
+- `indicators/v7-warbird-institutional.pine` is the active Pine work surface. Compiles clean, TV-validated. Output budget: 51/64 (46 plot + 2 plotshape + 3 alertcondition, 13 headroom). 4 `request.security()` calls + 1 `request.footprint()` call (live, implemented). Budget verified 2026-04-13.
+- `indicators/v7-warbird-strategy.pine` is the AG training data generator. Compiles clean. Output budget: 48/64 (46 plot + 2 plotshape, 16 headroom). Commission floor at $1.00/side. `use_bar_magnifier=true`, `slippage=1` pinned in `strategy()`. Budget verified 2026-04-13.
+- v7 parity guard (`scripts/guards/check-indicator-strategy-parity.sh`) updated for v7: ml_* parity, budget caps, coupled input defaults, strategy execution primitives, pinned TV defaults.
 - ESLint gate passes clean (`npm run lint` = 0 errors, 0 warnings).
 - Migration reconciliation through `045` is verified local↔remote.
 - Security advisor: 0 code warnings.
@@ -55,11 +59,12 @@ Phase execution order:
   (revenge re-entry clustering, premature exits, session-quality degradation, sizing in drawdown).
 
 ### What Doesn't Work Yet (v5 Execution)
+
 - ~~Local `warbird` PG17 database: not yet created (Phase 1)~~ **DONE 2026-04-11** — `warbird` created on PG17.
 - ~~`local_warehouse/migrations/` directory: not yet created (Phase 1)~~ **DONE 2026-04-11** — 6 migrations applied (001-006). 18 tables + ledger live.
 - ~~`local_schema_migrations` ledger table: not yet created (Phase 1)~~ **DONE 2026-04-11**
 - ~~One-time bootstrap from `rabid_raccoon`: not yet run (Phase 2)~~ **DONE 2026-04-11** — All surfaces bootstrapped. HG loaded from `data/cross_asset_1h.parquet`. All 6 cross-asset symbols live. 221,954 cross-asset rows through 2026-04-03.
-- Three canonical local AG tables and one canonical training view (`ag_training`): not yet created (Phase 3)
+- ~~Three canonical local AG tables and one canonical training view (`ag_training`): not yet created (Phase 3)~~ **DONE 2026-04-11** — migration 007. 3 tables + view live.
 - Python pipeline in `scripts/ag/`: not yet built (Phase 4)
 - Full-surface SHAP program: not yet built (Phase 5)
 - Cloud serving promotion: blocked on Phases 1-5 (Phase 6)
@@ -77,6 +82,7 @@ Phase execution order:
 - Trade-review timestamp join into feature lineage surfaces: not yet executed.
 
 ### Legacy / Stale Code (Known Debt)
+
 - `detect-setups` and `score-trades` exist as App Router routes (`app/api/cron/`) but have no active cron schedule and reference dropped/renamed tables. Not ported to Edge Functions.
 - `lib/warbird/queries.ts` reads missing legacy warbird tables.
 - `scripts/warbird/build-warbird-dataset.ts` still references `news_signals`, `trump_effect_1d`, and `warbird_setups`.
@@ -86,9 +92,11 @@ Phase execution order:
 - Legacy warbird operational tables read by `/api/warbird/signal`, `/api/warbird/history`, `/api/warbird/dashboard` do NOT exist in local or cloud. Runtime containment is in place (returns degradation payload).
 
 ### Architecture Direction
+
 Follow Warbird Full Reset Plan v5 only. No other plan drives implementation.
 
 ### Locked Rules
+
 - 15m is the primary model/chart/setup timeframe.
 - The canonical trade object is the MES 15m fib setup keyed by MES 15m bar close in `America/Chicago`.
 - Any `1H` wording outside archived docs is legacy and must not drive new work.
@@ -109,7 +117,7 @@ Follow Warbird Full Reset Plan v5 only. No other plan drives implementation.
 - Training discipline: walk-forward splits only, one-session embargo minimum, no shuffle, no fit on full dataset, no tuning on test, naive baseline required, full run metadata required.
 - Do not trust docs, prior agent summaries, or build success as proof of schema truth. Verify directly.
 - AG owns TA core pack computation server-side from Databento OHLCV. These are NOT Pine plot exports.
-- TradingView enforces a hard maximum of 64 output calls per script. Current v7 budget: 35/64 (29 headroom).
+- TradingView enforces a hard maximum of 64 output calls per script. Current v7 budget: 51/64 (13 headroom). Strategy: 48/64 (16 headroom).
 - Decision vocabulary: `TAKE_TRADE`, `WAIT`, `PASS`.
 - No mock data, no inactive Databento symbols, no Prisma/ORM paths.
 - Pine budget audit is required before any indicator implementation workstream.
