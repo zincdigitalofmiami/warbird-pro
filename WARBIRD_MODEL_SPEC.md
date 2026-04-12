@@ -41,6 +41,20 @@ This document is a subordinate reference for the model contract. It must not ove
 28. Exhaustion context is exported as `ml_*` hidden features in `ag_fib_interactions`.
     It is not a hard gate suppressing candidate row emission.
     Broad candidate emission is preserved. AG discovers the weights.
+    Exhaustion has two distinct evidence paths in Pine v7 (2026-04-13):
+    (a) **Reversal exhaustion** (`bearishExhaustion` / `bullishExhaustion`): fires at
+        extension levels (1.272 / 1.618) when footprint shows counter-direction pressure.
+        `exhaustionSignalDir` stores the reversal direction (−1 or +1 opposing `dir`).
+        Features: `ml_exh_confidence_tier`, `ml_exh_delta_div`, `ml_exh_absorption`,
+        `ml_exh_zero_print`, `ml_exh_z_score`, `ml_reversal_warning_in_trade`.
+    (b) **Continuation evidence** (`continuationTier1Fired` / `continuationTier2Fired`):
+        evaluated against `tradeDir` during an active trade — same-direction delta +
+        stacked buy/sell imbalances confirm absorption at pullback. This path drives
+        the hold guard (`continuationHoldActive`) and export features
+        `ml_cont_confidence_tier`, `ml_cont_bars_since_trigger`.
+        Prior to 2026-04-13 the hold guard was structurally dead (used reversal direction
+        `lastTier1ExhDir == tradeDir` which is always false for same-direction continuation).
+        Fixed by splitting the two paths into distinct Pine state variables.
 29. S/R feature architecture is locked to per-type wide numeric families
     (`dist_*`, `at_*`, `above_*`, `flip_*`, `reject_*`, `vol_at_*`, `*_is_missing`).
     All values normalized by ATR or percent. Raw absolute level prices are
@@ -257,23 +271,23 @@ The locked first training target is `outcome_label` from `ag_fib_outcomes`.
 
 ### 4.1 Canonical Warehouse Outcome Columns (`ag_fib_outcomes`)
 
-| Column | Type | Contract Role |
-|---|---|---|
-| `highest_tp_hit` | `int` | Highest target reached in the observation window |
-| `hit_tp1` | `boolean` | Target-1 hit flag |
-| `hit_tp2` | `boolean` | Target-2 hit flag |
-| `hit_tp3` | `boolean` | Target-3 hit flag |
-| `hit_tp4` | `boolean` | Target-4 hit flag |
-| `hit_tp5` | `boolean` | Target-5 hit flag |
-| `hit_sl` | `boolean` | Stop-loss hit flag |
-| `tp1_before_sl` | `boolean` | Path fact: TP1 before stop |
-| `bars_to_tp1` | `int` | Bars from interaction to TP1 |
-| `bars_to_sl` | `int` | Bars from interaction to SL |
-| `bars_to_resolution` | `int` | Bars from interaction to resolved state |
-| `mae_pts` | `float8` | Max adverse excursion |
-| `mfe_pts` | `float8` | Max favorable excursion |
-| `outcome_label` | `text` | Primary multiclass training target |
-| `observation_window` | `int` | Window used for label resolution |
+| Column               | Type      | Contract Role                                    |
+| -------------------- | --------- | ------------------------------------------------ |
+| `highest_tp_hit`     | `int`     | Highest target reached in the observation window |
+| `hit_tp1`            | `boolean` | Target-1 hit flag                                |
+| `hit_tp2`            | `boolean` | Target-2 hit flag                                |
+| `hit_tp3`            | `boolean` | Target-3 hit flag                                |
+| `hit_tp4`            | `boolean` | Target-4 hit flag                                |
+| `hit_tp5`            | `boolean` | Target-5 hit flag                                |
+| `hit_sl`             | `boolean` | Stop-loss hit flag                               |
+| `tp1_before_sl`      | `boolean` | Path fact: TP1 before stop                       |
+| `bars_to_tp1`        | `int`     | Bars from interaction to TP1                     |
+| `bars_to_sl`         | `int`     | Bars from interaction to SL                      |
+| `bars_to_resolution` | `int`     | Bars from interaction to resolved state          |
+| `mae_pts`            | `float8`  | Max adverse excursion                            |
+| `mfe_pts`            | `float8`  | Max favorable excursion                          |
+| `outcome_label`      | `text`    | Primary multiclass training target               |
+| `observation_window` | `int`     | Window used for label resolution                 |
 
 `ag_training` excludes censored rows with `WHERE outcome_label != 'CENSORED'`.
 
@@ -353,12 +367,12 @@ The regime gate produces a continuous score (0-100) from grouped intraday indica
 
 All 6 symbols use `.c.0` continuous contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic needed.
 
-| Group | Symbols | Detection | Databento | Data Pipeline |
-|---|---|---|---|---|
-| Leadership | NQ (`CME_MINI:NQ1!`) | EMA trend, relative strength vs MES | NQ.c.0 | `cross-asset` Edge Function → `cross_asset_1h` (hourly) |
-| Risk Appetite | RTY (`CME_MINI:RTY1!`), CL (`NYMEX:CL1!`), HG (`COMEX:HG1!`) | EMA trend, correlation divergence | RTY.c.0, CL.c.0, HG.c.0 | `cross-asset` Edge Function → `cross_asset_1h` (hourly) |
-| Macro-FX | 6E (`CME:6E1!`), 6J (`CME:6J1!`) | EMA trend, risk-on/risk-off flow | 6E.c.0, 6J.c.0 | `cross-asset` Edge Function → `cross_asset_1h` (hourly) |
-| Execution | ES VWAP state/event, range expansion, efficiency | Chart-native, zero security calls | N/A | Computed from MES OHLCV directly |
+| Group         | Symbols                                                      | Detection                           | Databento               | Data Pipeline                                           |
+| ------------- | ------------------------------------------------------------ | ----------------------------------- | ----------------------- | ------------------------------------------------------- |
+| Leadership    | NQ (`CME_MINI:NQ1!`)                                         | EMA trend, relative strength vs MES | NQ.c.0                  | `cross-asset` Edge Function → `cross_asset_1h` (hourly) |
+| Risk Appetite | RTY (`CME_MINI:RTY1!`), CL (`NYMEX:CL1!`), HG (`COMEX:HG1!`) | EMA trend, correlation divergence   | RTY.c.0, CL.c.0, HG.c.0 | `cross-asset` Edge Function → `cross_asset_1h` (hourly) |
+| Macro-FX      | 6E (`CME:6E1!`), 6J (`CME:6J1!`)                             | EMA trend, risk-on/risk-off flow    | 6E.c.0, 6J.c.0          | `cross-asset` Edge Function → `cross_asset_1h` (hourly) |
+| Execution     | ES VWAP state/event, range expansion, efficiency             | Chart-native, zero security calls   | N/A                     | Computed from MES OHLCV directly                        |
 
 State machine: NEUTRAL(0) → BULL(1) / BEAR(-1). Score > 65 for N bars → BULL. Score < 35 for N bars → BEAR. Exit to NEUTRAL at 50. Override (direct bull↔bear) only when multiple groups extreme same direction.
 
@@ -370,11 +384,11 @@ State machine: NEUTRAL(0) → BULL(1) / BEAR(-1). Score > 65 for N bars → BULL
 
 These are daily-only — same value for all 27 bars in a session. Exported as AG training features, NOT used in the 15m regime gate.
 
-| Symbol | Source | Role |
-|---|---|---|
-| VIX | FRED (daily) | Vol regime context — AG learns low-vol vs high-vol behavior |
-| SKEW | `CBOE:SKEW` | Tail-risk hedging — institutions hedge before selling |
-| NYSE A/D | `USI:ADD` | Advance-Decline breadth — divergence = exhaustion warning |
+| Symbol   | Source       | Role                                                        |
+| -------- | ------------ | ----------------------------------------------------------- |
+| VIX      | FRED (daily) | Vol regime context — AG learns low-vol vs high-vol behavior |
+| SKEW     | `CBOE:SKEW`  | Tail-risk hedging — institutions hedge before selling       |
+| NYSE A/D | `USI:ADD`    | Advance-Decline breadth — divergence = exhaustion warning   |
 
 ### 6c. MES-Native State (chart OHLCV)
 
@@ -407,23 +421,23 @@ It must not become a separate trade engine detached from the fib contract.
 
 The three standalone harnesses (BigBeluga Pivot Levels, LuxAlgo MSB/OB Toolkit, LuxAlgo Luminance Engine) have been retired. The 15-metric TA core pack is now **AG-owned and computed server-side from Databento OHLCV**. These metrics are NOT Pine plot exports and must not be re-added to the Pine output budget.
 
-| Metric | Formula |
-|---|---|
-| EMA(close, 21) | Exponential MA, 21 bar |
-| EMA(close, 50) | Exponential MA, 50 bar |
-| EMA(close, 100) | Exponential MA, 100 bar |
-| EMA(close, 200) | Exponential MA, 200 bar |
-| MACD histogram (12, 26, 9) | MACD diff histogram |
-| RSI(close, 14) | Relative Strength Index |
-| ATR(14) | Average True Range |
-| ADX(14) | Average Directional Index |
-| Raw bar volume | Volume |
-| SMA(volume, 20) | Volume SMA |
-| volume / SMA(volume, 20) | Volume ratio |
-| Change in vol_ratio bar-over-bar | Volume acceleration |
-| (high - low) × volume | Bar spread × volume |
-| On-Balance Volume (cumulative) | OBV |
-| Money Flow Index(hlc3, 14) | MFI |
+| Metric                           | Formula                   |
+| -------------------------------- | ------------------------- |
+| EMA(close, 21)                   | Exponential MA, 21 bar    |
+| EMA(close, 50)                   | Exponential MA, 50 bar    |
+| EMA(close, 100)                  | Exponential MA, 100 bar   |
+| EMA(close, 200)                  | Exponential MA, 200 bar   |
+| MACD histogram (12, 26, 9)       | MACD diff histogram       |
+| RSI(close, 14)                   | Relative Strength Index   |
+| ATR(14)                          | Average True Range        |
+| ADX(14)                          | Average Directional Index |
+| Raw bar volume                   | Volume                    |
+| SMA(volume, 20)                  | Volume SMA                |
+| volume / SMA(volume, 20)         | Volume ratio              |
+| Change in vol_ratio bar-over-bar | Volume acceleration       |
+| (high - low) × volume            | Bar spread × volume       |
+| On-Balance Volume (cumulative)   | OBV                       |
+| Money Flow Index(hlc3, 14)       | MFI                       |
 
 All metrics are deterministic, point-in-time safe, and computed from MES 15m OHLCV — no Pine plot budget cost. AG discovers thresholds, weights, and interactions from these primitives via SHAP.
 
@@ -482,17 +496,20 @@ For `ag_shap_cohort_summary`:
 ### 8.5 Mandatory Analyses
 
 **SHAP interaction analysis:**
+
 - global pairwise interaction importance
 - fold-specific interaction importance
 - cohort-specific interaction importance
 - prior-run vs current-run interaction drift
 
 **Temporal stability analysis:**
+
 - fold-over-fold rank correlation
 - normalized importance drift
 - stability bucket per feature
 
 **Baseline drift analysis:**
+
 - compare each retrain's SHAP against the prior approved run
 - record rank deltas, importance deltas, cohort deltas, and interaction deltas
 
@@ -529,7 +546,7 @@ The local AG training ingestion path is only: `scripts/ag/` Python reconstructio
 
 TradingView enforces a hard maximum of `64` output calls per script, and hidden `display.none` plots count toward that limit.
 
-**Current v7 budget: 32 plot + 3 alertcondition = 35/64 (29 headroom).** Any change that exceeds `64` is invalid.
+**Current v7 budget: 33 plot + 1 plotshape + 3 alertcondition = 37/64 (27 headroom).** Any change that exceeds `64` is invalid.
 
 Runtime output families that may remain in Pine:
 
