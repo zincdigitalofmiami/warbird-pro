@@ -98,7 +98,7 @@ string groupLogic = "Structure Logic"
 int retestBars   = input.int(6, "Acceptance Retest Window (bars)", minval=1, group=groupLogic)
 bool rejectWick   = input.bool(true, "Rejection = wick into zone then close back out", group=groupLogic)
 bool oneShotEvent = input.bool(true, "One-shot event markers/alerts", group=groupLogic)
-float exhAtrMult = input.float(0.7, "Exhaustion ATR Multiplier", minval=0.3, maxval=1.0, step=0.05, group=groupLogic)
+
 bool gateShortsInBullTrend = input.bool(true, "Gate Shorts In Bull Trend", group=groupLogic,
   tooltip="Blocks bearish accept-entry triggers when the broader trend context is bullish and rising. Keeps the engine from bleeding into obvious countertrend shorts.")
 float shortTrendGateAdx = input.float(18.0, "Short Gate ADX Floor", minval=5.0, maxval=50.0, step=0.5, group=groupLogic,
@@ -274,30 +274,6 @@ if not na(nearestFvgBearMid) and high > nearestFvgBearMid
 // ATR-normalized distance to nearest FVG
 float fvgBullDist = (not na(nearestFvgBullMid) and atr14 > 0) ? (close - nearestFvgBullMid) / atr14 : 0.0
 float fvgBearDist = (not na(nearestFvgBearMid) and atr14 > 0) ? (nearestFvgBearMid - close) / atr14 : 0.0
-
-//=====================
-// EXHAUSTION SCORE (HyperWave oscillator + centered Money Flow)
-// Source: LuxAlgo Oscillator Matrix exact formula
-// HyperWave: ta.ema(ta.linreg((close - avg(hi,lo,av)) / (hi-lo) * 100, len, 0), sL)
-// Money Flow: ta.sma(ta.mfi(hl2, 35) - 50, 6) — centered at zero
-// Exhaustion = both overbought/oversold together
-//=====================
-int hwLen = 7
-int hwSmooth = 3
-float hwHi = ta.highest(high, hwLen)
-float hwLo = ta.lowest(low, hwLen)
-float hwAvg = ta.sma(hl2, hwLen)
-float hwRange = hwHi - hwLo
-float hwRaw = hwRange != 0 ? (close - math.avg(hwHi, hwLo, hwAvg)) / hwRange * 100.0 : 0.0
-float hwOsc = ta.ema(ta.linreg(hwRaw, hwLen, 0), hwSmooth)
-
-// Centered Money Flow (MFI centered at zero)
-float mfCentered = ta.sma(ta.mfi(hl2, 35) - 50, 6)
-
-// Exhaustion score: 0-100, peaks when both HyperWave and MF are extreme in same direction
-float hwNorm = math.max(-100.0, math.min(100.0, hwOsc))  // clamp
-float mfNorm = math.max(-50.0, math.min(50.0, mfCentered))
-float exhaustionScore = math.abs(hwNorm) / 100.0 * 50.0 + math.abs(mfNorm) / 50.0 * 50.0
 
 //=====================
 // HTF FIB CONFLUENCE (1H, 4H, Daily)
@@ -484,22 +460,6 @@ int htfConfPivot = htfConfluenceCheck(pPivot, fibRange)
 int htfConf382   = htfConfluenceCheck(p382, fibRange)
 int htfConf618   = htfConfluenceCheck(p618, fibRange)
 int htfConfTotal = htfConfPivot + htfConf382 + htfConf618
-
-//=====================
-// EXHAUSTION DIAMOND (precursor visual at fib interaction)
-// Close-bar only precursor from the v6 engine. This is a heads-up signal,
-// not the trade trigger.
-//=====================
-float pVel = ta.roc(close, 5) / (atr14 + 0.0001)
-float vVel = ta.roc(volume, 5)
-float exhScore = pVel > 0 and vVel < 0 ? 1.0 : pVel < 0 and vVel < 0 ? -1.0 : 0.0
-bool shrinking = ta.atr(3) < ta.atr(8) * exhAtrMult
-bool isDoji = math.abs(close - open) < (high - low + 0.0001) * 0.2
-float candleExh = (shrinking ? 0.33 : 0.0) + (isDoji ? 0.33 : 0.0)
-float volDelta = volume * ((high - low) == 0 ? 0 : (2 * close - high - low) / (high - low))
-float resonance = ta.correlation(volDelta, close - close[1], 14)
-float energy = 100.0 - (math.abs(exhScore) * 40.0 + candleExh * 40.0 + (resonance < 0.3 ? 20.0 : 0.0))
-energy := math.max(0.0, math.min(100.0, energy))
 
 //=====================
 // VOLUME DELTA AT FIB TOUCHES

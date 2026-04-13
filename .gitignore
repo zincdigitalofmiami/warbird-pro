@@ -88,3 +88,7 @@ indicators/v1-*.pine
 indicators/v2-*.pine
 indicators/v6-*.pine
 indicators/harnesses/
+.worktrees/
+
+# tuning artifacts (generated output — not source)
+artifacts/

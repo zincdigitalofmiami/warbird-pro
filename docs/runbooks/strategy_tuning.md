@@ -11,17 +11,68 @@ and produce a defensible minimum-viable settings lock before AutoGluon starts op
 This is **not** AutoGluon training. AG does the real optimization via live packets after Phase 4.
 This harness locks the settings floor AG trains from. AG must not train from a garbage baseline.
 
-Three commands: `suggest`, `record`, `leaderboard`. No DOM scraping, no automated TV control.
-The authoritative evaluation mode is `CSV_FULL` — every other mode is deprecated.
+Three commands: `suggest`, `record`, `leaderboard`. The authoritative evaluation mode is `CSV_FULL` —
+every other mode is deprecated.
+
+**Preferred path: CDP automation** (`tv_auto_tune.py`) — applies inputs, waits for recalc, and reads
+`reportData().trades()` directly. No CSV export needed. See [Automated Workflow](#automated-workflow-preferred) below.
 
 ## Files
 
 - Search space: [scripts/ag/strategy_tuning_space.json](scripts/ag/strategy_tuning_space.json)
 - CLI: [scripts/ag/tune_strategy_params.py](scripts/ag/tune_strategy_params.py)
+- CDP automation: [scripts/ag/tv_auto_tune.py](scripts/ag/tv_auto_tune.py)
 - Local tables: `warbird_strategy_tuning_batches`, `warbird_strategy_tuning_trials`
 - Migrations: [local_warehouse/migrations/008_strategy_tuning_trials.sql](local_warehouse/migrations/008_strategy_tuning_trials.sql), [009](local_warehouse/migrations/009_strategy_tuning_evaluation_mode.sql)
 - Suggested configs: `artifacts/tuning/suggestions/<timestamp>/trial_*.json`
 - JSONL fallback: `artifacts/tuning/strategy_trials.jsonl` (use `--storage jsonl` to activate)
+
+## Automated Workflow (preferred)
+
+`tv_auto_tune.py` connects to TradingView Desktop via Chrome DevTools Protocol (CDP),
+applies all inputs via `setInputValues()`, polls `isLoading()` until recalc completes,
+reads `reportData().trades()` directly, and records the trial — no CSV export needed.
+
+### Prerequisites
+
+1. TradingView Desktop must be launched with CDP enabled:
+   ```
+   open -a "TradingView" --args --remote-debugging-port=9222
+   ```
+2. Active chart: `CME_MINI:MES1!` 15m with Warbird v7 Strategy loaded.
+3. Strategy Tester → Properties → **From** set to `2020-01-01`, Bar Magnifier ON.
+4. `pip install requests websockets` (one-time, if not already installed).
+
+> **Entity ID note:** `STRATEGY_ENTITY_ID = "kGnTgb"` is set at the top of `tv_auto_tune.py`.
+> If the chart is reloaded and the strategy gets a new entity ID, update this constant.
+> Run `chart_get_state` via the MCP or check `chart.getAllStudies()` in the TV console.
+
+### Automated run
+
+```bash
+# Generate new trial batch (same as before)
+python scripts/ag/tune_strategy_params.py suggest --count 20
+
+# Run the batch automatically via CDP -- no manual knob-turning or CSV export
+python scripts/ag/tv_auto_tune.py run --batch-dir artifacts/tuning/suggestions/<timestamp>/
+
+# Run a single trial
+python scripts/ag/tv_auto_tune.py run --trial-file artifacts/tuning/suggestions/<timestamp>/trial_001.json
+
+# Review leaderboard (same as before)
+python scripts/ag/tune_strategy_params.py leaderboard --top 20
+```
+
+Trials are stored in the same `warbird_strategy_tuning_trials` table with `evaluation_mode = 'CSV_FULL'`
+and `source_csv = 'tv_auto_tune:cdp'`. The leaderboard and scoring are identical to manual CSV runs.
+
+### Adverse excursion sign convention
+
+TV `reportData().trades()` returns `dd.v` as a positive magnitude (e.g., `117.25`).
+The tuner's 30-tick survival boundary uses a signed convention (`survival_stop_usd = -37.50`).
+`tv_auto_tune.py` negates `dd.v` before the survival check — this matches the CSV convention exactly.
+
+---
 
 ## Manual Deep Backtesting Checklist
 

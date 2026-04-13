@@ -31,7 +31,7 @@
 // Footprint (chart):    request.footprint()              = 1 call
 // TOTAL:                                                 = 5 request.* paths
 //
-// PLOT BUDGET: 43 plot + 2 plotshape = 45/64 (19 headroom)
+// PLOT BUDGET: 50 plot + 2 plotshape = 52/64 (12 headroom)
 //@version=6
 strategy("Warbird v7 Strategy", shorttitle="WB7 Strat", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100, pyramiding=0, process_orders_on_close=false, use_bar_magnifier=true, slippage=1, default_qty_type=strategy.fixed, default_qty_value=1, initial_capital=50000, currency=currency.USD, commission_type=strategy.commission.cash_per_contract, commission_value=1.00)
 import TradingView/ZigZag/7 as zigzag
@@ -107,7 +107,7 @@ string groupLogic = "Structure Logic"
 int retestBars   = input.int(6, "Acceptance Retest Window (bars)", minval=1, group=groupLogic)
 bool rejectWick   = input.bool(true, "Rejection = wick into zone then close back out", group=groupLogic)
 bool oneShotEvent = input.bool(true, "One-shot event markers/alerts", group=groupLogic)
-float exhAtrMult = input.float(0.7, "Exhaustion ATR Multiplier", minval=0.3, maxval=1.0, step=0.05, group=groupLogic)
+
 bool gateShortsInBullTrend = input.bool(true, "Gate Shorts In Bull Trend", group=groupLogic,
   tooltip="Blocks bearish accept-entry triggers when the broader trend context is bullish and rising. Keeps the engine from bleeding into obvious countertrend shorts.")
 float shortTrendGateAdx = input.float(18.0, "Short Gate ADX Floor", minval=5.0, maxval=50.0, step=0.5, group=groupLogic,
@@ -296,30 +296,6 @@ float fvgBullDist = (not na(nearestFvgBullMid) and atr14 > 0) ? (close - nearest
 float fvgBearDist = (not na(nearestFvgBearMid) and atr14 > 0) ? (nearestFvgBearMid - close) / atr14 : 0.0
 
 //=====================
-// EXHAUSTION SCORE (HyperWave oscillator + centered Money Flow)
-// Source: LuxAlgo Oscillator Matrix exact formula
-// HyperWave: ta.ema(ta.linreg((close - avg(hi,lo,av)) / (hi-lo) * 100, len, 0), sL)
-// Money Flow: ta.sma(ta.mfi(hl2, 35) - 50, 6) — centered at zero
-// Exhaustion = both overbought/oversold together
-//=====================
-int hwLen = 7
-int hwSmooth = 3
-float hwHi = ta.highest(high, hwLen)
-float hwLo = ta.lowest(low, hwLen)
-float hwAvg = ta.sma(hl2, hwLen)
-float hwRange = hwHi - hwLo
-float hwRaw = hwRange != 0 ? (close - math.avg(hwHi, hwLo, hwAvg)) / hwRange * 100.0 : 0.0
-float hwOsc = ta.ema(ta.linreg(hwRaw, hwLen, 0), hwSmooth)
-
-// Centered Money Flow (MFI centered at zero)
-float mfCentered = ta.sma(ta.mfi(hl2, 35) - 50, 6)
-
-// Exhaustion score: 0-100, peaks when both HyperWave and MF are extreme in same direction
-float hwNorm = math.max(-100.0, math.min(100.0, hwOsc))  // clamp
-float mfNorm = math.max(-50.0, math.min(50.0, mfCentered))
-float exhaustionScore = math.abs(hwNorm) / 100.0 * 50.0 + math.abs(mfNorm) / 50.0 * 50.0
-
-//=====================
 // HTF FIB CONFLUENCE (1H, 4H, Daily)
 //=====================
 string groupHTF = "HTF Confluence"
@@ -504,22 +480,6 @@ int htfConfPivot = htfConfluenceCheck(pPivot, fibRange)
 int htfConf382   = htfConfluenceCheck(p382, fibRange)
 int htfConf618   = htfConfluenceCheck(p618, fibRange)
 int htfConfTotal = htfConfPivot + htfConf382 + htfConf618
-
-//=====================
-// EXHAUSTION DIAMOND (precursor visual at fib interaction)
-// Close-bar only precursor from the v6 engine. This is a heads-up signal,
-// not the trade trigger.
-//=====================
-float pVel = ta.roc(close, 5) / (atr14 + 0.0001)
-float vVel = ta.roc(volume, 5)
-float exhScore = pVel > 0 and vVel < 0 ? 1.0 : pVel < 0 and vVel < 0 ? -1.0 : 0.0
-bool shrinking = ta.atr(3) < ta.atr(8) * exhAtrMult
-bool isDoji = math.abs(close - open) < (high - low + 0.0001) * 0.2
-float candleExh = (shrinking ? 0.33 : 0.0) + (isDoji ? 0.33 : 0.0)
-float volDelta = volume * ((high - low) == 0 ? 0 : (2 * close - high - low) / (high - low))
-float resonance = ta.correlation(volDelta, close - close[1], 14)
-float energy = 100.0 - (math.abs(exhScore) * 40.0 + candleExh * 40.0 + (resonance < 0.3 ? 20.0 : 0.0))
-energy := math.max(0.0, math.min(100.0, energy))
 
 //=====================
 // VOLUME DELTA AT FIB TOUCHES
@@ -1161,6 +1121,11 @@ plot(mlExhBarsSinceTrigger, "ml_exh_bars_since_trigger", display=display.none, e
 plot(float(mlContConfidenceTier), "ml_cont_confidence_tier", display=display.none, editable=false)
 plot(not na(lastContTriggerBar) ? float(bar_index - lastContTriggerBar) : na, "ml_cont_bars_since_trigger", display=display.none, editable=false)
 plot(mlExhConfidenceTier > 0 and tradeInFlightNow and exhaustionSignalDir != tradeDir ? 1.0 : 0.0, "ml_reversal_warning_in_trade", display=display.none, editable=false)
+// Raw footprint numerics — AG cannot compute these server-side (TV-exclusive API)
+plot(nz(footprintDelta), "ml_exh_fp_delta", display=display.none, editable=false)
+plot(nz(triggerRowDelta), "ml_exh_trigger_row_delta", display=display.none, editable=false)
+plot(nz(extremeRowVolRatio), "ml_exh_extreme_vol_ratio", display=display.none, editable=false)
+plot(float(stackedImbalanceCount), "ml_exh_stacked_imbalance_count", display=display.none, editable=false)
 
 // ── STRUCTURE / ICT ──
 plot(chochBull ? 1.0 : chochBear ? -1.0 : 0.0, "ml_choch", display=display.none, editable=false)
@@ -1180,7 +1145,7 @@ plot(float(vwapCode), "ml_vwap_code", display=display.none, editable=false)
 // ── MACRO CONTEXT ──
 plot(adSlopeNorm, "ml_adline_slope", display=display.none, editable=false)
 
-// ── PLOT BUDGET: 46 plot + 2 plotshape = 48/64 (16 headroom) ──
+// ── PLOT BUDGET: 50 plot + 2 plotshape = 52/64 (12 headroom) ──
 
 //=====================
 // STRATEGY EXECUTION
