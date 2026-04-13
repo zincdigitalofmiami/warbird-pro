@@ -11,8 +11,11 @@ and produce a defensible minimum-viable settings lock before AutoGluon starts op
 This is **not** AutoGluon training. AG does the real optimization via live packets after Phase 4.
 This harness locks the settings floor AG trains from. AG must not train from a garbage baseline.
 
-Three commands: `suggest`, `record`, `leaderboard`. The authoritative evaluation mode is `CSV_FULL` —
-every other mode is deprecated.
+Three commands: `suggest`, `record`, `leaderboard`.
+Authoritative scored evaluation modes are:
+- `CSV_FULL` (manual CSV record path)
+- `TV_MCP_STRICT` (CDP automation path)
+Deprecated/legacy modes are non-authoritative.
 
 **Preferred path: CDP automation** (`tv_auto_tune.py`) — applies inputs, waits for recalc, and reads
 `reportData().trades()` directly. No CSV export needed. See [Automated Workflow](#automated-workflow-preferred) below.
@@ -43,9 +46,8 @@ reads `reportData().trades()` directly, and records the trial — no CSV export 
 3. Strategy Tester → Properties → **From** set to `2020-01-01`, Bar Magnifier ON.
 4. `pip install requests websockets` (one-time, if not already installed).
 
-> **Entity ID note:** `STRATEGY_ENTITY_ID = "kGnTgb"` is set at the top of `tv_auto_tune.py`.
-> If the chart is reloaded and the strategy gets a new entity ID, update this constant.
-> Run `chart_get_state` via the MCP or check `chart.getAllStudies()` in the TV console.
+> **Entity ID note:** `tv_auto_tune.py` discovers the strategy entity ID at runtime
+> from `chartModel().dataSources()`. No hardcoded `STRATEGY_ENTITY_ID` is required.
 
 ### Automated run
 
@@ -63,8 +65,9 @@ python scripts/ag/tv_auto_tune.py run --trial-file artifacts/tuning/suggestions/
 python scripts/ag/tune_strategy_params.py leaderboard --top 20
 ```
 
-Trials are stored in the same `warbird_strategy_tuning_trials` table with `evaluation_mode = 'CSV_FULL'`
-and `source_csv = 'tv_auto_tune:cdp'`. The leaderboard and scoring are identical to manual CSV runs.
+Trials are stored in the same `warbird_strategy_tuning_trials` table with
+`evaluation_mode = 'TV_MCP_STRICT'` and `source_csv = 'tv_auto_tune:cdp'`.
+The leaderboard includes both authoritative scored modes (`CSV_FULL`, `TV_MCP_STRICT`).
 
 ### Adverse excursion sign convention
 
@@ -106,7 +109,8 @@ python scripts/ag/tune_strategy_params.py suggest --count 20
 
 This emits trial JSON files in `artifacts/tuning/suggestions/<timestamp>/`.
 Each config covers all search knobs in `strategy_tuning_space.json`.
-New suggestions are deduplicated against previously-recorded CSV_FULL trials.
+New suggestions are deduplicated against previously-recorded scored trials
+(`CSV_FULL` + `TV_MCP_STRICT`).
 
 ### 2. Apply one config to TradingView manually
 
@@ -156,7 +160,7 @@ python scripts/ag/tune_strategy_params.py leaderboard --top 20
 ```
 
 Output columns:
-- `score` — primary ranking metric (weighted blend of net_pnl, PF, DD, survival, long/short PF)
+- `score` — primary ranking metric (profit-first objective with AG richness constraints)
 - `fp_pf` — footprint-cohort profit factor (diagnostic; bars from `DEFAULT_FOOTPRINT_AVAILABLE_FROM` onward)
 - `params` — search parameter values for this trial
 
@@ -189,17 +193,37 @@ The CSV_FULL mode captures from the full TradingView trade-list export:
 - 30-tick survival rate (MES `$37.50` adverse-excursion boundary)
 - **footprint cohort** metrics (same fields, filtered to `footprint_available_from` date onward)
 
-The objective score is a weighted blend. Weights live in the JSON search space:
+The objective score is a weighted blend. Weights and gates live in
+`scripts/ag/strategy_tuning_space.json`.
+
+Current scoring model:
+- Hard sample gate (reject): `total_trades < min` OR one-sided samples (no long/no short)
+- Profit-first ranking components:
+  - `profit_factor` (primary)
+  - `expectancy_per_trade` (secondary)
+- AG-compatibility components (still scored):
+  - `sample_richness`
+  - `directional_balance`
+  - `regime_coverage`
+  - `outcome_diversity`
+- Realism gate:
+  - penalties apply if PF/expectancy/side-PF floors are violated
+
+Example objective block:
 
 ```json
+"trade_count_bounds": { "min": 200, "max": 2200 },
+"profit_factor_range": { "floor": 0.6, "target": 2.0, "realism_cap": 3.0 },
+"expectancy_per_trade": { "floor": 0.0, "target": 25.0, "negative_penalty": 0.5 },
+"side_profit_factor_floor": { "long": 0.8, "short": 0.8 },
 "weights": {
-  "net_pnl": 1.0,
-  "profit_factor": 1.25,
-  "drawdown": 0.8,
-  "survival": 0.35,
-  "long_pf": 0.35,
-  "short_pf": 0.85,
-  "trade_penalty": 0.75
+  "profit_factor": 0.45,
+  "expectancy": 0.20,
+  "sample_richness": 0.15,
+  "directional_balance": 0.10,
+  "regime_coverage": 0.05,
+  "outcome_diversity": 0.05,
+  "realism_gate_penalty": 0.50
 }
 ```
 
@@ -209,7 +233,8 @@ Default storage: Postgres in the local `warbird` warehouse.
 
 - `warbird_strategy_tuning_batches` — one row per suggestion batch
 - `warbird_strategy_tuning_trials` — one row per trial
-  - `evaluation_mode = 'CSV_FULL'` — authoritative, fully scored from trade CSV
+  - `evaluation_mode = 'CSV_FULL'` — authoritative manual CSV scoring
+  - `evaluation_mode = 'TV_MCP_STRICT'` — authoritative CDP scoring
   - `evaluation_mode = 'PENDING'` — generated suggestion, not yet run
   - `TV_DOM_SCREEN` rows from prior sessions are preserved but filtered out of all reads
 

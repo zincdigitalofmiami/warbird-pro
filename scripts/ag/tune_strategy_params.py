@@ -684,126 +684,147 @@ def calculate_trade_metrics(
     }
 
 
-def score_trial(metrics: dict[str, Any], objective: dict[str, Any]) -> dict[str, float]:
-    """Score a trial for AG training-sample fitness.
+def score_trial(metrics: dict[str, Any], objective: dict[str, Any]) -> dict[str, Any]:
+    """Score a trial for pre-AG parameter tuning with profit-first ranking.
 
-    Purpose: the v7 strategy is an AG *training-data generator*, not a live trading
-    system. We optimise for sample richness and balance, not for live PnL.
+    Richness compatibility is preserved for AG:
+      - hard sample gate stays in place (min trades and both directions required)
+      - richness/balance/coverage/diversity remain in the weighted score
 
-    Hard rejects (score = None, status = 'insufficient_sample'):
-      - total_trades < trade_count_bounds.min — too few samples for AG.
-      - long_trades == 0 OR short_trades == 0 — one-sided sample is worthless for AG.
+    Profitability now leads ranking:
+      - profit_factor score (primary)
+      - expectancy per trade score (secondary)
 
-    Components (each normalised to [0, 1], weighted sum):
-      sample_richness      — min(trades, max) / max  (saturates at bounds.max)
-      directional_balance  — 1 - |long_share - 0.5| * 2  (perfect at 50/50)
-      regime_coverage      — fraction of yearly buckets with >= 30 trades
-      outcome_diversity    — Shannon entropy across exit-outcome classes / max_entropy
-      realism_gate         — PF in [0.6, 3.0] AND expectancy >= 0; else multiplies
-                             final score by 0.5
-
-    Objective weights live in objective["weights"] under the keys:
-      sample_richness, directional_balance, regime_coverage, outcome_diversity,
-      realism_gate_penalty  (default values if missing: 0.35/0.25/0.20/0.20/0.50)
+    A realism gate still penalises unrealistic or structurally weak runs.
     """
-    trade_bounds  = objective.get("trade_count_bounds", {})
-    min_trades    = int(trade_bounds.get("min") or 200)
-    max_trades    = int(trade_bounds.get("max") or 2200)
-    weights       = objective.get("weights", {})
+    def clamp01(value: float) -> float:
+        return max(0.0, min(1.0, value))
 
-    total         = metrics["total_trades"]
-    long_trades   = metrics["long"]["trades"] if metrics["long"] else 0
-    short_trades  = metrics["short"]["trades"] if metrics["short"] else 0
+    trade_bounds = objective.get("trade_count_bounds", {})
+    min_trades = int(trade_bounds.get("min") or 200)
+    max_trades = int(trade_bounds.get("max") or 2200)
+    weights = objective.get("weights", {})
+    pf_range = objective.get("profit_factor_range", {})
+    expectancy_cfg = objective.get("expectancy_per_trade", {})
+    side_pf_floor = objective.get("side_profit_factor_floor", {})
 
-    # Hard reject — return score=None so the caller can mark as 'insufficient_sample'
+    total = metrics["total_trades"]
+    long_trades = metrics["long"]["trades"] if metrics["long"] else 0
+    short_trades = metrics["short"]["trades"] if metrics["short"] else 0
+
+    # Hard reject — return score=None so the caller can mark as insufficient sample.
     if total < min_trades or long_trades == 0 or short_trades == 0:
         return {
             "objective_score": None,
             "insufficient_sample": True,
             "components": {
-                "total_trades":  total,
-                "long_trades":   long_trades,
-                "short_trades":  short_trades,
-                "min_required":  min_trades,
+                "total_trades": total,
+                "long_trades": long_trades,
+                "short_trades": short_trades,
+                "min_required": min_trades,
             },
         }
 
-    # ── Component 1: sample_richness ──────────────────────────────────────────
+    # ── Richness components (kept for AG compatibility) ─────────────────────
     sample_richness = min(total, max_trades) / float(max_trades)
-
-    # ── Component 2: directional_balance ─────────────────────────────────────
     long_share = long_trades / float(total)
     directional_balance = 1.0 - abs(long_share - 0.5) * 2.0
 
-    # ── Component 3: regime_coverage ─────────────────────────────────────────
     by_year = metrics.get("by_year") or {}
-    # Recompute per-year trade counts from the closed trade list if available,
-    # otherwise approximate using the by_year PnL dict (len = number of years present).
-    # For a richer count we rely on the closed trade list embedded in metrics when
-    # available; the by_year dict only holds PnL. Use a rough proxy: any year in
-    # by_year that produced >= 1 trade is counted (trade distribution unknown here).
-    # To get exact per-year trade counts we'd need the raw closed list — not stored
-    # in the metrics dict. Approximate: weight by how many years have enough *pnl*
-    # activity. This is a best-effort proxy; Phase 5 pipeline will have exact counts.
-    #
-    # Exact approach: count years in by_year with at least 30 trades cannot be
-    # done from aggregate metrics alone. Use len(by_year) / expected_years as proxy.
     expected_years = 6  # 2020-2025 training window
-    years_present  = len(by_year)
+    years_present = len(by_year)
     regime_coverage = min(years_present / float(expected_years), 1.0)
 
-    # ── Component 4: outcome_diversity ───────────────────────────────────────
-    # Shannon entropy across exit-outcome classes (TP1..TP5 / STOPPED / EXPIRED).
-    # The metrics dict from the CDP path does not have per-outcome counts (it comes
-    # from TV reportData().trades() which only has net_pnl, not the ml_* label).
-    # Approximate using win/loss split as a 2-class proxy until the full AG pipeline
-    # provides ml_last_exit_outcome. This will be upgraded when the indicator
-    # capture pipeline (Phase 4) provides labelled snapshots.
-    wins   = metrics.get("wins", 0)
+    wins = metrics.get("wins", 0)
     losses = metrics.get("losses", 0)
     if total > 0 and wins > 0 and losses > 0:
         p_w = wins / float(total)
         p_l = losses / float(total)
         entropy_2class = -(p_w * math.log2(p_w) + p_l * math.log2(p_l))
-        outcome_diversity = entropy_2class / 1.0  # max entropy for 2 classes = 1 bit
+        outcome_diversity = entropy_2class
     else:
         outcome_diversity = 0.0
 
-    # ── Realism gate ─────────────────────────────────────────────────────────
+    # ── Profitability components (profit-first ranking) ─────────────────────
     profit_factor = metrics.get("profit_factor")
-    # Treat None (no-loss runs) and inf as "valid but unusual" — gate passes.
-    pf_numeric = profit_factor if (profit_factor is not None and math.isfinite(profit_factor)) else 3.0
+    pf_numeric = (
+        float(profit_factor)
+        if (profit_factor is not None and math.isfinite(profit_factor))
+        else 3.0
+    )
+    pf_floor = float(pf_range.get("floor", 0.6))
+    pf_target = float(pf_range.get("target", 2.0))
+    pf_target = max(pf_target, pf_floor + 1e-9)
+    profit_factor_score = clamp01((pf_numeric - pf_floor) / (pf_target - pf_floor))
+
     expectancy = metrics.get("net_pnl", 0.0) / float(total)
-    realism_ok = (0.6 <= pf_numeric <= 3.0) and (expectancy >= 0)
+    exp_floor = float(expectancy_cfg.get("floor", 0.0))
+    exp_target = float(expectancy_cfg.get("target", 25.0))
+    exp_target = max(exp_target, exp_floor + 1e-9)
+    expectancy_score = clamp01((expectancy - exp_floor) / (exp_target - exp_floor))
+    if expectancy < 0:
+        negative_penalty = clamp01(float(expectancy_cfg.get("negative_penalty", 0.50)))
+        expectancy_score *= negative_penalty
+
+    # ── Realism gate ─────────────────────────────────────────────────────────
+    long_pf = metrics.get("long", {}).get("profit_factor")
+    short_pf = metrics.get("short", {}).get("profit_factor")
+    long_floor = float(side_pf_floor.get("long", 0.80))
+    short_floor = float(side_pf_floor.get("short", 0.80))
+    long_ok = long_pf is None or long_pf >= long_floor
+    short_ok = short_pf is None or short_pf >= short_floor
+    realism_cap = float(pf_range.get("realism_cap", 3.0))
+    realism_ok = (pf_floor <= pf_numeric <= realism_cap) and (expectancy >= 0) and long_ok and short_ok
     realism_gate_penalty = float(weights.get("realism_gate_penalty", 0.50))
 
     # ── Weighted sum ─────────────────────────────────────────────────────────
-    w_richness   = float(weights.get("sample_richness",     0.35))
-    w_balance    = float(weights.get("directional_balance", 0.25))
-    w_coverage   = float(weights.get("regime_coverage",     0.20))
-    w_diversity  = float(weights.get("outcome_diversity",   0.20))
+    default_component_weights = {
+        "profit_factor": 0.45,
+        "expectancy": 0.20,
+        "sample_richness": 0.15,
+        "directional_balance": 0.10,
+        "regime_coverage": 0.05,
+        "outcome_diversity": 0.05,
+    }
+    raw_weights = {
+        key: max(0.0, float(weights.get(key, default_value)))
+        for key, default_value in default_component_weights.items()
+    }
+    weight_sum = sum(raw_weights.values())
+    if weight_sum <= 0.0:
+        raw_weights = default_component_weights
+        weight_sum = sum(raw_weights.values())
+    normalized_weights = {k: v / weight_sum for k, v in raw_weights.items()}
 
     raw_score = (
-        sample_richness     * w_richness  +
-        directional_balance * w_balance   +
-        regime_coverage     * w_coverage  +
-        outcome_diversity   * w_diversity
+        profit_factor_score * normalized_weights["profit_factor"] +
+        expectancy_score * normalized_weights["expectancy"] +
+        sample_richness * normalized_weights["sample_richness"] +
+        directional_balance * normalized_weights["directional_balance"] +
+        regime_coverage * normalized_weights["regime_coverage"] +
+        outcome_diversity * normalized_weights["outcome_diversity"]
     )
 
-    score = raw_score * (1.0 if realism_ok else realism_gate_penalty)
+    score = clamp01(raw_score * (1.0 if realism_ok else realism_gate_penalty))
 
     components = {
-        "sample_richness":     round(sample_richness,     4),
+        "profit_factor_score": round(profit_factor_score, 4),
+        "expectancy_score": round(expectancy_score, 4),
+        "expectancy_per_trade": round(expectancy, 4),
+        "sample_richness": round(sample_richness, 4),
         "directional_balance": round(directional_balance, 4),
-        "regime_coverage":     round(regime_coverage,     4),
-        "outcome_diversity":   round(outcome_diversity,   4),
-        "realism_ok":          realism_ok,
-        "raw_score":           round(raw_score,           4),
+        "regime_coverage": round(regime_coverage, 4),
+        "outcome_diversity": round(outcome_diversity, 4),
+        "long_profit_factor": None if long_pf is None else round(float(long_pf), 4),
+        "short_profit_factor": None if short_pf is None else round(float(short_pf), 4),
+        "realism_ok": realism_ok,
+        "raw_score": round(raw_score, 4),
+        "weights": {k: round(v, 4) for k, v in normalized_weights.items()},
     }
 
     return {
         "objective_score": round(score, 4),
-        "components":      components,
+        "components": components,
     }
 
 
@@ -904,7 +925,7 @@ def generate_suggestions(
 
     Deduplication is based on the suggest-time signature: hash(search + locked).
     This prevents collisions when the frozen fib profile changes between profile versions.
-    historical_trials must already be filtered to CSV_FULL evaluation_mode.
+    historical_trials must already be filtered to authoritative scored modes.
     """
     domains = build_domains(space)
     locked_params = space["locked_parameters"]
@@ -1087,7 +1108,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             "Warbird v7 strategy tuner — pre-AG settings sweep.\n"
             "Three commands: suggest (emit candidate configs), record (ingest a TV trade CSV),\n"
-            "leaderboard (rank recorded CSV_FULL trials).\n\n"
+            "leaderboard (rank recorded scored trials).\n\n"
             "Deep Backtesting date range is UI-only. Before exporting a CSV:\n"
             "  1. Open TradingView Strategy Tester → Properties\n"
             "  2. Set 'From' to 2020-01-01 (or earlier)\n"

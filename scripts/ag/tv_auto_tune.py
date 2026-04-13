@@ -215,22 +215,25 @@ async def discover_strategy_entity(ws, call_id: int) -> str:
             return JSON.stringify({err: 'chartModel().dataSources() not available'});
         }
         const sources = model.dataSources();
+        const isStrat = (meta) => meta.isTVScriptStrategy === true || meta.is_strategy === true;
+        const nameMatch = (meta) => {
+            const desc = meta.description || meta.shortDescription || '';
+            return desc.includes('Warbird v7 Strategy');
+        };
         const strategy = sources.find(s => {
             try {
                 const meta = s.metaInfo ? s.metaInfo() : null;
-                return meta && meta.is_strategy === true &&
-                       meta.shortDescription &&
-                       meta.shortDescription.includes('Warbird v7 Strategy');
+                return meta && isStrat(meta) && nameMatch(meta);
             } catch(e) { return false; }
         });
         if (!strategy) {
             const allStrats = sources
                 .filter(s => {
-                    try { return s.metaInfo && s.metaInfo().is_strategy; }
+                    try { const m = s.metaInfo ? s.metaInfo() : null; return m && isStrat(m); }
                     catch(e) { return false; }
                 })
                 .map(s => {
-                    try { return {id: s.id(), name: s.metaInfo().shortDescription}; }
+                    try { const m = s.metaInfo(); return {id: s.id(), name: m.description || m.shortDescription}; }
                     catch(e) { return {err: String(e)}; }
                 });
             return JSON.stringify({err: 'Warbird v7 Strategy not found', available: allStrats});
@@ -539,7 +542,7 @@ def make_get_trades_js(entity_id: str) -> str:
 
     const rd = stratSrc.reportData();
     if (!rd) return JSON.stringify({{err: 'reportData() returned null'}});
-    const trades = rd.trades();
+    const trades = typeof rd.trades === 'function' ? rd.trades() : rd.trades;
     if (!trades || !trades.length) return JSON.stringify({{err: 'no trades', count: 0}});
 
     return JSON.stringify({{
@@ -592,8 +595,8 @@ async def snapshot_strategy_metrics(
         if (!strat) return null;
         const rd = strat.reportData();
         if (!rd) return null;
-        const trades = rd.trades();
-        const perf = rd.performance ? rd.performance() : null;
+        const trades = typeof rd.trades === 'function' ? rd.trades() : rd.trades;
+        const perf = typeof rd.performance === 'function' ? rd.performance() : rd.performance;
         return JSON.stringify({{
             trade_count: trades ? trades.length : null,
             last_exit_ts: trades && trades.length ? (trades[trades.length - 1].x ? trades[trades.length - 1].x.tm : null) : null,

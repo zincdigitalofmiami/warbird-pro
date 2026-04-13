@@ -111,7 +111,7 @@ def _fake_input_schema() -> dict:
 # ===========================================================================
 
 class TestScoreTrial:
-    """AG-fit scoring logic."""
+    """Pre-AG PF-first scoring logic with richness constraints."""
 
     def test_hard_reject_too_few_trades(self):
         m = _balanced_metrics(total=50)
@@ -139,7 +139,7 @@ class TestScoreTrial:
         m = _balanced_metrics(total=2200, years=6)
         result = tsp.score_trial(m, _default_objective())
         assert result["objective_score"] is not None
-        assert result["objective_score"] >= 0.9
+        assert result["objective_score"] >= 0.6
         c = result["components"]
         assert c["sample_richness"] == 1.0
         assert c["directional_balance"] == 1.0
@@ -174,6 +174,15 @@ class TestScoreTrial:
         result = tsp.score_trial(m, _default_objective())
         assert result["components"]["realism_ok"] is False
 
+    def test_higher_pf_scores_higher_with_same_richness(self):
+        low_pf = _balanced_metrics(total=1000, pf=0.9, net=-1000)
+        high_pf = _balanced_metrics(total=1000, pf=1.5, net=1000)
+        low_result = tsp.score_trial(low_pf, _default_objective())
+        high_result = tsp.score_trial(high_pf, _default_objective())
+        assert low_result["objective_score"] is not None
+        assert high_result["objective_score"] is not None
+        assert high_result["objective_score"] > low_result["objective_score"]
+
     def test_pf_none_does_not_crash(self):
         """PF=None (no losses) should not raise."""
         m = _balanced_metrics(total=500)
@@ -193,6 +202,7 @@ class TestScoreTrial:
         obj = _default_objective()
         w = obj["weights"]
         component_sum = (
+            w["profit_factor"] + w["expectancy"] +
             w["sample_richness"] + w["directional_balance"]
             + w["regime_coverage"] + w["outcome_diversity"]
         )
@@ -471,12 +481,20 @@ class TestCLIStructure:
         assert space["profile_name"] == "mes15m_agfit_v2"
         w = space["objective"]["weights"]
         expected_keys = {
+            "profit_factor", "expectancy",
             "sample_richness", "directional_balance",
             "regime_coverage", "outcome_diversity", "realism_gate_penalty",
         }
         assert set(w.keys()) == expected_keys
-        component_sum = w["sample_richness"] + w["directional_balance"] + w["regime_coverage"] + w["outcome_diversity"]
+        component_sum = (
+            w["profit_factor"] + w["expectancy"] +
+            w["sample_richness"] + w["directional_balance"] +
+            w["regime_coverage"] + w["outcome_diversity"]
+        )
         assert abs(component_sum - 1.0) < 0.001
+        assert "profit_factor_range" in space["objective"]
+        assert "expectancy_per_trade" in space["objective"]
+        assert "side_profit_factor_floor" in space["objective"]
 
     def test_tuning_space_trade_bounds_use_min_max(self):
         space_path = Path(__file__).parent / "strategy_tuning_space.json"
