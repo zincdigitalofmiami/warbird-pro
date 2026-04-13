@@ -135,7 +135,11 @@ def load_trials_jsonl(ledger_path: Path) -> list[dict[str, Any]]:
 
 
 def load_trials_jsonl_csv_full(ledger_path: Path) -> list[dict[str, Any]]:
-    return [t for t in load_trials_jsonl(ledger_path) if t.get("evaluation_mode") == "CSV_FULL"]
+    """Load authoritative trials from JSONL (both CSV_FULL and TV_MCP_STRICT)."""
+    return [
+        t for t in load_trials_jsonl(ledger_path)
+        if t.get("evaluation_mode") in ("CSV_FULL", "TV_MCP_STRICT")
+    ]
 
 
 def append_trial_jsonl(ledger_path: Path, trial: dict[str, Any]) -> None:
@@ -155,7 +159,7 @@ def json_adapter(payload: Any) -> Json:
 
 
 def fetch_db_trials(conn, profile: str) -> list[dict[str, Any]]:
-    """Fetch only CSV_FULL trials — authoritative evaluation mode."""
+    """Fetch all authoritative trials (CSV_FULL and TV_MCP_STRICT evaluation modes)."""
     query = """
         SELECT
           trial_id,
@@ -177,7 +181,7 @@ def fetch_db_trials(conn, profile: str) -> list[dict[str, Any]]:
           created_at
         FROM warbird_strategy_tuning_trials
         WHERE profile_name = %s
-          AND evaluation_mode = 'CSV_FULL'
+          AND evaluation_mode IN ('CSV_FULL', 'TV_MCP_STRICT')
         ORDER BY created_at ASC, trial_id ASC
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -364,28 +368,106 @@ def upsert_recorded_trial(conn, trial: dict[str, Any]) -> None:
         )
 
 
-def fetch_db_leaderboard(conn, profile: str, top: int) -> list[dict[str, Any]]:
-    """Fetch top CSV_FULL trials ranked by objective score."""
+def upsert_failed_trial(conn, trial: dict[str, Any]) -> None:
+    """Persist a FAILED trial row to Postgres.
+
+    Requires migration 010 to be applied (adds 'FAILED' to the status CHECK
+    and the failure_reason column). Called by tv_auto_tune after Phase C migration.
+    """
+    query = """
+        INSERT INTO warbird_strategy_tuning_trials (
+          trial_id,
+          profile_name,
+          evaluation_mode,
+          origin,
+          status,
+          failure_reason,
+          params_signature,
+          search_parameters,
+          locked_parameters,
+          runtime_context,
+          notes,
+          created_at,
+          updated_at
+        ) VALUES (
+          %s, %s, 'TV_MCP_STRICT', 'tv_auto_tune', 'FAILED',
+          %s, %s, %s, %s, %s, %s, NOW(), NOW()
+        )
+        ON CONFLICT (trial_id) DO UPDATE SET
+          status          = 'FAILED',
+          evaluation_mode = EXCLUDED.evaluation_mode,
+          failure_reason  = EXCLUDED.failure_reason,
+          notes           = EXCLUDED.notes,
+          updated_at      = NOW()
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            query,
+            (
+                trial["trial_id"],
+                trial.get("profile", ""),
+                trial.get("failure_reason"),
+                trial.get("params_signature", ""),
+                json_adapter(trial.get("search_parameters", {})),
+                json_adapter(trial.get("locked_parameters", {})),
+                json_adapter(trial.get("runtime_context", {})),
+                trial.get("error_message", ""),
+            ),
+        )
+
+
+def fetch_db_leaderboard(
+    conn, profile: str, top: int, include_failed: bool = False
+) -> list[dict[str, Any]]:
+    """Fetch top RECORDED trials ranked by objective score.
+
+    With include_failed=True also returns a summary of FAILED rows appended
+    after the scored rows (these have no objective score).
+    """
     query = """
         SELECT
           trial_id,
           profile_name AS profile,
           evaluation_mode,
+          status,
+          failure_reason,
           search_parameters,
           metrics,
           objective
         FROM warbird_strategy_tuning_trials
         WHERE profile_name = %s
           AND status = 'RECORDED'
-          AND evaluation_mode = 'CSV_FULL'
+          AND evaluation_mode IN ('CSV_FULL', 'TV_MCP_STRICT')
           AND objective_score IS NOT NULL
         ORDER BY objective_score DESC, recorded_at DESC
         LIMIT %s
     """
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(query, (profile, top))
-        rows = cur.fetchall()
-    return [dict(row) for row in rows]
+        rows = [dict(r) for r in cur.fetchall()]
+
+    if include_failed:
+        failed_query = """
+            SELECT
+              trial_id,
+              profile_name AS profile,
+              evaluation_mode,
+              status,
+              failure_reason,
+              search_parameters,
+              NULL::jsonb AS metrics,
+              NULL::jsonb AS objective
+            FROM warbird_strategy_tuning_trials
+            WHERE profile_name = %s
+              AND status = 'FAILED'
+            ORDER BY created_at DESC
+            LIMIT 100
+        """
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(failed_query, (profile,))
+            rows.extend([dict(r) for r in cur.fetchall()])
+
+    return rows
 
 
 def parse_float(value: str) -> float:
@@ -603,37 +685,125 @@ def calculate_trade_metrics(
 
 
 def score_trial(metrics: dict[str, Any], objective: dict[str, Any]) -> dict[str, float]:
-    weights = objective["weights"]
-    profit_factor = metrics["profit_factor"] or 0.0
-    long_pf = metrics["long"]["profit_factor"] or 0.0
-    short_pf = metrics["short"]["profit_factor"] or 0.0
-    survival_pct = metrics.get("survival_30_tick_pct")
+    """Score a trial for AG training-sample fitness.
+
+    Purpose: the v7 strategy is an AG *training-data generator*, not a live trading
+    system. We optimise for sample richness and balance, not for live PnL.
+
+    Hard rejects (score = None, status = 'insufficient_sample'):
+      - total_trades < trade_count_bounds.min — too few samples for AG.
+      - long_trades == 0 OR short_trades == 0 — one-sided sample is worthless for AG.
+
+    Components (each normalised to [0, 1], weighted sum):
+      sample_richness      — min(trades, max) / max  (saturates at bounds.max)
+      directional_balance  — 1 - |long_share - 0.5| * 2  (perfect at 50/50)
+      regime_coverage      — fraction of yearly buckets with >= 30 trades
+      outcome_diversity    — Shannon entropy across exit-outcome classes / max_entropy
+      realism_gate         — PF in [0.6, 3.0] AND expectancy >= 0; else multiplies
+                             final score by 0.5
+
+    Objective weights live in objective["weights"] under the keys:
+      sample_richness, directional_balance, regime_coverage, outcome_diversity,
+      realism_gate_penalty  (default values if missing: 0.35/0.25/0.20/0.20/0.50)
+    """
+    trade_bounds  = objective.get("trade_count_bounds", {})
+    min_trades    = int(trade_bounds.get("min") or 200)
+    max_trades    = int(trade_bounds.get("max") or 2200)
+    weights       = objective.get("weights", {})
+
+    total         = metrics["total_trades"]
+    long_trades   = metrics["long"]["trades"] if metrics["long"] else 0
+    short_trades  = metrics["short"]["trades"] if metrics["short"] else 0
+
+    # Hard reject — return score=None so the caller can mark as 'insufficient_sample'
+    if total < min_trades or long_trades == 0 or short_trades == 0:
+        return {
+            "objective_score": None,
+            "insufficient_sample": True,
+            "components": {
+                "total_trades":  total,
+                "long_trades":   long_trades,
+                "short_trades":  short_trades,
+                "min_required":  min_trades,
+            },
+        }
+
+    # ── Component 1: sample_richness ──────────────────────────────────────────
+    sample_richness = min(total, max_trades) / float(max_trades)
+
+    # ── Component 2: directional_balance ─────────────────────────────────────
+    long_share = long_trades / float(total)
+    directional_balance = 1.0 - abs(long_share - 0.5) * 2.0
+
+    # ── Component 3: regime_coverage ─────────────────────────────────────────
+    by_year = metrics.get("by_year") or {}
+    # Recompute per-year trade counts from the closed trade list if available,
+    # otherwise approximate using the by_year PnL dict (len = number of years present).
+    # For a richer count we rely on the closed trade list embedded in metrics when
+    # available; the by_year dict only holds PnL. Use a rough proxy: any year in
+    # by_year that produced >= 1 trade is counted (trade distribution unknown here).
+    # To get exact per-year trade counts we'd need the raw closed list — not stored
+    # in the metrics dict. Approximate: weight by how many years have enough *pnl*
+    # activity. This is a best-effort proxy; Phase 5 pipeline will have exact counts.
+    #
+    # Exact approach: count years in by_year with at least 30 trades cannot be
+    # done from aggregate metrics alone. Use len(by_year) / expected_years as proxy.
+    expected_years = 6  # 2020-2025 training window
+    years_present  = len(by_year)
+    regime_coverage = min(years_present / float(expected_years), 1.0)
+
+    # ── Component 4: outcome_diversity ───────────────────────────────────────
+    # Shannon entropy across exit-outcome classes (TP1..TP5 / STOPPED / EXPIRED).
+    # The metrics dict from the CDP path does not have per-outcome counts (it comes
+    # from TV reportData().trades() which only has net_pnl, not the ml_* label).
+    # Approximate using win/loss split as a 2-class proxy until the full AG pipeline
+    # provides ml_last_exit_outcome. This will be upgraded when the indicator
+    # capture pipeline (Phase 4) provides labelled snapshots.
+    wins   = metrics.get("wins", 0)
+    losses = metrics.get("losses", 0)
+    if total > 0 and wins > 0 and losses > 0:
+        p_w = wins / float(total)
+        p_l = losses / float(total)
+        entropy_2class = -(p_w * math.log2(p_w) + p_l * math.log2(p_l))
+        outcome_diversity = entropy_2class / 1.0  # max entropy for 2 classes = 1 bit
+    else:
+        outcome_diversity = 0.0
+
+    # ── Realism gate ─────────────────────────────────────────────────────────
+    profit_factor = metrics.get("profit_factor")
+    # Treat None (no-loss runs) and inf as "valid but unusual" — gate passes.
+    pf_numeric = profit_factor if (profit_factor is not None and math.isfinite(profit_factor)) else 3.0
+    expectancy = metrics.get("net_pnl", 0.0) / float(total)
+    realism_ok = (0.6 <= pf_numeric <= 3.0) and (expectancy >= 0)
+    realism_gate_penalty = float(weights.get("realism_gate_penalty", 0.50))
+
+    # ── Weighted sum ─────────────────────────────────────────────────────────
+    w_richness   = float(weights.get("sample_richness",     0.35))
+    w_balance    = float(weights.get("directional_balance", 0.25))
+    w_coverage   = float(weights.get("regime_coverage",     0.20))
+    w_diversity  = float(weights.get("outcome_diversity",   0.20))
+
+    raw_score = (
+        sample_richness     * w_richness  +
+        directional_balance * w_balance   +
+        regime_coverage     * w_coverage  +
+        outcome_diversity   * w_diversity
+    )
+
+    score = raw_score * (1.0 if realism_ok else realism_gate_penalty)
+
     components = {
-        "net_pnl": metrics["net_pnl"] / 1000.0,
-        "profit_factor": profit_factor - 1.0,
-        "drawdown": -(metrics["max_drawdown_pct"] / 10.0),
-        "survival": 0.0 if survival_pct is None else (survival_pct - 50.0) / 10.0,
-        "long_pf": long_pf - 1.0,
-        "short_pf": short_pf - 1.0,
+        "sample_richness":     round(sample_richness,     4),
+        "directional_balance": round(directional_balance, 4),
+        "regime_coverage":     round(regime_coverage,     4),
+        "outcome_diversity":   round(outcome_diversity,   4),
+        "realism_ok":          realism_ok,
+        "raw_score":           round(raw_score,           4),
     }
 
-    trade_bounds = objective.get("trade_count_bounds", {})
-    trade_penalty = 0.0
-    trade_count = metrics["total_trades"]
-    min_trades = trade_bounds.get("min")
-    max_trades = trade_bounds.get("max")
-    if min_trades and trade_count < min_trades:
-        trade_penalty = (min_trades - trade_count) / float(min_trades)
-    elif max_trades and trade_count > max_trades:
-        trade_penalty = (trade_count - max_trades) / float(max_trades)
-    components["trade_penalty"] = -trade_penalty
-
-    score = 0.0
-    for name, weight in weights.items():
-        score += components.get(name, 0.0) * weight
     return {
         "objective_score": round(score, 4),
-        "components": {name: round(value, 4) for name, value in components.items()},
+        "components":      components,
     }
 
 
@@ -658,6 +828,16 @@ def make_trial_record(
 
     metrics = calculate_trade_metrics(csv_path, initial_capital, survival_stop_usd, footprint_available_from)
     scoring = score_trial(metrics, space["objective"])
+
+    if scoring.get("insufficient_sample"):
+        raise ValueError(
+            f"Hard reject — insufficient sample for AG training: "
+            f"total={scoring['components'].get('total_trades')}, "
+            f"long={scoring['components'].get('long_trades')}, "
+            f"short={scoring['components'].get('short_trades')}, "
+            f"min_required={scoring['components'].get('min_required')}"
+        )
+
     search_params = config["search_parameters"]
     locked_params = config["locked_parameters"]
 
@@ -703,8 +883,10 @@ def render_markdown_table(rows: list[dict[str, Any]]) -> str:
         fp_cohort = metrics.get("footprint_cohort", {})
         fp_pf = fp_cohort.get("profit_factor")
         params = ", ".join(f"{k}={v}" for k, v in row["search_parameters"].items())
+        score_val = row.get("objective", {}).get("objective_score")
+        score_str = f"{score_val:.4f}" if score_val is not None else "na"
         body.append(
-            f"| {rank} | {row['trial_id']} | {row['objective']['objective_score']:.4f} | "
+            f"| {rank} | {row['trial_id']} | {score_str} | "
             f"{fmt(metrics['net_pnl'])} | {fmt(metrics['profit_factor'])} | "
             f"{fmt(metrics['max_drawdown_pct'], '%')} | {fmt(metrics['survival_30_tick_pct'], '%')} | "
             f"{fmt(fp_pf)} | {params} |"
@@ -854,20 +1036,49 @@ def command_record(args: argparse.Namespace) -> int:
 
 def command_leaderboard(args: argparse.Namespace) -> int:
     space = load_json(Path(args.space))
+    include_failed = getattr(args, "include_failed", False)
+
     if args.storage == "postgres":
         with connect_db(args.db_dsn) as conn:
-            ranked = fetch_db_leaderboard(conn, space["profile_name"], args.top)
+            rows = fetch_db_leaderboard(
+                conn, space["profile_name"], args.top, include_failed=include_failed
+            )
     else:
-        trials = load_trials_jsonl_csv_full(Path(args.ledger))
-        ranked = sorted(
-            [t for t in trials if t.get("objective", {}).get("objective_score") is not None],
+        all_trials = load_trials_jsonl_csv_full(Path(args.ledger))
+        scored = sorted(
+            [t for t in all_trials if t.get("objective", {}).get("objective_score") is not None],
             key=lambda row: row["objective"]["objective_score"],
             reverse=True,
         )[: args.top]
-    if not ranked:
-        print("No CSV_FULL trials recorded yet.")
+        rows = scored
+        if include_failed:
+            failed_rows = [t for t in all_trials if t.get("status") == "FAILED"]
+            rows = scored + failed_rows
+
+    if not rows:
+        print("No trials recorded yet.")
         return 0
-    print(render_markdown_table(ranked))
+
+    scored_rows = [r for r in rows if r.get("objective") and r["objective"] is not None
+                   and r.get("status") != "FAILED"]
+    failed_rows = [r for r in rows if r.get("status") == "FAILED"]
+
+    if scored_rows:
+        print(render_markdown_table(scored_rows))
+
+    if include_failed and failed_rows:
+        # Tally by failure_reason
+        from collections import Counter
+        tally = Counter(r.get("failure_reason", "unknown") for r in failed_rows)
+        tally_str = " / ".join(f"{count} {reason}" for reason, count in sorted(tally.items()))
+        print(
+            f"\nFailed trials: {len(failed_rows)} total "
+            f"({tally_str})"
+        )
+
+    if not scored_rows and not failed_rows:
+        print("No trials recorded yet.")
+
     return 0
 
 
@@ -919,8 +1130,13 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--notes", default="", help="Optional operator notes for this trial.")
     record.set_defaults(func=command_record)
 
-    leaderboard = subparsers.add_parser("leaderboard", help="Show the best CSV_FULL recorded trials.")
+    leaderboard = subparsers.add_parser("leaderboard", help="Show the best RECORDED trials by objective score.")
     leaderboard.add_argument("--top", type=int, default=10, help="How many trials to display.")
+    leaderboard.add_argument(
+        "--include-failed", action="store_true",
+        help="Append a FAILED trial summary line: count by failure_reason. "
+             "Requires migration 010 for Postgres backend.",
+    )
     leaderboard.set_defaults(func=command_leaderboard)
 
     return parser

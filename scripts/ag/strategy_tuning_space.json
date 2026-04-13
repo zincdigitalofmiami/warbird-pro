@@ -1,5 +1,5 @@
 {
-  "profile_name": "mes15m_locked_fib_v1",
+  "profile_name": "mes15m_agfit_v2",
   "locked_parameters": {
     "Acceptance Retest Window (bars)": 6,
     "Anchor Span = Active Fib Window": true,
@@ -21,13 +21,11 @@
       "min": 200
     },
     "weights": {
-      "drawdown": 0.8,
-      "long_pf": 0.35,
-      "net_pnl": 1.0,
-      "profit_factor": 1.25,
-      "short_pf": 0.85,
-      "survival": 0.35,
-      "trade_penalty": 0.75
+      "sample_richness": 0.35,
+      "directional_balance": 0.25,
+      "regime_coverage": 0.20,
+      "outcome_diversity": 0.20,
+      "realism_gate_penalty": 0.50
     }
   },
   "runtime_context": {
