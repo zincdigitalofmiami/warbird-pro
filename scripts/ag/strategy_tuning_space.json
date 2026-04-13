@@ -11,14 +11,14 @@
     "Rejection = wick into zone then close back out": true,
     "Show Footprint Audit Table": false,
     "Target Line Lookback Bars": 40,
-    "ZigZag Depth (manual)": 10,
+    "ZigZag Depth (manual)": 12,
     "ZigZag Deviation (manual)": 3.0,
-    "ZigZag Threshold Floor (%)": 0.25
+    "ZigZag Threshold Floor (%)": 0.50
   },
   "objective": {
     "trade_count_bounds": {
       "max": 2200,
-      "min": 200
+      "min": 0
     },
     "profit_factor_range": {
       "floor": 0.6,

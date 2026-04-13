@@ -34,15 +34,15 @@ string groupFibEngine = "Fibonacci Engine"
 bool autoTuneZZ = input.bool(true, "Auto-tune ZigZag by Timeframe", group=groupFibEngine,
   tooltip="ON: 4H+ uses Deviation=4/Depth=20, 1H uses Deviation=3.5/Depth=15, 15m and below uses Deviation=3/Depth=15. Turn OFF to set values manually.")
 float fibDeviationManual = input.float(3.0, "ZigZag Deviation (manual)",
-  minval=0.5, maxval=10.0, step=0.5, group=groupFibEngine,
+  minval=0.5, maxval=20.0, step=0.5, group=groupFibEngine,
   tooltip="Only used when Auto-tune is OFF.")
-int fibDepthManual = input.int(10, "ZigZag Depth (manual)",
+int fibDepthManual = input.int(12, "ZigZag Depth (manual)",
   minval=2, maxval=50, group=groupFibEngine,
   tooltip="Only used when Auto-tune is OFF.")
-float fibConfluenceTolPct = input.float(0.10, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupFibEngine)
-float fibThresholdFloorPct = input.float(0.25, "ZigZag Threshold Floor (%)", minval=0.0, maxval=5.0, step=0.05, group=groupFibEngine,
-  tooltip="Minimum percent move required by the ZigZag after ATR scaling. Lower this if 15m anchors stay too wide even when manual deviation/depth are reduced.")
-float minFibRangeAtr = input.float(1.5, "Min Fib Range (ATR)", minval=0.5, maxval=10.0, step=0.1, group=groupFibEngine)
+float fibConfluenceTolPct = input.float(0.05, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupFibEngine)
+float fibThresholdFloorPct = input.float(0.50, "ZigZag Threshold Floor (%)", minval=0.0, maxval=5.0, step=0.05, group=groupFibEngine,
+  tooltip="Minimum percent move required by the ZigZag after ATR scaling.")
+float minFibRangeAtr = input.float(0.5, "Min Fib Range (ATR)", minval=0.5, maxval=10.0, step=0.1, group=groupFibEngine)
 
 int _tfSec = timeframe.in_seconds()
 float fibDeviation = autoTuneZZ
@@ -170,6 +170,9 @@ float ema100 = ta.ema(close, 100)
 [_macdFast, _macdSlow, macdHist] = ta.macd(close, 12, 26, 9)
 float rsi14 = ta.rsi(close, 14)
 float atr14 = ta.atr(14)
+// NOTE: barSpreadXVol, OBV, MFI use standard volume — kept as AG exports only.
+// AG computes these server-side from Databento tick data. Pine exports are placeholders.
+// Footprint delta is the canonical volume truth for all live indicator decisions.
 float barSpreadXVol = (high - low) * volume
 float obvChangeRaw = nz(ta.change(close))
 float _obvDelta = obvChangeRaw > 0 ? volume : obvChangeRaw < 0 ? -volume : 0.0
@@ -462,25 +465,104 @@ int htfConf618   = htfConfluenceCheck(p618, fibRange)
 int htfConfTotal = htfConfPivot + htfConf382 + htfConf618
 
 //=====================
-// VOLUME DELTA AT FIB TOUCHES
+// FOOTPRINT (moved up — all volume decisions use footprint delta, never standard volume)
+// Single request.footprint() call, cached per bar.
 //=====================
-string groupVolDelta = "Volume Delta"
-int volDeltaLookback = 5
-float volDeltaTolPts = 2.0
+footprint reqFootprint = request.footprint(footprintTicksPerRow, footprintVaPercent, footprintImbalancePercent)
+bool fpAvailable = not na(reqFootprint)
+float fpDelta = fpAvailable ? footprint.delta(reqFootprint) : na
+float fpDeltaAbs = fpAvailable and not na(fpDelta) ? math.abs(fpDelta) : na
 
+//=====================
+// FOOTPRINT DELTA AT FIB TOUCHES
+//=====================
 float barRange = high - low
-float clv = barRange > 0 ? (close - low) / barRange : 0.5
-float signedVol = volume * (2.0 * clv - 1.0)
+float volDeltaTolPts = 2.0
 
 fibTouchCheck(float level) =>
     not na(level) and math.abs(close - level) <= volDeltaTolPts
 
 bool isTouchingFib = fibTouchCheck(p236) or fibTouchCheck(p382) or fibTouchCheck(pPivot) or fibTouchCheck(p618) or fibTouchCheck(p786) or fibTouchCheck(pT1) or fibTouchCheck(pT2) or fibTouchCheck(pT3) or fibTouchCheck(pT4) or fibTouchCheck(pT5)
 
-float bullVol = math.sum(volume * math.max(clv, 0), volDeltaLookback)
-float totalVol = math.sum(volume, volDeltaLookback)
-float volDeltaPct = totalVol > 0 ? bullVol / totalVol * 100.0 : 50.0
-float fibTouchVolDelta = isTouchingFib ? volDeltaPct : na
+// Footprint delta at fib touch: positive = buyers dominant, negative = sellers dominant
+float fibTouchVolDelta = isTouchingFib and fpAvailable and not na(fpDelta) ? fpDelta : na
+
+//=====================
+// CANDLESTICK PATTERN DETECTION — EMPIRICALLY VALIDATED ON MES 15m
+// Source: "Candlestick Patterns on Backtest" indicator, 5+ years of MES data.
+// ONLY patterns with positive returns at multiple R:R ratios are included.
+// Everything else is a losing trade on MES 15m. No guessing. Data only.
+//=====================
+float bodySize = math.abs(close - open)
+float bodyRatio = barRange > 0 ? bodySize / barRange : 0.0
+bool bullishCandle = close > open
+bool bearishCandle = close < open
+float upperWickSize = high - math.max(open, close)
+float lowerWickSize = math.min(open, close) - low
+float upperWickRatio = barRange > 0 ? upperWickSize / barRange : 0.0
+float lowerWickRatio = barRange > 0 ? lowerWickSize / barRange : 0.0
+
+// ── PROVEN BULLISH PATTERNS ─────────────────────────────────────────────
+// Long Lower Shadow (+3.9% at 1:6 R:R — STRONGEST bullish pattern on MES 15m)
+// Long lower wick, close in upper portion of bar. Buyers absorbed selling.
+bool longLowerShadow = lowerWickRatio >= 0.55 and upperWickRatio <= 0.25
+
+// Dragonfly Doji (+1.2% at 1:6 R:R — consistent winner)
+// Open and close near high, long lower wick. Pure buyer rejection of lows.
+bool dragonflyDoji = lowerWickRatio >= 0.60 and bodyRatio <= 0.15
+
+// Rising Window / Gap Up (+0.9% at 1:6 — moderate, gap continuation)
+bool risingWindow = low > high[1]
+
+// ── PROVEN BEARISH PATTERNS ─────────────────────────────────────────────
+// Long Upper Shadow (-7.7% at 1:6 R:R — STRONGEST bearish pattern on MES 15m)
+// Long upper wick, close in lower portion. Sellers absorbed buying.
+bool longUpperShadow = upperWickRatio >= 0.55 and lowerWickRatio <= 0.25
+
+// Shooting Star (-5.6% at 1:6 R:R — strong)
+// Upper wick >= 50% of range, small body, bearish close.
+bool shootingStar = upperWickRatio >= 0.50 and bodyRatio <= 0.35 and bearishCandle
+
+// Bearish Engulfing (-6.6% at 1:6 R:R — strong at high R:R)
+// Current bearish body fully engulfs prior bullish body.
+bool bearishEngulfing = bearishCandle and bullishCandle[1] and close < open[1] and open > close[1]
+
+// Falling Window / Gap Down (-1.5% at 1:6 — moderate)
+bool fallingWindow = high < low[1]
+
+// ── PATTERNS PROVEN TO LOSE ON MES 15m (DO NOT USE) ─────────────────────
+// Hammer: -1.0% to -2.0% at all R:R. LOSING PATTERN.
+// Bullish Engulfing: -1.4% to -5.3%. LOSING PATTERN.
+// Inverted Hammer: -1.0% to -3.0%. LOSING PATTERN.
+// Doji Star (Bull): -1.2% to -2.3%. LOSING PATTERN.
+
+// ── COMPOSITE SIGNALS ───────────────────────────────────────────────────
+bool provenBullishPattern = longLowerShadow or dragonflyDoji or risingWindow
+bool provenBearishPattern = longUpperShadow or shootingStar or bearishEngulfing or fallingWindow
+
+//=====================
+// FIB LEVEL CONFIRMATION STACK — Footprint + Proven Candlestick Patterns
+// No RSI. No generic indicators. Footprint delta + empirically validated patterns only.
+//=====================
+
+// Footprint delta confirmation: delta must agree with trade direction
+bool fpDeltaConfirmLong  = fpAvailable and not na(fpDelta) and fpDelta > 0
+bool fpDeltaConfirmShort = fpAvailable and not na(fpDelta) and fpDelta < 0
+
+// Wick rejection at fib zone: price pierces zone then closes back outside
+bool wickRejectBull = not na(zoneLower) and low < zoneLower and close > zoneLower and bullishCandle
+bool wickRejectBear = not na(zoneUpper) and high > zoneUpper and close < zoneUpper and bearishCandle
+
+// Combined confirmation: footprint delta + (proven pattern OR wick rejection OR sweep)
+bool longConfirmed = (fpDeltaConfirmLong or not fpAvailable) and (
+    provenBullishPattern or
+    wickRejectBull or
+    liqSweepBull)
+
+bool shortConfirmed = (fpDeltaConfirmShort or not fpAvailable) and (
+    provenBearishPattern or
+    wickRejectBear or
+    liqSweepBear)
 
 //=====================
 // NYSE BREADTH + EXECUTION CONTEXT
@@ -606,79 +688,125 @@ if isValid
         fibLevelTouched := 100
 
 //=====================
-// FOOTPRINT EXHAUSTION (full v6 footprint path)
-// Geometry + signed Z-score + footprint divergence.
-// Tier 1 requires live footprint confirmation.
-// Tier 2 is geometry + statistics only when footprint is unavailable.
+// EXHAUSTION DIAMOND — Footprint + Proven Candlestick Patterns ONLY
+// NO RSI. NO standard volume. NO generic oscillators.
+//
+// Source: "Candlestick Patterns on Backtest" indicator on MES1! 15m chart +
+//         footprint delta/POC/imbalance from request.footprint().
+//
+// PROVEN BULLISH: Long Lower Shadow (+3.9%), Dragonfly Doji (+1.2%)
+// PROVEN BEARISH: Long Upper Shadow (-7.7%), Shooting Star (-5.6%), Bearish Engulfing (-6.6%)
+// LOSING patterns EXCLUDED: Hammer, Bullish Engulfing, Inverted Hammer, Doji Star
 //=====================
+
+bool mlExhFootprintAvailable = fpAvailable
+float footprintRowSize = footprintTicksPerRow * syminfo.mintick
+float footprintDelta = fpDelta
+
+// ── FOOTPRINT ANALYSIS ──────────────────────────────────────────────────
+volume_row pocRow = fpAvailable ? footprint.poc(reqFootprint) : na
+float pocRowVol = not na(pocRow) ? volume_row.total_volume(pocRow) : na
+
 float p1272 = fibPrice(FIB_1272)
 float exhaustionTol = atr14 * exhaustionLevelAtrTol
 bool exhAt1272 = not na(p1272) and (dir == 1 ? high >= p1272 - exhaustionTol : low <= p1272 + exhaustionTol)
 bool exhAt1618 = not na(pT2) and (dir == 1 ? high >= pT2 - exhaustionTol : low <= pT2 + exhaustionTol)
 bool mlExhGeomConfluence = isValid and confirmed and (exhAt1272 or exhAt1618)
-float exhaustionTriggerPrice = exhAt1618 ? pT2 : exhAt1272 ? p1272 : na
+float exhaustionTriggerPrice = exhAt1618 ? pT2 : exhAt1272 ? p1272 : (dir == 1 ? high : low)
 
+// Z-score (ML export only — NOT a gate)
 float exhaustionProbePrice = dir == 1 ? high : low
 float exhaustionMean = ta.sma(close, exhaustionZLen)
 float exhaustionStd = ta.stdev(close, exhaustionZLen)
 float mlExhZScore = exhaustionStd > 0 ? (exhaustionProbePrice - exhaustionMean) / exhaustionStd : 0.0
 bool mlExhZExtreme = math.abs(mlExhZScore) >= exhaustionZThreshold
-bool exhZDirectional = dir == 1 ? mlExhZScore >= exhaustionZThreshold : mlExhZScore <= -exhaustionZThreshold
 
-int hourEt = hour(time, "America/New_York")
-bool mlExhSessionValid = hourEt != 17
-
-footprint reqFootprint = request.footprint(footprintTicksPerRow, footprintVaPercent, footprintImbalancePercent)
-bool mlExhFootprintAvailable = not na(reqFootprint)
-float footprintRowSize = footprintTicksPerRow * syminfo.mintick
-float footprintDelta = mlExhFootprintAvailable ? footprint.delta(reqFootprint) : na
-
-volume_row pocRow = mlExhFootprintAvailable ? footprint.poc(reqFootprint) : na
-volume_row triggerRow = mlExhFootprintAvailable and not na(exhaustionTriggerPrice) ? footprint.get_row_by_price(reqFootprint, exhaustionTriggerPrice) : na
-volume_row extremeRow = mlExhFootprintAvailable ? footprint.get_row_by_price(reqFootprint, dir == 1 ? high : low) : na
-
-float pocRowTop = not na(pocRow) ? volume_row.up_price(pocRow) : na
-float pocRowBottom = not na(pocRow) ? volume_row.down_price(pocRow) : na
-float pocRowVol = not na(pocRow) ? volume_row.total_volume(pocRow) : na
+// Footprint row-level evidence (ML exports + diamond enrichment)
+volume_row triggerRow = fpAvailable and not na(exhaustionTriggerPrice) ? footprint.get_row_by_price(reqFootprint, exhaustionTriggerPrice) : na
+volume_row extremeRow = fpAvailable ? footprint.get_row_by_price(reqFootprint, close > open ? high : low) : na
 float triggerRowDelta = not na(triggerRow) ? volume_row.delta(triggerRow) : na
 float extremeRowVol = not na(extremeRow) ? volume_row.total_volume(extremeRow) : na
 float extremeRowVolRatio = not na(pocRowVol) and pocRowVol > 0 and not na(extremeRowVol) ? extremeRowVol / pocRowVol : na
 
-int stackedImbalanceCount = 0
-if mlExhFootprintAvailable
-    array<volume_row> footprintRows = footprint.rows(reqFootprint)
-    int rowCount = array.size(footprintRows)
-    int rowsToInspect = math.min(stackedImbalanceRows, rowCount)
-    if rowsToInspect > 0
-        if dir == 1
-            for offset = 0 to rowsToInspect - 1
-                volume_row row = array.get(footprintRows, rowCount - 1 - offset)
-                if volume_row.has_buy_imbalance(row)
-                    stackedImbalanceCount += 1
-        else
-            for offset = 0 to rowsToInspect - 1
-                volume_row row = array.get(footprintRows, offset)
-                if volume_row.has_sell_imbalance(row)
-                    stackedImbalanceCount += 1
-bool stackedImbalance = stackedImbalanceCount >= 2
-
-bool mlExhDeltaDiv = mlExhFootprintAvailable and not na(triggerRowDelta) and not na(footprintDelta) and (
-    dir == 1 ? (triggerRowDelta <= 0 and footprintDelta <= 0) : (triggerRowDelta >= 0 and footprintDelta >= 0)
-)
-bool mlExhAbsorption = mlExhFootprintAvailable and not na(exhaustionTriggerPrice) and not na(pocRowTop) and not na(pocRowBottom) and (
-    dir == 1 ?
-        (high - pocRowTop <= footprintRowSize and close < open and close <= exhaustionTriggerPrice) :
-        (pocRowBottom - low <= footprintRowSize and close > open and close >= exhaustionTriggerPrice)
-)
-bool mlExhZeroPrint = mlExhFootprintAvailable and not na(extremeRowVolRatio) and extremeRowVolRatio <= zeroPrintVolRatio and not na(extremeRow) and (volume_row.buy_volume(extremeRow) == 0 or volume_row.sell_volume(extremeRow) == 0)
+// Delta divergence: price goes one way, footprint delta goes the other
+bool mlExhDeltaDiv = fpAvailable and not na(fpDelta) and ((close > open and fpDelta <= 0) or (close < open and fpDelta >= 0))
+// Absorption: POC pinned at the extreme, rejection candle
+bool mlExhAbsorption = fpAvailable and not na(pocRow) and (
+    (high - volume_row.up_price(pocRow) <= footprintRowSize and close < open) or
+    (volume_row.down_price(pocRow) - low <= footprintRowSize and close > open))
+// Zero print: no volume at the extreme row on one side (finished auction)
+bool mlExhZeroPrint = fpAvailable and not na(extremeRowVolRatio) and extremeRowVolRatio <= zeroPrintVolRatio and not na(extremeRow) and (volume_row.buy_volume(extremeRow) == 0 or volume_row.sell_volume(extremeRow) == 0)
 int footprintEvidenceCount = (mlExhDeltaDiv ? 1 : 0) + (mlExhAbsorption ? 1 : 0) + (mlExhZeroPrint ? 1 : 0)
 
-bool tier1Exhaustion = mlExhSessionValid and mlExhGeomConfluence and exhZDirectional and mlExhFootprintAvailable and footprintEvidenceCount >= 2 and not stackedImbalance
-bool tier2Exhaustion = mlExhSessionValid and mlExhGeomConfluence and exhZDirectional and not mlExhFootprintAvailable
-int mlExhConfidenceTier = tier1Exhaustion ? 1 : tier2Exhaustion ? 2 : 0
-bool bearishExhaustion = confirmed and dir == 1 and mlExhConfidenceTier > 0
-bool bullishExhaustion = confirmed and dir == -1 and mlExhConfidenceTier > 0
+// ── SWING EXTREME ───────────────────────────────────────────────────────
+bool isSwingHighBar = high >= ta.highest(high, 10)
+bool isSwingLowBar = low <= ta.lowest(low, 10)
+
+// ── COOLDOWN: 8 bars (2 hours on 15m) ──────────────────────────────────
+var int lastBearDiamondBar = na
+var int lastBullDiamondBar = na
+int exhCooldown = 8
+bool bearCooldownOk = na(lastBearDiamondBar) or bar_index - lastBearDiamondBar >= exhCooldown
+bool bullCooldownOk = na(lastBullDiamondBar) or bar_index - lastBullDiamondBar >= exhCooldown
+
+int hourEt = hour(time, "America/New_York")
+bool mlExhSessionValid = hourEt != 17
+
+// ── 3 TYPES OF FOOTPRINT VOLUME (all from request.footprint()) ──────────
+// 1. DELTA: net buy vs sell pressure — who won the bar
+bool fpDeltaBullish = fpAvailable and not na(fpDelta) and fpDelta > 0   // buyers won
+bool fpDeltaBearish = fpAvailable and not na(fpDelta) and fpDelta < 0   // sellers won
+
+// 2. POC POSITION: where the heaviest trading clustered in the bar
+//    POC near the HIGH = institutions loaded up top (distribution)
+//    POC near the LOW = institutions loaded down low (accumulation)
+float pocPrice = not na(pocRow) ? (volume_row.up_price(pocRow) + volume_row.down_price(pocRow)) / 2.0 : na
+float pocPosition = not na(pocPrice) and barRange > 0 ? (pocPrice - low) / barRange : na
+bool pocNearLow = not na(pocPosition) and pocPosition <= 0.40   // accumulation zone
+bool pocNearHigh = not na(pocPosition) and pocPosition >= 0.60  // distribution zone
+
+// 3. IMBALANCE: stacked buy or sell imbalances showing aggressive one-sided flow
+int stackedBuyCount = 0
+int stackedSellCount = 0
+if fpAvailable
+    array<volume_row> fpRows = footprint.rows(reqFootprint)
+    int fpRowCount = array.size(fpRows)
+    int rowsCheck = math.min(stackedImbalanceRows, fpRowCount)
+    if rowsCheck > 0
+        for ri = 0 to rowsCheck - 1
+            volume_row topR = array.get(fpRows, fpRowCount - 1 - ri)
+            if volume_row.has_buy_imbalance(topR)
+                stackedBuyCount += 1
+            volume_row botR = array.get(fpRows, ri)
+            if volume_row.has_sell_imbalance(botR)
+                stackedSellCount += 1
+bool stackedBuyImbalance = stackedBuyCount >= 2    // aggressive buying at highs
+bool stackedSellImbalance = stackedSellCount >= 2  // aggressive selling at lows
+
+// ── DIAMOND TRIGGER ─────────────────────────────────────────────────────
+// THREE REQUIREMENTS, all mandatory:
+//   1. PROVEN candlestick pattern (backtester validated on MES 15m)
+//   2. FOOTPRINT DELTA confirms direction (buyers/sellers won the bar)
+//   3. FOOTPRINT POC OR IMBALANCE confirms institutional positioning
+// PLUS: swing extreme + cooldown + session filter
+//
+// BULLISH: proven pattern + delta positive + (POC near low OR no stacked sell imbalance)
+bool bullFpTriple = fpDeltaBullish and (pocNearLow or not stackedSellImbalance)
+bool bullCandleProven = longLowerShadow or dragonflyDoji
+bool bullishExhaustion = mlExhSessionValid and confirmed and isSwingLowBar and bullCooldownOk and bullFpTriple and bullCandleProven
+
+// BEARISH: proven pattern + delta negative + (POC near high OR no stacked buy imbalance)
+bool bearFpTriple = fpDeltaBearish and (pocNearHigh or not stackedBuyImbalance)
+bool bearCandleProven = longUpperShadow or shootingStar or bearishEngulfing
+bool bearishExhaustion = mlExhSessionValid and confirmed and isSwingHighBar and bearCooldownOk and bearFpTriple and bearCandleProven
+
+int mlExhConfidenceTier = bullishExhaustion or bearishExhaustion ? 1 : 0
 int exhaustionSignalDir = bearishExhaustion ? -1 : bullishExhaustion ? 1 : 0
+
+if confirmed and bearishExhaustion
+    lastBearDiamondBar := bar_index
+if confirmed and bullishExhaustion
+    lastBullDiamondBar := bar_index
 
 //=====================
 // TRADE STATE MACHINE (setup -> active -> TP progress -> final resolution)
@@ -762,8 +890,10 @@ float tp5Level   = pT5
 // Stop geometry is exported for AG and diagnostics, but not used as a live Pine gate.
 float slDistPts = math.abs(entryLevel - slLevel)
 float slDistAtr = atr14 > 0 ? slDistPts / atr14 : 0.0
-bool entryLongTrigger  = acceptEvent and dir == 1 and not ladderInvalidated
-bool entryShortTrigger = acceptEvent and dir == -1 and not ladderInvalidated and not bullishTrendBlocksShorts
+// Entry triggers: accept event + fib confirmation stack (PowerDrill §6.1)
+// No more naked accept entries. Every trade must be confirmed by volume + candle/wick/sweep.
+bool entryLongTrigger  = acceptEvent and dir == 1 and not ladderInvalidated and longConfirmed
+bool entryShortTrigger = acceptEvent and dir == -1 and not ladderInvalidated and not bullishTrendBlocksShorts and shortConfirmed
 
 if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or entryLongTrigger or entryShortTrigger)
     log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} longTrig={5} shortTrig={6} shortGate={7} fpCount={8}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, entryLongTrigger, entryShortTrigger, bullishTrendBlocksShorts, footprintEvidenceCount))
