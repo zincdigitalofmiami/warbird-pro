@@ -220,6 +220,14 @@ These are explicitly excluded from the canonical `warbird` warehouse:
 - Update `AGENTS.md` only when repo rules or hard workflow constraints change.
 - Update memory with the current canonical contract, required harness status, and current blocker when a phase locks.
 
+### Memory & Session Handoff — Non-Negotiable
+
+- `.remember/` files are **append-only**. NEVER overwrite any `.remember/today-*.md`, `.remember/now.md`, `.remember/recent.md`, or `.remember/archive.md`. All session history is permanent.
+- To save a session entry: append to `today-YYYY-MM-DD.md` using Edit (not Write/Bash overwrite). Update `now.md` with the current rolling state.
+- Persistent cross-session memories go to `/Users/zincdigital/.claude/projects/-Volumes-Satechi-Hub-warbird-pro/memory/` as typed files (`project_`, `feedback_`, `user_`, `reference_`). Always add a pointer line to `MEMORY.md`.
+- Never use a Bash heredoc or the Write tool to overwrite an existing `.remember` file.
+- At session end, roll `now.md` content into the dated `today-` file, then save any project/feedback memories that should persist to future sessions.
+
 ### No Hand-Rolling — Copy Working Code
 
 - When a working implementation exists (library example, reference indicator, proven pattern), **COPY IT EXACTLY**.
