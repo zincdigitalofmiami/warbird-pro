@@ -7,13 +7,16 @@ psycopg2 is mocked at import time.
 
 Run:  python3 -m pytest scripts/ag/test_tuner.py -v
 """
+
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import sys
 import unittest.mock as mock
 from pathlib import Path
+from typing import Any, cast
 
 # Mock psycopg2 before importing tuner modules (no live DB needed).
 sys.modules["psycopg2"] = mock.MagicMock()
@@ -27,6 +30,7 @@ import tv_auto_tune as tva
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 def _balanced_metrics(
     total: int = 1000,
@@ -42,6 +46,26 @@ def _balanced_metrics(
     long_trades = total // 2
     short_trades = total - long_trades
     by_year = {str(2020 + i): round(net / years, 2) for i in range(years)}
+    year_trade_counts = {year: max(total // max(years, 1), 20) for year in by_year}
+    window_trades = max(total // 4, 1)
+    rolling_windows = []
+    for idx in range(4):
+        rolling_windows.append(
+            {
+                "start_date": f"202{idx}-01-01",
+                "end_date": f"202{idx}-12-31",
+                "trades": window_trades,
+                "net_pnl": round(net / 4.0, 2),
+                "profit_factor": pf,
+                "expectancy_per_trade": round((net / 4.0) / window_trades, 4),
+                "max_drawdown_pct": round(dd_pct / 2.0, 2),
+                "return_over_drawdown": round(
+                    max((net / 10000 * 100), 0.0) / max(dd_pct, 0.01), 4
+                ),
+                "long_trades": window_trades // 2,
+                "short_trades": window_trades - (window_trades // 2),
+            }
+        )
     return {
         "total_trades": total,
         "wins": wins,
@@ -58,13 +82,20 @@ def _balanced_metrics(
         "long": {"trades": long_trades, "profit_factor": pf},
         "short": {"trades": short_trades, "profit_factor": pf},
         "by_year": by_year,
+        "year_trade_counts": year_trade_counts,
+        "year_positive_ratio": 1.0,
         "footprint_cohort": {
             "from_date": "2025-01-01",
             "trades": 200,
             "net_pnl": 1000.0,
             "profit_factor": 1.3,
-            "long_trades": 100,
-            "short_trades": 100,
+            "long": {"trades": 100, "profit_factor": 1.3},
+            "short": {"trades": 100, "profit_factor": 1.3},
+        },
+        "rolling_windows": {
+            "window_count": 4,
+            "valid_windows": 4,
+            "windows": rolling_windows,
         },
     }
 
@@ -80,35 +111,67 @@ def _fake_input_schema() -> dict:
     """Simulate a live TV input schema for validation tests."""
     return {
         "ZigZag Deviation (manual)": {
-            "id": "in_1", "name": "ZigZag Deviation (manual)",
-            "type": "float", "min": 3.0, "max": 10.0,
+            "id": "in_1",
+            "name": "ZigZag Deviation (manual)",
+            "type": "float",
+            "min": 3.0,
+            "max": 10.0,
         },
         "Fallback Stop Family": {
-            "id": "in_11", "name": "Fallback Stop Family",
+            "id": "in_11",
+            "name": "Fallback Stop Family",
             "type": "text",
-            "options": ["FIB_NEG_0236", "FIB_NEG_0382", "ATR_1_0", "ATR_1_5",
-                        "ATR_STRUCTURE_1_25", "FIB_0236_ATR_COMPRESS_0_50"],
+            "options": [
+                "FIB_NEG_0236",
+                "FIB_NEG_0382",
+                "ATR_1_0",
+                "ATR_1_5",
+                "ATR_STRUCTURE_1_25",
+                "FIB_0236_ATR_COMPRESS_0_50",
+            ],
         },
         "Footprint Ticks Per Row": {
-            "id": "in_13", "name": "Footprint Ticks Per Row",
-            "type": "integer", "min": 1, "max": 100,
+            "id": "in_13",
+            "name": "Footprint Ticks Per Row",
+            "type": "integer",
+            "min": 1,
+            "max": 100,
         },
         "Enable Debug Logs": {
-            "id": "in_25", "name": "Enable Debug Logs", "type": "bool",
+            "id": "in_25",
+            "name": "Enable Debug Logs",
+            "type": "bool",
         },
         "Show Footprint Audit Table": {
-            "id": "in_26", "name": "Show Footprint Audit Table", "type": "bool",
+            "id": "in_26",
+            "name": "Show Footprint Audit Table",
+            "type": "bool",
         },
         "Target Line Lookback Bars": {
-            "id": "in_22", "name": "Target Line Lookback Bars",
-            "type": "integer", "min": 5, "max": 100,
+            "id": "in_22",
+            "name": "Target Line Lookback Bars",
+            "type": "integer",
+            "min": 5,
+            "max": 100,
         },
     }
+
+
+def _subparser_choices(
+    parser: argparse.ArgumentParser,
+) -> dict[str, argparse.ArgumentParser]:
+    subparsers_action = next(
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    return cast(dict[str, argparse.ArgumentParser], subparsers_action.choices)
 
 
 # ===========================================================================
 # Phase B — score_trial
 # ===========================================================================
+
 
 class TestScoreTrial:
     """Pre-AG PF-first scoring logic with richness constraints."""
@@ -136,13 +199,14 @@ class TestScoreTrial:
         assert result["objective_score"] is None
 
     def test_perfect_balanced_sample_scores_high(self):
-        m = _balanced_metrics(total=2200, years=6)
+        m = _balanced_metrics(total=375, years=6, net=2000.0, dd_pct=8.0)
         result = tsp.score_trial(m, _default_objective())
         assert result["objective_score"] is not None
         assert result["objective_score"] >= 0.6
         c = result["components"]
+        assert c["trade_density"] == 1.0
         assert c["sample_richness"] == 1.0
-        assert c["directional_balance"] == 1.0
+        assert c["directional_balance"] >= 0.99
         assert c["regime_coverage"] == 1.0
         assert c["realism_ok"] is True
 
@@ -202,9 +266,16 @@ class TestScoreTrial:
         obj = _default_objective()
         w = obj["weights"]
         component_sum = (
-            w["profit_factor"] + w["expectancy"] +
-            w["sample_richness"] + w["directional_balance"]
-            + w["regime_coverage"] + w["outcome_diversity"]
+            w["profit_factor"]
+            + w["expectancy"]
+            + w["trade_density"]
+            + w["directional_balance"]
+            + w["regime_coverage"]
+            + w["outcome_diversity"]
+            + w["drawdown_efficiency"]
+            + w["rolling_stability"]
+            + w["footprint_stability"]
+            + w["yearly_consistency"]
         )
         assert abs(component_sum - 1.0) < 0.001
 
@@ -225,45 +296,59 @@ class TestScoreTrial:
 # Phase C — failure classification
 # ===========================================================================
 
-class TestFailureClassification:
 
+class TestFailureClassification:
     def test_no_recalc(self):
-        assert tva.classify_failure_reason(
-            RuntimeError("failed_no_recalc: never entered loading")
-        ) == "no_recalc"
+        assert (
+            tva.classify_failure_reason(
+                RuntimeError("failed_no_recalc: never entered loading")
+            )
+            == "no_recalc"
+        )
 
     def test_schema_drift(self):
-        assert tva.classify_failure_reason(
-            RuntimeError("schema_drift: 'Foo' not in live schema")
-        ) == "schema_drift"
+        assert (
+            tva.classify_failure_reason(
+                RuntimeError("schema_drift: 'Foo' not in live schema")
+            )
+            == "schema_drift"
+        )
 
     def test_invalid_input(self):
-        assert tva.classify_failure_reason(
-            RuntimeError("invalid_input: value out of range")
-        ) == "invalid_input"
+        assert (
+            tva.classify_failure_reason(
+                RuntimeError("invalid_input: value out of range")
+            )
+            == "invalid_input"
+        )
 
     def test_compile_error(self):
-        assert tva.classify_failure_reason(
-            RuntimeError("compile_error: JS exception: blah")
-        ) == "compile_error"
+        assert (
+            tva.classify_failure_reason(
+                RuntimeError("compile_error: JS exception: blah")
+            )
+            == "compile_error"
+        )
 
     def test_unknown_defaults_to_tv_disconnected(self):
-        assert tva.classify_failure_reason(
-            ConnectionError("websocket closed")
-        ) == "tv_disconnected"
+        assert (
+            tva.classify_failure_reason(ConnectionError("websocket closed"))
+            == "tv_disconnected"
+        )
 
     def test_generic_runtime_error_defaults_to_disconnected(self):
-        assert tva.classify_failure_reason(
-            RuntimeError("something unexpected")
-        ) == "tv_disconnected"
+        assert (
+            tva.classify_failure_reason(RuntimeError("something unexpected"))
+            == "tv_disconnected"
+        )
 
 
 # ===========================================================================
 # Phase A — input validation
 # ===========================================================================
 
-class TestValidateTrialParams:
 
+class TestValidateTrialParams:
     def test_valid_params_no_errors(self):
         schema = _fake_input_schema()
         params = {
@@ -323,8 +408,8 @@ class TestValidateTrialParams:
 # Phase A — input value building
 # ===========================================================================
 
-class TestBuildInputValues:
 
+class TestBuildInputValues:
     def test_resolves_names_to_ids(self):
         schema = _fake_input_schema()
         search = {"ZigZag Deviation (manual)": 7.0}
@@ -332,7 +417,7 @@ class TestBuildInputValues:
         result = tva.build_input_values(search, locked, schema)
         ids = {r["id"] for r in result}
         # Should have the two params + debug force-offs
-        assert "in_1" in ids   # ZigZag Deviation
+        assert "in_1" in ids  # ZigZag Deviation
         assert "in_13" in ids  # Footprint Ticks Per Row
         assert "in_25" in ids  # Enable Debug Logs (forced off)
         assert "in_26" in ids  # Show Footprint Audit Table (forced off)
@@ -366,8 +451,8 @@ class TestBuildInputValues:
 # Phase A — values_match (loose equality)
 # ===========================================================================
 
-class TestValuesMatch:
 
+class TestValuesMatch:
     def test_exact_match(self):
         assert tva._values_match(5, 5) is True
 
@@ -397,8 +482,8 @@ class TestValuesMatch:
 # Phase A — metrics computation from TV trades
 # ===========================================================================
 
-class TestCalculateMetricsFromTV:
 
+class TestCalculateMetricsFromTV:
     def _make_trades(self, n_long=50, n_short=50, pnl_per=10.0):
         trades = []
         ts_base = 1700000000000  # ms
@@ -407,16 +492,18 @@ class TestCalculateMetricsFromTV:
             side = "long" if i < n_long else "short"
             pnl = pnl_per if i % 3 != 0 else -pnl_per  # ~67% win rate
             cum += pnl
-            trades.append({
-                "trade_num": i + 1,
-                "side": side,
-                "entry_ts": ts_base + i * 60000,
-                "exit_ts": ts_base + (i + 1) * 60000,
-                "net_pnl": pnl,
-                "cumulative_pnl": cum,
-                "adverse_excursion_mag": abs(pnl) * 0.5,
-                "favorable_excursion": abs(pnl) * 1.5,
-            })
+            trades.append(
+                {
+                    "trade_num": i + 1,
+                    "side": side,
+                    "entry_ts": ts_base + i * 60000,
+                    "exit_ts": ts_base + (i + 1) * 60000,
+                    "net_pnl": pnl,
+                    "cumulative_pnl": cum,
+                    "adverse_excursion_mag": abs(pnl) * 0.5,
+                    "favorable_excursion": abs(pnl) * 1.5,
+                }
+            )
         return trades
 
     def test_basic_metrics_shape(self):
@@ -431,6 +518,7 @@ class TestCalculateMetricsFromTV:
 
     def test_no_trades_raises(self):
         import pytest
+
         with pytest.raises(ValueError, match="No closed trades"):
             tva.calculate_metrics_from_tv([], 10000, -37.50, "2025-01-01")
 
@@ -454,46 +542,70 @@ class TestCalculateMetricsFromTV:
 # Structural — CLI and JSON
 # ===========================================================================
 
-class TestCLIStructure:
 
+class TestCLIStructure:
     def test_tv_auto_tune_has_preflight_and_run(self):
         p = tva.build_parser()
-        choices = p._subparsers._group_actions[0].choices
+        choices = _subparser_choices(p)
         assert "preflight" in choices
         assert "run" in choices
 
     def test_run_has_required_flags(self):
         p = tva.build_parser()
-        run_p = p._subparsers._group_actions[0].choices["run"]
+        run_p = _subparser_choices(p)["run"]
         dests = {a.dest for a in run_p._actions}
-        for flag in ["batch_dir", "trial_file", "recalc_timeout", "stop_on_error", "delay"]:
+        for flag in [
+            "batch_dir",
+            "trial_file",
+            "recalc_timeout",
+            "stop_on_error",
+            "delay",
+        ]:
             assert flag in dests, f"missing --{flag.replace('_', '-')}"
 
     def test_tune_strategy_params_leaderboard_has_include_failed(self):
         p = tsp.build_parser()
-        lb_p = p._subparsers._group_actions[0].choices["leaderboard"]
+        lb_p = _subparser_choices(p)["leaderboard"]
         opts = [a.option_strings for a in lb_p._actions]
         assert any("--include-failed" in o for o in opts)
 
     def test_tuning_space_json_valid(self):
         space_path = Path(__file__).parent / "strategy_tuning_space.json"
         space = json.loads(space_path.read_text())
-        assert space["profile_name"] == "mes15m_agfit_v2"
+        assert space["profile_name"] == "mes15m_agfit_v3"
         w = space["objective"]["weights"]
         expected_keys = {
-            "profit_factor", "expectancy",
-            "sample_richness", "directional_balance",
-            "regime_coverage", "outcome_diversity", "realism_gate_penalty",
+            "profit_factor",
+            "expectancy",
+            "trade_density",
+            "directional_balance",
+            "regime_coverage",
+            "outcome_diversity",
+            "drawdown_efficiency",
+            "rolling_stability",
+            "footprint_stability",
+            "yearly_consistency",
+            "realism_gate_penalty",
+            "instability_penalty",
         }
         assert set(w.keys()) == expected_keys
         component_sum = (
-            w["profit_factor"] + w["expectancy"] +
-            w["sample_richness"] + w["directional_balance"] +
-            w["regime_coverage"] + w["outcome_diversity"]
+            w["profit_factor"]
+            + w["expectancy"]
+            + w["trade_density"]
+            + w["directional_balance"]
+            + w["regime_coverage"]
+            + w["outcome_diversity"]
+            + w["drawdown_efficiency"]
+            + w["rolling_stability"]
+            + w["footprint_stability"]
+            + w["yearly_consistency"]
         )
         assert abs(component_sum - 1.0) < 0.001
         assert "profit_factor_range" in space["objective"]
         assert "expectancy_per_trade" in space["objective"]
+        assert "return_over_drawdown" in space["objective"]
+        assert "rolling_window_stability" in space["objective"]
         assert "side_profit_factor_floor" in space["objective"]
 
     def test_tuning_space_trade_bounds_use_min_max(self):
@@ -501,15 +613,50 @@ class TestCLIStructure:
         space = json.loads(space_path.read_text())
         bounds = space["objective"]["trade_count_bounds"]
         assert "min" in bounds
+        assert "target" in bounds
         assert "max" in bounds
+
+
+class TestSearchSpaceConstraints:
+    def test_signature_filter_excludes_visual_locked_params(self):
+        space = json.loads(
+            (Path(__file__).parent / "strategy_tuning_space.json").read_text()
+        )
+        filtered = tsp.filter_signature_locked_params(space, space["locked_parameters"])
+        assert "Target Line Lookback Bars" not in filtered
+        assert "Extend Levels Right" not in filtered
+        assert "ZigZag Depth (manual)" in filtered
+
+    def test_parameter_constraints_catch_overwide_hold(self):
+        params = {
+            "Tier 1 Hold Bars": 5,
+            "Tier 1 Hold Stop ATR": 2.25,
+            "Exhaustion Z Length": 20,
+            "Exhaustion Z Threshold": 2.5,
+            "Extension ATR Tolerance": 0.1,
+            "Footprint Ticks Per Row": 4,
+            "Zero-Print Volume Ratio": 0.1,
+            "Footprint Imbalance %": 300,
+            "Extreme Rows To Inspect": 3,
+        }
+        assert "hold_logic_overwide" in tsp.parameter_constraint_violations(params)
+
+    def test_generate_suggestions_emits_only_valid_configs(self):
+        space = json.loads(
+            (Path(__file__).parent / "strategy_tuning_space.json").read_text()
+        )
+        suggestions = tsp.generate_suggestions(space, [], 5, tsp.random.Random(7))
+        assert len(suggestions) == 5
+        for suggestion in suggestions:
+            assert tsp.has_valid_parameter_structure(suggestion["search_parameters"])
 
 
 # ===========================================================================
 # Structural — evaluation_mode consistency
 # ===========================================================================
 
-class TestEvaluationModeConsistency:
 
+class TestEvaluationModeConsistency:
     def test_successful_trials_use_tv_mcp_strict(self):
         """make_tv_trial_record should stamp TV_MCP_STRICT, not CSV_FULL."""
         src = Path(__file__).parent / "tv_auto_tune.py"
@@ -540,8 +687,8 @@ class TestEvaluationModeConsistency:
 # Structural — no hardcoded entity ID or static input map
 # ===========================================================================
 
-class TestNoHardcodedValues:
 
+class TestNoHardcodedValues:
     def test_no_hardcoded_entity_id(self):
         """Regression: STRATEGY_ENTITY_ID = "kGnTgb" must not exist."""
         src = Path(__file__).parent / "tv_auto_tune.py"
@@ -557,7 +704,7 @@ class TestNoHardcodedValues:
             if stripped.startswith("#"):
                 continue
             assert "INPUT_NAME_TO_ID: dict" not in stripped, (
-                f"Static INPUT_NAME_TO_ID still present as live code at line {i+1}"
+                f"Static INPUT_NAME_TO_ID still present as live code at line {i + 1}"
             )
 
 
@@ -565,12 +712,14 @@ class TestNoHardcodedValues:
 # Ripple-effect guards — issues found during integration review
 # ===========================================================================
 
+
 class TestInsufficientSampleGuard:
     """Hard-rejected trials must not silently become RECORDED rows."""
 
     def test_cdp_path_raises_on_insufficient_sample(self):
         """make_tv_trial_record raises ValueError when sample is insufficient."""
         import pytest
+
         # Build minimal inputs that produce < 200 trades
         trades = TestCalculateMetricsFromTV()._make_trades(n_long=10, n_short=10)
         space = json.loads(
@@ -641,8 +790,12 @@ class TestCsvMetaKeyNames:
             notes="test",
         )
         csv_meta = record["runtime_context"]["csv_meta"]
-        assert "start_date" in csv_meta, f"csv_meta uses wrong key: {list(csv_meta.keys())}"
-        assert "end_date" in csv_meta, f"csv_meta uses wrong key: {list(csv_meta.keys())}"
+        assert "start_date" in csv_meta, (
+            f"csv_meta uses wrong key: {list(csv_meta.keys())}"
+        )
+        assert "end_date" in csv_meta, (
+            f"csv_meta uses wrong key: {list(csv_meta.keys())}"
+        )
         assert "from_date" not in csv_meta, "csv_meta should not have from_date"
 
 
@@ -669,21 +822,34 @@ class TestJsonlHistorySesBothModes:
 
     def test_load_trials_jsonl_csv_full_includes_tv_mcp_strict(self):
         import tempfile
+
         ledger = Path(tempfile.mktemp(suffix=".jsonl"))
         try:
             # Write one CSV_FULL and one TV_MCP_STRICT trial
-            tsp.append_trial_jsonl(ledger, {
-                "trial_id": "csv-001", "evaluation_mode": "CSV_FULL",
-                "search_parameters": {"a": 1},
-            })
-            tsp.append_trial_jsonl(ledger, {
-                "trial_id": "cdp-001", "evaluation_mode": "TV_MCP_STRICT",
-                "search_parameters": {"b": 2},
-            })
-            tsp.append_trial_jsonl(ledger, {
-                "trial_id": "pending-001", "evaluation_mode": "PENDING",
-                "search_parameters": {"c": 3},
-            })
+            tsp.append_trial_jsonl(
+                ledger,
+                {
+                    "trial_id": "csv-001",
+                    "evaluation_mode": "CSV_FULL",
+                    "search_parameters": {"a": 1},
+                },
+            )
+            tsp.append_trial_jsonl(
+                ledger,
+                {
+                    "trial_id": "cdp-001",
+                    "evaluation_mode": "TV_MCP_STRICT",
+                    "search_parameters": {"b": 2},
+                },
+            )
+            tsp.append_trial_jsonl(
+                ledger,
+                {
+                    "trial_id": "pending-001",
+                    "evaluation_mode": "PENDING",
+                    "search_parameters": {"c": 3},
+                },
+            )
             trials = tsp.load_trials_jsonl_csv_full(ledger)
             ids = {t["trial_id"] for t in trials}
             assert "csv-001" in ids, "CSV_FULL trial missing"
@@ -697,30 +863,38 @@ class TestRenderMarkdownTableNullScore:
     """render_markdown_table must not crash on None objective_score."""
 
     def test_none_score_formats_as_na(self):
-        rows = [{
-            "trial_id": "test-001",
-            "metrics": {
-                "net_pnl": 0, "profit_factor": None,
-                "max_drawdown_pct": 0, "survival_30_tick_pct": 0,
-                "footprint_cohort": {"profit_factor": None},
-            },
-            "objective": {"objective_score": None},
-            "search_parameters": {"foo": 1},
-        }]
+        rows = [
+            {
+                "trial_id": "test-001",
+                "metrics": {
+                    "net_pnl": 0,
+                    "profit_factor": None,
+                    "max_drawdown_pct": 0,
+                    "survival_30_tick_pct": 0,
+                    "footprint_cohort": {"profit_factor": None},
+                },
+                "objective": {"objective_score": None},
+                "search_parameters": {"foo": 1},
+            }
+        ]
         table = tsp.render_markdown_table(rows)
         assert "na" in table
         # Should not raise TypeError
 
     def test_valid_score_formats_normally(self):
-        rows = [{
-            "trial_id": "test-002",
-            "metrics": {
-                "net_pnl": 1000, "profit_factor": 1.5,
-                "max_drawdown_pct": 5.0, "survival_30_tick_pct": 80.0,
-                "footprint_cohort": {"profit_factor": 1.3},
-            },
-            "objective": {"objective_score": 0.8512},
-            "search_parameters": {"bar": 2},
-        }]
+        rows = [
+            {
+                "trial_id": "test-002",
+                "metrics": {
+                    "net_pnl": 1000,
+                    "profit_factor": 1.5,
+                    "max_drawdown_pct": 5.0,
+                    "survival_30_tick_pct": 80.0,
+                    "footprint_cohort": {"profit_factor": 1.3},
+                },
+                "objective": {"objective_score": 0.8512},
+                "search_parameters": {"bar": 2},
+            }
+        ]
         table = tsp.render_markdown_table(rows)
         assert "0.8512" in table

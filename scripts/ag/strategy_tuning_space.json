@@ -1,5 +1,12 @@
 {
-  "profile_name": "mes15m_agfit_v2",
+  "profile_name": "mes15m_agfit_v3",
+  "signature_exclude_locked_parameters": [
+    "Anchor Span = Active Fib Window",
+    "Confluence Tolerance (%)",
+    "Extend Levels Right",
+    "Show Footprint Audit Table",
+    "Target Line Lookback Bars"
+  ],
   "locked_parameters": {
     "Acceptance Retest Window (bars)": 6,
     "Anchor Span = Active Fib Window": true,
@@ -17,31 +24,61 @@
   },
   "objective": {
     "trade_count_bounds": {
-      "max": 2200,
-      "min": 0
+      "max": 900,
+      "min": 220,
+      "target": 375
     },
     "profit_factor_range": {
-      "floor": 0.6,
-      "target": 2.0,
-      "realism_cap": 3.0
+      "floor": 0.9,
+      "target": 1.6,
+      "realism_cap": 2.4
     },
     "expectancy_per_trade": {
       "floor": 0.0,
-      "target": 25.0,
-      "negative_penalty": 0.5
+      "target": 18.0,
+      "negative_penalty": 0.35
+    },
+    "return_over_drawdown": {
+      "floor": 0.25,
+      "target": 1.5
+    },
+    "footprint_cohort": {
+      "min_score": 0.45,
+      "min_trades": 60
+    },
+    "rolling_window_stability": {
+      "max_score_stddev": 0.18,
+      "min_score": 0.45,
+      "min_trades_per_window": 40,
+      "target_positive_windows": 0.75,
+      "window_count": 4
+    },
+    "yearly_consistency": {
+      "max_dominance": 0.55,
+      "min_score": 0.45,
+      "target_positive_ratio": 0.67
+    },
+    "suspicious_perfection": {
+      "profit_factor": 2.25,
+      "return_over_drawdown": 3.5
     },
     "side_profit_factor_floor": {
-      "long": 0.8,
-      "short": 0.8
+      "long": 0.95,
+      "short": 0.95
     },
     "weights": {
-      "profit_factor": 0.45,
-      "expectancy": 0.20,
-      "sample_richness": 0.15,
-      "directional_balance": 0.10,
-      "regime_coverage": 0.05,
-      "outcome_diversity": 0.05,
-      "realism_gate_penalty": 0.50
+      "profit_factor": 0.23,
+      "expectancy": 0.12,
+      "trade_density": 0.12,
+      "directional_balance": 0.08,
+      "regime_coverage": 0.06,
+      "outcome_diversity": 0.04,
+      "drawdown_efficiency": 0.14,
+      "rolling_stability": 0.12,
+      "footprint_stability": 0.05,
+      "yearly_consistency": 0.04,
+      "realism_gate_penalty": 0.40,
+      "instability_penalty": 0.55
     }
   },
   "runtime_context": {
@@ -56,17 +93,17 @@
   "search_parameters": {
     "Exhaustion Z Length": {
       "type": "int",
-      "values": [10, 14, 20, 30, 50]
+      "values": [14, 20, 30]
     },
     "Exhaustion Z Threshold": {
-      "max": 3.2,
-      "min": 1.8,
+      "max": 2.8,
+      "min": 2.2,
       "step": 0.1,
       "type": "float"
     },
     "Extension ATR Tolerance": {
-      "max": 0.2,
-      "min": 0.05,
+      "max": 0.12,
+      "min": 0.08,
       "step": 0.01,
       "type": "float"
     },
@@ -75,9 +112,7 @@
       "values": [
         2,
         3,
-        4,
-        5,
-        6
+        4
       ]
     },
     "Fallback Stop Family": {
@@ -87,27 +122,25 @@
         "ATR_1_5",
         "ATR_STRUCTURE_1_25",
         "FIB_NEG_0236",
-        "FIB_NEG_0382",
         "FIB_0236_ATR_COMPRESS_0_50"
       ]
     },
     "Footprint Imbalance %": {
-      "max": 400,
-      "min": 200,
+      "max": 350,
+      "min": 250,
       "step": 25,
       "type": "float"
     },
     "Footprint Ticks Per Row": {
       "type": "int",
       "values": [
-        2,
         4,
         6
       ]
     },
     "Footprint VA %": {
-      "max": 80,
-      "min": 60,
+      "max": 75,
+      "min": 65,
       "step": 5,
       "type": "float"
     },
@@ -115,8 +148,8 @@
       "type": "bool"
     },
     "Short Gate ADX Floor": {
-      "max": 30,
-      "min": 14,
+      "max": 24,
+      "min": 18,
       "step": 1,
       "type": "float"
     },
@@ -126,20 +159,18 @@
         2,
         3,
         4,
-        5,
-        6,
-        8
+        5
       ]
     },
     "Tier 1 Hold Stop ATR": {
-      "max": 3.5,
-      "min": 1.25,
+      "max": 2.25,
+      "min": 1.5,
       "step": 0.25,
       "type": "float"
     },
     "Zero-Print Volume Ratio": {
-      "max": 0.25,
-      "min": 0.05,
+      "max": 0.15,
+      "min": 0.08,
       "step": 0.01,
       "type": "float"
     }

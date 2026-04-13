@@ -65,7 +65,7 @@ Phase execution order:
 - ~~`local_schema_migrations` ledger table: not yet created (Phase 1)~~ **DONE 2026-04-11**
 - ~~One-time bootstrap from `rabid_raccoon`: not yet run (Phase 2)~~ **DONE 2026-04-11** — All surfaces bootstrapped. HG loaded from `data/cross_asset_1h.parquet`. All 6 cross-asset symbols live. 221,954 cross-asset rows through 2026-04-03.
 - ~~Three canonical local AG tables and one canonical training view (`ag_training`): not yet created (Phase 3)~~ **DONE 2026-04-11** — migration 007. 3 tables + view live.
-- Python pipeline in `scripts/ag/`: CDP tuner automation built (`tv_auto_tune.py` + `tune_strategy_params.py` + `strategy_tuning_space.json` — applies inputs via CDP, polls recalc, reads trades without CSV export). Full AG feature pipeline (extract, reconstruct, label, train, SHAP) still unbuilt.
+- Python pipeline in `scripts/ag/`: CDP tuner automation built (`tv_auto_tune.py` + `tune_strategy_params.py` + `strategy_tuning_space.json` — applies inputs via CDP, polls recalc, reads trades without CSV export). 2026-04-13 tuner hardening landed: new profile `mes15m_agfit_v3`, narrowed search ranges, non-causal locked inputs removed from trial signatures, coupled-parameter rejection rules added, and objective upgraded to include drawdown efficiency, rolling-window stability, footprint-tail stability, and yearly consistency. No authoritative `mes15m_agfit_v3` recorded trials yet. Full AG feature pipeline (extract, reconstruct, label, train, SHAP) still unbuilt.
 - Full-surface SHAP program: not yet built (Phase 5)
 - Cloud serving promotion: blocked on Phases 1-5 (Phase 6)
 - `artifacts/` and `artifacts/shap/` directories: not yet created

@@ -8,6 +8,7 @@ import json
 import math
 import os
 import random
+import statistics
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -23,12 +24,39 @@ DEFAULT_LEDGER_PATH = REPO_ROOT / "artifacts" / "tuning" / "strategy_trials.json
 DEFAULT_SUGGESTIONS_DIR = REPO_ROOT / "artifacts" / "tuning" / "suggestions"
 DEFAULT_INITIAL_CAPITAL = 50_000.0
 DEFAULT_SURVIVAL_STOP_USD = -37.50
-DEFAULT_DB_DSN = os.environ.get("WARBIRD_PG_DSN", "host=127.0.0.1 port=5432 dbname=warbird")
+DEFAULT_DB_DSN = os.environ.get(
+    "WARBIRD_PG_DSN", "host=127.0.0.1 port=5432 dbname=warbird"
+)
 # TV tick archive boundary for MES1! 15m — bars before this date rarely have footprint data.
 # Operator can override per session via --footprint-available-from on the `record` command.
 DEFAULT_FOOTPRINT_AVAILABLE_FROM = "2024-01-01"
 # Minimum CSV start date: 2020-01-01 per v5 training-data floor.
 DEFAULT_REQUIRED_CSV_START = "2020-01-01"
+DEFAULT_ROLLING_WINDOW_COUNT = 4
+
+PARAMETER_GROUPS: tuple[tuple[str, ...], ...] = (
+    (
+        "Footprint Ticks Per Row",
+        "Footprint VA %",
+        "Footprint Imbalance %",
+        "Extreme Rows To Inspect",
+        "Zero-Print Volume Ratio",
+    ),
+    (
+        "Exhaustion Z Length",
+        "Exhaustion Z Threshold",
+        "Extension ATR Tolerance",
+    ),
+    (
+        "Gate Shorts In Bull Trend",
+        "Short Gate ADX Floor",
+    ),
+    (
+        "Fallback Stop Family",
+        "Tier 1 Hold Bars",
+        "Tier 1 Hold Stop ATR",
+    ),
+)
 
 
 @dataclass
@@ -62,6 +90,57 @@ def normalize_number(value: Any) -> Any:
 
 def canonical_json(payload: Any) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+def clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def config_value(mapping: dict[str, Any], key: str, default: Any) -> Any:
+    return mapping[key] if key in mapping and mapping[key] is not None else default
+
+
+def filter_signature_locked_params(
+    space: dict[str, Any], locked_params: dict[str, Any]
+) -> dict[str, Any]:
+    excluded = set(space.get("signature_exclude_locked_parameters", []))
+    return {key: value for key, value in locked_params.items() if key not in excluded}
+
+
+def parameter_constraint_violations(params: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
+
+    hold_bars = params.get("Tier 1 Hold Bars")
+    hold_atr = params.get("Tier 1 Hold Stop ATR")
+    if hold_bars is not None and hold_atr is not None:
+        if hold_bars >= 5 and hold_atr > 2.0:
+            issues.append("hold_logic_overwide")
+
+    z_len = params.get("Exhaustion Z Length")
+    z_threshold = params.get("Exhaustion Z Threshold")
+    ext_tol = params.get("Extension ATR Tolerance")
+    if z_len is not None and z_threshold is not None and ext_tol is not None:
+        if z_len <= 14 and z_threshold <= 2.2 and ext_tol >= 0.12:
+            issues.append("exhaustion_gate_too_permissive")
+        if z_len >= 30 and z_threshold >= 2.8 and ext_tol <= 0.08:
+            issues.append("exhaustion_gate_too_sparse")
+
+    ticks_per_row = params.get("Footprint Ticks Per Row")
+    zero_ratio = params.get("Zero-Print Volume Ratio")
+    imbalance = params.get("Footprint Imbalance %")
+    rows_to_inspect = params.get("Extreme Rows To Inspect")
+    if ticks_per_row is not None and zero_ratio is not None:
+        if ticks_per_row >= 6 and zero_ratio > 0.14:
+            issues.append("zero_print_too_loose_for_row_size")
+    if imbalance is not None and rows_to_inspect is not None:
+        if imbalance >= 325 and rows_to_inspect < 3:
+            issues.append("imbalance_window_too_shallow")
+
+    return issues
+
+
+def has_valid_parameter_structure(params: dict[str, Any]) -> bool:
+    return not parameter_constraint_violations(params)
 
 
 def params_signature(payload: dict[str, Any]) -> str:
@@ -111,7 +190,11 @@ def neighbor_choice(domain: Domain, current: Any, rng: random.Random) -> Any:
         return current
     index = domain.values.index(current)
     if domain.kind in {"int", "float"}:
-        offsets = [offset for offset in (-2, -1, 1, 2) if 0 <= index + offset < len(domain.values)]
+        offsets = [
+            offset
+            for offset in (-2, -1, 1, 2)
+            if 0 <= index + offset < len(domain.values)
+        ]
         if offsets:
             return domain.values[index + rng.choice(offsets)]
     alternatives = [value for value in domain.values if value != current]
@@ -137,7 +220,8 @@ def load_trials_jsonl(ledger_path: Path) -> list[dict[str, Any]]:
 def load_trials_jsonl_csv_full(ledger_path: Path) -> list[dict[str, Any]]:
     """Load authoritative trials from JSONL (both CSV_FULL and TV_MCP_STRICT)."""
     return [
-        t for t in load_trials_jsonl(ledger_path)
+        t
+        for t in load_trials_jsonl(ledger_path)
         if t.get("evaluation_mode") in ("CSV_FULL", "TV_MCP_STRICT")
     ]
 
@@ -190,7 +274,15 @@ def fetch_db_trials(conn, profile: str) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
-def persist_suggestion_batch(conn, space: dict[str, Any], batch_id: str, count: int, seed: int | None, suggestions: list[dict[str, Any]], space_path: Path) -> None:
+def persist_suggestion_batch(
+    conn,
+    space: dict[str, Any],
+    batch_id: str,
+    count: int,
+    seed: int | None,
+    suggestions: list[dict[str, Any]],
+    space_path: Path,
+) -> None:
     batch_query = """
         INSERT INTO warbird_strategy_tuning_batches (
           batch_id,
@@ -545,6 +637,182 @@ def summarize_side(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def max_drawdown_from_rows(rows: list[dict[str, Any]]) -> float:
+    if not rows:
+        return 0.0
+    baseline = rows[0]["cumulative_pnl"] - rows[0]["net_pnl"]
+    peak = 0.0
+    max_drawdown = 0.0
+    for row in rows:
+        equity = row["cumulative_pnl"] - baseline
+        peak = max(peak, equity)
+        max_drawdown = max(max_drawdown, peak - equity)
+    return max_drawdown
+
+
+def summarize_window(
+    rows: list[dict[str, Any]],
+    initial_capital: float,
+) -> dict[str, Any]:
+    if not rows:
+        return {
+            "start_date": None,
+            "end_date": None,
+            "trades": 0,
+            "net_pnl": 0.0,
+            "profit_factor": None,
+            "expectancy_per_trade": 0.0,
+            "max_drawdown_pct": 0.0,
+            "return_over_drawdown": 0.0,
+            "long_trades": 0,
+            "short_trades": 0,
+        }
+
+    gross_profit = sum(row["net_pnl"] for row in rows if row["net_pnl"] > 0)
+    gross_loss = abs(sum(row["net_pnl"] for row in rows if row["net_pnl"] < 0))
+    trades = len(rows)
+    net_pnl = round(sum(row["net_pnl"] for row in rows), 2)
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else math.inf
+    max_drawdown = max_drawdown_from_rows(rows)
+    max_drawdown_pct = round(max_drawdown / initial_capital * 100.0, 2)
+    return_pct = round(net_pnl / initial_capital * 100.0, 2)
+    return_over_drawdown = (
+        max(return_pct, 0.0) / max(max_drawdown_pct, 0.01)
+        if max_drawdown_pct > 0
+        else 0.0
+    )
+    long_trades = sum(1 for row in rows if row["side"] == "long")
+    short_trades = sum(1 for row in rows if row["side"] == "short")
+    return {
+        "start_date": rows[0]["exit_time"].date().isoformat(),
+        "end_date": rows[-1]["exit_time"].date().isoformat(),
+        "trades": trades,
+        "net_pnl": net_pnl,
+        "profit_factor": None if math.isinf(profit_factor) else round(profit_factor, 3),
+        "expectancy_per_trade": round(net_pnl / trades, 4) if trades else 0.0,
+        "max_drawdown_pct": max_drawdown_pct,
+        "return_over_drawdown": round(return_over_drawdown, 4),
+        "long_trades": long_trades,
+        "short_trades": short_trades,
+    }
+
+
+def build_time_windows(
+    rows: list[dict[str, Any]],
+    window_count: int = DEFAULT_ROLLING_WINDOW_COUNT,
+) -> list[list[dict[str, Any]]]:
+    if not rows or window_count <= 0:
+        return []
+
+    start = rows[0]["exit_time"]
+    end = rows[-1]["exit_time"]
+    if end <= start:
+        return [rows]
+
+    total_seconds = (end - start).total_seconds()
+    windows: list[list[dict[str, Any]]] = [[] for _ in range(window_count)]
+    for row in rows:
+        elapsed = (row["exit_time"] - start).total_seconds()
+        idx = min(int((elapsed / total_seconds) * window_count), window_count - 1)
+        windows[idx].append(row)
+
+    return [window for window in windows if window]
+
+
+def summarize_closed_trades(
+    closed_trades: list[dict[str, Any]],
+    initial_capital: float,
+    survival_stop_usd: float,
+    footprint_available_from: str = DEFAULT_FOOTPRINT_AVAILABLE_FROM,
+) -> dict[str, Any]:
+    if not closed_trades:
+        raise ValueError("No closed trades found")
+
+    closed_trades = sorted(closed_trades, key=lambda row: row["exit_time"])
+    total_trades = len(closed_trades)
+    gross_profit = sum(row["net_pnl"] for row in closed_trades if row["net_pnl"] > 0)
+    gross_loss = abs(sum(row["net_pnl"] for row in closed_trades if row["net_pnl"] < 0))
+    wins = sum(1 for row in closed_trades if row["net_pnl"] > 0)
+    losses = sum(1 for row in closed_trades if row["net_pnl"] < 0)
+    net_pnl = round(sum(row["net_pnl"] for row in closed_trades), 2)
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else math.inf
+    percent_profitable = (
+        round((wins / total_trades * 100.0), 2) if total_trades else 0.0
+    )
+    avg_trade = round(net_pnl / total_trades, 2) if total_trades else 0.0
+    avg_win = round(gross_profit / wins, 2) if wins else 0.0
+    avg_loss = round(gross_loss / losses, 2) if losses else 0.0
+    max_drawdown = max_drawdown_from_rows(closed_trades)
+
+    long_rows = [row for row in closed_trades if row["side"] == "long"]
+    short_rows = [row for row in closed_trades if row["side"] == "short"]
+    survivors = sum(
+        1 for row in closed_trades if row["adverse_excursion"] > survival_stop_usd
+    )
+    survival_rate = (
+        round((survivors / total_trades * 100.0), 2) if total_trades else 0.0
+    )
+
+    by_year: dict[str, float] = {}
+    year_trade_counts: dict[str, int] = {}
+    for row in closed_trades:
+        year = str(row["exit_time"].year)
+        by_year[year] = round(by_year.get(year, 0.0) + row["net_pnl"], 2)
+        year_trade_counts[year] = year_trade_counts.get(year, 0) + 1
+
+    fp_from_date = date.fromisoformat(footprint_available_from)
+    fp_trades = [
+        row for row in closed_trades if row["exit_time"].date() >= fp_from_date
+    ]
+    rolling_windows = [
+        summarize_window(window_rows, initial_capital)
+        for window_rows in build_time_windows(closed_trades)
+    ]
+
+    positive_years = sum(1 for pnl in by_year.values() if pnl > 0)
+    year_positive_ratio = positive_years / float(len(by_year)) if by_year else 0.0
+
+    return {
+        "total_trades": total_trades,
+        "wins": wins,
+        "losses": losses,
+        "percent_profitable": percent_profitable,
+        "net_pnl": net_pnl,
+        "gross_profit": round(gross_profit, 2),
+        "gross_loss": round(gross_loss, 2),
+        "profit_factor": None if math.isinf(profit_factor) else round(profit_factor, 3),
+        "avg_trade": avg_trade,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "max_drawdown": round(max_drawdown, 2),
+        "max_drawdown_pct": round(max_drawdown / initial_capital * 100.0, 2),
+        "return_on_initial_pct": round(net_pnl / initial_capital * 100.0, 2),
+        "survival_30_tick_pct": survival_rate,
+        "long": summarize_side(long_rows),
+        "short": summarize_side(short_rows),
+        "by_year": by_year,
+        "year_trade_counts": year_trade_counts,
+        "year_positive_ratio": round(year_positive_ratio, 4),
+        "footprint_cohort": {
+            "from_date": footprint_available_from,
+            "trades": len(fp_trades),
+            "net_pnl": round(sum(row["net_pnl"] for row in fp_trades), 2),
+            "profit_factor": summarize_window(fp_trades, initial_capital)[
+                "profit_factor"
+            ],
+            "long": summarize_side([row for row in fp_trades if row["side"] == "long"]),
+            "short": summarize_side(
+                [row for row in fp_trades if row["side"] == "short"]
+            ),
+        },
+        "rolling_windows": {
+            "window_count": DEFAULT_ROLLING_WINDOW_COUNT,
+            "windows": rolling_windows,
+            "valid_windows": len(rolling_windows),
+        },
+    }
+
+
 def calculate_trade_metrics(
     csv_path: Path,
     initial_capital: float,
@@ -559,7 +827,6 @@ def calculate_trade_metrics(
       TV tick archives are bounded — most 2020-2023 bars have no footprint data.
       A knob that looks good only in the footprint-rich tail should not dominate.
     """
-    fp_from_date = date.fromisoformat(footprint_available_from)
     by_trade: dict[int, dict[str, Any]] = {}
     with csv_path.open(encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -587,18 +854,25 @@ def calculate_trade_metrics(
                 bucket["exit"] = parsed
 
     closed_trades: list[dict[str, Any]] = []
-    exit_curve: list[dict[str, Any]] = []
     for trade_id, pair in sorted(by_trade.items()):
         entry = pair.get("entry")
         exit_row = pair.get("exit")
         if not entry and not exit_row:
             continue
-        anchor = entry or exit_row
+        anchor = entry if entry is not None else exit_row
+        if anchor is None:
+            continue
+        result_row = exit_row if exit_row is not None else entry
+        if result_row is None:
+            continue
+        excursion_row = entry if entry is not None else exit_row
+        if excursion_row is None:
+            continue
         side = "long" if "long" in anchor["type"].lower() else "short"
-        net_pnl = (exit_row or entry)["net_pnl"]
-        cumulative_pnl = (exit_row or entry)["cumulative_pnl"]
-        exit_time = (exit_row or entry)["time"]
-        adverse_excursion = (entry or exit_row)["adverse_excursion"]
+        net_pnl = result_row["net_pnl"]
+        cumulative_pnl = result_row["cumulative_pnl"]
+        exit_time = result_row["time"]
+        adverse_excursion = excursion_row["adverse_excursion"]
         closed_trades.append(
             {
                 "trade_id": trade_id,
@@ -610,78 +884,12 @@ def calculate_trade_metrics(
                 "adverse_excursion": adverse_excursion,
             }
         )
-        exit_curve.append({"time": exit_time, "cumulative_pnl": cumulative_pnl})
-
-    closed_trades.sort(key=lambda row: row["exit_time"])
-    exit_curve.sort(key=lambda row: row["time"])
-
-    gross_profit = sum(row["net_pnl"] for row in closed_trades if row["net_pnl"] > 0)
-    gross_loss = abs(sum(row["net_pnl"] for row in closed_trades if row["net_pnl"] < 0))
-    wins = sum(1 for row in closed_trades if row["net_pnl"] > 0)
-    losses = sum(1 for row in closed_trades if row["net_pnl"] < 0)
-    total_trades = len(closed_trades)
-    net_pnl = round(sum(row["net_pnl"] for row in closed_trades), 2)
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else math.inf
-    percent_profitable = round((wins / total_trades * 100.0), 2) if total_trades else 0.0
-    avg_trade = round(net_pnl / total_trades, 2) if total_trades else 0.0
-    avg_win = round(gross_profit / wins, 2) if wins else 0.0
-    avg_loss = round(gross_loss / losses, 2) if losses else 0.0
-
-    peak = 0.0
-    max_drawdown = 0.0
-    for point in exit_curve:
-        equity = point["cumulative_pnl"]
-        peak = max(peak, equity)
-        max_drawdown = max(max_drawdown, peak - equity)
-
-    long_rows = [row for row in closed_trades if row["side"] == "long"]
-    short_rows = [row for row in closed_trades if row["side"] == "short"]
-    survivors = sum(1 for row in closed_trades if row["adverse_excursion"] > survival_stop_usd)
-    survival_rate = round((survivors / total_trades * 100.0), 2) if total_trades else 0.0
-
-    by_year: dict[str, float] = {}
-    for row in closed_trades:
-        year = str(row["exit_time"].year)
-        by_year[year] = round(by_year.get(year, 0.0) + row["net_pnl"], 2)
-
-    # ── Footprint cohort (diagnostic — TV tick archive boundary) ──
-    fp_trades = [t for t in closed_trades if t["exit_time"].date() >= fp_from_date]
-    fp_long = [t for t in fp_trades if t["side"] == "long"]
-    fp_short = [t for t in fp_trades if t["side"] == "short"]
-    fp_net = sum(t["net_pnl"] for t in fp_trades)
-    fp_gp = sum(t["net_pnl"] for t in fp_trades if t["net_pnl"] > 0)
-    fp_gl = abs(sum(t["net_pnl"] for t in fp_trades if t["net_pnl"] < 0))
-    fp_pf = fp_gp / fp_gl if fp_gl > 0 else math.inf
-    footprint_cohort = {
-        "from_date": footprint_available_from,
-        "trades": len(fp_trades),
-        "net_pnl": round(fp_net, 2),
-        "profit_factor": None if math.isinf(fp_pf) else round(fp_pf, 3),
-        "long": summarize_side(fp_long),
-        "short": summarize_side(fp_short),
-    }
-
-    return {
-        "total_trades": total_trades,
-        "wins": wins,
-        "losses": losses,
-        "percent_profitable": percent_profitable,
-        "net_pnl": net_pnl,
-        "gross_profit": round(gross_profit, 2),
-        "gross_loss": round(gross_loss, 2),
-        "profit_factor": None if math.isinf(profit_factor) else round(profit_factor, 3),
-        "avg_trade": avg_trade,
-        "avg_win": avg_win,
-        "avg_loss": avg_loss,
-        "max_drawdown": round(max_drawdown, 2),
-        "max_drawdown_pct": round(max_drawdown / initial_capital * 100.0, 2),
-        "return_on_initial_pct": round(net_pnl / initial_capital * 100.0, 2),
-        "survival_30_tick_pct": survival_rate,
-        "long": summarize_side(long_rows),
-        "short": summarize_side(short_rows),
-        "by_year": by_year,
-        "footprint_cohort": footprint_cohort,
-    }
+    return summarize_closed_trades(
+        closed_trades,
+        initial_capital=initial_capital,
+        survival_stop_usd=survival_stop_usd,
+        footprint_available_from=footprint_available_from,
+    )
 
 
 def score_trial(metrics: dict[str, Any], objective: dict[str, Any]) -> dict[str, Any]:
@@ -697,20 +905,60 @@ def score_trial(metrics: dict[str, Any], objective: dict[str, Any]) -> dict[str,
 
     A realism gate still penalises unrealistic or structurally weak runs.
     """
-    def clamp01(value: float) -> float:
-        return max(0.0, min(1.0, value))
 
     trade_bounds = objective.get("trade_count_bounds", {})
-    min_trades = int(trade_bounds.get("min") or 200)
-    max_trades = int(trade_bounds.get("max") or 2200)
+    min_trades = int(config_value(trade_bounds, "min", 200))
+    target_trades = int(config_value(trade_bounds, "target", max(min_trades, 400)))
+    max_trades = int(config_value(trade_bounds, "max", max(target_trades, 2200)))
+    target_trades = max(target_trades, min_trades)
+    max_trades = max(max_trades, target_trades)
+
     weights = objective.get("weights", {})
     pf_range = objective.get("profit_factor_range", {})
     expectancy_cfg = objective.get("expectancy_per_trade", {})
+    drawdown_cfg = objective.get("return_over_drawdown", {})
+    footprint_cfg = objective.get("footprint_cohort", {})
+    rolling_cfg = objective.get("rolling_window_stability", {})
+    yearly_cfg = objective.get("yearly_consistency", {})
+    suspicious_cfg = objective.get("suspicious_perfection", {})
     side_pf_floor = objective.get("side_profit_factor_floor", {})
 
     total = metrics["total_trades"]
     long_trades = metrics["long"]["trades"] if metrics["long"] else 0
     short_trades = metrics["short"]["trades"] if metrics["short"] else 0
+
+    def normalized_range_score(
+        value: float | None, floor: float, target: float
+    ) -> float:
+        if value is None:
+            return 0.0
+        target = max(target, floor + 1e-9)
+        return clamp01((float(value) - floor) / (target - floor))
+
+    def pf_score(value: float | None) -> tuple[float, float]:
+        pf_floor = float(config_value(pf_range, "floor", 0.9))
+        pf_target = float(config_value(pf_range, "target", 1.6))
+        if value is None or not math.isfinite(float(value)):
+            numeric = float(config_value(pf_range, "realism_cap", 2.4))
+        else:
+            numeric = float(value)
+        return normalized_range_score(numeric, pf_floor, pf_target), numeric
+
+    def expectancy_score_fn(value: float) -> float:
+        exp_floor = float(config_value(expectancy_cfg, "floor", 0.0))
+        exp_target = float(config_value(expectancy_cfg, "target", 18.0))
+        score = normalized_range_score(value, exp_floor, exp_target)
+        if value < 0:
+            negative_penalty = clamp01(
+                float(config_value(expectancy_cfg, "negative_penalty", 0.35))
+            )
+            score *= negative_penalty
+        return score
+
+    def drawdown_efficiency_score(value: float) -> float:
+        dd_floor = float(config_value(drawdown_cfg, "floor", 0.25))
+        dd_target = float(config_value(drawdown_cfg, "target", 1.5))
+        return normalized_range_score(value, dd_floor, dd_target)
 
     # Hard reject — return score=None so the caller can mark as insufficient sample.
     if total < min_trades or long_trades == 0 or short_trades == 0:
@@ -722,17 +970,31 @@ def score_trial(metrics: dict[str, Any], objective: dict[str, Any]) -> dict[str,
                 "long_trades": long_trades,
                 "short_trades": short_trades,
                 "min_required": min_trades,
+                "target_trades": target_trades,
             },
         }
 
     # ── Richness components (kept for AG compatibility) ─────────────────────
-    sample_richness = min(total, max_trades) / float(max_trades)
+    if total <= target_trades:
+        trade_density = clamp01(
+            (total - min_trades) / float(max(target_trades - min_trades, 1))
+        )
+    else:
+        trade_density = clamp01(
+            1.0 - (total - target_trades) / float(max(max_trades - target_trades, 1))
+        )
+    sample_richness = trade_density
     long_share = long_trades / float(total)
     directional_balance = 1.0 - abs(long_share - 0.5) * 2.0
 
     by_year = metrics.get("by_year") or {}
+    year_trade_counts = metrics.get("year_trade_counts") or {}
     expected_years = 6  # 2020-2025 training window
-    years_present = len(by_year)
+    years_present = sum(
+        1
+        for year, pnl in by_year.items()
+        if year_trade_counts.get(year, 0) >= 20 and pnl != 0
+    )
     regime_coverage = min(years_present / float(expected_years), 1.0)
 
     wins = metrics.get("wins", 0)
@@ -747,49 +1009,187 @@ def score_trial(metrics: dict[str, Any], objective: dict[str, Any]) -> dict[str,
 
     # ── Profitability components (profit-first ranking) ─────────────────────
     profit_factor = metrics.get("profit_factor")
-    pf_numeric = (
-        float(profit_factor)
-        if (profit_factor is not None and math.isfinite(profit_factor))
-        else 3.0
-    )
-    pf_floor = float(pf_range.get("floor", 0.6))
-    pf_target = float(pf_range.get("target", 2.0))
-    pf_target = max(pf_target, pf_floor + 1e-9)
-    profit_factor_score = clamp01((pf_numeric - pf_floor) / (pf_target - pf_floor))
+    profit_factor_score, pf_numeric = pf_score(profit_factor)
 
     expectancy = metrics.get("net_pnl", 0.0) / float(total)
-    exp_floor = float(expectancy_cfg.get("floor", 0.0))
-    exp_target = float(expectancy_cfg.get("target", 25.0))
-    exp_target = max(exp_target, exp_floor + 1e-9)
-    expectancy_score = clamp01((expectancy - exp_floor) / (exp_target - exp_floor))
-    if expectancy < 0:
-        negative_penalty = clamp01(float(expectancy_cfg.get("negative_penalty", 0.50)))
-        expectancy_score *= negative_penalty
+    expectancy_score = expectancy_score_fn(expectancy)
+
+    return_pct = float(metrics.get("return_on_initial_pct", 0.0) or 0.0)
+    max_drawdown_pct = float(metrics.get("max_drawdown_pct", 0.0) or 0.0)
+    return_over_drawdown = (
+        max(return_pct, 0.0) / max(max_drawdown_pct, 0.01)
+        if max_drawdown_pct > 0
+        else 0.0
+    )
+    drawdown_efficiency = drawdown_efficiency_score(return_over_drawdown)
+
+    fp_metrics = metrics.get("footprint_cohort") or {}
+    fp_trades = int(fp_metrics.get("trades") or 0)
+    fp_expectancy = (
+        fp_metrics.get("net_pnl", 0.0) / float(fp_trades) if fp_trades else 0.0
+    )
+    fp_pf_score, _ = pf_score(fp_metrics.get("profit_factor"))
+    fp_expectancy_score = expectancy_score_fn(fp_expectancy)
+    fp_presence = clamp01(
+        fp_trades / float(max(int(config_value(footprint_cfg, "min_trades", 60)), 1))
+    )
+    footprint_stability = clamp01(
+        fp_presence
+        * (
+            1.0
+            - 0.5 * abs(fp_pf_score - profit_factor_score)
+            - 0.5 * abs(fp_expectancy_score - expectancy_score)
+        )
+    )
+
+    window_weights = (0.45, 0.35, 0.20)
+    min_trades_per_window = int(config_value(rolling_cfg, "min_trades_per_window", 40))
+    valid_windows = [
+        window
+        for window in (metrics.get("rolling_windows", {}).get("windows") or [])
+        if int(window.get("trades") or 0) >= min_trades_per_window
+    ]
+    window_scores: list[float] = []
+    positive_windows = 0
+    for window in valid_windows:
+        win_pf_score, _ = pf_score(window.get("profit_factor"))
+        win_exp_score = expectancy_score_fn(
+            float(window.get("expectancy_per_trade") or 0.0)
+        )
+        win_dd_score = drawdown_efficiency_score(
+            float(window.get("return_over_drawdown") or 0.0)
+        )
+        window_score = (
+            win_pf_score * window_weights[0]
+            + win_exp_score * window_weights[1]
+            + win_dd_score * window_weights[2]
+        )
+        window_scores.append(window_score)
+        if float(window.get("net_pnl") or 0.0) > 0 and (
+            window.get("profit_factor") is None
+            or float(window.get("profit_factor") or 0.0) >= 1.0
+        ):
+            positive_windows += 1
+
+    if window_scores:
+        rolling_mean = sum(window_scores) / len(window_scores)
+        rolling_std = (
+            statistics.pstdev(window_scores) if len(window_scores) > 1 else 0.0
+        )
+        max_std = float(config_value(rolling_cfg, "max_score_stddev", 0.18))
+        std_score = clamp01(1.0 - rolling_std / max(max_std, 1e-9))
+        target_positive_windows = float(
+            config_value(rolling_cfg, "target_positive_windows", 0.75)
+        )
+        positive_ratio = positive_windows / float(len(window_scores))
+        positive_score = clamp01(positive_ratio / max(target_positive_windows, 1e-9))
+        rolling_stability = clamp01(
+            (0.6 * rolling_mean + 0.4 * positive_score) * std_score
+        )
+    else:
+        rolling_mean = 0.0
+        rolling_std = 0.0
+        positive_ratio = 0.0
+        rolling_stability = 0.0
+
+    year_values = list(by_year.values())
+    if year_values:
+        positive_year_ratio = float(metrics.get("year_positive_ratio") or 0.0)
+        target_positive_ratio = float(
+            config_value(yearly_cfg, "target_positive_ratio", 0.67)
+        )
+        positive_year_score = clamp01(
+            positive_year_ratio / max(target_positive_ratio, 1e-9)
+        )
+        total_abs_year_pnl = sum(abs(value) for value in year_values)
+        dominance = (
+            max(abs(value) for value in year_values) / total_abs_year_pnl
+            if total_abs_year_pnl > 0
+            else 1.0
+        )
+        max_dominance = float(config_value(yearly_cfg, "max_dominance", 0.55))
+        dominance_score = (
+            1.0
+            if dominance <= max_dominance
+            else clamp01(
+                1.0 - (dominance - max_dominance) / max(1.0 - max_dominance, 1e-9)
+            )
+        )
+        yearly_consistency = clamp01(positive_year_score * dominance_score)
+    else:
+        positive_year_ratio = 0.0
+        dominance = 1.0
+        yearly_consistency = 0.0
 
     # ── Realism gate ─────────────────────────────────────────────────────────
     long_pf = metrics.get("long", {}).get("profit_factor")
     short_pf = metrics.get("short", {}).get("profit_factor")
-    long_floor = float(side_pf_floor.get("long", 0.80))
-    short_floor = float(side_pf_floor.get("short", 0.80))
+    long_floor = float(config_value(side_pf_floor, "long", 0.95))
+    short_floor = float(config_value(side_pf_floor, "short", 0.95))
     long_ok = long_pf is None or long_pf >= long_floor
     short_ok = short_pf is None or short_pf >= short_floor
-    realism_cap = float(pf_range.get("realism_cap", 3.0))
-    realism_ok = (pf_floor <= pf_numeric <= realism_cap) and (expectancy >= 0) and long_ok and short_ok
-    realism_gate_penalty = float(weights.get("realism_gate_penalty", 0.50))
+    pf_floor = float(config_value(pf_range, "floor", 0.9))
+    realism_cap = float(config_value(pf_range, "realism_cap", 2.4))
+    suspicious_pf = pf_numeric >= float(
+        config_value(suspicious_cfg, "profit_factor", realism_cap)
+    )
+    suspicious_ratio = return_over_drawdown >= float(
+        config_value(suspicious_cfg, "return_over_drawdown", 3.5)
+    )
+    suspicious_perfection = (
+        suspicious_pf
+        or suspicious_ratio
+        or (metrics.get("losses", 0) == 0 and total >= min_trades)
+    )
+    realism_ok = (
+        (pf_floor <= pf_numeric <= realism_cap)
+        and (expectancy >= 0)
+        and long_ok
+        and short_ok
+        and not suspicious_perfection
+    )
+    realism_gate_penalty = float(config_value(weights, "realism_gate_penalty", 0.40))
+
+    rolling_floor = float(config_value(rolling_cfg, "min_score", 0.45))
+    footprint_floor = float(config_value(footprint_cfg, "min_score", 0.45))
+    yearly_floor = float(config_value(yearly_cfg, "min_score", 0.45))
+    regime_fragile = (
+        rolling_stability < rolling_floor
+        or footprint_stability < footprint_floor
+        or yearly_consistency < yearly_floor
+    )
+    instability_penalty = float(config_value(weights, "instability_penalty", 0.55))
 
     # ── Weighted sum ─────────────────────────────────────────────────────────
     default_component_weights = {
-        "profit_factor": 0.45,
-        "expectancy": 0.20,
-        "sample_richness": 0.15,
-        "directional_balance": 0.10,
-        "regime_coverage": 0.05,
-        "outcome_diversity": 0.05,
+        "profit_factor": 0.23,
+        "expectancy": 0.12,
+        "trade_density": 0.12,
+        "directional_balance": 0.08,
+        "regime_coverage": 0.06,
+        "outcome_diversity": 0.04,
+        "drawdown_efficiency": 0.14,
+        "rolling_stability": 0.12,
+        "footprint_stability": 0.05,
+        "yearly_consistency": 0.04,
     }
-    raw_weights = {
-        key: max(0.0, float(weights.get(key, default_value)))
-        for key, default_value in default_component_weights.items()
-    }
+    raw_weights: dict[str, float] = {}
+    for key, default_value in default_component_weights.items():
+        if key == "trade_density":
+            raw_weights[key] = max(
+                0.0,
+                float(
+                    config_value(
+                        weights,
+                        key,
+                        config_value(weights, "sample_richness", default_value),
+                    )
+                ),
+            )
+        else:
+            raw_weights[key] = max(
+                0.0, float(config_value(weights, key, default_value))
+            )
     weight_sum = sum(raw_weights.values())
     if weight_sum <= 0.0:
         raw_weights = default_component_weights
@@ -797,27 +1197,50 @@ def score_trial(metrics: dict[str, Any], objective: dict[str, Any]) -> dict[str,
     normalized_weights = {k: v / weight_sum for k, v in raw_weights.items()}
 
     raw_score = (
-        profit_factor_score * normalized_weights["profit_factor"] +
-        expectancy_score * normalized_weights["expectancy"] +
-        sample_richness * normalized_weights["sample_richness"] +
-        directional_balance * normalized_weights["directional_balance"] +
-        regime_coverage * normalized_weights["regime_coverage"] +
-        outcome_diversity * normalized_weights["outcome_diversity"]
+        profit_factor_score * normalized_weights["profit_factor"]
+        + expectancy_score * normalized_weights["expectancy"]
+        + trade_density * normalized_weights["trade_density"]
+        + directional_balance * normalized_weights["directional_balance"]
+        + regime_coverage * normalized_weights["regime_coverage"]
+        + outcome_diversity * normalized_weights["outcome_diversity"]
+        + drawdown_efficiency * normalized_weights["drawdown_efficiency"]
+        + rolling_stability * normalized_weights["rolling_stability"]
+        + footprint_stability * normalized_weights["footprint_stability"]
+        + yearly_consistency * normalized_weights["yearly_consistency"]
     )
 
-    score = clamp01(raw_score * (1.0 if realism_ok else realism_gate_penalty))
+    score = raw_score
+    if not realism_ok:
+        score *= realism_gate_penalty
+    if regime_fragile:
+        score *= instability_penalty
+    score = clamp01(score)
 
     components = {
         "profit_factor_score": round(profit_factor_score, 4),
         "expectancy_score": round(expectancy_score, 4),
         "expectancy_per_trade": round(expectancy, 4),
+        "trade_density": round(trade_density, 4),
         "sample_richness": round(sample_richness, 4),
         "directional_balance": round(directional_balance, 4),
         "regime_coverage": round(regime_coverage, 4),
         "outcome_diversity": round(outcome_diversity, 4),
+        "drawdown_efficiency": round(drawdown_efficiency, 4),
+        "return_over_drawdown": round(return_over_drawdown, 4),
+        "rolling_stability": round(rolling_stability, 4),
+        "rolling_mean_score": round(rolling_mean, 4),
+        "rolling_score_stddev": round(rolling_std, 4),
+        "rolling_positive_ratio": round(positive_ratio, 4),
+        "footprint_stability": round(footprint_stability, 4),
+        "footprint_trades": fp_trades,
+        "yearly_consistency": round(yearly_consistency, 4),
+        "year_positive_ratio": round(positive_year_ratio, 4),
+        "year_pnl_dominance": round(dominance, 4),
         "long_profit_factor": None if long_pf is None else round(float(long_pf), 4),
         "short_profit_factor": None if short_pf is None else round(float(short_pf), 4),
+        "suspicious_perfection": suspicious_perfection,
         "realism_ok": realism_ok,
+        "regime_fragile": regime_fragile,
         "raw_score": round(raw_score, 4),
         "weights": {k: round(v, 4) for k, v in normalized_weights.items()},
     }
@@ -847,7 +1270,9 @@ def make_trial_record(
     csv_meta = extract_csv_window_meta(csv_path)
     validate_csv_window(csv_meta, required_csv_start)
 
-    metrics = calculate_trade_metrics(csv_path, initial_capital, survival_stop_usd, footprint_available_from)
+    metrics = calculate_trade_metrics(
+        csv_path, initial_capital, survival_stop_usd, footprint_available_from
+    )
     scoring = score_trial(metrics, space["objective"])
 
     if scoring.get("insufficient_sample"):
@@ -866,7 +1291,7 @@ def make_trial_record(
     runtime = config.get("runtime_context", space.get("runtime_context", {}))
     sig_payload = {
         "search": search_params,
-        "locked": locked_params,
+        "locked": filter_signature_locked_params(space, locked_params),
         "csv_meta": csv_meta,
         "commission": runtime.get("commission_per_contract_usd"),
         "slippage_ticks": runtime.get("slippage_ticks"),
@@ -928,22 +1353,82 @@ def generate_suggestions(
     historical_trials must already be filtered to authoritative scored modes.
     """
     domains = build_domains(space)
+    domain_map = {domain.name: domain for domain in domains}
     locked_params = space["locked_parameters"]
+    signature_locked_params = filter_signature_locked_params(space, locked_params)
 
     def suggest_sig(search_params: dict[str, Any]) -> str:
-        return params_signature({"locked": locked_params, "search": search_params})
+        return params_signature(
+            {"locked": signature_locked_params, "search": search_params}
+        )
 
-    seen = {suggest_sig(trial["search_parameters"]) for trial in historical_trials}
+    def historical_sig(trial: dict[str, Any]) -> str:
+        return params_signature(
+            {
+                "locked": filter_signature_locked_params(
+                    space, trial.get("locked_parameters", locked_params)
+                ),
+                "search": trial["search_parameters"],
+            }
+        )
+
+    def sample_valid_params(max_attempts: int = 256) -> dict[str, Any]:
+        for _ in range(max_attempts):
+            candidate = sample_random_params(domains, rng)
+            if has_valid_parameter_structure(candidate):
+                return candidate
+        raise RuntimeError(
+            "Could not generate a valid parameter set from the current search space"
+        )
+
+    def mutate_params(parent_params: dict[str, Any]) -> dict[str, Any]:
+        fallback = dict(parent_params)
+        for _ in range(128):
+            params = dict(parent_params)
+            selected_groups = rng.sample(
+                PARAMETER_GROUPS,
+                k=rng.randint(1, min(2, len(PARAMETER_GROUPS))),
+            )
+            mutate_domains: list[Domain] = []
+            for group in selected_groups:
+                members = [domain_map[name] for name in group if name in domain_map]
+                if not members:
+                    continue
+                mutate_domains.extend(
+                    rng.sample(members, k=rng.randint(1, min(2, len(members))))
+                )
+            if not mutate_domains:
+                mutate_domains = rng.sample(
+                    domains, k=rng.randint(1, min(3, len(domains)))
+                )
+            seen_names: set[str] = set()
+            for domain in mutate_domains:
+                if domain.name in seen_names:
+                    continue
+                seen_names.add(domain.name)
+                params[domain.name] = neighbor_choice(domain, params[domain.name], rng)
+            if has_valid_parameter_structure(params):
+                return params
+        return fallback
+
+    seen = {historical_sig(trial) for trial in historical_trials}
     ranked_trials = [
         trial
         for trial in historical_trials
-        if trial.get("objective") and trial["objective"].get("objective_score") is not None
+        if trial.get("objective")
+        and trial["objective"].get("objective_score") is not None
     ]
-    ranked_trials.sort(key=lambda row: row["objective"]["objective_score"], reverse=True)
+    ranked_trials.sort(
+        key=lambda row: row["objective"]["objective_score"], reverse=True
+    )
 
     suggestions: list[dict[str, Any]] = []
 
-    def accept(params: dict[str, Any], parent_trial_id: str | None, origin: str) -> None:
+    def accept(
+        params: dict[str, Any], parent_trial_id: str | None, origin: str
+    ) -> None:
+        if not has_valid_parameter_structure(params):
+            return
         signature = suggest_sig(params)
         if signature in seen:
             return
@@ -963,8 +1448,14 @@ def generate_suggestions(
         )
 
     if not ranked_trials:
-        while len(suggestions) < count:
-            accept(sample_random_params(domains, rng), None, "random")
+        attempts = 0
+        while len(suggestions) < count and attempts < count * 256:
+            attempts += 1
+            accept(sample_valid_params(), None, "random")
+        if len(suggestions) < count:
+            raise RuntimeError(
+                "Could not generate enough valid suggestions from the current search space"
+            )
         return suggestions
 
     best_score = ranked_trials[0]["objective"]["objective_score"]
@@ -977,16 +1468,18 @@ def generate_suggestions(
     if not top_trials:
         top_trials = ranked_trials[:1]
     top_trials = top_trials[: min(6, len(top_trials))]
-    while len(suggestions) < count:
+    attempts = 0
+    while len(suggestions) < count and attempts < count * 256:
+        attempts += 1
         parent = rng.choice(top_trials)
-        params = dict(parent["search_parameters"])
-        mutate_count = rng.randint(1, min(3, len(domains)))
-        mutate_domains = rng.sample(domains, k=mutate_count)
-        for domain in mutate_domains:
-            params[domain.name] = neighbor_choice(domain, params[domain.name], rng)
+        params = mutate_params(parent["search_parameters"])
         accept(params, parent["trial_id"], "mutated")
         if len(suggestions) < count:
-            accept(sample_random_params(domains, rng), None, "exploratory")
+            accept(sample_valid_params(), None, "exploratory")
+    if len(suggestions) < count:
+        raise RuntimeError(
+            "Could not generate enough valid suggestions from the current search space"
+        )
     return suggestions[:count]
 
 
@@ -1013,7 +1506,9 @@ def command_suggest(args: argparse.Namespace) -> int:
 
     if args.storage == "postgres":
         with connect_db(args.db_dsn) as conn:
-            persist_suggestion_batch(conn, space, batch_stamp, args.count, args.seed, suggestions, space_path)
+            persist_suggestion_batch(
+                conn, space, batch_stamp, args.count, args.seed, suggestions, space_path
+            )
 
     print(f"Wrote {len(suggestions)} trial configs to {batch_dir}")
     for suggestion in suggestions:
@@ -1067,7 +1562,11 @@ def command_leaderboard(args: argparse.Namespace) -> int:
     else:
         all_trials = load_trials_jsonl_csv_full(Path(args.ledger))
         scored = sorted(
-            [t for t in all_trials if t.get("objective", {}).get("objective_score") is not None],
+            [
+                t
+                for t in all_trials
+                if t.get("objective", {}).get("objective_score") is not None
+            ],
             key=lambda row: row["objective"]["objective_score"],
             reverse=True,
         )[: args.top]
@@ -1080,8 +1579,13 @@ def command_leaderboard(args: argparse.Namespace) -> int:
         print("No trials recorded yet.")
         return 0
 
-    scored_rows = [r for r in rows if r.get("objective") and r["objective"] is not None
-                   and r.get("status") != "FAILED"]
+    scored_rows = [
+        r
+        for r in rows
+        if r.get("objective")
+        and r["objective"] is not None
+        and r.get("status") != "FAILED"
+    ]
     failed_rows = [r for r in rows if r.get("status") == "FAILED"]
 
     if scored_rows:
@@ -1090,12 +1594,12 @@ def command_leaderboard(args: argparse.Namespace) -> int:
     if include_failed and failed_rows:
         # Tally by failure_reason
         from collections import Counter
+
         tally = Counter(r.get("failure_reason", "unknown") for r in failed_rows)
-        tally_str = " / ".join(f"{count} {reason}" for reason, count in sorted(tally.items()))
-        print(
-            f"\nFailed trials: {len(failed_rows)} total "
-            f"({tally_str})"
+        tally_str = " / ".join(
+            f"{count} {reason}" for reason, count in sorted(tally.items())
         )
+        print(f"\nFailed trials: {len(failed_rows)} total ({tally_str})")
 
     if not scored_rows and not failed_rows:
         print("No trials recorded yet.")
@@ -1119,17 +1623,45 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--space", default=str(DEFAULT_SPACE_PATH), help="Search-space JSON path.")
-    parser.add_argument("--storage", choices=["postgres", "jsonl"], default="postgres", help="Persistence backend for suggestions and results.")
-    parser.add_argument("--db-dsn", default=DEFAULT_DB_DSN, help="Postgres DSN for the local warbird warehouse.")
-    parser.add_argument("--ledger", default=str(DEFAULT_LEDGER_PATH), help="JSONL ledger path when --storage=jsonl.")
+    parser.add_argument(
+        "--space", default=str(DEFAULT_SPACE_PATH), help="Search-space JSON path."
+    )
+    parser.add_argument(
+        "--storage",
+        choices=["postgres", "jsonl"],
+        default="postgres",
+        help="Persistence backend for suggestions and results.",
+    )
+    parser.add_argument(
+        "--db-dsn",
+        default=DEFAULT_DB_DSN,
+        help="Postgres DSN for the local warbird warehouse.",
+    )
+    parser.add_argument(
+        "--ledger",
+        default=str(DEFAULT_LEDGER_PATH),
+        help="JSONL ledger path when --storage=jsonl.",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    suggest = subparsers.add_parser("suggest", help="Generate new trial configs from the search space.")
-    suggest.add_argument("--count", type=int, default=10, help="How many trial configs to generate.")
-    suggest.add_argument("--seed", type=int, default=42, help="Random seed for deterministic suggestions.")
-    suggest.add_argument("--out-dir", default=str(DEFAULT_SUGGESTIONS_DIR), help="Output directory for trial JSON files.")
+    suggest = subparsers.add_parser(
+        "suggest", help="Generate new trial configs from the search space."
+    )
+    suggest.add_argument(
+        "--count", type=int, default=10, help="How many trial configs to generate."
+    )
+    suggest.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for deterministic suggestions.",
+    )
+    suggest.add_argument(
+        "--out-dir",
+        default=str(DEFAULT_SUGGESTIONS_DIR),
+        help="Output directory for trial JSON files.",
+    )
     suggest.set_defaults(func=command_suggest)
 
     record = subparsers.add_parser(
@@ -1142,21 +1674,52 @@ def build_parser() -> argparse.ArgumentParser:
             "so re-recording with a different date window produces a distinct trial, not a collision."
         ),
     )
-    record.add_argument("--params-file", required=True, help="Trial config JSON generated by `suggest`.")
-    record.add_argument("--trades-csv", required=True, help="TradingView strategy trade-list CSV (List of Trades export).")
-    record.add_argument("--initial-capital", type=float, default=DEFAULT_INITIAL_CAPITAL, help="Initial capital used by the strategy report.")
-    record.add_argument("--survival-stop-usd", type=float, default=DEFAULT_SURVIVAL_STOP_USD, help="30-tick survival boundary in USD.")
-    record.add_argument("--required-csv-start", default=DEFAULT_REQUIRED_CSV_START, help="Minimum required CSV start date (ISO). Record is rejected if CSV starts later.")
-    record.add_argument("--footprint-available-from", default=DEFAULT_FOOTPRINT_AVAILABLE_FROM, help="Date from which TV tick archive provides footprint data. Trades on/after this date form the footprint-cohort diagnostic metric.")
-    record.add_argument("--notes", default="", help="Optional operator notes for this trial.")
+    record.add_argument(
+        "--params-file", required=True, help="Trial config JSON generated by `suggest`."
+    )
+    record.add_argument(
+        "--trades-csv",
+        required=True,
+        help="TradingView strategy trade-list CSV (List of Trades export).",
+    )
+    record.add_argument(
+        "--initial-capital",
+        type=float,
+        default=DEFAULT_INITIAL_CAPITAL,
+        help="Initial capital used by the strategy report.",
+    )
+    record.add_argument(
+        "--survival-stop-usd",
+        type=float,
+        default=DEFAULT_SURVIVAL_STOP_USD,
+        help="30-tick survival boundary in USD.",
+    )
+    record.add_argument(
+        "--required-csv-start",
+        default=DEFAULT_REQUIRED_CSV_START,
+        help="Minimum required CSV start date (ISO). Record is rejected if CSV starts later.",
+    )
+    record.add_argument(
+        "--footprint-available-from",
+        default=DEFAULT_FOOTPRINT_AVAILABLE_FROM,
+        help="Date from which TV tick archive provides footprint data. Trades on/after this date form the footprint-cohort diagnostic metric.",
+    )
+    record.add_argument(
+        "--notes", default="", help="Optional operator notes for this trial."
+    )
     record.set_defaults(func=command_record)
 
-    leaderboard = subparsers.add_parser("leaderboard", help="Show the best RECORDED trials by objective score.")
-    leaderboard.add_argument("--top", type=int, default=10, help="How many trials to display.")
+    leaderboard = subparsers.add_parser(
+        "leaderboard", help="Show the best RECORDED trials by objective score."
+    )
     leaderboard.add_argument(
-        "--include-failed", action="store_true",
+        "--top", type=int, default=10, help="How many trials to display."
+    )
+    leaderboard.add_argument(
+        "--include-failed",
+        action="store_true",
         help="Append a FAILED trial summary line: count by failure_reason. "
-             "Requires migration 010 for Postgres backend.",
+        "Requires migration 010 for Postgres backend.",
     )
     leaderboard.set_defaults(func=command_leaderboard)
 

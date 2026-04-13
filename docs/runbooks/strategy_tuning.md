@@ -192,6 +192,7 @@ The CSV_FULL mode captures from the full TradingView trade-list export:
 - yearly P&L
 - 30-tick survival rate (MES `$37.50` adverse-excursion boundary)
 - **footprint cohort** metrics (same fields, filtered to `footprint_available_from` date onward)
+- **rolling time windows** (4 chronological windows with PF / expectancy / drawdown-efficiency)
 
 The objective score is a weighted blend. Weights and gates live in
 `scripts/ag/strategy_tuning_space.json`.
@@ -201,31 +202,135 @@ Current scoring model:
 - Profit-first ranking components:
   - `profit_factor` (primary)
   - `expectancy_per_trade` (secondary)
-- AG-compatibility components (still scored):
-  - `sample_richness`
+- Stability and sample-quality components:
+  - `trade_density` (target range, not monotonic "more trades is always better")
   - `directional_balance`
   - `regime_coverage`
   - `outcome_diversity`
-- Realism gate:
+  - `drawdown_efficiency`
+  - `rolling_stability`
+  - `footprint_stability`
+  - `yearly_consistency`
+- Realism and instability gates:
   - penalties apply if PF/expectancy/side-PF floors are violated
+  - penalties apply if the result is concentrated in one time slice or degrades sharply in the footprint-rich tail
 
 Example objective block:
 
 ```json
-"trade_count_bounds": { "min": 0, "max": 2200 },
-"profit_factor_range": { "floor": 0.6, "target": 2.0, "realism_cap": 3.0 },
-"expectancy_per_trade": { "floor": 0.0, "target": 25.0, "negative_penalty": 0.5 },
-"side_profit_factor_floor": { "long": 0.8, "short": 0.8 },
+"trade_count_bounds": { "min": 220, "target": 375, "max": 900 },
+"profit_factor_range": { "floor": 0.9, "target": 1.6, "realism_cap": 2.4 },
+"expectancy_per_trade": { "floor": 0.0, "target": 18.0, "negative_penalty": 0.35 },
+"return_over_drawdown": { "floor": 0.25, "target": 1.5 },
+"footprint_cohort": { "min_trades": 60, "min_score": 0.45 },
+"rolling_window_stability": {
+  "window_count": 4,
+  "min_trades_per_window": 40,
+  "target_positive_windows": 0.75,
+  "max_score_stddev": 0.18,
+  "min_score": 0.45
+},
+"yearly_consistency": {
+  "target_positive_ratio": 0.67,
+  "max_dominance": 0.55,
+  "min_score": 0.45
+},
+"side_profit_factor_floor": { "long": 0.95, "short": 0.95 },
 "weights": {
-  "profit_factor": 0.45,
-  "expectancy": 0.20,
-  "sample_richness": 0.15,
-  "directional_balance": 0.10,
-  "regime_coverage": 0.05,
-  "outcome_diversity": 0.05,
-  "realism_gate_penalty": 0.50
+  "profit_factor": 0.23,
+  "expectancy": 0.12,
+  "trade_density": 0.12,
+  "directional_balance": 0.08,
+  "regime_coverage": 0.06,
+  "outcome_diversity": 0.04,
+  "drawdown_efficiency": 0.14,
+  "rolling_stability": 0.12,
+  "footprint_stability": 0.05,
+  "yearly_consistency": 0.04,
+  "realism_gate_penalty": 0.40,
+  "instability_penalty": 0.55
 }
 ```
+
+## 2026-04-13 Optimization Update
+
+This runbook now reflects the production tuning surface in `mes15m_agfit_v3`.
+The update is deliberately narrower than the earlier broad random sweep because the
+15m backtest evidence and PowerDrill synthesis both showed that the old tuner was
+spending too much search budget on unstable or low-information regions.
+
+### Audit findings that changed the tuner
+
+- Search-space width was too large for a CDP-backed full-history tuner. The previous space exceeded `208B` discrete combinations and encouraged random combinations with no coupling awareness.
+- The old score rewarded trade count monotonically up to the cap. That pushed the tuner toward overtrading even though the 15m baseline pathology is already "too many mediocre trades."
+- The old score ignored drawdown efficiency, rolling-window stability, and footprint-tail degradation even though those are exactly where this strategy class can overfit.
+- Locked visual/debug inputs polluted the trial signature. They can change chart rendering while leaving the trade list unchanged.
+
+### Final recommended search ranges
+
+These are the default production ranges in `scripts/ag/strategy_tuning_space.json`:
+
+| Component | Parameter | Range / Values | Why |
+| --- | --- | --- | --- |
+| Footprint core | `Footprint Ticks Per Row` | `4`, `6` | Avoid the noisiest 2-tick historical footprint surface |
+| Footprint core | `Footprint VA %` | `65-75` step `5` | Keeps POC stable without over-diluting extreme-row tests |
+| Footprint core | `Footprint Imbalance %` | `250-350` step `25` | Preserves meaningful imbalance without starving continuation/reversal evidence |
+| Footprint core | `Extreme Rows To Inspect` | `2`, `3`, `4` | Keeps the row scan local to the extreme instead of drifting into redundant rows |
+| Exhaustion stats | `Exhaustion Z Length` | `14`, `20`, `30` | Covers fast / medium / regime-normalized windows without wasting search on ultra-long tails |
+| Exhaustion stats | `Exhaustion Z Threshold` | `2.2-2.8` step `0.1` | Centers around the repo's `2.5` reference zone |
+| Exhaustion geometry | `Extension ATR Tolerance` | `0.08-0.12` step `0.01` | Keeps extension checks structural instead of fuzzy |
+| Exhaustion auction | `Zero-Print Volume Ratio` | `0.08-0.15` step `0.01` | Matches the finished-auction intent without making the test toothless |
+| Short asymmetry | `Gate Shorts In Bull Trend` | `true/false` | Still searchable, but scored under stricter side-PF and stability penalties |
+| Short asymmetry | `Short Gate ADX Floor` | `18-24` step `1` | Focuses on the zone where trend-context gating matters |
+| Hold logic | `Tier 1 Hold Bars` | `2`, `3`, `4`, `5` | Avoids extended stop-widening that lets losers sit too long |
+| Hold logic | `Tier 1 Hold Stop ATR` | `1.5-2.25` step `0.25` | Preserves hold protection without recreating the baseline stop problem |
+| Stop family | `Fallback Stop Family` | `ATR_1_0`, `ATR_1_5`, `ATR_STRUCTURE_1_25`, `FIB_NEG_0236`, `FIB_0236_ATR_COMPRESS_0_50` | Keeps one fib control plus the ATR-aware families most relevant to the 15m pathology |
+
+### Coupling rules now enforced by the suggester
+
+- Reject over-wide hold combinations (`Tier 1 Hold Bars >= 5` with `Tier 1 Hold Stop ATR > 2.0`).
+- Reject exhaustion gates that are too permissive (`Z Length <= 14`, `Z Threshold <= 2.2`, `ATR Tolerance >= 0.12`).
+- Reject exhaustion gates that are too sparse (`Z Length >= 30`, `Z Threshold >= 2.8`, `ATR Tolerance <= 0.08`).
+- Reject coarse-row + loose-auction combinations (`Ticks Per Row >= 6` with `Zero-Print Volume Ratio > 0.14`).
+- Reject shallow row scans paired with very high imbalance thresholds (`Imbalance >= 325` and `Rows To Inspect < 3`).
+
+### Trial identity rules
+
+Trial signatures now exclude these locked inputs because they do not change the trade list:
+
+- `Anchor Span = Active Fib Window`
+- `Confluence Tolerance (%)`
+- `Extend Levels Right`
+- `Show Footprint Audit Table`
+- `Target Line Lookback Bars`
+
+This prevents the tuner from treating chart-rendering tweaks as distinct strategy results.
+
+## Repeatable Optimization Protocol
+
+1. Run `suggest` from the current `mes15m_agfit_v3` space.
+2. Execute a coarse batch with CDP or CSV on the full `2020+` window.
+3. Filter by score, then inspect the top rows for side PF, drawdown efficiency, rolling-window stability, and footprint-cohort retention.
+4. Freeze the best footprint / exhaustion cluster.
+5. Run a second sweep focused on stop family plus hold settings.
+6. Only lock a winner after it survives the same friction settings, the same date window, and at least one walk-forward style review.
+
+## Known Limitations
+
+- This harness still ranks one parameter set at a time against a single full-history TV backtest; it is not a full Bayesian optimizer.
+- TradingView Deep Backtesting date selection is still manual.
+- Footprint history quality is not stationary across the full sample. Recent bars are richer than the early `2020-2023` segment.
+- Walk-forward stability is approximated from rolling chronological trade windows. It is a penalty surface, not a replacement for a true purged re-optimization loop.
+
+## Re-optimization Triggers
+
+Re-run the tuner when any of these happen:
+
+- rolling 60-trade PF drops below `0.95`
+- rolling max drawdown exceeds the locked config's backtest drawdown by `25%+`
+- footprint-cohort PF diverges materially from all-bars PF for two consecutive monthly reviews
+- a structural strategy change lands in `v7-warbird-strategy.pine`
+- quarterly calendar roll / macro regime shifts materially alter the MES 15m trade distribution
 
 ## Storage Model
 

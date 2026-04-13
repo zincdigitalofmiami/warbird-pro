@@ -41,6 +41,7 @@ HARDENING NOTES (Phase A):
   - FAILED rows: written to JSONL ledger regardless of --storage. DB persistence
     of FAILED rows requires migration 010 (Phase C).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -66,10 +67,11 @@ from tune_strategy_params import (
     DEFAULT_SURVIVAL_STOP_USD,
     append_trial_jsonl,
     connect_db,
+    filter_signature_locked_params,
     load_json,
     params_signature,
     score_trial,
-    summarize_side,
+    summarize_closed_trades,
     upsert_failed_trial,
     upsert_recorded_trial,
     utc_now,
@@ -110,7 +112,8 @@ async def find_tv_chart_tab_for_context(runtime_context: dict) -> str:
         ) from exc
 
     candidates = [
-        t for t in resp.json()
+        t
+        for t in resp.json()
         if "tradingview.com" in t.get("url", "") and t.get("webSocketDebuggerUrl")
     ]
 
@@ -142,8 +145,12 @@ async def find_tv_chart_tab_for_context(runtime_context: dict) -> str:
             ) as ws:
                 result = await cdp_run(ws, state_js, call_id=1)
                 if isinstance(result, dict) and not result.get("err"):
-                    sym_ok = not target_symbol or result.get("symbol", "") == target_symbol
-                    tf_ok = not target_tf or str(result.get("timeframe", "")) == target_tf
+                    sym_ok = (
+                        not target_symbol or result.get("symbol", "") == target_symbol
+                    )
+                    tf_ok = (
+                        not target_tf or str(result.get("timeframe", "")) == target_tf
+                    )
                     if sym_ok and tf_ok:
                         matched.append(ws_url)
         except Exception:
@@ -186,7 +193,9 @@ async def cdp_run(ws, expression: str, call_id: int = 1) -> Any:
     resp = json.loads(await ws.recv())
     exc_detail = resp.get("result", {}).get("exceptionDetails")
     if exc_detail:
-        raise RuntimeError(f"compile_error: JS exception: {exc_detail.get('text', exc_detail)}")
+        raise RuntimeError(
+            f"compile_error: JS exception: {exc_detail.get('text', exc_detail)}"
+        )
     result = resp.get("result", {}).get("result", {})
     if result.get("type") == "string":
         try:
@@ -333,13 +342,9 @@ def validate_trial_params(params: dict[str, Any], schema: dict[str, dict]) -> li
             try:
                 num_val = float(value)
                 if mn is not None and num_val < float(mn):
-                    errors.append(
-                        f"invalid_input: '{name}' value {value} < min {mn}"
-                    )
+                    errors.append(f"invalid_input: '{name}' value {value} < min {mn}")
                 if mx is not None and num_val > float(mx):
-                    errors.append(
-                        f"invalid_input: '{name}' value {value} > max {mx}"
-                    )
+                    errors.append(f"invalid_input: '{name}' value {value} > max {mx}")
             except (TypeError, ValueError):
                 pass  # non-numeric value will surface as a type mismatch after set
 
@@ -628,9 +633,7 @@ def calculate_metrics_from_tv(
     A trade survives if -adverse_excursion_mag > survival_stop_usd,
     i.e., the max adverse move was less than abs(survival_stop_usd).
     """
-    fp_from_date = date.fromisoformat(footprint_available_from)
     closed: list[dict] = []
-    exit_curve: list[dict] = []
 
     for t in tv_trades:
         if t.get("exit_ts") is None:
@@ -638,84 +641,27 @@ def calculate_metrics_from_tv(
         exit_dt = datetime.fromtimestamp(t["exit_ts"] / 1000, tz=UTC)
         entry_dt = (
             datetime.fromtimestamp(t["entry_ts"] / 1000, tz=UTC)
-            if t.get("entry_ts") else exit_dt
+            if t.get("entry_ts")
+            else exit_dt
         )
-        closed.append({
-            "trade_num":       t["trade_num"],
-            "side":            t["side"],
-            "entry_time":      entry_dt,
-            "exit_time":       exit_dt,
-            "net_pnl":         t["net_pnl"],
-            "cumulative_pnl":  t["cumulative_pnl"],
-            # Negate: TV gives positive magnitude; survival check uses signed convention.
-            "adverse_excursion": -t["adverse_excursion_mag"],
-        })
-        exit_curve.append({"time": exit_dt, "cumulative_pnl": t["cumulative_pnl"]})
-
-    closed.sort(key=lambda r: r["exit_time"])
-    exit_curve.sort(key=lambda r: r["time"])
-
-    total = len(closed)
-    if total == 0:
-        raise ValueError("No closed trades found in TV reportData")
-
-    gross_profit = sum(r["net_pnl"] for r in closed if r["net_pnl"] > 0)
-    gross_loss   = abs(sum(r["net_pnl"] for r in closed if r["net_pnl"] < 0))
-    wins         = sum(1 for r in closed if r["net_pnl"] > 0)
-    losses       = total - wins
-    net_pnl      = round(sum(r["net_pnl"] for r in closed), 2)
-    profit_factor = gross_profit / gross_loss if gross_loss > 0 else math.inf
-
-    peak = max_drawdown = 0.0
-    for pt in exit_curve:
-        eq = pt["cumulative_pnl"]
-        peak = max(peak, eq)
-        max_drawdown = max(max_drawdown, peak - eq)
-
-    long_rows  = [r for r in closed if r["side"] == "long"]
-    short_rows = [r for r in closed if r["side"] == "short"]
-
-    survivors    = sum(1 for r in closed if r["adverse_excursion"] > survival_stop_usd)
-    survival_rate = round(survivors / total * 100.0, 2)
-
-    by_year: dict[str, float] = {}
-    for r in closed:
-        yr = str(r["exit_time"].year)
-        by_year[yr] = round(by_year.get(yr, 0.0) + r["net_pnl"], 2)
-
-    fp_trades = [r for r in closed if r["exit_time"].date() >= fp_from_date]
-    fp_long   = [r for r in fp_trades if r["side"] == "long"]
-    fp_short  = [r for r in fp_trades if r["side"] == "short"]
-    fp_net    = sum(r["net_pnl"] for r in fp_trades)
-    fp_gp     = sum(r["net_pnl"] for r in fp_trades if r["net_pnl"] > 0)
-    fp_gl     = abs(sum(r["net_pnl"] for r in fp_trades if r["net_pnl"] < 0))
-    fp_pf     = fp_gp / fp_gl if fp_gl > 0 else math.inf
-
-    return {
-        "total_trades":         total,
-        "wins":                 wins,
-        "losses":               losses,
-        "percent_profitable":   round(wins / total * 100.0, 2),
-        "gross_profit":         round(gross_profit, 2),
-        "gross_loss":           round(gross_loss, 2),
-        "net_pnl":              net_pnl,
-        "profit_factor":        round(profit_factor, 4) if math.isfinite(profit_factor) else None,
-        "max_drawdown":         round(max_drawdown, 2),
-        "max_drawdown_pct":     round(max_drawdown / initial_capital * 100.0, 2),
-        "return_on_initial_pct": round(net_pnl / initial_capital * 100.0, 2),
-        "survival_30_tick_pct": survival_rate,
-        "long":                 summarize_side(long_rows),
-        "short":                summarize_side(short_rows),
-        "by_year":              by_year,
-        "footprint_cohort": {
-            "from_date":     fp_from_date.isoformat(),
-            "trades":        len(fp_trades),
-            "net_pnl":       round(fp_net, 2),
-            "profit_factor": round(fp_pf, 4) if math.isfinite(fp_pf) else None,
-            "long_trades":   len(fp_long),
-            "short_trades":  len(fp_short),
-        },
-    }
+        closed.append(
+            {
+                "trade_num": t["trade_num"],
+                "side": t["side"],
+                "entry_time": entry_dt,
+                "exit_time": exit_dt,
+                "net_pnl": t["net_pnl"],
+                "cumulative_pnl": t["cumulative_pnl"],
+                # Negate: TV gives positive magnitude; survival check uses signed convention.
+                "adverse_excursion": -t["adverse_excursion_mag"],
+            }
+        )
+    return summarize_closed_trades(
+        closed,
+        initial_capital=initial_capital,
+        survival_stop_usd=survival_stop_usd,
+        footprint_available_from=footprint_available_from,
+    )
 
 
 # -- Trial record building ----------------------------------------------------
@@ -738,7 +684,7 @@ def make_tv_trial_record(
     csv_meta = {
         "source": "tv_auto_tune:cdp",
         "start_date": required_csv_start,
-        "end_date":   utc_now()[:10],
+        "end_date": utc_now()[:10],
     }
 
     validate_csv_window(csv_meta, required_csv_start)
@@ -754,31 +700,31 @@ def make_tv_trial_record(
             f"min_required={scoring['components'].get('min_required')}"
         )
 
-    search_params  = config["search_parameters"]
-    locked_params  = config["locked_parameters"]
-    runtime        = config.get("runtime_context", space.get("runtime_context", {}))
+    search_params = config["search_parameters"]
+    locked_params = config["locked_parameters"]
+    runtime = config.get("runtime_context", space.get("runtime_context", {}))
 
     sig_payload = {
-        "search":          search_params,
-        "locked":          locked_params,
-        "csv_meta":        csv_meta,
-        "commission":      runtime.get("commission_per_contract_usd"),
-        "slippage_ticks":  runtime.get("slippage_ticks"),
+        "search": search_params,
+        "locked": filter_signature_locked_params(space, locked_params),
+        "csv_meta": csv_meta,
+        "commission": runtime.get("commission_per_contract_usd"),
+        "slippage_ticks": runtime.get("slippage_ticks"),
     }
 
     return {
-        "trial_id":          config["trial_id"],
-        "recorded_at":       utc_now(),
-        "profile":           space["profile_name"],
-        "evaluation_mode":   "TV_MCP_STRICT",
-        "params_signature":  params_signature(sig_payload),
-        "source_csv":        "tv_auto_tune:cdp",
+        "trial_id": config["trial_id"],
+        "recorded_at": utc_now(),
+        "profile": space["profile_name"],
+        "evaluation_mode": "TV_MCP_STRICT",
+        "params_signature": params_signature(sig_payload),
+        "source_csv": "tv_auto_tune:cdp",
         "search_parameters": search_params,
         "locked_parameters": locked_params,
-        "runtime_context":   {**runtime, "csv_meta": csv_meta},
-        "metrics":           metrics,
-        "objective":         scoring,
-        "notes":             notes,
+        "runtime_context": {**runtime, "csv_meta": csv_meta},
+        "metrics": metrics,
+        "objective": scoring,
+        "notes": notes,
     }
 
 
@@ -794,9 +740,9 @@ def classify_failure_reason(exc: Exception) -> str:
     msg = str(exc)
     for prefix, reason in [
         ("failed_no_recalc", "no_recalc"),
-        ("schema_drift",     "schema_drift"),
-        ("invalid_input",    "invalid_input"),
-        ("compile_error",    "compile_error"),
+        ("schema_drift", "schema_drift"),
+        ("invalid_input", "invalid_input"),
+        ("compile_error", "compile_error"),
     ]:
         if prefix in msg:
             return reason
@@ -818,14 +764,14 @@ def record_failed_trial(
     are written to JSONL only and do not flow into the Postgres upsert path.
     """
     row = {
-        "trial_id":          trial_id,
-        "status":            "FAILED",
-        "failure_reason":    failure_reason,
-        "failed_at":         utc_now(),
-        "profile":           config.get("profile", ""),
+        "trial_id": trial_id,
+        "status": "FAILED",
+        "failure_reason": failure_reason,
+        "failed_at": utc_now(),
+        "profile": config.get("profile", ""),
         "search_parameters": config.get("search_parameters", {}),
         "locked_parameters": config.get("locked_parameters", {}),
-        "error_message":     message,
+        "error_message": message,
     }
     append_trial_jsonl(ledger_path, row)
 
@@ -849,16 +795,18 @@ async def run_preflight_checks(ws, space: dict) -> tuple[str, dict[str, dict]]:
     cid = 10  # start at 10 to avoid collision with tab-discovery call_id=1
 
     print("Preflight [1/5]: discovering strategy entity...")
-    entity_id = await discover_strategy_entity(ws, cid); cid += 1
+    entity_id = await discover_strategy_entity(ws, cid)
+    cid += 1
     print(f"  entity_id: {entity_id}")
 
     print("Preflight [2/5]: fetching live input schema...")
-    schema = await fetch_input_schema(ws, entity_id, cid); cid += 1
+    schema = await fetch_input_schema(ws, entity_id, cid)
+    cid += 1
     print(f"  {len(schema)} input(s) found in live schema.")
 
     print("Preflight [3/5]: cross-checking search_parameters names...")
-    search_params  = space.get("search_parameters", {})
-    locked_params  = space.get("locked_parameters", {})
+    search_params = space.get("search_parameters", {})
+    locked_params = space.get("locked_parameters", {})
     missing_search = [n for n in search_params if n not in schema]
     missing_locked = [n for n in locked_params if n not in schema]
     if missing_search:
@@ -867,7 +815,9 @@ async def run_preflight_checks(ws, space: dict) -> tuple[str, dict[str, dict]]:
             "Pine inputs may have been renamed or removed. Update strategy_tuning_space.json."
         )
     if missing_locked:
-        print(f"  WARNING: locked_parameters not in live schema (will be skipped): {missing_locked}")
+        print(
+            f"  WARNING: locked_parameters not in live schema (will be skipped): {missing_locked}"
+        )
     print(f"  All {len(search_params)} search params found. OK.")
 
     print("Preflight [4/5]: canary round-trip...")
@@ -885,16 +835,22 @@ async def run_preflight_checks(ws, space: dict) -> tuple[str, dict[str, dict]]:
     return v ? v.value : null;
 }})()
 """
-        canary_orig = await cdp_run(ws, read_js, cid); cid += 1
+        canary_orig = await cdp_run(ws, read_js, cid)
+        cid += 1
         canary_test = 40 if canary_orig != 40 else 45
         canary_inputs = [{"id": canary_id, "value": canary_test}]
 
-        await apply_inputs(ws, entity_id, canary_inputs, cid); cid += 1
+        await apply_inputs(ws, entity_id, canary_inputs, cid)
+        cid += 1
         await asyncio.sleep(0.4)
-        mismatches = await verify_inputs_applied(ws, entity_id, canary_inputs, cid); cid += 1
+        mismatches = await verify_inputs_applied(ws, entity_id, canary_inputs, cid)
+        cid += 1
 
         # Restore before any possible raise
-        await apply_inputs(ws, entity_id, [{"id": canary_id, "value": canary_orig}], cid); cid += 1
+        await apply_inputs(
+            ws, entity_id, [{"id": canary_id, "value": canary_orig}], cid
+        )
+        cid += 1
 
         if mismatches:
             raise RuntimeError(
@@ -903,12 +859,17 @@ async def run_preflight_checks(ws, space: dict) -> tuple[str, dict[str, dict]]:
             )
         print(f"  Canary: set {canary_test}, verified, restored to {canary_orig}. OK.")
     else:
-        print(f"  Canary input '{canary_name}' not found in schema — skipping round-trip.")
+        print(
+            f"  Canary input '{canary_name}' not found in schema — skipping round-trip."
+        )
 
     print("Preflight [5/5]: snapshotting initial strategy metrics...")
-    snap = await snapshot_strategy_metrics(ws, entity_id, cid); cid += 1
+    snap = await snapshot_strategy_metrics(ws, entity_id, cid)
+    cid += 1
     if snap:
-        print(f"  trades={snap.get('trade_count')} last_exit={snap.get('last_exit_ts')} net_profit={snap.get('net_profit')}")
+        print(
+            f"  trades={snap.get('trade_count')} last_exit={snap.get('last_exit_ts')} net_profit={snap.get('net_profit')}"
+        )
     else:
         print("  Snapshot unavailable (non-blocking).")
 
@@ -945,25 +906,28 @@ async def run_trial(
 
     # 1. Validate params
     errors = validate_trial_params({**locked_params, **search_params}, schema)
-    schema_drift_errors   = [e for e in errors if e.startswith("schema_drift")]
-    invalid_input_errors  = [e for e in errors if e.startswith("invalid_input")]
+    schema_drift_errors = [e for e in errors if e.startswith("schema_drift")]
+    invalid_input_errors = [e for e in errors if e.startswith("invalid_input")]
     if schema_drift_errors:
         raise RuntimeError(schema_drift_errors[0])
     if invalid_input_errors:
         raise RuntimeError(invalid_input_errors[0])
 
     # 2. Pre-snapshot
-    pre_snap = await snapshot_strategy_metrics(ws, entity_id, cid); cid += 1
+    pre_snap = await snapshot_strategy_metrics(ws, entity_id, cid)
+    cid += 1
 
     # 3. Build resolved input list
     input_values = build_input_values(search_params, locked_params, schema)
     print(f"  -> applying {len(input_values)} inputs ... ", end="", flush=True)
 
     # 4a. Apply
-    await apply_inputs(ws, entity_id, input_values, cid); cid += 1
+    await apply_inputs(ws, entity_id, input_values, cid)
+    cid += 1
 
     # 4b. Verify-after-set
-    mismatches = await verify_inputs_applied(ws, entity_id, input_values, cid); cid += 1
+    mismatches = await verify_inputs_applied(ws, entity_id, input_values, cid)
+    cid += 1
     if mismatches:
         raise RuntimeError(
             f"invalid_input: getInputValues() mismatch after setInputValues — {mismatches}"
@@ -971,11 +935,13 @@ async def run_trial(
 
     # 5. Two-phase freshness gate
     print("recalc ... ", end="", flush=True)
-    await wait_for_recalc(ws, entity_id, args.recalc_timeout, cid); cid += 1
+    await wait_for_recalc(ws, entity_id, args.recalc_timeout, cid)
+    cid += 1
 
     # 6. Read trades
     print("reading ... ", end="", flush=True)
-    tv_trades = await get_trades(ws, entity_id, cid); cid += 1
+    tv_trades = await get_trades(ws, entity_id, cid)
+    cid += 1
     print(f"{len(tv_trades)} trades.", flush=True)
 
     # Diagnostic: log if trade count unchanged (may indicate a silent no-op)
@@ -1002,8 +968,10 @@ async def command_preflight_async(args: argparse.Namespace) -> int:
     space = load_json(Path(args.space))
     runtime_context = space.get("runtime_context", {})
 
-    print(f"Connecting to TradingView (symbol={runtime_context.get('symbol')} "
-          f"tf={runtime_context.get('timeframe')})...")
+    print(
+        f"Connecting to TradingView (symbol={runtime_context.get('symbol')} "
+        f"tf={runtime_context.get('timeframe')})..."
+    )
     ws_url = await find_tv_chart_tab_for_context(runtime_context)
     print(f"CDP: {ws_url[:70]}...")
 
@@ -1064,8 +1032,8 @@ async def command_run_async(args: argparse.Namespace) -> int:
                 record = await run_trial(
                     ws, entity_id, schema, config, space, args, cid_base=i * 100
                 )
-                m  = record["metrics"]
-                o  = record["objective"]
+                m = record["metrics"]
+                o = record["objective"]
                 fp = m["footprint_cohort"]
                 print(
                     f"  score={o['objective_score']:.4f}  "
@@ -1084,19 +1052,21 @@ async def command_run_async(args: argparse.Namespace) -> int:
                 reason = classify_failure_reason(exc)
                 print(f"  FAILED [{reason}]: {exc}")
                 # Always write to JSONL for durability.
-                record_failed_trial(Path(args.ledger), trial_id, reason, config, str(exc))
+                record_failed_trial(
+                    Path(args.ledger), trial_id, reason, config, str(exc)
+                )
                 # Also persist to Postgres if migration 010 has been applied.
                 if conn:
                     try:
                         failed_row = {
-                            "trial_id":          trial_id,
-                            "profile":           space.get("profile_name", ""),
-                            "failure_reason":    reason,
-                            "params_signature":  config.get("params_signature", ""),
+                            "trial_id": trial_id,
+                            "profile": space.get("profile_name", ""),
+                            "failure_reason": reason,
+                            "params_signature": config.get("params_signature", ""),
                             "search_parameters": config.get("search_parameters", {}),
                             "locked_parameters": config.get("locked_parameters", {}),
-                            "runtime_context":   config.get("runtime_context", {}),
-                            "error_message":     str(exc),
+                            "runtime_context": config.get("runtime_context", {}),
+                            "error_message": str(exc),
                         }
                         upsert_failed_trial(conn, failed_row)
                     except Exception as db_exc:
@@ -1158,24 +1128,35 @@ def build_parser() -> argparse.ArgumentParser:
     run_p = sub.add_parser("run", help="Run trial(s) via CDP automation.")
 
     src = run_p.add_mutually_exclusive_group(required=True)
-    src.add_argument("--batch-dir",  help="Directory of trial_*.json files.")
+    src.add_argument("--batch-dir", help="Directory of trial_*.json files.")
     src.add_argument("--trial-file", help="Single trial JSON file.")
 
-    run_p.add_argument("--initial-capital",          type=float, default=DEFAULT_INITIAL_CAPITAL)
-    run_p.add_argument("--survival-stop-usd",        type=float, default=DEFAULT_SURVIVAL_STOP_USD)
-    run_p.add_argument("--required-csv-start",       default=DEFAULT_REQUIRED_CSV_START)
-    run_p.add_argument("--footprint-available-from", default=DEFAULT_FOOTPRINT_AVAILABLE_FROM)
+    run_p.add_argument("--initial-capital", type=float, default=DEFAULT_INITIAL_CAPITAL)
     run_p.add_argument(
-        "--recalc-timeout", type=int, default=90,
+        "--survival-stop-usd", type=float, default=DEFAULT_SURVIVAL_STOP_USD
+    )
+    run_p.add_argument("--required-csv-start", default=DEFAULT_REQUIRED_CSV_START)
+    run_p.add_argument(
+        "--footprint-available-from", default=DEFAULT_FOOTPRINT_AVAILABLE_FROM
+    )
+    run_p.add_argument(
+        "--recalc-timeout",
+        type=int,
+        default=90,
         help="Seconds to wait for strategy recalculation per trial (default: 90).",
     )
     run_p.add_argument(
-        "--delay", type=float, default=3.0,
+        "--delay",
+        type=float,
+        default=3.0,
         help="Seconds between trials (default: 3.0).",
     )
-    run_p.add_argument("--notes", default="", help="Operator notes stored on every trial.")
     run_p.add_argument(
-        "--stop-on-error", action="store_true",
+        "--notes", default="", help="Operator notes stored on every trial."
+    )
+    run_p.add_argument(
+        "--stop-on-error",
+        action="store_true",
         help="Halt the batch on the first trial failure.",
     )
     run_p.set_defaults(func=command_run)
