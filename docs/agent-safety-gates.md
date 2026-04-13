@@ -112,8 +112,8 @@ If any touched file ends in `.pine`:
 
 If either of these files is touched:
 
-- `indicators/v6-warbird-complete.pine`
-- `indicators/v6-warbird-complete-strategy.pine`
+- `indicators/v7-warbird-institutional.pine`
+- `indicators/v7-warbird-strategy.pine`
 
 Also run:
 

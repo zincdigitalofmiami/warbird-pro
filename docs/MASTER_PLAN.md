@@ -96,15 +96,26 @@ This phase begins after Phase 0 is fully landed (`docs/contracts/ag_local_traini
 tracked in git). It runs in parallel with Phase 1 warehouse work and does not block Phase 1
 warehouse execution. It blocks only the Pine indicator implementation work stream.
 
-### Pine Budget Baseline (v7-warbird-institutional.pine)
+### Pine Budget Baseline
 
-Verified 2026-04-11 by full file audit (Python parser, comment-stripped):
+Verified 2026-04-13 (pine-lint.sh, both files):
 
-Output budget: 37 / 64 (33 plot + 1 plotshape + 3 alertcondition, 27 headroom)
-Request budget: 4 / 40 (3 HTF fib security + 1 A-D line, 36 headroom)
-request.footprint(): 0 (not yet implemented — Phase 0.5 scope)
+`v7-warbird-institutional.pine` (live indicator):
+  Output: 51/64 (46 plot + 2 plotshape + 3 alertcondition, 13 headroom)
+  Request: 4 `request.security()` + 1 `request.footprint()` = 5 paths
 
-Header comment corrected at 2026-04-12 session and now matches this audit.
+`v7-warbird-strategy.pine` (AG training data generator):
+  Output: 52/64 (50 plot + 2 plotshape, 12 headroom)
+  Request: 4 `request.security()` + 1 `request.footprint()` = 5 paths
+
+2026-04-13 session changes:
+- Dead HyperWave oscillator + EXHAUSTION DIAMOND energy blocks removed from both files
+  (were live v6 code driving sidebar; orphaned in v7 when sidebar was removed).
+- `Exhaustion ATR Multiplier` removed from strategy_tuning_space.json (fed only dead code).
+- ZigZag locked params corrected: Deviation=3.0, Depth=10.
+- Raw footprint numeric exports added to strategy: `ml_exh_fp_delta`, `ml_exh_trigger_row_delta`,
+  `ml_exh_extreme_vol_ratio`, `ml_exh_stacked_imbalance_count`.
+- CDP tuner automation built: `scripts/ag/tv_auto_tune.py` replaces manual knob→CSV loop.
 
 All additions must be priced against these baselines before any code is written.
 Any implementation exceeding 64 plots or 40 request calls is invalid without

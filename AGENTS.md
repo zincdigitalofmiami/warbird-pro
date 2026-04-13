@@ -162,9 +162,10 @@ These are explicitly excluded from the canonical `warbird` warehouse:
 - NEVER edit `indicators/v7-warbird-institutional.pine` without explicit approval
   in the current session. State intent, wait for approval, then edit.
 - NEVER push Pine changes to TradingView Pine Editor without explicit approval.
-- Pine budget baselines (`v7-warbird-institutional.pine`):
-  Plot budget: 37 / 64 (33 plot + 1 plotshape + 3 alertcondition; strategy: 34/64)
-  Request budget: 4 / 40
+- Pine budget baselines (verified 2026-04-13):
+  Institutional (`v7-warbird-institutional.pine`): 51/64 (46 plot + 2 plotshape + 3 alertcondition, 13 headroom)
+  Strategy (`v7-warbird-strategy.pine`): 52/64 (50 plot + 2 plotshape, 12 headroom)
+  Request budget: 4 `request.security()` + 1 `request.footprint()` = 5 paths (both files)
   Any implementation must be priced against these baselines before code is written.
 - `request.footprint()` must be treated as a tightly budgeted call path.
   All footprint-derived features must be computed from one cached object per bar.

@@ -41,7 +41,7 @@ Phase execution order:
 - All Databento calls use `.c.0` continuous front-month contracts with `stype_in=continuous`. No manual contract-roll logic.
 - Live core retention floor is `2020-01-01T00:00:00Z`.
 - `indicators/v7-warbird-institutional.pine` is the active Pine work surface. Compiles clean, TV-validated. Output budget: 51/64 (46 plot + 2 plotshape + 3 alertcondition, 13 headroom). 4 `request.security()` calls + 1 `request.footprint()` call (live, implemented). Budget verified 2026-04-13.
-- `indicators/v7-warbird-strategy.pine` is the AG training data generator. Compiles clean. Output budget: 48/64 (46 plot + 2 plotshape, 16 headroom). Commission floor at $1.00/side. `use_bar_magnifier=true`, `slippage=1` pinned in `strategy()`. Budget verified 2026-04-13.
+- `indicators/v7-warbird-strategy.pine` is the AG training data generator. Compiles clean. Output budget: 52/64 (50 plot + 2 plotshape, 12 headroom). Commission floor at $1.00/side. `use_bar_magnifier=true`, `slippage=1` pinned in `strategy()`. Budget verified 2026-04-13. Dead HyperWave oscillator + energy computation blocks removed 2026-04-13 (were live in v6, orphaned in v7). Raw footprint numeric exports added 2026-04-13: `ml_exh_fp_delta`, `ml_exh_trigger_row_delta`, `ml_exh_extreme_vol_ratio`, `ml_exh_stacked_imbalance_count` — AG cannot compute these server-side (TV-exclusive API).
 - v7 parity guard (`scripts/guards/check-indicator-strategy-parity.sh`) updated for v7: ml_* parity, budget caps, coupled input defaults, strategy execution primitives, pinned TV defaults.
 - ESLint gate passes clean (`npm run lint` = 0 errors, 0 warnings).
 - Migration reconciliation through `045` is verified local↔remote.
@@ -65,7 +65,7 @@ Phase execution order:
 - ~~`local_schema_migrations` ledger table: not yet created (Phase 1)~~ **DONE 2026-04-11**
 - ~~One-time bootstrap from `rabid_raccoon`: not yet run (Phase 2)~~ **DONE 2026-04-11** — All surfaces bootstrapped. HG loaded from `data/cross_asset_1h.parquet`. All 6 cross-asset symbols live. 221,954 cross-asset rows through 2026-04-03.
 - ~~Three canonical local AG tables and one canonical training view (`ag_training`): not yet created (Phase 3)~~ **DONE 2026-04-11** — migration 007. 3 tables + view live.
-- Python pipeline in `scripts/ag/`: not yet built (Phase 4)
+- Python pipeline in `scripts/ag/`: CDP tuner automation built (`tv_auto_tune.py` + `tune_strategy_params.py` + `strategy_tuning_space.json` — applies inputs via CDP, polls recalc, reads trades without CSV export). Full AG feature pipeline (extract, reconstruct, label, train, SHAP) still unbuilt.
 - Full-surface SHAP program: not yet built (Phase 5)
 - Cloud serving promotion: blocked on Phases 1-5 (Phase 6)
 - `artifacts/` and `artifacts/shap/` directories: not yet created
@@ -117,7 +117,7 @@ Follow Warbird Full Reset Plan v5 only. No other plan drives implementation.
 - Training discipline: walk-forward splits only, one-session embargo minimum, no shuffle, no fit on full dataset, no tuning on test, naive baseline required, full run metadata required.
 - Do not trust docs, prior agent summaries, or build success as proof of schema truth. Verify directly.
 - AG owns TA core pack computation server-side from Databento OHLCV. These are NOT Pine plot exports.
-- TradingView enforces a hard maximum of 64 output calls per script. Current v7 budget: 51/64 (13 headroom). Strategy: 48/64 (16 headroom).
+- TradingView enforces a hard maximum of 64 output calls per script. Current v7 budget: 51/64 (13 headroom). Strategy: 52/64 (12 headroom).
 - Decision vocabulary: `TAKE_TRADE`, `WAIT`, `PASS`.
 - No mock data, no inactive Databento symbols, no Prisma/ORM paths.
 - Pine budget audit is required before any indicator implementation workstream.
