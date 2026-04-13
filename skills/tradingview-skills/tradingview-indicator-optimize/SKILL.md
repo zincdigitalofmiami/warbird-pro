@@ -11,8 +11,8 @@ Optimize mode improves performance and reliability. It does not silently perform
 
 - Primary contract: MES 15m bar-close in `America/Chicago`.
 - Primary files:
-- `indicators/v6-warbird-complete.pine`
-- `indicators/v6-warbird-complete-strategy.pine`
+- `indicators/v7-warbird-institutional.pine`
+- `indicators/v7-warbird-strategy.pine`
 - Primary objective: measurable improvement without semantic drift.
 
 ## Safety Stops (Hard Stop Conditions)

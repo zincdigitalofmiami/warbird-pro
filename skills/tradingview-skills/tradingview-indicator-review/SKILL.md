@@ -11,8 +11,8 @@ Review mode is audit-only by default. Treat this as a quant-grade, evidence-firs
 
 - Primary contract: MES 15m bar-close in `America/Chicago`.
 - Primary files:
-- `indicators/v6-warbird-complete.pine`
-- `indicators/v6-warbird-complete-strategy.pine`
+- `indicators/v7-warbird-institutional.pine`
+- `indicators/v7-warbird-strategy.pine`
 - Primary objective: identify defects, regression risk, and release blockers.
 
 ## Safety Stops (Hard Stop Conditions)

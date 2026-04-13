@@ -11,8 +11,8 @@ Repair mode is bug-fix mode. Target root cause, minimal patch, and regression pr
 
 - Primary contract: MES 15m bar-close in `America/Chicago`.
 - Primary files:
-- `indicators/v6-warbird-complete.pine`
-- `indicators/v6-warbird-complete-strategy.pine`
+- `indicators/v7-warbird-institutional.pine`
+- `indicators/v7-warbird-strategy.pine`
 - Primary objective: correct verified defects without widening blast radius.
 
 ## Safety Stops (Hard Stop Conditions)

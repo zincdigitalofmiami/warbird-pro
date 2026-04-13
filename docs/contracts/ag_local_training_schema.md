@@ -146,15 +146,18 @@ Required hidden export columns (add to ag_fib_interactions or as join surface):
   ml_exh_delta_div            BOOLEAN  delta divergence confirmed at extension bar
   ml_exh_absorption           BOOLEAN  POC near wick extreme with rejection close
   ml_exh_zero_print           BOOLEAN  extreme-row participation near zero (regime-normalized)
-  ml_exh_confidence_tier      INT      1=geometry+stats+footprint, 2=geometry+stats only
+  ml_exh_confidence_tier      INT      reversal tier: 1=geometry+stats+footprint, 0=not triggered
   ml_exh_footprint_available  BOOLEAN  footprint data present for this bar
   ml_exh_session_valid        BOOLEAN  bar outside CME maintenance (17:00-18:00 ET)
   ml_exh_bars_since_trigger   INT      bars since confluence met, null if not triggered
+  ml_cont_confidence_tier     INT      continuation tier: 1=full footprint, 2=reduced fallback, 0=not triggered
 
 Confidence tiers:
-  Tier 1 (full):    geometry + Z-score + footprint confirmed
-  Tier 2 (reduced): geometry + Z-score only, footprint returned na or unavailable
-  Both tiers are first-class signal states, not degraded fallback modes.
+  Reversal exhaustion (`ml_exh_confidence_tier`):
+    Tier 1 only (geometry + Z-score + footprint). No geometry-only Tier 2 fallback.
+  Continuation evidence (`ml_cont_confidence_tier`):
+    Tier 1 (full): same-direction footprint confirmation.
+    Tier 2 (reduced): fallback when footprint is unavailable.
 
 
 ## Behavioral Feature Contract

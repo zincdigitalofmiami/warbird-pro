@@ -11,8 +11,8 @@ Build mode is for intentional implementation with contract discipline and quant 
 
 - Primary contract: MES 15m bar-close in `America/Chicago`.
 - Primary files:
-- `indicators/v6-warbird-complete.pine`
-- `indicators/v6-warbird-complete-strategy.pine`
+- `indicators/v7-warbird-institutional.pine`
+- `indicators/v7-warbird-strategy.pine`
 - Primary objective: add approved capability without breaking semantics.
 
 ## Safety Stops (Hard Stop Conditions)

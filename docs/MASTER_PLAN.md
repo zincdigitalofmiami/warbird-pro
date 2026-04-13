@@ -112,7 +112,7 @@ Verified 2026-04-13 (pine-lint.sh, both files):
 - Dead HyperWave oscillator + EXHAUSTION DIAMOND energy blocks removed from both files
   (were live v6 code driving sidebar; orphaned in v7 when sidebar was removed).
 - `Exhaustion ATR Multiplier` removed from strategy_tuning_space.json (fed only dead code).
-- ZigZag locked params corrected: Deviation=3.0, Depth=10.
+- ZigZag locked params corrected: Deviation=3.0, Depth=12.
 - Raw footprint numeric exports added to strategy: `ml_exh_fp_delta`, `ml_exh_trigger_row_delta`,
   `ml_exh_extreme_vol_ratio`, `ml_exh_stacked_imbalance_count`.
 - CDP tuner automation built: `scripts/ag/tv_auto_tune.py` replaces manual knob→CSV loop.
@@ -126,10 +126,10 @@ an explicit approved recount.
 `request.footprint()` is budget-constrained and must be designed as a single cached
 source per bar for all footprint-derived features.
 
-Two confidence tiers are required for all exhaustion-dependent outputs:
-Tier 1 (full): geometry + Z-score + footprint confirmed
-Tier 2 (reduced): geometry + Z-score only, footprint returned `na` or unavailable
-Both tiers are first-class signal states with distinct visual rendering.
+Confidence tier handling as of 2026-04-13:
+- Reversal exhaustion (`ml_exh_confidence_tier`): Tier 1 only when footprint confirms; otherwise 0.
+- Continuation evidence (`ml_cont_confidence_tier`): Tier 1 (full) and Tier 2 (reduced when footprint is unavailable).
+Do not reintroduce geometry-only reversal Tier 2 without explicit approval.
 
 `polyline.new()` replaces multi-line Fibonacci grid construction where equivalent.
 Pine v6 strict booleans are required for exhaustion and hold-state logic.

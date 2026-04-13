@@ -13,8 +13,8 @@ Run a checkpointed workflow for Pine indicator engineering and review. Discover 
 2. Read the active plan file identified in step 1.
 3. Read `CLAUDE.md` and `WARBIRD_MODEL_SPEC.md`.
 4. Read target Pine files. Default to:
-- `indicators/v6-warbird-complete.pine`
-- `indicators/v6-warbird-complete-strategy.pine`
+- `indicators/v7-warbird-institutional.pine`
+- `indicators/v7-warbird-strategy.pine`
 5. Inspect latest work:
 - `git log --oneline --decorate -n 12`
 - `git status --short`

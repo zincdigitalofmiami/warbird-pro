@@ -212,7 +212,7 @@ Current scoring model:
 Example objective block:
 
 ```json
-"trade_count_bounds": { "min": 200, "max": 2200 },
+"trade_count_bounds": { "min": 0, "max": 2200 },
 "profit_factor_range": { "floor": 0.6, "target": 2.0, "realism_cap": 3.0 },
 "expectancy_per_trade": { "floor": 0.0, "target": 25.0, "negative_penalty": 0.5 },
 "side_profit_factor_floor": { "long": 0.8, "short": 0.8 },
