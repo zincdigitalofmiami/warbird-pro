@@ -66,9 +66,16 @@ STRATEGY_ENTITY_ID = "kGnTgb"
 
 # -- Input ID map -------------------------------------------------------------
 # Display name (as shown in TV settings) -> Pine input ID (in_N).
-# Derived from getInputsInfo() on the strategy study. Covers all 28 user inputs.
-# Strategy execution inputs (in_28+: pyramiding, commission, etc.) are locked in
+# Derived from getInputsInfo() on the strategy study. Covers all 27 user inputs.
+# Strategy execution inputs (in_27+: pyramiding, commission, etc.) are locked in
 # strategy() and must NOT be set -- TV rejects or ignores them.
+#
+# WARNING: Pine assigns in_N by declaration order. Any input added or removed
+# from v7-warbird-strategy.pine shifts all subsequent IDs. Verify this map
+# against getInputsInfo() after any Pine input change. The full tuner migration
+# (Phase A) will replace this static map with a runtime-resolved schema.
+#
+# Last verified: 2026-04-13 (after removal of "Exhaustion ATR Multiplier").
 INPUT_NAME_TO_ID: dict[str, str] = {
     "Auto-tune ZigZag by Timeframe":                    "in_0",
     "ZigZag Deviation (manual)":                        "in_1",
@@ -79,25 +86,24 @@ INPUT_NAME_TO_ID: dict[str, str] = {
     "Acceptance Retest Window (bars)":                  "in_6",
     "Rejection = wick into zone then close back out":   "in_7",
     "One-shot event markers/alerts":                    "in_8",
-    "Exhaustion ATR Multiplier":                        "in_9",
-    "Gate Shorts In Bull Trend":                        "in_10",
-    "Short Gate ADX Floor":                             "in_11",
-    "Fallback Stop Family":                             "in_12",
-    "Tier 1 Hold Stop ATR":                             "in_13",
-    "Footprint Ticks Per Row":                          "in_14",
-    "Footprint VA %":                                   "in_15",
-    "Footprint Imbalance %":                            "in_16",
-    "Exhaustion Z Length":                              "in_17",
-    "Exhaustion Z Threshold":                           "in_18",
-    "Extension ATR Tolerance":                          "in_19",
-    "Zero-Print Volume Ratio":                          "in_20",
-    "Extreme Rows To Inspect":                          "in_21",
-    "Tier 1 Hold Bars":                                 "in_22",
-    "Target Line Lookback Bars":                        "in_23",
-    "Extend Levels Right":                              "in_24",
-    "Anchor Span = Active Fib Window":                  "in_25",
-    "Enable Debug Logs":                                "in_26",
-    "Show Footprint Audit Table":                       "in_27",
+    "Gate Shorts In Bull Trend":                        "in_9",
+    "Short Gate ADX Floor":                             "in_10",
+    "Fallback Stop Family":                             "in_11",
+    "Tier 1 Hold Stop ATR":                             "in_12",
+    "Footprint Ticks Per Row":                          "in_13",
+    "Footprint VA %":                                   "in_14",
+    "Footprint Imbalance %":                            "in_15",
+    "Exhaustion Z Length":                              "in_16",
+    "Exhaustion Z Threshold":                           "in_17",
+    "Extension ATR Tolerance":                          "in_18",
+    "Zero-Print Volume Ratio":                          "in_19",
+    "Extreme Rows To Inspect":                          "in_20",
+    "Tier 1 Hold Bars":                                 "in_21",
+    "Target Line Lookback Bars":                        "in_22",
+    "Extend Levels Right":                              "in_23",
+    "Anchor Span = Active Fib Window":                  "in_24",
+    "Enable Debug Logs":                                "in_25",
+    "Show Footprint Audit Table":                       "in_26",
 }
 
 # -- CDP connection -----------------------------------------------------------
@@ -168,8 +174,8 @@ def build_input_values(search_params: dict, locked_params: dict) -> list[dict]:
         input_id = INPUT_NAME_TO_ID.get(name)
         if input_id:
             overrides[input_id] = val
-    overrides["in_26"] = False   # Enable Debug Logs -- force off
-    overrides["in_27"] = False   # Show Footprint Audit Table -- force off
+    overrides["in_25"] = False   # Enable Debug Logs -- force off
+    overrides["in_26"] = False   # Show Footprint Audit Table -- force off
     return [{"id": k, "value": v} for k, v in sorted(overrides.items())]
 
 

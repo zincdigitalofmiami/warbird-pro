@@ -48,16 +48,36 @@ count_alertcondition_calls() {
 }
 
 # ── 1. Hidden ml_* export field parity ──
+# Policy: all indicator ml_* fields must exist in the strategy (indicator ⊆ strategy).
+# Strategy-exclusive ml_* fields (footprint numerics AG cannot compute server-side)
+# are allowed and reported as INFO, not FAIL.
+STRATEGY_ONLY_ALLOWLIST="ml_exh_fp_delta ml_exh_trigger_row_delta ml_exh_extreme_vol_ratio ml_exh_stacked_imbalance_count"
+
 extract_ml_fields "$INDICATOR_FILE" "$TMP_DIR/ml_indicator.txt"
 extract_ml_fields "$STRATEGY_FILE" "$TMP_DIR/ml_strategy.txt"
 
-if ! diff -u "$TMP_DIR/ml_indicator.txt" "$TMP_DIR/ml_strategy.txt" > "$TMP_DIR/ml_diff.txt"; then
-    echo "FAIL: Hidden export field mismatch between indicator and strategy"
-    sed -n '1,120p' "$TMP_DIR/ml_diff.txt"
+# Fields in indicator but missing from strategy = FAIL (strategy must cover indicator)
+MISSING_IN_STRATEGY=$(comm -23 "$TMP_DIR/ml_indicator.txt" "$TMP_DIR/ml_strategy.txt")
+if [[ -n "$MISSING_IN_STRATEGY" ]]; then
+    echo "FAIL: Indicator ml_* fields missing from strategy:"
+    echo "$MISSING_IN_STRATEGY" | sed 's/^/  /'
     FAIL=1
 else
     ML_FIELD_COUNT=$(wc -l < "$TMP_DIR/ml_indicator.txt" | tr -d '[:space:]')
-    echo "INFO: Hidden export fields match (${ML_FIELD_COUNT} fields)"
+    echo "INFO: All indicator ml_* fields present in strategy (${ML_FIELD_COUNT} fields)"
+fi
+
+# Fields in strategy but not indicator — must be in the allowlist
+STRATEGY_EXTRAS=$(comm -13 "$TMP_DIR/ml_indicator.txt" "$TMP_DIR/ml_strategy.txt")
+if [[ -n "$STRATEGY_EXTRAS" ]]; then
+    while IFS= read -r field; do
+        if echo "$STRATEGY_ONLY_ALLOWLIST" | grep -qw "$field"; then
+            echo "INFO: Strategy-exclusive ml_* field (allowlisted): $field"
+        else
+            echo "FAIL: Strategy ml_* field not in indicator and not allowlisted: $field"
+            FAIL=1
+        fi
+    done <<< "$STRATEGY_EXTRAS"
 fi
 
 # ── 2. Plot budget ──
@@ -134,7 +154,6 @@ check_input_default 'stackedImbalanceRows = input.int\([0-9]+' 'stackedImbalance
 check_input_default 'continuationHoldBars = input.int\([0-9]+' 'continuationHoldBars'
 check_input_default 'continuationHoldStopAtrMult = input.float\([0-9.]+' 'continuationHoldStopAtrMult'
 check_input_default 'shortTrendGateAdx = input.float\([0-9.]+' 'shortTrendGateAdx'
-check_input_default 'exhAtrMult = input.float\([0-9.]+' 'exhAtrMult'
 check_input_default '"ATR_1_5", "Fallback Stop Family"' 'stopFamilyId_default'
 
 # ── 5. Strategy execution primitives ──
