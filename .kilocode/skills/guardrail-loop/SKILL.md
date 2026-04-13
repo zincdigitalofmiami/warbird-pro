@@ -35,7 +35,9 @@ Similar to Ralph Loop — high guardrails, high accuracy.
 - Check that no mock/fake data was introduced
 - Verify database queries use correct table prefixes
 - Verify cron routes have `CRON_SECRET` validation and `job_log` logging
-- If touching database: confirm migration file exists in `supabase/migrations/`
+- If touching database: confirm migration file exists in the correct path
+  - local canonical DDL -> `local_warehouse/migrations/` (`local_schema_migrations` ledger)
+  - cloud serving DDL -> `supabase/migrations/`
 
 ### Step 4: Report
 - List every file changed

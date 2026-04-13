@@ -36,10 +36,19 @@ Lock these truths before touching Pine:
 - canonical object = MES 15m fib setup
 - canonical key = MES 15m bar close in `America/Chicago`
 - indicator = live structural candidate-generator
-- strategy = backtest mirror
+- `indicators/v7-warbird-strategy.pine` = AG training data generator
+  - produces labeled training data via Deep Backtesting
+  - not a live trading strategy
+  - not a mirror of the institutional indicator
 - Tier 1 = Pine candidate transport
 - Tier 2 = server-side AG scoring
 - entry-state and entry spot semantics are first-class contract truth
+- Strategy generator-only `ml_*` exports are allowed and must not be flagged as parity defects:
+  - `ml_exh_fp_delta`
+  - `ml_exh_trigger_row_delta`
+  - `ml_exh_extreme_vol_ratio`
+  - `ml_exh_stacked_imbalance_count`
+- Shared `ml_*` parity remains mandatory (`indicator ⊆ strategy`) per `scripts/guards/check-indicator-strategy-parity.sh`.
 
 ## Choose the Mode
 
@@ -64,7 +73,8 @@ Confirm:
 3. captured entry price or spot semantics
 4. indicator and strategy parity
 5. Tier 1 and Tier 2 boundary compliance
-6. Pine budget safety
+6. shared `ml_*` parity and strategy-only allowlist compliance
+7. Pine budget safety
 
 If any of these are unresolved, the task is not ready for implementation.
 

@@ -10,35 +10,40 @@ description: >
 
 CRITICAL: Research BEFORE any API calls. Getting this wrong costs money.
 
-## Step 1: Research the Docs
+## Step 1: Research the docs and tier limits
 
 Before writing ANY Databento API code:
 - Check what schemas are available on Standard $179/mo tier
 - Free schemas: ohlcv-1s, ohlcv-1m, ohlcv-1h, ohlcv-1d, definition, statistics
 - Paid schemas (DO NOT USE without approval): trades, mbp-1, mbp-10, mbo
-- Check symbology: use `.v.0` for volume roll conventions
 
-## Step 2: Check Current Usage
+## Step 2: Lock symbology (non-negotiable)
+
+- Use `.c.0` continuous front-month contracts for all futures symbols.
+- Set `stype_in=continuous` on Databento calls.
+- Do NOT implement manual contract-roll logic, roll dates, expiry switching, or custom roll handlers.
+- Keep symbology aligned with authority docs (`AGENTS.md`, `CLAUDE.md`).
+
+## Step 3: Check current usage
 
 - Review existing Databento code in the repo
 - Check which schemas are currently being pulled
 - Verify you are not duplicating an existing data pipeline
 
-## Step 3: Symbol Safety
+## Step 4: Symbol safety
 
 - ONLY query symbols where `is_active=true AND data_source='DATABENTO'`
 - NEVER hardcode symbol names — always query the active symbols table
-- Use the correct contract roll methodology (TradingView MES1! rolls 8 cal days before 3rd Friday)
 
-## Step 4: Cost Awareness
+## Step 5: Cost awareness
 
 - Space data pulls evenly across available windows — never stack pulls
 - Minimize API calls — batch where possible
 - Check if the data already exists in Supabase before pulling
 
-## Step 5: Implementation
+## Step 6: Implementation
 
-Only AFTER steps 1-4 are complete, write the code.
+Only AFTER steps 1-5 are complete, write the code.
 - Follow cron route creation workflow if this is a scheduled pull
 - Use Supabase admin client for writes
 - Log to job_log

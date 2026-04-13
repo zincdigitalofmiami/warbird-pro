@@ -34,8 +34,16 @@ If the correct mode is unclear, start as a review until the defect or change cla
 
 - Confirm MES 15m bar-close contract
 - Confirm indicator = live candidate-generator
-- Confirm strategy = backtest mirror
+- Confirm `indicators/v7-warbird-strategy.pine` = AG training data generator
+  - generates labeled training data via Deep Backtesting
+  - is not a live trading strategy
+  - is not a mirror of the institutional indicator
 - Confirm entry-state truth is in scope when evaluating trade logic
+- Confirm strategy-only `ml_*` export allowlist is respected and not treated as parity drift:
+  - `ml_exh_fp_delta`
+  - `ml_exh_trigger_row_delta`
+  - `ml_exh_extreme_vol_ratio`
+  - `ml_exh_stacked_imbalance_count`
 
 ### 2. Budget and platform limits
 
@@ -48,7 +56,7 @@ If the correct mode is unclear, start as a review until the defect or change cla
 - Confirm no-repaint and confirmed-bar discipline
 - Confirm entry event, entry timing, and entry spot semantics
 - Confirm Tier 1 versus Tier 2 boundaries
-- Confirm indicator and strategy parity where shared logic exists
+- Confirm shared `ml_*` parity where shared logic exists (`indicator ⊆ strategy`)
 
 ### 4. Execute the change
 

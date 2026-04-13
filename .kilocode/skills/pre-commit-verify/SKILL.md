@@ -22,9 +22,12 @@ Run `npm run build` and confirm zero errors. Do NOT proceed if the build fails.
 
 ## Step 3: Database Rules
 
-- If SQL migrations were added: confirm they are in `supabase/migrations/`
+- If SQL migrations were added, confirm correct routing:
+  - local canonical DDL -> `local_warehouse/migrations/` with `local_schema_migrations` ledger discipline
+  - cloud serving DDL -> `supabase/migrations/`
 - Confirm no Prisma/Drizzle imports were introduced
-- Confirm table prefixes are correct (`mes_`, `cross_asset_`, `econ_`, `warbird_`)
+- Confirm table prefixes are correct (`mes_`, `cross_asset_`, `econ_`, `warbird_`, `ag_`)
+- Confirm local AG naming follows `docs/contracts/ag_local_training_schema.md`
 - Confirm all columns use snake_case
 
 ## Step 4: Cron Route Rules
@@ -33,7 +36,7 @@ Run `npm run build` and confirm zero errors. Do NOT proceed if the build fails.
   - `CRON_SECRET` validation present
   - `job_log` logging present
   - `export const maxDuration = 60` present
-  - Schedule added to `vercel.json`
+  - Recurring schedule changes are defined in Supabase `pg_cron` migration files only
 
 ## Step 5: Deploy Safety
 
