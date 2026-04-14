@@ -67,7 +67,20 @@ CREATE TABLE ag_fib_interactions (
   macd_hist FLOAT8,
   adx FLOAT8,
   energy FLOAT8,
-  confluence_quality FLOAT8
+  confluence_quality FLOAT8,
+  ml_exec_tf_code INT,
+  ml_exec_state_code INT,
+  ml_exec_pattern_code INT,
+  ml_exec_pocket_code INT,
+  ml_exec_impulse_break_atr FLOAT8,
+  ml_exec_reclaim_dist_atr FLOAT8,
+  ml_exec_orderflow_bias INT,
+  ml_exec_delta_norm FLOAT8,
+  ml_exec_absorption BOOLEAN,
+  ml_exec_zero_print BOOLEAN,
+  ml_exec_same_dir_imbalance_ct INT,
+  ml_exec_opp_dir_imbalance_ct INT,
+  ml_exec_target_leg_code INT
 );
 
 CREATE TABLE ag_fib_outcomes (

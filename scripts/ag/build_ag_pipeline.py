@@ -7,7 +7,7 @@ import json
 import math
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -104,8 +104,38 @@ class InteractionRow:
     adx: float
     energy: float
     confluence_quality: float
+    ml_exec_tf_code: int
+    ml_exec_state_code: int
+    ml_exec_pattern_code: int
+    ml_exec_pocket_code: int
+    ml_exec_impulse_break_atr: float | None
+    ml_exec_reclaim_dist_atr: float | None
+    ml_exec_orderflow_bias: int
+    ml_exec_delta_norm: float | None
+    ml_exec_absorption: bool
+    ml_exec_zero_print: bool
+    ml_exec_same_dir_imbalance_ct: int
+    ml_exec_opp_dir_imbalance_ct: int
+    ml_exec_target_leg_code: int
     bar_index: int
     trade_dir: int
+
+
+@dataclass
+class MicroExecContext:
+    tf_code: int = 0
+    state_code: int = 0
+    pattern_code: int = 0
+    pocket_code: int = 0
+    impulse_break_atr: float | None = None
+    reclaim_dist_atr: float | None = None
+    orderflow_bias: int = 0
+    delta_norm: float | None = None
+    absorption: bool = False
+    zero_print: bool = False
+    same_dir_imbalance_ct: int = 0
+    opp_dir_imbalance_ct: int = 0
+    target_leg_code: int = 0
 
 
 def parse_args() -> argparse.Namespace:
@@ -206,6 +236,49 @@ def fetch_mes_15m_rows(conn: psycopg2.extensions.connection, start_ts: str | Non
         for row in rows
     ]
     return bars
+
+
+def table_exists(conn: psycopg2.extensions.connection, table_name: str) -> bool:
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass(%s)", (f"public.{table_name}",))
+        return cur.fetchone()[0] is not None
+
+
+def fetch_mes_1m_rows(conn: psycopg2.extensions.connection, start_ts: str | None, end_ts: str | None) -> list[MesBar]:
+    if not table_exists(conn, "mes_1m"):
+        return []
+
+    where = []
+    params: list[Any] = []
+    if start_ts:
+        where.append("ts >= %s::timestamptz - interval '14 minutes'")
+        params.append(start_ts)
+    if end_ts:
+        where.append("ts <= %s::timestamptz")
+        params.append(end_ts)
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+
+    sql = f"""
+        SELECT ts, open, high, low, close, volume
+        FROM mes_1m
+        {where_sql}
+        ORDER BY ts ASC
+    """
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+
+    return [
+        MesBar(
+            ts=row["ts"],
+            open=to_float(row["open"]),
+            high=to_float(row["high"]),
+            low=to_float(row["low"]),
+            close=to_float(row["close"]),
+            volume=to_float(row["volume"]),
+        )
+        for row in rows
+    ]
 
 
 def ema(values: list[float], length: int) -> list[float]:
@@ -473,6 +546,7 @@ def nearest_fib_level(levels: list[tuple[int, float]], close_price: float) -> tu
 def build_snapshots_and_interactions(
     bars: list[MesBar],
     ind: dict[str, list[float]],
+    micro_bars: list[MesBar],
     touch_tol_pts: float,
 ) -> tuple[list[SnapshotState], list[InteractionRow]]:
     snapshots: list[SnapshotState] = []
@@ -492,6 +566,7 @@ def build_snapshots_and_interactions(
     current_snapshot: SnapshotState | None = None
     current_snapshot_idx: int | None = None
     last_break_bar: int | None = None
+    micro_window_index = build_micro_window_index(bars, micro_bars)
 
     for i in range(len(bars)):
         pivot_idx = i - fib_depth
@@ -672,6 +747,17 @@ def build_snapshots_and_interactions(
             ind["low_55"][i],
             tol_pct=0.05,
         )
+        window_start_idx, window_end_idx = micro_window_index.get(bars[i].ts, (0, 0))
+        micro_ctx = derive_micro_exec_context(
+            window_bars=micro_bars[window_start_idx:window_end_idx],
+            direction=direction,
+            fib_level_touched=level_code,
+            fib_level_price=level_price,
+            close_now=close_now,
+            high_now=high_now,
+            low_now=low_now,
+            atr14_now=atr14_now,
+        )
 
         interactions.append(
             InteractionRow(
@@ -716,12 +802,181 @@ def build_snapshots_and_interactions(
                 adx=ind["adx14"][i],
                 energy=energy,
                 confluence_quality=cq,
+                ml_exec_tf_code=micro_ctx.tf_code,
+                ml_exec_state_code=micro_ctx.state_code,
+                ml_exec_pattern_code=micro_ctx.pattern_code,
+                ml_exec_pocket_code=micro_ctx.pocket_code,
+                ml_exec_impulse_break_atr=micro_ctx.impulse_break_atr,
+                ml_exec_reclaim_dist_atr=micro_ctx.reclaim_dist_atr,
+                ml_exec_orderflow_bias=micro_ctx.orderflow_bias,
+                ml_exec_delta_norm=micro_ctx.delta_norm,
+                ml_exec_absorption=micro_ctx.absorption,
+                ml_exec_zero_print=micro_ctx.zero_print,
+                ml_exec_same_dir_imbalance_ct=micro_ctx.same_dir_imbalance_ct,
+                ml_exec_opp_dir_imbalance_ct=micro_ctx.opp_dir_imbalance_ct,
+                ml_exec_target_leg_code=micro_ctx.target_leg_code,
                 bar_index=i,
                 trade_dir=direction,
             )
         )
 
     return snapshots, interactions
+
+
+def build_micro_window_index(
+    parent_bars: list[MesBar],
+    micro_bars: list[MesBar],
+) -> dict[datetime, tuple[int, int]]:
+    if not parent_bars or not micro_bars:
+        return {}
+
+    index: dict[datetime, tuple[int, int]] = {}
+    start_idx = 0
+    end_idx = 0
+    micro_len = len(micro_bars)
+
+    for parent_bar in parent_bars:
+        window_start = parent_bar.ts - timedelta(minutes=14)
+        while start_idx < micro_len and micro_bars[start_idx].ts < window_start:
+            start_idx += 1
+        while end_idx < micro_len and micro_bars[end_idx].ts <= parent_bar.ts:
+            end_idx += 1
+        index[parent_bar.ts] = (start_idx, end_idx)
+    return index
+
+
+def micro_signed_flow(bar: MesBar) -> float:
+    bar_range = max(bar.high - bar.low, 1e-9)
+    clv = (bar.close - bar.low) / bar_range
+    return bar.volume * (2.0 * clv - 1.0)
+
+
+def rollup_micro_bars(window_bars: list[MesBar], bucket_size: int) -> list[MesBar]:
+    if bucket_size <= 1:
+        return window_bars
+    usable = (len(window_bars) // bucket_size) * bucket_size
+    if usable <= 0:
+        return []
+    start = len(window_bars) - usable
+    rolled: list[MesBar] = []
+    for idx in range(start, len(window_bars), bucket_size):
+        chunk = window_bars[idx : idx + bucket_size]
+        rolled.append(
+            MesBar(
+                ts=chunk[-1].ts,
+                open=chunk[0].open,
+                high=max(bar.high for bar in chunk),
+                low=min(bar.low for bar in chunk),
+                close=chunk[-1].close,
+                volume=sum(bar.volume for bar in chunk),
+            )
+        )
+    return rolled
+
+
+def micro_target_leg_code(fib_level_touched: int, pattern_code: int) -> int:
+    if pattern_code == 3:
+        return 1
+    if fib_level_touched >= 786:
+        return 2
+    if fib_level_touched in {236, 382, 500, 618}:
+        return 3
+    return 0
+
+
+def derive_micro_exec_context(
+    window_bars: list[MesBar],
+    direction: int,
+    fib_level_touched: int,
+    fib_level_price: float,
+    close_now: float,
+    high_now: float,
+    low_now: float,
+    atr14_now: float,
+) -> MicroExecContext:
+    pocket_code = fib_level_touched if fib_level_touched in {236, 382, 500, 618, 786} else 0
+    context = MicroExecContext(pocket_code=pocket_code)
+    if len(window_bars) < 3 or atr14_now <= 0:
+        context.target_leg_code = micro_target_leg_code(fib_level_touched, 0)
+        return context
+
+    scored_timeframes: list[dict[str, float | int]] = []
+    for bucket_size in (1, 3, 5):
+        rolled = rollup_micro_bars(window_bars, bucket_size)
+        if not rolled:
+            continue
+        flows = [micro_signed_flow(bar) for bar in rolled]
+        vol_sum = sum(bar.volume for bar in rolled)
+        directional_pressure = direction * (sum(flows) / max(vol_sum, 1.0))
+        same_dir_count = sum(
+            1 for flow, bar in zip(flows, rolled, strict=False)
+            if direction * flow > max(bar.volume * 0.15, 1.0)
+        )
+        opp_dir_count = sum(
+            1 for flow, bar in zip(flows, rolled, strict=False)
+            if direction * flow < -max(bar.volume * 0.15, 1.0)
+        )
+        net_move_norm = direction * ((rolled[-1].close - rolled[0].open) / max(atr14_now, 1e-9))
+        score = directional_pressure + 0.25 * net_move_norm + 0.05 * (same_dir_count - opp_dir_count)
+        scored_timeframes.append(
+            {
+                "bucket_size": bucket_size,
+                "directional_pressure": directional_pressure,
+                "same_dir_count": same_dir_count,
+                "opp_dir_count": opp_dir_count,
+                "net_move_norm": net_move_norm,
+                "score": score,
+            }
+        )
+
+    if not scored_timeframes:
+        context.target_leg_code = micro_target_leg_code(fib_level_touched, 0)
+        return context
+
+    best = max(scored_timeframes, key=lambda row: float(row["score"]))
+    aligned_delta = float(best["directional_pressure"])
+    same_dir_count = int(best["same_dir_count"])
+    opp_dir_count = int(best["opp_dir_count"])
+    impulse_break_atr = abs(float(best["net_move_norm"]))
+    reclaim_dist_atr = abs(close_now - fib_level_price) / max(atr14_now, 1e-9)
+
+    orderflow_bias = 0
+    if aligned_delta >= 0.15:
+        orderflow_bias = 1
+    elif aligned_delta <= -0.15:
+        orderflow_bias = -1
+
+    state_code = 1
+    if orderflow_bias == -1 and (opp_dir_count > same_dir_count or aligned_delta <= -0.20):
+        state_code = 4
+    elif orderflow_bias == 1 and aligned_delta >= 0.35 and same_dir_count >= max(2, opp_dir_count + 1):
+        state_code = 3
+    elif orderflow_bias == 1:
+        state_code = 2
+
+    pattern_code = 0
+    if state_code == 3:
+        if direction == 1 and pocket_code in {236, 382, 500, 618, 786} and low_now <= fib_level_price <= high_now and close_now >= fib_level_price:
+            pattern_code = 1
+        elif direction == -1 and pocket_code in {382, 500, 618, 786} and low_now <= fib_level_price <= high_now and close_now <= fib_level_price:
+            pattern_code = 2
+    elif state_code == 4:
+        if pocket_code in {236, 382, 500}:
+            pattern_code = 3
+        else:
+            pattern_code = 4
+
+    context.tf_code = int(best["bucket_size"])
+    context.state_code = state_code
+    context.pattern_code = pattern_code
+    context.impulse_break_atr = impulse_break_atr
+    context.reclaim_dist_atr = reclaim_dist_atr
+    context.orderflow_bias = orderflow_bias
+    context.delta_norm = aligned_delta
+    context.same_dir_imbalance_ct = same_dir_count
+    context.opp_dir_imbalance_ct = opp_dir_count
+    context.target_leg_code = micro_target_leg_code(fib_level_touched, pattern_code)
+    return context
 
 
 def outcome_label_for(highest_tp_hit: int, hit_sl: bool, resolved: bool) -> str:
@@ -938,6 +1193,19 @@ def insert_interactions(conn: psycopg2.extensions.connection, interactions: list
             r.adx,
             r.energy,
             r.confluence_quality,
+            r.ml_exec_tf_code,
+            r.ml_exec_state_code,
+            r.ml_exec_pattern_code,
+            r.ml_exec_pocket_code,
+            r.ml_exec_impulse_break_atr,
+            r.ml_exec_reclaim_dist_atr,
+            r.ml_exec_orderflow_bias,
+            r.ml_exec_delta_norm,
+            r.ml_exec_absorption,
+            r.ml_exec_zero_print,
+            r.ml_exec_same_dir_imbalance_ct,
+            r.ml_exec_opp_dir_imbalance_ct,
+            r.ml_exec_target_leg_code,
         )
         for r in interactions
     ]
@@ -949,7 +1217,11 @@ def insert_interactions(conn: psycopg2.extensions.connection, interactions: list
             sl_dist_pts, sl_dist_atr, tp1_dist_pts, rr_to_tp1,
             open, high, low, close, volume, body_pct, upper_wick_pct, lower_wick_pct,
             rvol, rsi14, ema9, ema21, ema50, ema200, ema_stacked_bull, ema_stacked_bear,
-            ema9_dist_pct, macd_hist, adx, energy, confluence_quality
+            ema9_dist_pct, macd_hist, adx, energy, confluence_quality,
+            ml_exec_tf_code, ml_exec_state_code, ml_exec_pattern_code, ml_exec_pocket_code,
+            ml_exec_impulse_break_atr, ml_exec_reclaim_dist_atr, ml_exec_orderflow_bias, ml_exec_delta_norm,
+            ml_exec_absorption, ml_exec_zero_print, ml_exec_same_dir_imbalance_ct,
+            ml_exec_opp_dir_imbalance_ct, ml_exec_target_leg_code
         ) VALUES %s
         RETURNING id
     """
@@ -1129,11 +1401,13 @@ def main() -> None:
             bars = fetch_mes_15m_rows(conn, args.start_ts, args.end_ts)
             if not bars:
                 raise SystemExit("No mes_15m rows found for the requested window.")
+            micro_bars = fetch_mes_1m_rows(conn, args.start_ts, args.end_ts)
 
             indicators = calc_indicators(bars)
             snapshots, interactions = build_snapshots_and_interactions(
                 bars=bars,
                 ind=indicators,
+                micro_bars=micro_bars,
                 touch_tol_pts=args.touch_tol_pts,
             )
             outcomes = build_outcomes(
@@ -1154,6 +1428,7 @@ def main() -> None:
                     {
                         "populate": {
                             "bars_loaded": len(bars),
+                            "micro_bars_loaded": len(micro_bars),
                             "snapshots_written": len(snapshots),
                             "interactions_written": len(interactions),
                             "outcomes_written": len(outcomes),

@@ -386,12 +386,33 @@ Outputs:
   - `autogluon` is not installed in the active local Python environment, so
     `TabularPredictor.fit()` cannot complete in this workspace yet
 
+**Checkpoint 2026-04-14:** subordinate micro-execution scaffold landed.
+Outputs:
+- migration `011_mes_1m_micro_execution.sql` applied to local `warbird`
+  - created local `mes_1m`
+  - added child execution fields (`ml_exec_*`) to `ag_fib_interactions`
+  - recreated `ag_training` so the new fields surface in training reads
+- loader `local_warehouse/bootstrap/load_mes_1m_from_parquet.py` added
+- project-home source `data/mes_1m.parquet` loaded into local `warbird.mes_1m`
+  - row count: `2,207,167`
+  - range: `2020-01-01 17:00:00-06` -> `2026-04-03 08:14:00-05`
+- `scripts/ag/build_ag_pipeline.py` updated to read local `mes_1m` and populate
+  first child execution fields on `ag_fib_interactions`
+- rebuild completed successfully:
+  - `bars_loaded`: `147,860`
+  - `micro_bars_loaded`: `2,207,167`
+  - `agfit_20260414T112223Z` split manifest written under `artifacts/ag_runs/`
+- current child execution implementation is an OHLCV-derived microstructure
+  scaffold only. Footprint-specific child fields remain unavailable until
+  lower-timeframe capture is wired.
+
 Remaining Phase 4 blocker after this checkpoint:
-- execution-contract repair. Current 15m-only trigger semantics do not express
-  `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED` child execution states or the
-  simple pocket-failure trades that resolve cleanly into `1.0` / `TARGET 1`.
-- local `mes_1m` admission is now required as subordinate microstructure input
-  for the child execution layer. `3m/5m` remain derived on read.
+- child execution semantics still need Pine/runtime admission. The local
+  training pipeline now emits `ml_exec_*`, but the chart surface does not yet
+  expose `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED`.
+- child pattern math still needs a second pass against real live tape examples.
+  The current implementation is a deterministic 1m OHLCV scaffold, not the
+  final order-flow contract.
 - the tuner must split into two scopes:
   - parent 15m fib/settings profile
   - child 1m/3m/5m execution profile

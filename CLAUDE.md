@@ -70,7 +70,13 @@ Phase execution order:
 - ~~Three canonical local AG tables and one canonical training view (`ag_training`): not yet created (Phase 3)~~ **DONE 2026-04-11** — migration 007. 3 tables + view live.
 - Python pipeline in `scripts/ag/`:
   - CDP tuner automation built (`tv_auto_tune.py` + `tune_strategy_params.py` + `strategy_tuning_space.json` — applies inputs via CDP, polls recalc, reads trades without CSV export). 2026-04-13 tuner hardening landed: new profile `mes15m_agfit_v3`, narrowed search ranges, non-causal locked inputs removed from trial signatures, coupled-parameter rejection rules added, and objective upgraded to include drawdown efficiency, rolling-window stability, footprint-tail stability, and yearly consistency. No authoritative `mes15m_agfit_v3` recorded trials yet.
-  - Phase 4 bootstrap pipeline now implemented (`scripts/ag/build_ag_pipeline.py`) and executed on local `warbird` (2026-04-13): `ag_fib_snapshots=3,101`, `ag_fib_interactions=37,450`, `ag_fib_outcomes=37,450`, `ag_training=17,100` rows.
+- Phase 4 bootstrap pipeline now implemented (`scripts/ag/build_ag_pipeline.py`) and executed on local `warbird` (2026-04-13): `ag_fib_snapshots=3,101`, `ag_fib_interactions=37,450`, `ag_fib_outcomes=37,450`, `ag_training=17,100` rows.
+  - 2026-04-14 child execution follow-on landed:
+    - migration `011_mes_1m_micro_execution.sql` adds local `mes_1m` plus child execution fields on `ag_fib_interactions`
+    - `data/mes_1m.parquet` loaded into local `warbird.mes_1m` via `local_warehouse/bootstrap/load_mes_1m_from_parquet.py`
+    - local `mes_1m` now holds 2,207,167 rows (`2020-01-01 17:00:00-06` -> `2026-04-03 08:14:00-05`)
+    - `build_ag_pipeline.py` now populates child execution fields (`ml_exec_*`) from local 1m microstructure
+    - latest local rebuild (`agfit_20260414T112223Z`) completed with `micro_bars_loaded=2,207,167`
   - Walk-forward split structure now generated at `artifacts/ag_runs/agfit_20260413T192255Z/` (`train.csv`, `val.csv`, `test.csv`, `manifest.json`).
   - Repo-native baseline trainer now exists (`scripts/ag/train_ag_baseline.py`). It joins real `cross_asset_1h` + `FRED/econ_calendar`, removes label leakage from `ag_training`, writes run artifacts under `artifacts/ag_runs/`, and blocks training when a validation/test slice has fewer than 2 target classes.
   - Remaining Phase 4 blocker: current `outcome_label` sparsity breaks several time-safe multiclass eval slices (`TP1_ONLY` disappears after 2022-06-28; 2024+ is almost entirely `STOPPED`). Next blocking item is evaluation-policy repair on top of the current label regime, then actual AutoGluon fit + SHAP lineage.
@@ -91,8 +97,11 @@ Phase execution order:
 - Current tuning harness only optimizes parent 15m strategy knobs. It does not
   choose `1m` / `3m` / `5m` child execution triggers or expose
   `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED` operator states.
-- Local `mes_1m` is reopened as pending Phase 4 input for subordinate
-  micro-execution context. `3m/5m` remain derived on read.
+- Local `mes_1m` admission is now complete for subordinate micro-execution
+  context. `3m/5m` remain derived on read.
+- Current child execution layer is a first deterministic 1m OHLCV-derived
+  scaffold. Footprint-specific child fields such as true absorption and
+  zero-print remain false until lower-timeframe capture is wired.
 
 ### Legacy / Stale Code (Known Debt)
 
