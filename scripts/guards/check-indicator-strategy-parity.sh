@@ -154,7 +154,7 @@ check_input_default 'stackedImbalanceRows = input.int\([0-9]+' 'stackedImbalance
 check_input_default 'continuationHoldBars = input.int\([0-9]+' 'continuationHoldBars'
 check_input_default 'continuationHoldStopAtrMult = input.float\([0-9.]+' 'continuationHoldStopAtrMult'
 check_input_default 'shortTrendGateAdx = input.float\([0-9.]+' 'shortTrendGateAdx'
-check_input_default '"ATR_1_5", "Fallback Stop Family"' 'stopFamilyId_default'
+check_input_default 'stopFamilyId = input.string\("[^"]+", "Fallback Stop Family"' 'stopFamilyId_default'
 
 # ── 5. Strategy execution primitives ──
 for required in \

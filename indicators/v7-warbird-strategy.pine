@@ -2,21 +2,21 @@
 // © Kirk / ZINC Digital
 // Warbird v7 Strategy — AG training data generator
 // Purpose: Emit every structurally valid 15m fib candidate for AutoGluon training.
-//          1 contract, hold to TP5 (2.618) or SL. AG learns which setups hit which targets.
-// Date: 2026-04-10
+//          1 contract, take TP1 by default, but let fast runners extend to higher targets.
+// Date: 2026-04-13
 //
 // ENTRY CONTRACT:
 // - Candidate fires on ANY confirmed-bar fib level touch (.236/.382/.5/.618/.786/1.0)
 // - Direction-aligned only (fibBull ? long : short)
 // - No hard-coded breakout/retest gate — AG decides quality, not Pine
 // - Body%, volume, RSI, EMA context exported as features for AG, not used as Pine gates
-// - Cooldown: 8 bars between trades to prevent sample corruption
+// - Cooldown: short re-arm window for multi-leg intraday sequences
 //
 // EXIT CONTRACT:
-// - Single exit: SL or TP5 (2.618 extension)
-// - No opposite-side kill — runners resolve naturally
-// - highestTargetHit tracks TP1-TP5 path for AG labeling
-// - AG label: 0=stopped, 1=TP1, 2=TP2, 3=TP3, 4=TP4, 5=TP5
+// - Base exit: SL or TP1
+// - Fast runner extension: if TP1 is hit quickly, promote the live target to TP2/TP3
+// - No opposite-side kill — runners resolve naturally against target or stop
+// - highestTargetHit tracks the furthest target reached before the trade resolves
 //
 // NO-REPAINT:
 // - All triggers gated by barstate.isconfirmed — bar close only
@@ -28,8 +28,9 @@
 // HTF fib (4H):        [high, low] tuple                 = 1 call
 // HTF fib (1D):        [high, low] tuple                 = 1 call
 // NYSE A-D Line (D):   close                             = 1 call
+// Anchor TF snapshot:  optional fib + diamond overlay    = 1 call
 // Footprint (chart):    request.footprint()              = 1 call
-// TOTAL:                                                 = 5 request.* paths
+// TOTAL:                                                 = 6 request.* paths
 //
 // PLOT BUDGET: 50 plot + 2 plotshape = 52/64 (12 headroom)
 //@version=6
@@ -40,20 +41,24 @@ import TradingView/ZigZag/7 as zigzag
 // FIBONACCI ENGINE SETTINGS
 //=====================
 string groupFibEngine = "Fibonacci Engine"
-bool autoTuneZZ = input.bool(true, "Auto-tune ZigZag by Timeframe", group=groupFibEngine,
+bool autoTuneZZ = input.bool(false, "Auto-tune ZigZag by Timeframe", group=groupFibEngine,
   tooltip="ON: 4H+ uses Deviation=4/Depth=20, 1H uses Deviation=3.5/Depth=15, 15m and below uses Deviation=3/Depth=15. Turn OFF to set values manually.")
 float fibDeviationManual = input.float(3.0, "ZigZag Deviation (manual)",
   minval=0.5, maxval=10.0, step=0.5, group=groupFibEngine,
   tooltip="Only used when Auto-tune is OFF.")
-int fibDepthManual = input.int(10, "ZigZag Depth (manual)",
+int fibDepthManual = input.int(12, "ZigZag Depth (manual)",
   minval=2, maxval=50, group=groupFibEngine,
   tooltip="Only used when Auto-tune is OFF.")
-float fibConfluenceTolPct = input.float(0.10, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupFibEngine)
-float fibThresholdFloorPct = input.float(0.25, "ZigZag Threshold Floor (%)", minval=0.0, maxval=5.0, step=0.05, group=groupFibEngine,
+float fibConfluenceTolPct = input.float(0.05, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupFibEngine)
+float fibThresholdFloorPct = input.float(0.60, "ZigZag Threshold Floor (%)", minval=0.0, maxval=5.0, step=0.05, group=groupFibEngine,
   tooltip="Minimum percent move required by the ZigZag after ATR scaling. Lower this if 15m anchors stay too wide even when manual deviation/depth are reduced.")
-float minFibRangeAtr = input.float(1.5, "Min Fib Range (ATR)", minval=0.5, maxval=10.0, step=0.1, group=groupFibEngine)
+float minFibRangeAtr = input.float(0.6, "Min Fib Range (ATR)", minval=0.5, maxval=10.0, step=0.1, group=groupFibEngine)
+string fibAnchorTimeframe = input.timeframe("", "Anchor Timeframe Override", group=groupFibEngine,
+  tooltip="Blank = chart timeframe. Use 60 to project the 1H fib ladder onto a 15m chart.")
 
-int _tfSec = timeframe.in_seconds()
+string fibCalcTimeframe = str.length(fibAnchorTimeframe) > 0 ? fibAnchorTimeframe : timeframe.period
+bool useFibAnchorTimeframeOverride = str.length(fibAnchorTimeframe) > 0 and fibAnchorTimeframe != timeframe.period
+int _tfSec = timeframe.in_seconds(fibCalcTimeframe)
 float fibDeviation = autoTuneZZ
   ? (_tfSec >= 14400 ? 4.0 : _tfSec >= 3600 ? 3.5 : 3.0)
   : fibDeviationManual
@@ -104,38 +109,60 @@ int WIDTH_TARGET      = 2
 // STRUCTURE LOGIC
 //=====================
 string groupLogic = "Structure Logic"
-int retestBars   = input.int(6, "Acceptance Retest Window (bars)", minval=1, group=groupLogic)
+int retestBars   = input.int(1, "Acceptance Retest Window (bars)", minval=1, group=groupLogic)
 bool rejectWick   = input.bool(true, "Rejection = wick into zone then close back out", group=groupLogic)
 bool oneShotEvent = input.bool(true, "One-shot event markers/alerts", group=groupLogic)
 
 bool gateShortsInBullTrend = input.bool(true, "Gate Shorts In Bull Trend", group=groupLogic,
   tooltip="Blocks bearish accept-entry triggers when the broader trend context is bullish and rising. Keeps the engine from bleeding into obvious countertrend shorts.")
-float shortTrendGateAdx = input.float(18.0, "Short Gate ADX Floor", minval=5.0, maxval=50.0, step=0.5, group=groupLogic,
+float shortTrendGateAdx = input.float(23.0, "Short Gate ADX Floor", minval=5.0, maxval=50.0, step=0.5, group=groupLogic,
   tooltip="Minimum ADX required before the bullish-trend short gate activates.")
 
 string groupStops = "Stop Logic"
-string stopFamilyId = input.string("ATR_1_5", "Fallback Stop Family", options=["FIB_NEG_0236", "FIB_NEG_0382", "ATR_1_0", "ATR_1_5", "ATR_STRUCTURE_1_25", "FIB_0236_ATR_COMPRESS_0_50"], group=groupStops,
+string stopFamilyId = input.string("ATR_STRUCTURE_1_25", "Fallback Stop Family", options=["FIB_NEG_0236", "FIB_NEG_0382", "ATR_1_0", "ATR_1_5", "ATR_STRUCTURE_1_25", "FIB_0236_ATR_COMPRESS_0_50"], group=groupStops,
   tooltip="Local fallback stop family for strategy backtests until the AG packet runtime can publish a live stop-family decision back to TradingView.")
-float continuationHoldStopAtrMult = input.float(2.0, "Tier 1 Hold Stop ATR", minval=1.0, maxval=4.0, step=0.25, group=groupStops,
+float continuationHoldStopAtrMult = input.float(1.5, "Tier 1 Hold Stop ATR", minval=1.0, maxval=4.0, step=0.25, group=groupStops,
   tooltip="When a same-direction Tier 1 continuation signal fires during an active trade, temporarily widen the stop to entry +/- ATR x this multiplier for the configured hold bars.")
 
+string groupExecution = "Execution Contract"
+int cooldownLen = input.int(1, "Cooldown Bars", minval=1, maxval=20, group=groupExecution,
+  tooltip="Bars to wait after a resolved trade before a new setup can arm. 1 allows a new setup on the next bar.")
+bool useFootprintScalpEntries = input.bool(true, "Use Footprint Scalp Entries", group=groupExecution)
+int executionFibLookback = input.int(8, "Execution Fib Lookback", minval=4, maxval=34, group=groupExecution)
+float executionFibTouchAtr = input.float(0.15, "Execution Fib Touch ATR", minval=0.05, maxval=0.75, step=0.05, group=groupExecution)
+float executionMinRangeAtr = input.float(0.75, "Execution Fib Min Range (ATR)", minval=0.25, maxval=3.0, step=0.05, group=groupExecution)
+float scalpTargetPoints = input.float(20.0, "Scalp Target (Points)", minval=4.0, maxval=100.0, step=0.25, group=groupExecution,
+  tooltip="Footprint scalp entries use a fixed first target in points instead of waiting for the macro fib target ladder.")
+float scalpBreakevenTriggerPoints = input.float(10.0, "Scalp Break-Even Trigger", minval=2.0, maxval=50.0, step=0.25, group=groupExecution,
+  tooltip="After a footprint scalp moves this many points in favor, move the stop to entry and stop donating the move back.")
+int scalpMaxBars = input.int(12, "Scalp Max Hold Bars", minval=1, maxval=40, group=groupExecution,
+  tooltip="If a footprint scalp does not resolve quickly, force it flat instead of letting it degrade into a multi-session hold.")
+bool letFastRunnersRun = input.bool(true, "Let Fast Runners Run", group=groupExecution,
+  tooltip="If TP1 is reached quickly, promote the active exit target so strong moves can continue.")
+int fastRunnerBars = input.int(2, "Fast Runner Window (bars)", minval=1, maxval=10, group=groupExecution,
+  tooltip="TP1 must be reached within this many bars after entry to qualify as a fast runner.")
+string fastRunnerTargetId = input.string("TP2", "Fast Runner Target", options=["TP2", "TP3"], group=groupExecution,
+  tooltip="Promoted target tier used when a fast runner is detected.")
+bool runnerBreakevenAfterTp1 = input.bool(true, "Break-Even After TP1", group=groupExecution,
+  tooltip="After a fast runner promotion, move the stop to entry once TP1 has been tagged.")
+
 string groupFootprint = "Footprint Exhaustion"
-int footprintTicksPerRow = input.int(4, "Footprint Ticks Per Row", minval=1, group=groupFootprint)
+int footprintTicksPerRow = input.int(6, "Footprint Ticks Per Row", minval=1, group=groupFootprint)
 float footprintVaPercent = input.float(70.0, "Footprint VA %", minval=1.0, maxval=100.0, step=1.0, group=groupFootprint)
-float footprintImbalancePercent = input.float(300.0, "Footprint Imbalance %", minval=100.0, maxval=1000.0, step=10.0, group=groupFootprint)
-int exhaustionZLen = input.int(20, "Exhaustion Z Length", minval=10, maxval=100, group=groupFootprint)
+float footprintImbalancePercent = input.float(275.0, "Footprint Imbalance %", minval=100.0, maxval=1000.0, step=10.0, group=groupFootprint)
+int exhaustionZLen = input.int(14, "Exhaustion Z Length", minval=10, maxval=100, group=groupFootprint)
 float exhaustionZThreshold = input.float(2.5, "Exhaustion Z Threshold", minval=1.0, maxval=5.0, step=0.1, group=groupFootprint)
 float exhaustionLevelAtrTol = input.float(0.10, "Extension ATR Tolerance", minval=0.01, maxval=0.50, step=0.01, group=groupFootprint)
-float zeroPrintVolRatio = input.float(0.12, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
+float zeroPrintVolRatio = input.float(0.10, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
 int stackedImbalanceRows = input.int(3, "Extreme Rows To Inspect", minval=1, maxval=10, group=groupFootprint)
-int continuationHoldBars = input.int(4, "Tier 1 Hold Bars", minval=1, maxval=20, group=groupFootprint)
+int continuationHoldBars = input.int(4, "Tier 1 Hold Bars", minval=0, maxval=20, group=groupFootprint)
 
 
 //=====================
 // VISUALS (colors/widths locked to spec — see constants above)
 //=====================
 string groupViz = "Visuals"
-int targetLookbackBars = input.int(55, "Target Line Lookback Bars", minval=5, maxval=500, group=groupViz)
+int targetLookbackBars = input.int(40, "Target Line Lookback Bars", minval=5, maxval=500, group=groupViz)
 bool extendLevelsRight = input.bool(false, "Extend Levels Right", group=groupViz)
 bool useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window", group=groupViz)
 
@@ -187,6 +214,9 @@ float atrPct = close != 0 ? atrRaw / close * 100.0 : 0.0
 // Deterministic, point-in-time safe, no lookahead, no external dependencies.
 //=====================
 float ema100 = ta.ema(close, 100)
+float ema21 = ta.ema(close, 21)
+float ema50 = ta.ema(close, 50)
+float ema200 = ta.ema(close, 200)
 [_macdFast, _macdSlow, macdHist] = ta.macd(close, 12, 26, 9)
 float rsi14 = ta.rsi(close, 14)
 float atr14 = ta.atr(14)
@@ -300,6 +330,10 @@ float fvgBearDist = (not na(nearestFvgBearMid) and atr14 > 0) ? (nearestFvgBearM
 //=====================
 string groupHTF = "HTF Confluence"
 float htfConfTolPct = 0.15
+bool useHtfStructureFilter = input.bool(true, "Use 1H/4H Structure Filter", group=groupHTF,
+  tooltip="Require 15m entries to align with 1H/4H structure and stay clear of nearby higher-timeframe fib and historical S/R walls.")
+float htfWallBufferAtr = input.float(0.75, "HTF Wall Buffer (ATR)", minval=0.25, maxval=4.0, step=0.25, group=groupHTF,
+  tooltip="Minimum 15m ATR clearance required to the nearest 1H/4H wall in the trade direction.")
 
 [htf1hHigh, htf1hLow] = request.security(syminfo.tickerid, "60", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [htf4hHigh, htf4hLow] = request.security(syminfo.tickerid, "240", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
@@ -312,13 +346,17 @@ float htf1dRange = nz(htf1dHigh - htf1dLow)
 htfFibPrice(float htfHigh, float htfLow, float htfRng, float ratio) =>
     htfRng <= 0 ? na : htfLow + htfRng * ratio
 
+float htf1hP236 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_236)
 float htf1hP382 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_382)
 float htf1hP500 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_PIVOT)
 float htf1hP618 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_618)
+float htf1hP786 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_786)
 
+float htf4hP236 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_236)
 float htf4hP382 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_382)
 float htf4hP500 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_PIVOT)
 float htf4hP618 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_618)
+float htf4hP786 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_786)
 
 float htf1dP382 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_382)
 float htf1dP500 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_PIVOT)
@@ -350,21 +388,55 @@ htfConfluenceCheck(float level15m, float currentFibRange) =>
             hits += 1
         hits
 
+htfBarrierPick(float candidatePrice, float refPrice, bool wantLong, float currentWall) =>
+    if na(candidatePrice)
+        currentWall
+    else
+        bool candidateValid = wantLong ? candidatePrice > refPrice : candidatePrice < refPrice
+        if not candidateValid
+            currentWall
+        else
+            na(currentWall) ? candidatePrice : wantLong ? math.min(currentWall, candidatePrice) : math.max(currentWall, candidatePrice)
+
+nearestHtfWall(bool wantLong, float refPrice) =>
+    float wall = na
+    wall := htfBarrierPick(htf1hP500, refPrice, wantLong, wall)
+    wall := htfBarrierPick(htf4hP500, refPrice, wantLong, wall)
+    if wantLong
+        wall := htfBarrierPick(htf1hP618, refPrice, wantLong, wall)
+        wall := htfBarrierPick(htf1hP786, refPrice, wantLong, wall)
+        wall := htfBarrierPick(htf1hHigh, refPrice, wantLong, wall)
+        wall := htfBarrierPick(htf4hP618, refPrice, wantLong, wall)
+        wall := htfBarrierPick(htf4hP786, refPrice, wantLong, wall)
+        wall := htfBarrierPick(htf4hHigh, refPrice, wantLong, wall)
+    else
+        wall := htfBarrierPick(htf1hP382, refPrice, wantLong, wall)
+        wall := htfBarrierPick(htf1hP236, refPrice, wantLong, wall)
+        wall := htfBarrierPick(htf1hLow, refPrice, wantLong, wall)
+        wall := htfBarrierPick(htf4hP382, refPrice, wantLong, wall)
+        wall := htfBarrierPick(htf4hP236, refPrice, wantLong, wall)
+        wall := htfBarrierPick(htf4hLow, refPrice, wantLong, wall)
+    wall
+
 // NOTE: htfConfluenceCheck() is called AFTER fib prices are computed (below the AUTO FIB ENGINE)
 
 //=====================
 // AUTO FIB ENGINE — ZigZag confirmed pivots (non-repainting)
 //=====================
-fibZzUpdate() =>
-    var fibSettings = zigzag.Settings.new(fibDeviation, fibDepth, color(na), false, false, false, false, "Absolute", true)
+fibZzUpdate(float deviationPct, int depthBars, float thresholdFloorPct) =>
+    var fibSettings = zigzag.Settings.new(deviationPct, depthBars, color(na), false, false, false, false, "Absolute", true)
     var zigzag.ZigZag fibZZ = zigzag.newInstance(fibSettings)
     var zigzag.Pivot lastPvt = na
-    fibSettings.devThreshold := math.max(ta.atr(10) / close * 100 * fibDeviation, fibThresholdFloorPct)
+    var float activeAnchorHigh = na
+    var float activeAnchorLow = na
+    var int activeAnchorHighTime = na
+    var int activeAnchorLowTime = na
+    fibSettings.devThreshold := math.max(ta.atr(10) / close * 100 * deviationPct, thresholdFloorPct)
     bool newPivot = false
     float pivotHighPrice = na
     float pivotLowPrice = na
-    int pivotHighBar = na
-    int pivotLowBar = na
+    int pivotHighTime = na
+    int pivotLowTime = na
     int swingDir = 0  // +1 = up-swing (low→high, bullish), -1 = down-swing (high→low, bearish), 0 = flat/no pivot
     if fibZZ.update()
         lastPvt := fibZZ.lastPivot()
@@ -376,27 +448,107 @@ fibZzUpdate() =>
             pivotLowPrice  := math.min(startP, endP)
             swingDir := endP > startP ? 1 : endP < startP ? -1 : 0
             if startP >= endP
-                pivotHighBar := lastPvt.start.index
-                pivotLowBar  := lastPvt.end.index
+                pivotHighTime := lastPvt.start.time
+                pivotLowTime  := lastPvt.end.time
             else
-                pivotHighBar := lastPvt.end.index
-                pivotLowBar  := lastPvt.start.index
-    [newPivot, pivotHighPrice, pivotLowPrice, pivotHighBar, pivotLowBar, swingDir]
+                pivotHighTime := lastPvt.end.time
+                pivotLowTime  := lastPvt.start.time
+            activeAnchorHigh := pivotHighPrice
+            activeAnchorLow := pivotLowPrice
+            activeAnchorHighTime := pivotHighTime
+            activeAnchorLowTime := pivotLowTime
 
-[zzNewPivot, zzHighPrice, zzLowPrice, zzHighBar, zzLowBar, zzSwingDir] = fibZzUpdate()
+    float activeAtr14 = ta.atr(14)
+    float activeRange = activeAnchorHigh - activeAnchorLow
+    float activeMinFibRange = minFibRangeAtr * activeAtr14
+    bool activeValid = not na(activeAnchorHigh) and not na(activeAnchorLow) and activeRange >= activeMinFibRange
+    bool activeFibBull = true
+    if activeValid
+        if activeAnchorHighTime > activeAnchorLowTime
+            activeFibBull := true
+        else if activeAnchorLowTime > activeAnchorHighTime
+            activeFibBull := false
+    float activeFibBase = activeFibBull ? activeAnchorLow : activeAnchorHigh
+    float activeFibDir = activeFibBull ? 1.0 : -1.0
+    float activeP1272 = activeRange <= 0 ? na : activeFibBase + activeFibDir * activeRange * FIB_1272
+    float activePT2 = activeRange <= 0 ? na : activeFibBase + activeFibDir * activeRange * FIB_T2
+    float activeExhaustionTol = activeAtr14 * exhaustionLevelAtrTol
+    bool activeExhAt1272 = activeValid and not na(activeP1272) and (activeFibBull ? high >= activeP1272 - activeExhaustionTol : low <= activeP1272 + activeExhaustionTol)
+    bool activeExhAt1618 = activeValid and not na(activePT2) and (activeFibBull ? high >= activePT2 - activeExhaustionTol : low <= activePT2 + activeExhaustionTol)
+    bool activeGeomConfluence = activeValid and barstate.isconfirmed and (activeExhAt1272 or activeExhAt1618)
+    float activeProbePrice = activeFibBull ? high : low
+    float activeExhaustionMean = ta.sma(close, exhaustionZLen)
+    float activeExhaustionStd = ta.stdev(close, exhaustionZLen)
+    float activeExhaustionZScore = activeExhaustionStd > 0 ? (activeProbePrice - activeExhaustionMean) / activeExhaustionStd : 0.0
+    bool activeDirectional = activeFibBull ? activeExhaustionZScore >= exhaustionZThreshold : activeExhaustionZScore <= -exhaustionZThreshold
+    int activeHourEt = hour(time, "America/New_York")
+    bool activeSessionValid = activeHourEt != 17
+    int projectedExhaustionDir = activeSessionValid and activeGeomConfluence and activeDirectional ? (activeFibBull ? -1 : 1) : 0
+    int projectedExhaustionTime = projectedExhaustionDir != 0 ? time_close : na
+    [newPivot, pivotHighPrice, pivotLowPrice, pivotHighTime, pivotLowTime, swingDir, projectedExhaustionDir, projectedExhaustionTime]
+
+fibHtfSnapshot(float deviationPct, int depthBars, float thresholdFloorPct) =>
+    float pivotHigh = ta.pivothigh(high, depthBars, depthBars)
+    float pivotLow = ta.pivotlow(low, depthBars, depthBars)
+    bool newPivot = not na(pivotHigh) or not na(pivotLow)
+    float lastHigh = ta.valuewhen(not na(pivotHigh), pivotHigh, 0)
+    float lastLow = ta.valuewhen(not na(pivotLow), pivotLow, 0)
+    int lastHighTime = ta.valuewhen(not na(pivotHigh), time[depthBars], 0)
+    int lastLowTime = ta.valuewhen(not na(pivotLow), time[depthBars], 0)
+    int swingDir = lastHighTime > lastLowTime ? 1 : lastLowTime > lastHighTime ? -1 : 0
+
+    float activeRange = lastHigh - lastLow
+    float activeThresholdPct = math.max(ta.atr(10) / close * 100 * deviationPct, thresholdFloorPct)
+    float activeRangePct = close != 0 ? activeRange / close * 100.0 : 0.0
+    float activeMinFibRange = minFibRangeAtr * ta.atr(14)
+    bool activeValid = not na(lastHigh) and not na(lastLow) and activeRange >= activeMinFibRange and activeRangePct >= activeThresholdPct
+    bool activeFibBull = swingDir >= 0
+    float activeFibBase = activeFibBull ? lastLow : lastHigh
+    float activeFibDir = activeFibBull ? 1.0 : -1.0
+    float activeP1272 = activeRange <= 0 ? na : activeFibBase + activeFibDir * activeRange * FIB_1272
+    float activePT2 = activeRange <= 0 ? na : activeFibBase + activeFibDir * activeRange * FIB_T2
+    float activeExhaustionTol = ta.atr(14) * exhaustionLevelAtrTol
+    bool activeExhAt1272 = activeValid and not na(activeP1272) and (activeFibBull ? high >= activeP1272 - activeExhaustionTol : low <= activeP1272 + activeExhaustionTol)
+    bool activeExhAt1618 = activeValid and not na(activePT2) and (activeFibBull ? high >= activePT2 - activeExhaustionTol : low <= activePT2 + activeExhaustionTol)
+    bool activeGeomConfluence = barstate.isconfirmed and (activeExhAt1272 or activeExhAt1618)
+    float activeProbePrice = activeFibBull ? high : low
+    float activeExhaustionMean = ta.sma(close, exhaustionZLen)
+    float activeExhaustionStd = ta.stdev(close, exhaustionZLen)
+    float activeExhaustionZScore = activeExhaustionStd > 0 ? (activeProbePrice - activeExhaustionMean) / activeExhaustionStd : 0.0
+    bool activeDirectional = activeFibBull ? activeExhaustionZScore >= exhaustionZThreshold : activeExhaustionZScore <= -exhaustionZThreshold
+    int activeHourEt = hour(time, "America/New_York")
+    bool activeSessionValid = activeHourEt != 17
+    int projectedExhaustionDir = activeSessionValid and activeGeomConfluence and activeDirectional ? (activeFibBull ? -1 : 1) : 0
+    int projectedExhaustionTime = projectedExhaustionDir != 0 ? time_close : na
+    [newPivot, lastHigh, lastLow, lastHighTime, lastLowTime, swingDir, projectedExhaustionDir, projectedExhaustionTime]
+
+fibZzSource() =>
+    if useFibAnchorTimeframeOverride
+        request.security(syminfo.tickerid, fibAnchorTimeframe, fibHtfSnapshot(fibDeviation, fibDepth, fibThresholdFloorPct), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+    else
+        fibZzUpdate(fibDeviation, fibDepth, fibThresholdFloorPct)
+
+[zzNewPivot, zzHighPrice, zzLowPrice, zzHighTime, zzLowTime, zzSwingDir, zzProjectedExhDir, zzProjectedExhTime] = fibZzSource()
 
 var float fibAnchorHigh = na
 var float fibAnchorLow = na
-var int anchorHighBar = na
-var int anchorLowBar = na
+var int anchorHighTime = na
+var int anchorLowTime = na
 var int lastBreakBar = na
+bool htfSnapshotReady = not na(zzHighPrice) and not na(zzLowPrice) and not na(zzHighTime) and not na(zzLowTime) and zzHighPrice > zzLowPrice and zzHighTime != zzLowTime
+bool anchorSnapshotChanged = useFibAnchorTimeframeOverride
+  ? htfSnapshotReady and ((na(anchorHighTime) or zzHighTime != anchorHighTime) or (na(anchorLowTime) or zzLowTime != anchorLowTime))
+  : zzNewPivot
 
-if zzNewPivot
+if anchorSnapshotChanged
     fibAnchorHigh := zzHighPrice
     fibAnchorLow  := zzLowPrice
-    anchorHighBar := zzHighBar
-    anchorLowBar  := zzLowBar
+    anchorHighTime := zzHighTime
+    anchorLowTime  := zzLowTime
     lastBreakBar  := na
+
+int anchorHighBar = not na(anchorHighTime) ? ta.valuewhen(time == anchorHighTime, bar_index, 0) : na
+int anchorLowBar = not na(anchorLowTime) ? ta.valuewhen(time == anchorLowTime, bar_index, 0) : na
 
 // Pre-compute rolling high/low at each confluence period at global scope.
 // ta.highest/ta.lowest require a compile-time-constant length — they cannot
@@ -441,9 +593,9 @@ bool isValid = not na(fibAnchorHigh) and not na(fibAnchorLow) and fibRange >= mi
 // a new anchor relationship is confirmed, not when price chops around a midpoint.
 var bool fibBull = true
 if isValid
-    if anchorHighBar > anchorLowBar
+    if anchorHighTime > anchorLowTime
         fibBull := true
-    else if anchorLowBar > anchorHighBar
+    else if anchorLowTime > anchorHighTime
         fibBull := false
 else
     fibBull := true
@@ -480,6 +632,12 @@ int htfConfPivot = htfConfluenceCheck(pPivot, fibRange)
 int htfConf382   = htfConfluenceCheck(p382, fibRange)
 int htfConf618   = htfConfluenceCheck(p618, fibRange)
 int htfConfTotal = htfConfPivot + htfConf382 + htfConf618
+bool htf1hStructureBull = htf1hHigh >= nz(htf1hHigh[1], htf1hHigh) and htf1hLow >= nz(htf1hLow[1], htf1hLow)
+bool htf1hStructureBear = htf1hHigh <= nz(htf1hHigh[1], htf1hHigh) and htf1hLow <= nz(htf1hLow[1], htf1hLow)
+bool htf4hStructureBull = htf4hHigh >= nz(htf4hHigh[1], htf4hHigh) and htf4hLow >= nz(htf4hLow[1], htf4hLow)
+bool htf4hStructureBear = htf4hHigh <= nz(htf4hHigh[1], htf4hHigh) and htf4hLow <= nz(htf4hLow[1], htf4hLow)
+bool htfTrendLongOk = not useHtfStructureFilter or (htf1hStructureBull and htf4hStructureBull and close >= htf4hP382)
+bool htfTrendShortOk = not useHtfStructureFilter or (htf1hStructureBear and htf4hStructureBear and close <= htf4hP618)
 
 //=====================
 // VOLUME DELTA AT FIB TOUCHES
@@ -501,6 +659,30 @@ float bullVol = math.sum(volume * math.max(clv, 0), volDeltaLookback)
 float totalVol = math.sum(volume, volDeltaLookback)
 float volDeltaPct = totalVol > 0 ? bullVol / totalVol * 100.0 : 50.0
 float fibTouchVolDelta = isTouchingFib ? volDeltaPct : na
+
+//=====================
+// CANDLESTICK PATTERN DETECTION — EMPIRICALLY VALIDATED ON MES 15m
+// Used as a confirmation layer for scalp execution, never as a standalone predictor.
+//=====================
+float bodySize = math.abs(close - open)
+float bodyRatio = barRange > 0 ? bodySize / barRange : 0.0
+bool bullishCandle = close > open
+bool bearishCandle = close < open
+float upperWickSize = high - math.max(open, close)
+float lowerWickSize = math.min(open, close) - low
+float upperWickRatio = barRange > 0 ? upperWickSize / barRange : 0.0
+float lowerWickRatio = barRange > 0 ? lowerWickSize / barRange : 0.0
+
+bool longLowerShadow = lowerWickRatio >= 0.55 and upperWickRatio <= 0.25
+bool dragonflyDoji = lowerWickRatio >= 0.60 and bodyRatio <= 0.15
+bool risingWindow = low > high[1]
+bool longUpperShadow = upperWickRatio >= 0.55 and lowerWickRatio <= 0.25
+bool shootingStar = upperWickRatio >= 0.50 and bodyRatio <= 0.35 and bearishCandle
+bool bearishEngulfing = bearishCandle and bullishCandle[1] and close < open[1] and open > close[1]
+bool fallingWindow = high < low[1]
+
+bool provenBullishPattern = longLowerShadow or dragonflyDoji or risingWindow
+bool provenBearishPattern = longUpperShadow or shootingStar or bearishEngulfing or fallingWindow
 
 //=====================
 // INTERMARKET SERIES + REGIMES
@@ -537,6 +719,8 @@ float barEfficiency = math.abs(close - open) / math.max(barRange, syminfo.mintic
 float execDir = vwapCode == 2 ? 1.0 : vwapCode == -2 ? -1.0 : vwapCode == 1 ? 0.5 : vwapCode == -1 ? -0.5 : 0.0
 float execQual = 0.5 * barEfficiency + 0.5 * math.min(rangeExpClamped / 3.0, 1.0)
 float execScore = execDir * (0.5 + 0.5 * execQual)
+bool emaStackBull = ema21 > ema50 and ema50 > ema100 and ema21 > nz(ema21[1], ema21) and ema50 > nz(ema50[1], ema50)
+bool emaStackBear = ema21 < ema50 and ema50 < ema100 and ema21 < nz(ema21[1], ema21) and ema50 < nz(ema50[1], ema50)
 bool bullishTrendBlocksShorts = gateShortsInBullTrend and (
     adxVal >= shortTrendGateAdx and
     diPlus > diMinus and
@@ -586,7 +770,7 @@ bool tagT4Event = oneShotEvent ? (tagT4 and not tagT4[1]) : tagT4
 bool tagT5Event = oneShotEvent ? (tagT5 and not tagT5[1]) : tagT5
 
 var bool ladderInvalidated = false
-if zzNewPivot
+if anchorSnapshotChanged
     ladderInvalidated := false
 if breakAgainstConfirmed
     ladderInvalidated := true
@@ -650,8 +834,11 @@ bool mlExhSessionValid = hourEt != 17
 
 footprint reqFootprint = request.footprint(footprintTicksPerRow, footprintVaPercent, footprintImbalancePercent)
 bool mlExhFootprintAvailable = not na(reqFootprint)
+bool fpAvailable = mlExhFootprintAvailable
 float footprintRowSize = footprintTicksPerRow * syminfo.mintick
 float footprintDelta = mlExhFootprintAvailable ? footprint.delta(reqFootprint) : na
+bool fpDeltaBullish = fpAvailable and not na(footprintDelta) and footprintDelta > 0
+bool fpDeltaBearish = fpAvailable and not na(footprintDelta) and footprintDelta < 0
 
 volume_row pocRow = mlExhFootprintAvailable ? footprint.poc(reqFootprint) : na
 volume_row triggerRow = mlExhFootprintAvailable and not na(exhaustionTriggerPrice) ? footprint.get_row_by_price(reqFootprint, exhaustionTriggerPrice) : na
@@ -660,26 +847,31 @@ volume_row extremeRow = mlExhFootprintAvailable ? footprint.get_row_by_price(req
 float pocRowTop = not na(pocRow) ? volume_row.up_price(pocRow) : na
 float pocRowBottom = not na(pocRow) ? volume_row.down_price(pocRow) : na
 float pocRowVol = not na(pocRow) ? volume_row.total_volume(pocRow) : na
+float pocPrice = not na(pocRowTop) and not na(pocRowBottom) ? (pocRowTop + pocRowBottom) / 2.0 : na
+float pocPosition = not na(pocPrice) and barRange > 0 ? (pocPrice - low) / barRange : na
+bool pocNearLow = not na(pocPosition) and pocPosition <= 0.40
+bool pocNearHigh = not na(pocPosition) and pocPosition >= 0.60
 float triggerRowDelta = not na(triggerRow) ? volume_row.delta(triggerRow) : na
 float extremeRowVol = not na(extremeRow) ? volume_row.total_volume(extremeRow) : na
 float extremeRowVolRatio = not na(pocRowVol) and pocRowVol > 0 and not na(extremeRowVol) ? extremeRowVol / pocRowVol : na
 
-int stackedImbalanceCount = 0
+int stackedBuyCount = 0
+int stackedSellCount = 0
 if mlExhFootprintAvailable
     array<volume_row> footprintRows = footprint.rows(reqFootprint)
     int rowCount = array.size(footprintRows)
     int rowsToInspect = math.min(stackedImbalanceRows, rowCount)
     if rowsToInspect > 0
-        if dir == 1
-            for offset = 0 to rowsToInspect - 1
-                volume_row row = array.get(footprintRows, rowCount - 1 - offset)
-                if volume_row.has_buy_imbalance(row)
-                    stackedImbalanceCount += 1
-        else
-            for offset = 0 to rowsToInspect - 1
-                volume_row row = array.get(footprintRows, offset)
-                if volume_row.has_sell_imbalance(row)
-                    stackedImbalanceCount += 1
+        for offset = 0 to rowsToInspect - 1
+            volume_row topRow = array.get(footprintRows, rowCount - 1 - offset)
+            if volume_row.has_buy_imbalance(topRow)
+                stackedBuyCount += 1
+            volume_row bottomRow = array.get(footprintRows, offset)
+            if volume_row.has_sell_imbalance(bottomRow)
+                stackedSellCount += 1
+bool stackedBuyImbalance = stackedBuyCount >= 2
+bool stackedSellImbalance = stackedSellCount >= 2
+int stackedImbalanceCount = dir == 1 ? stackedBuyCount : stackedSellCount
 bool stackedImbalance = stackedImbalanceCount >= 2
 
 bool mlExhDeltaDiv = mlExhFootprintAvailable and not na(triggerRowDelta) and not na(footprintDelta) and (
@@ -692,6 +884,37 @@ bool mlExhAbsorption = mlExhFootprintAvailable and not na(exhaustionTriggerPrice
 )
 bool mlExhZeroPrint = mlExhFootprintAvailable and not na(extremeRowVolRatio) and extremeRowVolRatio <= zeroPrintVolRatio and not na(extremeRow) and (volume_row.buy_volume(extremeRow) == 0 or volume_row.sell_volume(extremeRow) == 0)
 int footprintEvidenceCount = (mlExhDeltaDiv ? 1 : 0) + (mlExhAbsorption ? 1 : 0) + (mlExhZeroPrint ? 1 : 0)
+
+bool fpDeltaConfirmLong  = fpDeltaBullish
+bool fpDeltaConfirmShort = fpDeltaBearish
+bool wickRejectBull = not na(zoneLower) and low < zoneLower and close > zoneLower and bullishCandle
+bool wickRejectBear = not na(zoneUpper) and high > zoneUpper and close < zoneUpper and bearishCandle
+bool longConfirmed = (fpDeltaConfirmLong or not fpAvailable) and (
+    provenBullishPattern or
+    wickRejectBull or
+    liqSweepBull)
+bool shortConfirmed = (fpDeltaConfirmShort or not fpAvailable) and (
+    provenBearishPattern or
+    wickRejectBear or
+    liqSweepBear)
+
+// Local execution fib: a smaller 15m pullback map nested inside the active macro structure.
+// This gives the strategy a second entry path on trend days without changing the visible fib ladder.
+float executionSwingHigh = ta.highest(high, executionFibLookback)
+float executionSwingLow = ta.lowest(low, executionFibLookback)
+float executionFibRange = executionSwingHigh - executionSwingLow
+float executionFibPivot = executionSwingLow + executionFibRange * FIB_PIVOT
+float executionFib618 = executionSwingLow + executionFibRange * FIB_618
+float executionFibTouchTol = atr14 * executionFibTouchAtr
+bool executionFibValid = executionFibRange >= executionMinRangeAtr * atr14
+bool structureLongOk = dir == 1 and isValid and emaStackBull and htfTrendLongOk and close >= pPivot and vwapCode >= 0 and (htfConfTotal > 0 or nz(confluenceQuality) > 0)
+bool structureShortOk = dir == -1 and isValid and emaStackBear and htfTrendShortOk and close <= pPivot and vwapCode <= 0 and (htfConfTotal > 0 or nz(confluenceQuality) > 0) and not bullishTrendBlocksShorts
+bool footprintHeatLong = fpAvailable and fpDeltaBullish and (pocNearLow or stackedBuyImbalance) and not stackedSellImbalance
+bool footprintHeatShort = fpAvailable and fpDeltaBearish and (pocNearHigh or stackedSellImbalance) and not stackedBuyImbalance
+bool executionFibLongTouch = executionFibValid and low <= executionFib618 + executionFibTouchTol and close >= executionFibPivot and (bullishCandle or liqSweepBull)
+bool executionFibShortTouch = executionFibValid and high >= executionFibPivot - executionFibTouchTol and close <= executionFibPivot and (bearishCandle or liqSweepBear)
+bool scalpLongReady = useFootprintScalpEntries and confirmed and structureLongOk and footprintHeatLong and executionFibLongTouch and (provenBullishPattern or wickRejectBull or vwapCode == 2)
+bool scalpShortReady = useFootprintScalpEntries and confirmed and structureShortOk and footprintHeatShort and executionFibShortTouch and (provenBearishPattern or wickRejectBear or vwapCode == -2)
 
 bool tier1Exhaustion = mlExhSessionValid and mlExhGeomConfluence and exhZDirectional and mlExhFootprintAvailable and footprintEvidenceCount >= 2 and not stackedImbalance
 bool tier2Exhaustion = mlExhSessionValid and mlExhGeomConfluence and exhZDirectional and not mlExhFootprintAvailable
@@ -739,7 +962,9 @@ var int lastTier1ExhDir = 0
 var int lastContTriggerBar = na
 var int lastContTriggerDir = 0
 var int mlContConfidenceTier = 0
-int cooldownLen = 8 // bars to wait after exit (8 × 15m = 2h minimum; 4 was too short — consecutive entries corrupt AG samples)
+var int exitTargetTier = 1     // 1=TP1 base, promoted to 2/3 for fast runners
+var bool tradeIsScalp = false
+var bool forceCloseTrade = false
 int barsSinceExit = not na(lastExitBar) ? bar_index - lastExitBar : 999
 bool cooldownActive = barsSinceExit < cooldownLen
 
@@ -768,15 +993,23 @@ stopFamilyLevel(string familyId, float entryPx, float atrVal) =>
         roundToTick(raw)
 
 int stopFamilyCode = stopFamilyId == "FIB_NEG_0236" ? 1 : stopFamilyId == "FIB_NEG_0382" ? 2 : stopFamilyId == "ATR_1_0" ? 3 : stopFamilyId == "ATR_1_5" ? 4 : stopFamilyId == "ATR_STRUCTURE_1_25" ? 5 : 6
+int configuredRunnerTargetTier = fastRunnerTargetId == "TP3" ? 3 : 2
 
 // Entry level = the fib level price is closest to (actual interaction point)
-float entryLevel = fibLevelTouched == 618 ? p618 : fibLevelTouched == 382 ? p382 : fibLevelTouched == 500 ? pPivot : fibLevelTouched == 786 ? p786 : fibLevelTouched == 236 ? p236 : fibLevelTouched == 100 ? pOne : close
+float baseEntryLevel = fibLevelTouched == 618 ? p618 : fibLevelTouched == 382 ? p382 : fibLevelTouched == 500 ? pPivot : fibLevelTouched == 786 ? p786 : fibLevelTouched == 236 ? p236 : fibLevelTouched == 100 ? pOne : close
+bool scalpEntryContext = useFootprintScalpEntries and (scalpLongReady or scalpShortReady)
+float entryLevel = scalpEntryContext and executionFibValid ? executionFibPivot : baseEntryLevel
 float slLevel    = stopFamilyLevel(stopFamilyId, entryLevel, atr14)
 float tp1Level   = pT1
 float tp2Level   = pT2
 float tp3Level   = pT3
 float tp4Level   = pT4
 float tp5Level   = pT5
+float htfWallBufferPts = atr14 * htfWallBufferAtr
+float htfLongWallPrice = nearestHtfWall(true, entryLevel)
+float htfShortWallPrice = nearestHtfWall(false, entryLevel)
+bool htfWallLongOk = not useHtfStructureFilter or na(htfLongWallPrice) or htfLongWallPrice - entryLevel >= htfWallBufferPts
+bool htfWallShortOk = not useHtfStructureFilter or na(htfShortWallPrice) or entryLevel - htfShortWallPrice >= htfWallBufferPts
 
 // Stop geometry is exported for AG and diagnostics, but not used as a live Pine gate.
 float slDistPts = math.abs(entryLevel - slLevel)
@@ -795,13 +1028,15 @@ bool priceAtFibLevel = isValid and confirmed and (
     math.abs(close - pOne) <= fibTouchTol)
 bool validArchetype = setupArchetypeCode == 1 or setupArchetypeCode == 2 or setupArchetypeCode == 3 or setupArchetypeCode == 5
 bool candidateSetup = priceAtFibLevel and validArchetype
-bool entryLongTrigger  = acceptEvent and dir == 1 and not ladderInvalidated
-bool entryShortTrigger = acceptEvent and dir == -1 and not ladderInvalidated and not bullishTrendBlocksShorts
+bool entryLongTrigger  = ((acceptEvent and longConfirmed) or scalpLongReady) and dir == 1 and not ladderInvalidated and htfWallLongOk
+bool entryShortTrigger = ((acceptEvent and shortConfirmed) or scalpShortReady) and dir == -1 and not ladderInvalidated and not bullishTrendBlocksShorts and htfWallShortOk
 
 if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or entryLongTrigger or entryShortTrigger)
-    log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} longTrig={5} shortTrig={6} shortGate={7} fpCount={8}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, entryLongTrigger, entryShortTrigger, bullishTrendBlocksShorts, footprintEvidenceCount))
+    log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} longTrig={5} shortTrig={6} shortGate={7} fpCount={8} htfLong={9} htfShort={10} wallLong={11} wallShort={12}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, entryLongTrigger, entryShortTrigger, bullishTrendBlocksShorts, footprintEvidenceCount, htfTrendLongOk, htfTrendShortOk, htfWallLongOk, htfWallShortOk))
 
 if confirmed
+    forceCloseTrade := false
+
     if exhaustionSignalDir != 0
         lastExhTriggerBar := bar_index
         lastExhTriggerDir := exhaustionSignalDir
@@ -809,7 +1044,10 @@ if confirmed
             lastTier1ExhBar := bar_index
             lastTier1ExhDir := exhaustionSignalDir
 
-    if tradeState == TRADE_NONE and pivotNearZone and not cooldownActive and not ladderInvalidated
+    // Allow the setup state to arm on the actual confirmed accept bar, not only while price
+    // is still sitting inside the zone. Otherwise valid accept events can never convert to entries.
+    bool setupReadyNow = pivotNearZone or acceptEvent or scalpLongReady or scalpShortReady
+    if tradeState == TRADE_NONE and setupReadyNow and not cooldownActive and not ladderInvalidated
         tradeState := TRADE_SETUP
         setupBar := bar_index
 
@@ -824,6 +1062,8 @@ if confirmed
         entryAtr := atr14
         tradeDir  := dir      // lock direction here — anchor may shift by exit bar
         highestTargetHit := 0
+        exitTargetTier := 1
+        tradeIsScalp := scalpEntryContext
         tradeState := TRADE_ACTIVE
         entryBar := bar_index
 
@@ -856,37 +1096,58 @@ if confirmed
         lastContTriggerBar := bar_index
         lastContTriggerDir := tradeDir
 
-    bool continuationHoldActiveLocal = tradeInFlight and not na(lastContTriggerBar) and bar_index - lastContTriggerBar <= continuationHoldBars and lastContTriggerDir == tradeDir
+    bool continuationHoldActiveLocal = continuationHoldBars > 0 and tradeInFlight and not na(lastContTriggerBar) and bar_index - lastContTriggerBar <= continuationHoldBars and lastContTriggerDir == tradeDir
     float holdEmergencyStopPriceLocal = not na(entryPrice) and not na(entryAtr) and tradeDir != 0 ? roundToTick(tradeDir == 1 ? entryPrice - entryAtr * continuationHoldStopAtrMult : entryPrice + entryAtr * continuationHoldStopAtrMult) : na
-    float activeTradeStopPrice = tradeInFlight ? (
+    float activeTradeBaseStopPrice = tradeInFlight ? (
          continuationHoldActiveLocal and not na(holdEmergencyStopPriceLocal)
              ? (tradeDir == 1 ? math.min(slPrice, holdEmergencyStopPriceLocal) : math.max(slPrice, holdEmergencyStopPriceLocal))
              : slPrice
+    ) : na
+    float scalpTargetPriceLocal = tradeInFlight and tradeIsScalp and not na(entryPrice) ? roundToTick(entryPrice + tradeDir * scalpTargetPoints) : na
+    bool runnerBreakevenActiveLocal = tradeInFlight and runnerBreakevenAfterTp1 and exitTargetTier > 1 and highestTargetHit >= 1 and not na(entryPrice)
+    bool scalpBreakevenActiveLocal = tradeInFlight and tradeIsScalp and not na(entryPrice) and (
+        tradeDir == 1 ? high >= entryPrice + scalpBreakevenTriggerPoints : low <= entryPrice - scalpBreakevenTriggerPoints)
+    float activeTradeStopPrice = tradeInFlight ? (
+         (runnerBreakevenActiveLocal or scalpBreakevenActiveLocal)
+             ? (tradeDir == 1 ? math.max(activeTradeBaseStopPrice, roundToTick(entryPrice)) : math.min(activeTradeBaseStopPrice, roundToTick(entryPrice)))
+             : activeTradeBaseStopPrice
     ) : na
 
     bool canResolveTrade = tradeInFlight and not na(entryBar) and bar_index > entryBar
     if canResolveTrade
         if tradeDir == 1
-            int targetHitNow = high >= tp5Price ? 5 : high >= tp4Price ? 4 : high >= tp3Price ? 3 : high >= tp2Price ? 2 : high >= tp1Price ? 1 : 0
+            int targetHitNow = tradeIsScalp and not na(scalpTargetPriceLocal) ? (high >= scalpTargetPriceLocal ? 1 : 0) : high >= tp5Price ? 5 : high >= tp4Price ? 4 : high >= tp3Price ? 3 : high >= tp2Price ? 2 : high >= tp1Price ? 1 : 0
+            bool fastRunnerNow = letFastRunnersRun and not tradeIsScalp and exitTargetTier == 1 and targetHitNow >= 1 and bar_index - entryBar <= fastRunnerBars
+            if fastRunnerNow
+                exitTargetTier := configuredRunnerTargetTier
             if low <= activeTradeStopPrice
                 tradeState := TRADE_STOPPED
             else if targetHitNow > highestTargetHit
                 highestTargetHit := targetHitNow
                 tradeState := targetHitNow == 5 ? TRADE_HIT_TP5 : targetHitNow == 4 ? TRADE_HIT_TP4 : targetHitNow == 3 ? TRADE_HIT_TP3 : targetHitNow == 2 ? TRADE_HIT_TP2 : TRADE_HIT_TP1
+            else if tradeIsScalp and bar_index - entryBar >= scalpMaxBars
+                forceCloseTrade := true
+                tradeState := TRADE_EXPIRED
         else
-            int targetHitNow = low <= tp5Price ? 5 : low <= tp4Price ? 4 : low <= tp3Price ? 3 : low <= tp2Price ? 2 : low <= tp1Price ? 1 : 0
+            int targetHitNow = tradeIsScalp and not na(scalpTargetPriceLocal) ? (low <= scalpTargetPriceLocal ? 1 : 0) : low <= tp5Price ? 5 : low <= tp4Price ? 4 : low <= tp3Price ? 3 : low <= tp2Price ? 2 : low <= tp1Price ? 1 : 0
+            bool fastRunnerNow = letFastRunnersRun and not tradeIsScalp and exitTargetTier == 1 and targetHitNow >= 1 and bar_index - entryBar <= fastRunnerBars
+            if fastRunnerNow
+                exitTargetTier := configuredRunnerTargetTier
             if high >= activeTradeStopPrice
                 tradeState := TRADE_STOPPED
             else if targetHitNow > highestTargetHit
                 highestTargetHit := targetHitNow
                 tradeState := targetHitNow == 5 ? TRADE_HIT_TP5 : targetHitNow == 4 ? TRADE_HIT_TP4 : targetHitNow == 3 ? TRADE_HIT_TP3 : targetHitNow == 2 ? TRADE_HIT_TP2 : TRADE_HIT_TP1
+            else if tradeIsScalp and bar_index - entryBar >= scalpMaxBars
+                forceCloseTrade := true
+                tradeState := TRADE_EXPIRED
 
     // Timed-out setup: price entered the zone but never confirmed the accept trigger.
     if tradeState == TRADE_SETUP and not na(setupBar) and bar_index - setupBar > 12
         lastExitOutcome := 4  // EXPIRED — setup timed out, no fill
         tradeState := TRADE_EXPIRED
 
-    bool tradeResolved = tradeState == TRADE_STOPPED or tradeState == TRADE_EXPIRED or tradeState == TRADE_HIT_TP5
+    bool tradeResolved = tradeState == TRADE_STOPPED or tradeState == TRADE_EXPIRED or highestTargetHit >= exitTargetTier
     if tradeResolved
         // Resolve outcome BEFORE resetting state — if a trade stopped after TP1-TP4, preserve the highest target reached.
         lastExitOutcome := tradeState == TRADE_EXPIRED ? 4 : highestTargetHit == 5 ? 7 : highestTargetHit == 4 ? 6 : highestTargetHit == 3 ? 5 : highestTargetHit == 2 ? 2 : highestTargetHit == 1 ? 1 : 3
@@ -904,22 +1165,37 @@ if confirmed
         setupBar := na
         entryBar := na
         highestTargetHit := 0
+        exitTargetTier := 1
+        tradeIsScalp := false
 
 bool tradeInFlightNow = tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
-bool continuationHoldActive = tradeInFlightNow and not na(lastContTriggerBar) and bar_index - lastContTriggerBar <= continuationHoldBars and lastContTriggerDir == tradeDir
+bool continuationHoldActive = continuationHoldBars > 0 and tradeInFlightNow and not na(lastContTriggerBar) and bar_index - lastContTriggerBar <= continuationHoldBars and lastContTriggerDir == tradeDir
 float holdEmergencyStopPrice = not na(entryPrice) and not na(entryAtr) and tradeDir != 0 ? roundToTick(tradeDir == 1 ? entryPrice - entryAtr * continuationHoldStopAtrMult : entryPrice + entryAtr * continuationHoldStopAtrMult) : na
-float activeStopPrice = tradeInFlightNow ? (
+float activeBaseStopPrice = tradeInFlightNow ? (
      continuationHoldActive and not na(holdEmergencyStopPrice)
          ? (tradeDir == 1 ? math.min(slPrice, holdEmergencyStopPrice) : math.max(slPrice, holdEmergencyStopPrice))
          : slPrice
 ) : na
+bool runnerBreakevenActive = tradeInFlightNow and runnerBreakevenAfterTp1 and exitTargetTier > 1 and highestTargetHit >= 1 and not na(entryPrice)
+bool scalpBreakevenActive = tradeInFlightNow and tradeIsScalp and not na(entryPrice) and (
+    tradeDir == 1 ? high >= entryPrice + scalpBreakevenTriggerPoints : low <= entryPrice - scalpBreakevenTriggerPoints)
+float activeStopPrice = tradeInFlightNow ? (
+     (runnerBreakevenActive or scalpBreakevenActive)
+         ? (tradeDir == 1 ? math.max(activeBaseStopPrice, roundToTick(entryPrice)) : math.min(activeBaseStopPrice, roundToTick(entryPrice)))
+         : activeBaseStopPrice
+) : na
+float scalpTargetPrice = tradeInFlightNow and tradeIsScalp and not na(entryPrice) ? roundToTick(entryPrice + tradeDir * scalpTargetPoints) : na
+float activeTargetPrice = tradeInFlightNow ? (tradeIsScalp and not na(scalpTargetPrice) ? scalpTargetPrice : exitTargetTier >= 3 ? tp3Price : exitTargetTier == 2 ? tp2Price : tp1Price) : na
+bool exitOrdersArmed = tradeInFlightNow and not na(entryBar) and bar_index > entryBar
 bool strategyLongEntry = tradeState == TRADE_ACTIVE and entryBar == bar_index and tradeDir == 1
 bool strategyShortEntry = tradeState == TRADE_ACTIVE and entryBar == bar_index and tradeDir == -1
 float mlExhBarsSinceTrigger = not na(lastExhTriggerBar) ? float(bar_index - lastExhTriggerBar) : na
-bool showBearishExhaustion = bearishExhaustion
-bool showBullishExhaustion = bullishExhaustion
-color bearishExhaustionColor = mlExhConfidenceTier == 1 ? COLOR_STOP : color.new(COLOR_STOP, 35)
-color bullishExhaustionColor = mlExhConfidenceTier == 1 ? COLOR_TARGET : color.new(COLOR_TARGET, 35)
+bool projectedBearishExhaustion = useFibAnchorTimeframeOverride and htfSnapshotReady and zzProjectedExhDir == -1 and time_close == zzProjectedExhTime
+bool projectedBullishExhaustion = useFibAnchorTimeframeOverride and htfSnapshotReady and zzProjectedExhDir == 1 and time_close == zzProjectedExhTime
+bool showBearishExhaustion = useFibAnchorTimeframeOverride ? projectedBearishExhaustion : bearishExhaustion
+bool showBullishExhaustion = useFibAnchorTimeframeOverride ? projectedBullishExhaustion : bullishExhaustion
+color bearishExhaustionColor = useFibAnchorTimeframeOverride ? COLOR_STOP : bearishExhaustion ? (mlExhConfidenceTier == 1 ? COLOR_STOP : color.new(COLOR_STOP, 35)) : color.new(COLOR_STOP, 0)
+color bullishExhaustionColor = useFibAnchorTimeframeOverride ? COLOR_TARGET : bullishExhaustion ? (mlExhConfidenceTier == 1 ? COLOR_TARGET : color.new(COLOR_TARGET, 35)) : color.new(COLOR_TARGET, 0)
 
 var int fpBarsSeen = 0
 var int fpAvailableBars = 0
@@ -1050,9 +1326,6 @@ else
 // trendStr / corrStr removed — monotonic rescalings of adxVal and im_score_on/off.
 // Collinear with existing ADX and IM score exports. Zero new information for AG.
 
-float ema21 = ta.ema(close, 21)
-float ema50 = ta.ema(close, 50)
-float ema200 = ta.ema(close, 200)
 int ema21Dir = f_ema_dir(ema21)
 int ema50Dir = f_ema_dir(ema50)
 int ema200Dir = f_ema_dir(ema200)
@@ -1154,19 +1427,25 @@ bool levelsValid = not na(slLevel) and not na(tp1Level) and not na(tp2Level) and
 bool canTradeBar = levelsValid and barstate.isconfirmed
 float strategyStop = not na(activeStopPrice) ? activeStopPrice : slLevel
 
-// 1 contract, hold until TP5 (2.618) or SL. AG reads highestTargetHit for path data.
-// No strategy.close opposite side — let runners resolve naturally via SL or TP5.
+// 1 contract, take TP1 by default, but promote fast runners to the configured higher target.
+// No strategy.close opposite side — let runners resolve naturally via the active target or stop.
 if strategyLongEntry and canTradeBar
     strategy.entry("Long", strategy.long)
 
 if strategyShortEntry and canTradeBar
     strategy.entry("Short", strategy.short)
 
-if (strategy.position_size > 0 or strategyLongEntry) and canTradeBar
-    strategy.exit("Long Exit", from_entry="Long", stop=strategyStop, limit=tp5Level)
+if forceCloseTrade and strategy.position_size > 0 and canTradeBar
+    strategy.close("Long", comment="Scalp Timeout")
 
-if (strategy.position_size < 0 or strategyShortEntry) and canTradeBar
-    strategy.exit("Short Exit", from_entry="Short", stop=strategyStop, limit=tp5Level)
+if forceCloseTrade and strategy.position_size < 0 and canTradeBar
+    strategy.close("Short", comment="Scalp Timeout")
+
+if (strategy.position_size > 0 or strategyLongEntry) and canTradeBar and exitOrdersArmed
+    strategy.exit("Long Exit", from_entry="Long", stop=strategyStop, limit=activeTargetPrice)
+
+if (strategy.position_size < 0 or strategyShortEntry) and canTradeBar and exitOrdersArmed
+    strategy.exit("Short Exit", from_entry="Short", stop=strategyStop, limit=activeTargetPrice)
 
 //=====================
 // ALERTS
@@ -1179,3 +1458,5 @@ if strategyShortEntry
     alert("WARBIRD ENTRY SHORT. Close=" + str.tostring(close), alert.freq_once_per_bar_close)
 if breakAgainstEvent
     alert("PIVOT BREAK against AutoFib direction. Close=" + str.tostring(close), alert.freq_once_per_bar_close)
+
+// End of strategy file

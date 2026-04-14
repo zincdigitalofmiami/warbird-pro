@@ -65,10 +65,15 @@ Phase execution order:
 - ~~`local_schema_migrations` ledger table: not yet created (Phase 1)~~ **DONE 2026-04-11**
 - ~~One-time bootstrap from `rabid_raccoon`: not yet run (Phase 2)~~ **DONE 2026-04-11** — All surfaces bootstrapped. HG loaded from `data/cross_asset_1h.parquet`. All 6 cross-asset symbols live. 221,954 cross-asset rows through 2026-04-03.
 - ~~Three canonical local AG tables and one canonical training view (`ag_training`): not yet created (Phase 3)~~ **DONE 2026-04-11** — migration 007. 3 tables + view live.
-- Python pipeline in `scripts/ag/`: CDP tuner automation built (`tv_auto_tune.py` + `tune_strategy_params.py` + `strategy_tuning_space.json` — applies inputs via CDP, polls recalc, reads trades without CSV export). 2026-04-13 tuner hardening landed: new profile `mes15m_agfit_v3`, narrowed search ranges, non-causal locked inputs removed from trial signatures, coupled-parameter rejection rules added, and objective upgraded to include drawdown efficiency, rolling-window stability, footprint-tail stability, and yearly consistency. No authoritative `mes15m_agfit_v3` recorded trials yet. Full AG feature pipeline (extract, reconstruct, label, train, SHAP) still unbuilt.
+- Python pipeline in `scripts/ag/`:
+  - CDP tuner automation built (`tv_auto_tune.py` + `tune_strategy_params.py` + `strategy_tuning_space.json` — applies inputs via CDP, polls recalc, reads trades without CSV export). 2026-04-13 tuner hardening landed: new profile `mes15m_agfit_v3`, narrowed search ranges, non-causal locked inputs removed from trial signatures, coupled-parameter rejection rules added, and objective upgraded to include drawdown efficiency, rolling-window stability, footprint-tail stability, and yearly consistency. No authoritative `mes15m_agfit_v3` recorded trials yet.
+  - Phase 4 bootstrap pipeline now implemented (`scripts/ag/build_ag_pipeline.py`) and executed on local `warbird` (2026-04-13): `ag_fib_snapshots=3,101`, `ag_fib_interactions=37,450`, `ag_fib_outcomes=37,450`, `ag_training=17,100` rows.
+  - Walk-forward split structure now generated at `artifacts/ag_runs/agfit_20260413T192255Z/` (`train.csv`, `val.csv`, `test.csv`, `manifest.json`).
+  - Repo-native baseline trainer now exists (`scripts/ag/train_ag_baseline.py`). It joins real `cross_asset_1h` + `FRED/econ_calendar`, removes label leakage from `ag_training`, writes run artifacts under `artifacts/ag_runs/`, and blocks training when a validation/test slice has fewer than 2 target classes.
+  - Remaining Phase 4 blocker: current `outcome_label` sparsity breaks several time-safe multiclass eval slices (`TP1_ONLY` disappears after 2022-06-28; 2024+ is almost entirely `STOPPED`). Next blocking item is evaluation-policy repair on top of the current label regime, then actual AutoGluon fit + SHAP lineage.
 - Full-surface SHAP program: not yet built (Phase 5)
 - Cloud serving promotion: blocked on Phases 1-5 (Phase 6)
-- `artifacts/` and `artifacts/shap/` directories: not yet created
+- `artifacts/` directory: now active for AG split/baseline runs. `artifacts/shap/` still not created.
 - `data/` directory for raw Databento archives: not yet organized per v5
 - Exhaustion diamond v2: designed, not yet implemented. Full spec in Phase 0.5.
   Requires budget audit + explicit approval before touching `v7-warbird-institutional.pine`.

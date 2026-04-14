@@ -87,6 +87,11 @@ CDP_PORT = 9222
 # and fetch_input_schema(). This prevents silent misalignment after Pine input changes
 # or chart reloads.
 
+STRATEGY_DESCRIPTION = "Warbird v7 Strategy"
+INDICATOR_DESCRIPTION = "Warbird v7 Institutional"
+STRATEGY_SHORT_TITLE = "WB7 Strat"
+INDICATOR_SHORT_TITLE = "WB v7"
+
 # -- Tab discovery ------------------------------------------------------------
 
 
@@ -208,57 +213,102 @@ async def cdp_run(ws, expression: str, call_id: int = 1) -> Any:
 # -- Strategy discovery -------------------------------------------------------
 
 
-async def discover_strategy_entity(ws, call_id: int) -> str:
-    """Discover the entity ID of 'Warbird v7 Strategy' from chartModel().dataSources().
+async def discover_study_entity(
+    ws,
+    call_id: int,
+    description_substring: str,
+    short_title: str,
+    require_strategy: bool,
+) -> str:
+    """Discover a study entity ID from chartModel().dataSources()."""
 
-    Walks all data sources on the active chart and finds the one whose metaInfo()
-    marks it as a strategy with a name containing 'Warbird v7 Strategy'.
-    Raises RuntimeError with available strategy names if not found.
-    """
-    js = """
-(() => {
-    try {
+    strategy_filter = (
+        "meta.isTVScriptStrategy === true || meta.is_strategy === true"
+        if require_strategy
+        else "meta.isTVScriptStrategy !== true && meta.is_strategy !== true"
+    )
+    js = f"""
+(() => {{
+    try {{
         const chart = window.TradingViewApi.activeChart();
         const model = chart.chartModel();
-        if (!model || typeof model.dataSources !== 'function') {
-            return JSON.stringify({err: 'chartModel().dataSources() not available'});
-        }
+        if (!model || typeof model.dataSources !== 'function') {{
+            return JSON.stringify({{err: 'chartModel().dataSources() not available'}});
+        }}
         const sources = model.dataSources();
-        const isStrat = (meta) => meta.isTVScriptStrategy === true || meta.is_strategy === true;
-        const nameMatch = (meta) => {
-            const desc = meta.description || meta.shortDescription || '';
-            return desc.includes('Warbird v7 Strategy');
-        };
-        const strategy = sources.find(s => {
-            try {
+        const matchesStudy = (meta, src) => {{
+            const desc = meta.description || '';
+            const shortDesc = meta.shortDescription || '';
+            let title = '';
+            try {{ title = typeof src.title === 'function' ? src.title() : (src.title || ''); }} catch(e) {{}}
+            return ({strategy_filter}) && (
+                desc.includes({json.dumps(description_substring)}) ||
+                shortDesc.includes({json.dumps(description_substring)}) ||
+                title.includes({json.dumps(short_title)})
+            );
+        }};
+        const study = sources.find(s => {{
+            try {{
                 const meta = s.metaInfo ? s.metaInfo() : null;
-                return meta && isStrat(meta) && nameMatch(meta);
-            } catch(e) { return false; }
-        });
-        if (!strategy) {
-            const allStrats = sources
-                .filter(s => {
-                    try { const m = s.metaInfo ? s.metaInfo() : null; return m && isStrat(m); }
-                    catch(e) { return false; }
-                })
-                .map(s => {
-                    try { const m = s.metaInfo(); return {id: s.id(), name: m.description || m.shortDescription}; }
-                    catch(e) { return {err: String(e)}; }
-                });
-            return JSON.stringify({err: 'Warbird v7 Strategy not found', available: allStrats});
-        }
-        return JSON.stringify({entity_id: strategy.id()});
-    } catch(e) {
-        return JSON.stringify({err: String(e)});
-    }
-})()
+                return meta && matchesStudy(meta, s);
+            }} catch(e) {{ return false; }}
+        }});
+        if (!study) {{
+            const allStudies = sources
+                .filter(s => {{
+                    try {{
+                        const m = s.metaInfo ? s.metaInfo() : null;
+                        return m && ({strategy_filter});
+                    }}
+                    catch(e) {{ return false; }}
+                }})
+                .map(s => {{
+                    try {{
+                        const m = s.metaInfo();
+                        return {{
+                            id: s.id(),
+                            name: m.description || m.shortDescription,
+                            title: typeof s.title === 'function' ? s.title() : s.title,
+                        }};
+                    }}
+                    catch(e) {{ return {{err: String(e)}}; }}
+                }});
+            return JSON.stringify({{err: 'study not found', available: allStudies}});
+        }}
+        return JSON.stringify({{entity_id: study.id()}});
+    }} catch(e) {{
+        return JSON.stringify({{err: String(e)}});
+    }}
+}})()
 """
     result = await cdp_run(ws, js, call_id)
     if isinstance(result, dict) and result.get("err"):
         available = result.get("available", [])
-        diag = f". Available strategies on chart: {available}" if available else ""
-        raise RuntimeError(f"Strategy entity discovery failed: {result['err']}{diag}")
+        diag = f". Available studies on chart: {available}" if available else ""
+        raise RuntimeError(
+            f"Study entity discovery failed for {description_substring}: {result['err']}{diag}"
+        )
     return result["entity_id"]
+
+
+async def discover_strategy_entity(ws, call_id: int) -> str:
+    return await discover_study_entity(
+        ws,
+        call_id,
+        STRATEGY_DESCRIPTION,
+        STRATEGY_SHORT_TITLE,
+        True,
+    )
+
+
+async def discover_indicator_entity(ws, call_id: int) -> str:
+    return await discover_study_entity(
+        ws,
+        call_id,
+        INDICATOR_DESCRIPTION,
+        INDICATOR_SHORT_TITLE,
+        False,
+    )
 
 
 # -- Input schema -------------------------------------------------------------
@@ -443,13 +493,13 @@ async def wait_for_recalc(
     timeout_sec: int,
     call_id: int,
     enter_loading_timeout: float = 5.0,
-) -> None:
+) -> bool:
     """Two-phase freshness gate.
 
     Phase 1: Require at least one isLoading()=true within enter_loading_timeout seconds.
              If the study never enters loading state, inputs were likely silently no-op'd
              (out-of-range value, duplicate of current state, or TV glitch).
-             Raises RuntimeError with 'failed_no_recalc' prefix.
+             Returns False when no loading transition is observed.
 
     Phase 2: Poll isLoading()=false up to timeout_sec.
              Raises TimeoutError if recalc does not complete.
@@ -480,13 +530,7 @@ async def wait_for_recalc(
             break
 
     if not entered_loading:
-        raise RuntimeError(
-            "failed_no_recalc: strategy never entered loading state after setInputValues. "
-            "Inputs may have been silently rejected (out-of-range, type mismatch, or no-op "
-            "because submitted values match the current live values). "
-            "If this is a deterministic identical-input rerun, this failure is expected — "
-            "change at least one parameter value to force a recalc."
-        )
+        return False
 
     # Phase 2: wait for loading to complete
     deadline_2 = asyncio.get_event_loop().time() + timeout_sec
@@ -496,11 +540,67 @@ async def wait_for_recalc(
         if loading is None:
             raise RuntimeError(f"Study {entity_id} disappeared during recalc wait")
         if not loading:
-            return
+            return True
 
     raise TimeoutError(
         f"Strategy did not finish recalculating within {timeout_sec}s. "
         "Try increasing --recalc-timeout or check that Deep Backtesting is enabled."
+    )
+
+
+async def focus_strategy_report_metrics_tab(ws, call_id: int) -> bool:
+    js = r"""
+(() => {
+    const btn = Array.from(document.querySelectorAll('button[role="tab"],button')).find(
+        el => (el.innerText || '').trim() === 'Metrics'
+    );
+    if (!btn) return JSON.stringify({clicked: false});
+    btn.click();
+    return JSON.stringify({clicked: true});
+})()
+"""
+    result = await cdp_run(ws, js, call_id)
+    return isinstance(result, dict) and bool(result.get("clicked"))
+
+
+async def refresh_strategy_report(ws, call_id: int, timeout_s: float = 30.0) -> bool:
+    """Click TradingView's 'Update report' prompt when present.
+
+    The Strategy Report widget can remain stale after the study itself finishes
+    recalculating. When TradingView shows the snackbar button, click it and wait
+    for it to clear before reading report data.
+    """
+
+    click_js = r"""
+(() => {
+    const btn = Array.from(document.querySelectorAll('button,[role="button"]')).find(
+        el => (el.innerText || el.textContent || '').trim() === 'Update report'
+    );
+    if (!btn) return JSON.stringify({clicked: false});
+    btn.click();
+    return JSON.stringify({clicked: true});
+})()
+"""
+    result = await cdp_run(ws, click_js, call_id)
+    if not isinstance(result, dict) or not result.get("clicked"):
+        return False
+
+    present_js = r"""
+(() => JSON.stringify({
+    present: !!Array.from(document.querySelectorAll('button,[role="button"]')).find(
+        el => (el.innerText || el.textContent || '').trim() === 'Update report'
+    )
+}))()
+"""
+    attempts = max(1, int(timeout_s / 0.25))
+    for _ in range(attempts):
+        state = await cdp_run(ws, present_js, call_id + 1)
+        if not isinstance(state, dict) or not state.get("present"):
+            return True
+        await asyncio.sleep(0.25)
+
+    raise RuntimeError(
+        "failed_no_recalc: clicked 'Update report' but the refresh prompt did not clear"
     )
 
 
@@ -516,6 +616,42 @@ def make_get_trades_js(entity_id: str) -> str:
     """
     return f"""
 (() => {{
+    function findVisibleStrategyReportData() {{
+        const root = document.querySelector('.bottom-widgetbar-content.backtesting');
+        if (!root) return null;
+        for (const node of root.querySelectorAll('*')) {{
+            for (const key of Object.keys(node)) {{
+                if (!key.startsWith('__reactFiber$')) continue;
+                let fiber = node[key];
+                for (let depth = 0; fiber && depth < 20; depth++, fiber = fiber.return) {{
+                    const reportsData = fiber.memoizedProps && fiber.memoizedProps.reportsData;
+                    if (reportsData && Array.isArray(reportsData.trades)) {{
+                        return reportsData;
+                    }}
+                }}
+            }}
+        }}
+        return null;
+    }}
+
+    const reportData = findVisibleStrategyReportData();
+    if (reportData && Array.isArray(reportData.trades) && reportData.trades.length) {{
+        return JSON.stringify({{
+            count: reportData.trades.length,
+            source: 'strategy_report_widget',
+            trades: reportData.trades.map((t, idx) => ({{
+                trade_num: t.tradeNumber ?? idx + 1,
+                side: (t.entry && t.entry.id && t.entry.id.toLowerCase().includes('short')) ? 'short' : 'long',
+                entry_ts: t.entry ? t.entry.time : null,
+                exit_ts: t.exit ? t.exit.time : null,
+                net_pnl: t.profit ? t.profit.value : 0,
+                cumulative_pnl: t.cumulativeProfit ? t.cumulativeProfit.value : 0,
+                adverse_excursion_mag: t.drawdown ? t.drawdown.value : 0,
+                favorable_excursion: t.runup ? t.runup.value : 0
+            }}))
+        }});
+    }}
+
     let stratSrc = null;
 
     try {{
@@ -590,7 +726,37 @@ async def snapshot_strategy_metrics(
     """
     js = f"""
 (() => {{
+    function findVisibleStrategyReportData() {{
+        const root = document.querySelector('.bottom-widgetbar-content.backtesting');
+        if (!root) return null;
+        for (const node of root.querySelectorAll('*')) {{
+            for (const key of Object.keys(node)) {{
+                if (!key.startsWith('__reactFiber$')) continue;
+                let fiber = node[key];
+                for (let depth = 0; fiber && depth < 20; depth++, fiber = fiber.return) {{
+                    const reportsData = fiber.memoizedProps && fiber.memoizedProps.reportsData;
+                    if (reportsData && Array.isArray(reportsData.trades)) {{
+                        return reportsData;
+                    }}
+                }}
+            }}
+        }}
+        return null;
+    }}
+
     try {{
+        const reportData = findVisibleStrategyReportData();
+        if (reportData && Array.isArray(reportData.trades)) {{
+            const trades = reportData.trades;
+            const perf = reportData.performance && reportData.performance.all ? reportData.performance.all : null;
+            return JSON.stringify({{
+                source: 'strategy_report_widget',
+                trade_count: trades.length,
+                last_exit_ts: trades.length ? (trades[trades.length - 1].exit ? trades[trades.length - 1].exit.time : null) : null,
+                net_profit: perf && perf.netProfit !== undefined ? perf.netProfit : null
+            }});
+        }}
+
         const chart = window.TradingViewApi.activeChart();
         const model = chart.chartModel();
         if (!model || typeof model.dataSources !== 'function') return null;
@@ -779,51 +945,72 @@ def record_failed_trial(
 # -- Preflight ----------------------------------------------------------------
 
 
-async def run_preflight_checks(ws, space: dict) -> tuple[str, dict[str, dict]]:
-    """Run all preflight checks. Returns (entity_id, schema).
+async def run_preflight_checks(
+    ws, space: dict
+) -> tuple[str, dict[str, dict], str, dict[str, dict]]:
+    """Run all preflight checks.
 
     Steps:
-    1. Discover strategy entity ID by name in dataSources().
-    2. Fetch live input schema via getInputsInfo().
-    3. Cross-check all search_parameters names exist in schema.
-    4. Canary round-trip: set 'Target Line Lookback Bars' to a test value,
-       verify via getInputValues(), restore.
-    5. Snapshot initial strategy-result metrics for diagnostic baseline.
+     1. Discover strategy + indicator entity IDs by name in dataSources().
+     2. Fetch live input schema via getInputsInfo() for both studies.
+     3. Cross-check all search_parameters names exist in both schemas.
+     4. Canary round-trip on both surfaces.
+     5. Snapshot initial strategy-result metrics for diagnostic baseline.
 
     Raises RuntimeError on any failure.
     """
     cid = 10  # start at 10 to avoid collision with tab-discovery call_id=1
 
-    print("Preflight [1/5]: discovering strategy entity...")
+    print("Preflight [1/5]: discovering strategy + indicator entities...")
     entity_id = await discover_strategy_entity(ws, cid)
     cid += 1
-    print(f"  entity_id: {entity_id}")
+    indicator_entity_id = await discover_indicator_entity(ws, cid)
+    cid += 1
+    print(f"  strategy_entity_id: {entity_id}")
+    print(f"  indicator_entity_id: {indicator_entity_id}")
 
-    print("Preflight [2/5]: fetching live input schema...")
+    print("Preflight [2/5]: fetching live input schemas...")
     schema = await fetch_input_schema(ws, entity_id, cid)
     cid += 1
-    print(f"  {len(schema)} input(s) found in live schema.")
+    indicator_schema = await fetch_input_schema(ws, indicator_entity_id, cid)
+    cid += 1
+    print(f"  strategy schema: {len(schema)} input(s)")
+    print(f"  indicator schema: {len(indicator_schema)} input(s)")
 
     print("Preflight [3/5]: cross-checking search_parameters names...")
     search_params = space.get("search_parameters", {})
     locked_params = space.get("locked_parameters", {})
     missing_search = [n for n in search_params if n not in schema]
+    missing_indicator_search = [n for n in search_params if n not in indicator_schema]
     missing_locked = [n for n in locked_params if n not in schema]
+    missing_indicator_locked = [n for n in locked_params if n not in indicator_schema]
     if missing_search:
         raise RuntimeError(
             f"Preflight FAILED: search_parameters not in live schema: {missing_search}\n"
             "Pine inputs may have been renamed or removed. Update strategy_tuning_space.json."
         )
+    if missing_indicator_search:
+        raise RuntimeError(
+            "Preflight FAILED: search_parameters not in live indicator schema: "
+            f"{missing_indicator_search}\n"
+            "The chart-side indicator is out of sync with the tuner surface."
+        )
     if missing_locked:
         print(
             f"  WARNING: locked_parameters not in live schema (will be skipped): {missing_locked}"
+        )
+    if missing_indicator_locked:
+        print(
+            "  WARNING: locked_parameters not in live indicator schema "
+            f"(will be skipped): {missing_indicator_locked}"
         )
     print(f"  All {len(search_params)} search params found. OK.")
 
     print("Preflight [4/5]: canary round-trip...")
     canary_name = "Target Line Lookback Bars"
-    if canary_name in schema:
+    if canary_name in schema and canary_name in indicator_schema:
         canary_id = schema[canary_name]["id"]
+        indicator_canary_id = indicator_schema[canary_name]["id"]
         # Read current value
         read_js = f"""
 (() => {{
@@ -839,11 +1026,20 @@ async def run_preflight_checks(ws, space: dict) -> tuple[str, dict[str, dict]]:
         cid += 1
         canary_test = 40 if canary_orig != 40 else 45
         canary_inputs = [{"id": canary_id, "value": canary_test}]
+        indicator_canary_inputs = [{"id": indicator_canary_id, "value": canary_test}]
 
         await apply_inputs(ws, entity_id, canary_inputs, cid)
         cid += 1
+        await apply_inputs(ws, indicator_entity_id, indicator_canary_inputs, cid)
+        cid += 1
+        await refresh_strategy_report(ws, cid)
+        cid += 2
         await asyncio.sleep(0.4)
         mismatches = await verify_inputs_applied(ws, entity_id, canary_inputs, cid)
+        cid += 1
+        indicator_mismatches = await verify_inputs_applied(
+            ws, indicator_entity_id, indicator_canary_inputs, cid
+        )
         cid += 1
 
         # Restore before any possible raise
@@ -851,10 +1047,20 @@ async def run_preflight_checks(ws, space: dict) -> tuple[str, dict[str, dict]]:
             ws, entity_id, [{"id": canary_id, "value": canary_orig}], cid
         )
         cid += 1
+        await apply_inputs(
+            ws,
+            indicator_entity_id,
+            [{"id": indicator_canary_id, "value": canary_orig}],
+            cid,
+        )
+        cid += 1
+        await refresh_strategy_report(ws, cid)
+        cid += 2
 
-        if mismatches:
+        if mismatches or indicator_mismatches:
             raise RuntimeError(
-                f"Preflight canary round-trip FAILED — getInputValues() mismatch: {mismatches}. "
+                "Preflight canary round-trip FAILED — getInputValues() mismatch: "
+                f"strategy={mismatches}, indicator={indicator_mismatches}. "
                 "setInputValues may not be applying correctly on this TV build."
             )
         print(f"  Canary: set {canary_test}, verified, restored to {canary_orig}. OK.")
@@ -864,6 +1070,8 @@ async def run_preflight_checks(ws, space: dict) -> tuple[str, dict[str, dict]]:
         )
 
     print("Preflight [5/5]: snapshotting initial strategy metrics...")
+    await focus_strategy_report_metrics_tab(ws, cid)
+    cid += 1
     snap = await snapshot_strategy_metrics(ws, entity_id, cid)
     cid += 1
     if snap:
@@ -874,7 +1082,7 @@ async def run_preflight_checks(ws, space: dict) -> tuple[str, dict[str, dict]]:
         print("  Snapshot unavailable (non-blocking).")
 
     print("Preflight: PASSED")
-    return entity_id, schema
+    return entity_id, schema, indicator_entity_id, indicator_schema
 
 
 # -- Automation loop ----------------------------------------------------------
@@ -884,6 +1092,8 @@ async def run_trial(
     ws,
     entity_id: str,
     schema: dict[str, dict],
+    indicator_entity_id: str,
+    indicator_schema: dict[str, dict],
     config: dict,
     space: dict,
     args: argparse.Namespace,
@@ -905,40 +1115,84 @@ async def run_trial(
     locked_params = config["locked_parameters"]
 
     # 1. Validate params
-    errors = validate_trial_params({**locked_params, **search_params}, schema)
-    schema_drift_errors = [e for e in errors if e.startswith("schema_drift")]
-    invalid_input_errors = [e for e in errors if e.startswith("invalid_input")]
+    strategy_errors = validate_trial_params({**locked_params, **search_params}, schema)
+    indicator_errors = validate_trial_params(
+        {**locked_params, **search_params}, indicator_schema
+    )
+    schema_drift_errors = [
+        *[e for e in strategy_errors if e.startswith("schema_drift")],
+        *[f"indicator:{e}" for e in indicator_errors if e.startswith("schema_drift")],
+    ]
+    invalid_input_errors = [
+        *[e for e in strategy_errors if e.startswith("invalid_input")],
+        *[f"indicator:{e}" for e in indicator_errors if e.startswith("invalid_input")],
+    ]
     if schema_drift_errors:
         raise RuntimeError(schema_drift_errors[0])
     if invalid_input_errors:
         raise RuntimeError(invalid_input_errors[0])
 
     # 2. Pre-snapshot
+    await focus_strategy_report_metrics_tab(ws, cid)
+    cid += 1
     pre_snap = await snapshot_strategy_metrics(ws, entity_id, cid)
     cid += 1
 
     # 3. Build resolved input list
     input_values = build_input_values(search_params, locked_params, schema)
-    print(f"  -> applying {len(input_values)} inputs ... ", end="", flush=True)
+    indicator_input_values = build_input_values(
+        search_params, locked_params, indicator_schema
+    )
+    print(
+        f"  -> applying {len(input_values)} strategy + {len(indicator_input_values)} indicator inputs ... ",
+        end="",
+        flush=True,
+    )
 
     # 4a. Apply
     await apply_inputs(ws, entity_id, input_values, cid)
     cid += 1
+    await apply_inputs(ws, indicator_entity_id, indicator_input_values, cid)
+    cid += 1
+    report_refreshed = await refresh_strategy_report(ws, cid)
+    cid += 2
+    if report_refreshed:
+        print("update-report ... ", end="", flush=True)
 
     # 4b. Verify-after-set
     mismatches = await verify_inputs_applied(ws, entity_id, input_values, cid)
     cid += 1
-    if mismatches:
+    indicator_mismatches = await verify_inputs_applied(
+        ws, indicator_entity_id, indicator_input_values, cid
+    )
+    cid += 1
+    if mismatches or indicator_mismatches:
         raise RuntimeError(
-            f"invalid_input: getInputValues() mismatch after setInputValues — {mismatches}"
+            "invalid_input: getInputValues() mismatch after setInputValues — "
+            f"strategy={mismatches}, indicator={indicator_mismatches}"
         )
 
     # 5. Two-phase freshness gate
     print("recalc ... ", end="", flush=True)
-    await wait_for_recalc(ws, entity_id, args.recalc_timeout, cid)
+    strategy_loaded = await wait_for_recalc(ws, entity_id, args.recalc_timeout, cid)
+    cid += 1
+    indicator_loaded = await wait_for_recalc(
+        ws, indicator_entity_id, args.recalc_timeout, cid
+    )
     cid += 1
 
+    report_refreshed = await refresh_strategy_report(ws, cid)
+    cid += 2
+    if report_refreshed:
+        print("update-report ... ", end="", flush=True)
+    if not strategy_loaded:
+        print("no-strategy-loading ... ", end="", flush=True)
+    if not indicator_loaded:
+        print("no-indicator-loading ... ", end="", flush=True)
+
     # 6. Read trades
+    await focus_strategy_report_metrics_tab(ws, cid)
+    cid += 1
     print("reading ... ", end="", flush=True)
     tv_trades = await get_trades(ws, entity_id, cid)
     cid += 1
@@ -976,15 +1230,24 @@ async def command_preflight_async(args: argparse.Namespace) -> int:
     print(f"CDP: {ws_url[:70]}...")
 
     async with websockets.connect(ws_url, max_size=64 * 1024 * 1024) as ws:
-        entity_id, schema = await run_preflight_checks(ws, space)
+        (
+            entity_id,
+            schema,
+            indicator_entity_id,
+            indicator_schema,
+        ) = await run_preflight_checks(ws, space)
 
-    print(f"\nEntity ID:   {entity_id}")
-    print(f"Schema size: {len(schema)} inputs")
-    print("\nSearch parameter → live input ID mapping:")
+    print(f"\nStrategy Entity ID:   {entity_id}")
+    print(f"Indicator Entity ID:  {indicator_entity_id}")
+    print(f"Strategy Schema size: {len(schema)} inputs")
+    print(f"Indicator Schema size:{len(indicator_schema)} inputs")
+    print("\nSearch parameter → live input IDs:")
     for name in sorted(space.get("search_parameters", {})):
         inp = schema.get(name)
+        ind_inp = indicator_schema.get(name)
         inp_id = inp["id"] if inp else "NOT FOUND"
-        print(f"  {inp_id}  {name}")
+        ind_id = ind_inp["id"] if ind_inp else "NOT FOUND"
+        print(f"  strategy={inp_id}  indicator={ind_id}  {name}")
     return 0
 
 
@@ -1022,7 +1285,12 @@ async def command_run_async(args: argparse.Namespace) -> int:
     async with websockets.connect(ws_url, max_size=64 * 1024 * 1024) as ws:
         # Run preflight once per batch
         print("\nRunning preflight checks...")
-        entity_id, schema = await run_preflight_checks(ws, space)
+        (
+            entity_id,
+            schema,
+            indicator_entity_id,
+            indicator_schema,
+        ) = await run_preflight_checks(ws, space)
         print()
 
         for i, config in enumerate(configs, 1):
@@ -1030,7 +1298,15 @@ async def command_run_async(args: argparse.Namespace) -> int:
             print(f"[{i}/{len(configs)}] {trial_id}")
             try:
                 record = await run_trial(
-                    ws, entity_id, schema, config, space, args, cid_base=i * 100
+                    ws,
+                    entity_id,
+                    schema,
+                    indicator_entity_id,
+                    indicator_schema,
+                    config,
+                    space,
+                    args,
+                    cid_base=i * 100,
                 )
                 m = record["metrics"]
                 o = record["objective"]

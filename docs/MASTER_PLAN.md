@@ -39,7 +39,7 @@
   - `rabid_raccoon` exists; `warbird` does not yet exist.
   - `local_warehouse/` is absent, so `local_warehouse/migrations/` and `local_schema_migrations` are still pending.
   - `data/` exists with bootstrap candidate files/parquet extracts; `artifacts/` is still absent.
-  - `scripts/ag/` exists but only contains `.gitkeep` and `local_warehouse_schema.sql`; there is no Phase 4 pipeline implementation yet.
+- `scripts/ag/` now includes Phase 4 bootstrap implementation (`build_ag_pipeline.py`) plus tuner utilities.
 - Exact drift blocking execution:
   - `scripts/ag/local_warehouse_schema.sql` is legacy local-research SQL. It assumes canonical cloud tables already exist locally and references legacy `warbird_*` tables plus retired news surfaces, so it does not satisfy the Phase 1 local warehouse or Phase 3 canonical AG contract.
   - `docs/contracts/ag_local_training_schema.md` exists in the working tree but is currently untracked, so the Phase 0 authority rewrite is not yet fully protected in git.
@@ -112,7 +112,11 @@ Verified 2026-04-13 (pine-lint.sh, both files):
 - Dead HyperWave oscillator + EXHAUSTION DIAMOND energy blocks removed from both files
   (were live v6 code driving sidebar; orphaned in v7 when sidebar was removed).
 - `Exhaustion ATR Multiplier` removed from strategy_tuning_space.json (fed only dead code).
-- ZigZag locked params corrected: Deviation=3.0, Depth=12.
+- ZigZag contract is not actually locked yet. Verified 2026-04-13: docs still state
+  Deviation=3.0 / Depth=12, but runtime and generator paths are split:
+  institutional auto-tune uses 15m Depth=15, strategy manual default stays Depth=12
+  while strategy auto-tune also resolves 15m to Depth=15, and
+  `scripts/ag/build_ag_pipeline.py` hardcodes Deviation=3.0 / Depth=15.
 - Raw footprint numeric exports added to strategy: `ml_exh_fp_delta`, `ml_exh_trigger_row_delta`,
   `ml_exh_extreme_vol_ratio`, `ml_exh_stacked_imbalance_count`.
 - CDP tuner automation built: `scripts/ag/tv_auto_tune.py` replaces manual knob→CSV loop.
@@ -308,6 +312,38 @@ Original requirements:
   - no tuning on test
   - naive baseline required
   - full run metadata required
+
+**Checkpoint 2026-04-13:** `scripts/ag/build_ag_pipeline.py` implemented and executed against local `warbird`.  
+Outputs:
+- populated canonical AG tables from `mes_15m` reconstruction:
+  - `ag_fib_snapshots`: 3,101 rows
+  - `ag_fib_interactions`: 37,450 rows
+  - `ag_fib_outcomes`: 37,450 rows
+  - `ag_training` (non-censored): 17,100 rows
+- generated walk-forward split structure at `artifacts/ag_runs/agfit_20260413T192255Z/` (`train.csv`, `val.csv`, `test.csv`, `manifest.json`)
+- added repo-native baseline trainer scaffold at `scripts/ag/train_ag_baseline.py`:
+  - consumes `ag_training`
+  - joins real `cross_asset_1h` + `FRED/econ_calendar`
+  - strips realized-outcome leakage before training
+  - writes local run artifacts under `artifacts/ag_runs/`
+  - blocks training when validation/test slices collapse below 2 target classes
+  - trainer defaults now force `presets=best_quality`, `num_bag_folds=5`,
+    `num_stack_levels=2`, `dynamic_stacking=auto`
+- verified current local training-state facts:
+  - `ag_training` label distribution:
+    - `STOPPED`: 15,893
+    - `TP5_HIT`: 1,114
+    - `TP1_ONLY`: 74
+    - `TP2_HIT`: 19
+  - no trained predictor artifact currently exists under `artifacts/`
+  - `autogluon` is not installed in the active local Python environment, so
+    `TabularPredictor.fit()` cannot complete in this workspace yet
+
+Remaining Phase 4 blocker after this checkpoint:
+- evaluation-policy repair for the current `outcome_label` regime. Verified on 2026-04-13: `TP1_ONLY` disappears after 2022-06-28 and 2024+ is nearly all `STOPPED`, so several time-safe multiclass folds are structurally invalid.
+- ZigZag contract drift remains unresolved across docs, Pine runtime, and Python reconstruction. Do not claim reproducible AG/Pine parity until one depth contract is selected and enforced everywhere.
+- local lineage/reporting tables are still absent in `warbird`: `ag_training_runs`, `ag_shap_feature_summary`, `ag_shap_interactions`.
+- then finish feature parity for first-run scope (`MES + cross-asset + macro` plus indicator-snapshot-derived feature families) and complete AutoGluon training/SHAP lineage steps.
 
 ## Phase 5: Full-Surface SHAP Program
 

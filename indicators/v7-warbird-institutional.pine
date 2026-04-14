@@ -3,7 +3,7 @@
 // Warbird v7 Institutional — MES Fib Structure + AG Contract Surface
 // Base: v6-warbird-complete.pine (2026-03-26)
 // Upgrade: v6 migration + 5 target extensions + AG hidden export surface
-// Date: 2026-03-31
+// Date: 2026-04-13
 //
 // NO-REPAINT AUDIT:
 // - All structure conditions gated by barstate.isconfirmed — signals fire at bar close only
@@ -31,7 +31,7 @@ import TradingView/ZigZag/7 as zigzag
 // FIBONACCI ENGINE SETTINGS
 //=====================
 string groupFibEngine = "Fibonacci Engine"
-bool autoTuneZZ = input.bool(true, "Auto-tune ZigZag by Timeframe", group=groupFibEngine,
+bool autoTuneZZ = input.bool(false, "Auto-tune ZigZag by Timeframe", group=groupFibEngine,
   tooltip="ON: 4H+ uses Deviation=4/Depth=20, 1H uses Deviation=3.5/Depth=15, 15m and below uses Deviation=3/Depth=15. Turn OFF to set values manually.")
 float fibDeviationManual = input.float(3.0, "ZigZag Deviation (manual)",
   minval=0.5, maxval=20.0, step=0.5, group=groupFibEngine,
@@ -95,29 +95,29 @@ int WIDTH_TARGET      = 2
 // STRUCTURE LOGIC
 //=====================
 string groupLogic = "Structure Logic"
-int retestBars   = input.int(6, "Acceptance Retest Window (bars)", minval=1, group=groupLogic)
+int retestBars   = input.int(1, "Acceptance Retest Window (bars)", minval=1, group=groupLogic)
 bool rejectWick   = input.bool(true, "Rejection = wick into zone then close back out", group=groupLogic)
 bool oneShotEvent = input.bool(true, "One-shot event markers/alerts", group=groupLogic)
 
 bool gateShortsInBullTrend = input.bool(true, "Gate Shorts In Bull Trend", group=groupLogic,
   tooltip="Blocks bearish accept-entry triggers when the broader trend context is bullish and rising. Keeps the engine from bleeding into obvious countertrend shorts.")
-float shortTrendGateAdx = input.float(18.0, "Short Gate ADX Floor", minval=5.0, maxval=50.0, step=0.5, group=groupLogic,
+float shortTrendGateAdx = input.float(23.0, "Short Gate ADX Floor", minval=5.0, maxval=50.0, step=0.5, group=groupLogic,
   tooltip="Minimum ADX required before the bullish-trend short gate activates.")
 
 string groupStops = "Stop Logic"
-string stopFamilyId = input.string("ATR_1_5", "Fallback Stop Family", options=["FIB_NEG_0236", "FIB_NEG_0382", "ATR_1_0", "ATR_1_5", "ATR_STRUCTURE_1_25", "FIB_0236_ATR_COMPRESS_0_50"], group=groupStops,
+string stopFamilyId = input.string("ATR_STRUCTURE_1_25", "Fallback Stop Family", options=["FIB_NEG_0236", "FIB_NEG_0382", "ATR_1_0", "ATR_1_5", "ATR_STRUCTURE_1_25", "FIB_0236_ATR_COMPRESS_0_50"], group=groupStops,
   tooltip="Local fallback stop family for the indicator overlay and hidden stop export. Use this until the AG packet runtime can publish a live stop-family decision back to TradingView.")
-float continuationHoldStopAtrMult = input.float(2.0, "Tier 1 Hold Stop ATR", minval=1.0, maxval=4.0, step=0.25, group=groupStops,
+float continuationHoldStopAtrMult = input.float(1.5, "Tier 1 Hold Stop ATR", minval=1.0, maxval=4.0, step=0.25, group=groupStops,
   tooltip="When a same-direction Tier 1 continuation signal fires during an active trade, temporarily widen the stop to entry +/- ATR x this multiplier for the configured hold bars.")
 
 string groupFootprint = "Footprint Exhaustion"
-int footprintTicksPerRow = input.int(4, "Footprint Ticks Per Row", minval=1, group=groupFootprint)
+int footprintTicksPerRow = input.int(6, "Footprint Ticks Per Row", minval=1, group=groupFootprint)
 float footprintVaPercent = input.float(70.0, "Footprint VA %", minval=1.0, maxval=100.0, step=1.0, group=groupFootprint)
-float footprintImbalancePercent = input.float(300.0, "Footprint Imbalance %", minval=100.0, maxval=1000.0, step=10.0, group=groupFootprint)
-int exhaustionZLen = input.int(20, "Exhaustion Z Length", minval=10, maxval=100, group=groupFootprint)
+float footprintImbalancePercent = input.float(275.0, "Footprint Imbalance %", minval=100.0, maxval=1000.0, step=10.0, group=groupFootprint)
+int exhaustionZLen = input.int(14, "Exhaustion Z Length", minval=10, maxval=100, group=groupFootprint)
 float exhaustionZThreshold = input.float(2.5, "Exhaustion Z Threshold", minval=1.0, maxval=5.0, step=0.1, group=groupFootprint)
 float exhaustionLevelAtrTol = input.float(0.10, "Extension ATR Tolerance", minval=0.01, maxval=0.50, step=0.01, group=groupFootprint)
-float zeroPrintVolRatio = input.float(0.12, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
+float zeroPrintVolRatio = input.float(0.10, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
 int stackedImbalanceRows = input.int(3, "Extreme Rows To Inspect", minval=1, maxval=10, group=groupFootprint)
 int continuationHoldBars = input.int(4, "Tier 1 Hold Bars", minval=1, maxval=20, group=groupFootprint)
 
@@ -125,7 +125,7 @@ int continuationHoldBars = input.int(4, "Tier 1 Hold Bars", minval=1, maxval=20,
 // VISUALS (colors/widths locked to spec — see constants above)
 //=====================
 string groupViz = "Visuals"
-int targetLookbackBars = input.int(55, "Target Line Lookback Bars", minval=5, maxval=500, group=groupViz)
+int targetLookbackBars = input.int(40, "Target Line Lookback Bars", minval=5, maxval=500, group=groupViz)
 bool extendLevelsRight = input.bool(false, "Extend Levels Right", group=groupViz)
 bool useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window", group=groupViz)
 
@@ -340,8 +340,8 @@ htfConfluenceCheck(float level15m, float currentFibRange) =>
 //=====================
 fibZzUpdate() =>
     var fibSettings = zigzag.Settings.new(fibDeviation, fibDepth, color(na), false, false, false, false, "Absolute", true)
-    var zigzag.ZigZag fibZZ = zigzag.newInstance(fibSettings)
-    var zigzag.Pivot lastPvt = na
+    var fibZZ = zigzag.newInstance(fibSettings)
+    zigzag.Pivot lastPvt = na
     fibSettings.devThreshold := math.max(ta.atr(10) / close * 100 * fibDeviation, fibThresholdFloorPct)
     bool newPivot = false
     float pivotHighPrice = na
@@ -735,7 +735,7 @@ bool mlExhAbsorption = fpAvailable and not na(pocRow) and (
     (high - volume_row.up_price(pocRow) <= footprintRowSize and close < open) or
     (volume_row.down_price(pocRow) - low <= footprintRowSize and close > open))
 // Zero print: no volume at the extreme row on one side (finished auction)
-bool mlExhZeroPrint = fpAvailable and not na(extremeRowVolRatio) and extremeRowVolRatio <= zeroPrintVolRatio and not na(extremeRow) and (volume_row.buy_volume(extremeRow) == 0 or volume_row.sell_volume(extremeRow) == 0)
+bool mlExhZeroPrint = mlExhFootprintAvailable and not na(extremeRowVolRatio) and extremeRowVolRatio <= zeroPrintVolRatio and not na(extremeRow) and (volume_row.buy_volume(extremeRow) == 0 or volume_row.sell_volume(extremeRow) == 0)
 int footprintEvidenceCount = (mlExhDeltaDiv ? 1 : 0) + (mlExhAbsorption ? 1 : 0) + (mlExhZeroPrint ? 1 : 0)
 
 // ── SWING EXTREME ───────────────────────────────────────────────────────

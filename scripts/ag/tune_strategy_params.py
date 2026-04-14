@@ -365,6 +365,7 @@ def upsert_recorded_trial(conn, trial: dict[str, Any]) -> None:
           evaluation_mode,
           origin,
           status,
+          failure_reason,
           params_signature,
           search_parameters,
           locked_parameters,
@@ -389,7 +390,7 @@ def upsert_recorded_trial(conn, trial: dict[str, Any]) -> None:
           created_at,
           updated_at
         ) VALUES (
-          %s, %s, %s, 'manual_record', 'RECORDED', %s, %s, %s, %s, %s, %s, %s, %s,
+          %s, %s, %s, 'manual_record', 'RECORDED', NULL, %s, %s, %s, %s, %s, %s, %s, %s,
           %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()
         )
         ON CONFLICT (trial_id)
@@ -397,6 +398,7 @@ def upsert_recorded_trial(conn, trial: dict[str, Any]) -> None:
           trial_id = EXCLUDED.trial_id,
           origin = 'manual_record',
           status = 'RECORDED',
+          failure_reason = NULL,
           evaluation_mode = EXCLUDED.evaluation_mode,
           params_signature = EXCLUDED.params_signature,
           search_parameters = EXCLUDED.search_parameters,
