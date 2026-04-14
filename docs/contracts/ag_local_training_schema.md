@@ -69,6 +69,7 @@ CREATE TABLE ag_fib_interactions (
   energy FLOAT8,
   confluence_quality FLOAT8,
   ml_exec_tf_code INT,
+  ml_exec_direction_code INT,
   ml_exec_state_code INT,
   ml_exec_pattern_code INT,
   ml_exec_pocket_code INT,
@@ -229,22 +230,31 @@ First admitted child execution patterns:
 
 Required columns (add to `ag_fib_interactions` or a 1:1 local join surface keyed by `id`):
   ml_exec_tf_code               INT      1=1m, 3=3m, 5=5m, 0=none
+  ml_exec_direction_code        INT      -1=short child trigger, 0=none, 1=long child trigger
   ml_exec_state_code            INT      0=none, 1=WATCH, 2=ARMED, 3=GREEN_LIGHT, 4=INVALIDATED, 5=EXPIRED
   ml_exec_pattern_code          INT      0=none, 1=PULLBACK_HOLD, 2=FAILED_RECLAIM, 3=CLIMAX_REVERSAL, 4=FAILED_EXPANSION
   ml_exec_pocket_code           INT      dominant child trigger pocket (236/382/500/618/786)
   ml_exec_impulse_break_atr     FLOAT8   normalized size of the impulse break that created the child setup
   ml_exec_reclaim_dist_atr      FLOAT8   normalized distance from child trigger close to the reclaim / half-back line
-  ml_exec_orderflow_bias        INT      -1=counter, 0=neutral, 1=same-direction at trigger
+  ml_exec_orderflow_bias        INT      -1=counter-to-parent, 0=neutral, 1=parent-aligned at trigger
   ml_exec_delta_norm            FLOAT8   normalized signed delta at the trigger
   ml_exec_absorption            BOOLEAN  absorption confirmed near the child trigger level
   ml_exec_zero_print            BOOLEAN  zero-print / finished-auction condition confirmed
-  ml_exec_same_dir_imbalance_ct INT      same-direction imbalance rows near the trigger
-  ml_exec_opp_dir_imbalance_ct  INT      opposing imbalance rows near the trigger
+  ml_exec_same_dir_imbalance_ct INT      imbalance rows aligned with parent 15m direction
+  ml_exec_opp_dir_imbalance_ct  INT      imbalance rows opposing parent 15m direction
   ml_exec_target_leg_code       INT      1=to_1_0, 2=to_t1, 3=to_1_0_then_t1
 
 These fields describe how the parent MES 15m setup becomes actionable. They do
 not alter candidate identity, do not create a second trade object, and do not
 permit cloud mirroring of raw lower-timeframe execution history.
+
+`ml_exec_direction_code` is the admitted child execution direction. It may
+match the parent `direction`, or oppose it when the lower-timeframe tape emits a
+legal failure / reversal trigger while the parent 15m map remains unchanged.
+
+These child execution fields are AG-facing primitives. They are not a hand-built
+execution policy. AutoGluon and SHAP determine which child timeframe, state,
+direction, and pressure combinations survive.
 
 Current warehouse heuristic for `EXPIRED`:
 

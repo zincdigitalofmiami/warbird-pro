@@ -114,8 +114,12 @@ Phase execution order:
   parent-aligned long rows at `05:00`, `05:30`, `05:45`, `06:00`, and `06:15`
   CT, with `GREEN_LIGHT` at `06:00` and `06:15`. It does not emit the obvious
   counter-direction failure short the operator marked on tape.
-- Verified blocker: current parent-direction interaction contract cannot
-  represent a failure short while the active parent 15m map remains long.
+- Direction repair landed: child execution direction is explicit on the parent
+  row, so lower-timeframe failure triggers can oppose the active 15m map
+  without creating a second trade object.
+- AG-ready scope lock: do not add a second child routing taxonomy ahead of AG.
+  The admitted child surface is the primitive `ml_exec_*` field family; AG and
+  SHAP decide which states/timeframes matter.
 
 ### Legacy / Stale Code (Known Debt)
 

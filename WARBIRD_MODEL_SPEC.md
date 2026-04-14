@@ -181,7 +181,8 @@ Canonical local training schema is the exact contract in `docs/contracts/ag_loca
 `ag_fib_interactions` is also the admitted home for child execution-state
 context once the migration lands. Do not create a fourth canonical AG table for
 `1m` / `3m` / `5m` triggers. Child execution features remain attached to the
-parent MES 15m setup row.
+parent MES 15m setup row. Child execution direction may oppose the parent
+direction when the lower timeframe emits a legal failure / reversal trigger.
 
 `ag_fib_outcomes` holds realized path/outcome fields, including:
 
@@ -602,8 +603,9 @@ The packet must include:
 8. event-response thresholds and suppression rules
 9. fib snapshot / lookback-family decisions when they are part of the admitted contract
 10. decision-policy thresholds for `TAKE_TRADE` / `WAIT` / `PASS`
-11. parent-versus-child execution routing policy, including the preferred
-    `1m` / `3m` / `5m` trigger family when the parent 15m setup is active
+11. child execution feature/timeframe evidence that survived AG/SHAP review,
+    including the preferred `1m` / `3m` / `5m` trigger family when the parent
+    15m setup is active
 12. run metadata and sample counts
 
 Packet promotion rule:

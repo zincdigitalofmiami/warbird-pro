@@ -32,6 +32,21 @@ FIB_T3 = 2.0
 FIB_T4 = 2.236
 FIB_T5 = 2.618
 
+AG_TRAINING_VIEW_SQL = """
+CREATE OR REPLACE VIEW ag_training AS
+SELECT
+  i.*,
+  s.anchor_high, s.anchor_low, s.fib_range, s.fib_bull,
+  s.anchor_swing_bars, s.anchor_swing_velocity, s.atr14,
+  o.highest_tp_hit, o.hit_tp1, o.hit_tp2, o.hit_tp3, o.hit_tp4, o.hit_tp5,
+  o.tp1_before_sl, o.mae_pts, o.mfe_pts, o.outcome_label,
+  o.bars_to_tp1, o.bars_to_sl
+FROM ag_fib_interactions i
+JOIN ag_fib_snapshots s ON i.snapshot_ts = s.ts
+JOIN ag_fib_outcomes o ON o.interaction_id = i.id
+WHERE o.outcome_label != 'CENSORED'
+"""
+
 
 @dataclass
 class MesBar:
@@ -105,6 +120,7 @@ class InteractionRow:
     energy: float
     confluence_quality: float
     ml_exec_tf_code: int
+    ml_exec_direction_code: int
     ml_exec_state_code: int
     ml_exec_pattern_code: int
     ml_exec_pocket_code: int
@@ -124,6 +140,7 @@ class InteractionRow:
 @dataclass
 class MicroExecContext:
     tf_code: int = 0
+    direction_code: int = 0
     state_code: int = 0
     pattern_code: int = 0
     pocket_code: int = 0
@@ -811,6 +828,7 @@ def build_snapshots_and_interactions(
                 energy=energy,
                 confluence_quality=cq,
                 ml_exec_tf_code=micro_ctx.tf_code,
+                ml_exec_direction_code=micro_ctx.direction_code,
                 ml_exec_state_code=micro_ctx.state_code,
                 ml_exec_pattern_code=micro_ctx.pattern_code,
                 ml_exec_pocket_code=micro_ctx.pocket_code,
@@ -902,6 +920,36 @@ def micro_exec_expired(
     return reclaim_dist_atr >= 1.5 and impulse_break_atr <= 0.15
 
 
+def micro_tail_metrics(
+    rolled: list[MesBar],
+    flows: list[float],
+    bucket_size: int,
+    atr14_now: float,
+) -> tuple[float, float]:
+    tail_len = 5 if bucket_size == 1 else 3 if bucket_size == 3 else 2
+    tail_len = min(tail_len, len(rolled))
+    if tail_len <= 0:
+        return 0.0, 0.0
+
+    tail_rows = rolled[-tail_len:]
+    tail_flows = flows[-tail_len:]
+    tail_vol = sum(bar.volume for bar in tail_rows)
+    tail_delta = sum(tail_flows) / max(tail_vol, 1.0)
+    tail_move = (tail_rows[-1].close - tail_rows[0].open) / max(atr14_now, 1e-9)
+    return tail_delta, tail_move
+
+
+def micro_counter_target_leg_code(
+    parent_direction: int,
+    fib_level_touched: int,
+    fib_level_price: float,
+    close_now: float,
+) -> int:
+    if parent_direction == 1:
+        return 1 if fib_level_touched in {618, 786} and close_now <= fib_level_price else 0
+    return 1 if fib_level_touched in {236, 382} and close_now >= fib_level_price else 0
+
+
 def derive_micro_exec_context(
     window_bars: list[MesBar],
     direction: int,
@@ -925,7 +973,8 @@ def derive_micro_exec_context(
             continue
         flows = [micro_signed_flow(bar) for bar in rolled]
         vol_sum = sum(bar.volume for bar in rolled)
-        directional_pressure = direction * (sum(flows) / max(vol_sum, 1.0))
+        raw_delta = sum(flows) / max(vol_sum, 1.0)
+        directional_pressure = direction * raw_delta
         same_dir_count = sum(
             1 for flow, bar in zip(flows, rolled, strict=False)
             if direction * flow > max(bar.volume * 0.15, 1.0)
@@ -934,18 +983,70 @@ def derive_micro_exec_context(
             1 for flow, bar in zip(flows, rolled, strict=False)
             if direction * flow < -max(bar.volume * 0.15, 1.0)
         )
-        net_move_norm = direction * ((rolled[-1].close - rolled[0].open) / max(atr14_now, 1e-9))
+        raw_move_norm = (rolled[-1].close - rolled[0].open) / max(atr14_now, 1e-9)
+        net_move_norm = direction * raw_move_norm
+        tail_delta_raw, tail_move_raw = micro_tail_metrics(rolled, flows, bucket_size, atr14_now)
+        counter_tail_pressure = (-direction) * tail_delta_raw
+        counter_tail_move = (-direction) * tail_move_raw
+        close_side_counter = (-direction) * ((close_now - fib_level_price) / max(atr14_now, 1e-9))
+        level_failed_reclaim = bool(
+            (direction == 1 and max(bar.high for bar in rolled) >= fib_level_price and close_now < fib_level_price)
+            or (direction == -1 and min(bar.low for bar in rolled) <= fib_level_price and close_now > fib_level_price)
+        )
+        orderflow_bias = 0
+        if directional_pressure >= 0.15:
+            orderflow_bias = 1
+        elif directional_pressure <= -0.15 or opp_dir_count > same_dir_count:
+            orderflow_bias = -1
         score = directional_pressure + 0.25 * net_move_norm + 0.05 * (same_dir_count - opp_dir_count)
         scored_timeframes.append(
             {
                 "bucket_size": bucket_size,
+                "direction_code": direction,
+                "state_code": MICRO_EXEC_STATE_WATCH,
+                "pattern_code": 0,
                 "directional_pressure": directional_pressure,
                 "same_dir_count": same_dir_count,
                 "opp_dir_count": opp_dir_count,
-                "net_move_norm": net_move_norm,
+                "impulse_break_atr": abs(float(net_move_norm)),
+                "reclaim_dist_atr": abs(close_now - fib_level_price) / max(atr14_now, 1e-9),
+                "orderflow_bias": orderflow_bias,
                 "score": score,
+                "target_leg_code": 0,
             }
         )
+
+        counter_score = (
+            0.45 * counter_tail_pressure
+            + 0.30 * counter_tail_move
+            + 0.20 * close_side_counter
+            + 0.05 * max(opp_dir_count - same_dir_count, 0)
+            + (0.20 if level_failed_reclaim else 0.0)
+        )
+        if level_failed_reclaim:
+            counter_state = (
+                MICRO_EXEC_STATE_GREEN
+                if counter_score >= 0.20 and counter_tail_pressure >= 0.05 and counter_tail_move >= 0.10
+                else MICRO_EXEC_STATE_ARMED
+                if counter_score >= 0.10
+                else MICRO_EXEC_STATE_WATCH
+            )
+            scored_timeframes.append(
+                {
+                    "bucket_size": bucket_size,
+                    "direction_code": -direction,
+                    "state_code": counter_state,
+                    "pattern_code": 2,
+                    "directional_pressure": counter_tail_pressure,
+                    "same_dir_count": same_dir_count,
+                    "opp_dir_count": opp_dir_count,
+                    "impulse_break_atr": abs(float(counter_tail_move)),
+                    "reclaim_dist_atr": abs(close_now - fib_level_price) / max(atr14_now, 1e-9),
+                    "orderflow_bias": -1,
+                    "score": counter_score,
+                    "target_leg_code": micro_counter_target_leg_code(direction, fib_level_touched, fib_level_price, close_now),
+                }
+            )
 
     if not scored_timeframes:
         context.target_leg_code = micro_target_leg_code(fib_level_touched, 0)
@@ -955,39 +1056,38 @@ def derive_micro_exec_context(
     aligned_delta = float(best["directional_pressure"])
     same_dir_count = int(best["same_dir_count"])
     opp_dir_count = int(best["opp_dir_count"])
-    impulse_break_atr = abs(float(best["net_move_norm"]))
-    reclaim_dist_atr = abs(close_now - fib_level_price) / max(atr14_now, 1e-9)
+    impulse_break_atr = float(best["impulse_break_atr"])
+    reclaim_dist_atr = float(best["reclaim_dist_atr"])
+    direction_code = int(best["direction_code"])
+    orderflow_bias = int(best["orderflow_bias"])
 
-    orderflow_bias = 0
-    if aligned_delta >= 0.15:
-        orderflow_bias = 1
-    elif aligned_delta <= -0.15:
-        orderflow_bias = -1
-
-    state_code = MICRO_EXEC_STATE_WATCH
-    if orderflow_bias == -1 and (opp_dir_count > same_dir_count or aligned_delta <= -0.20):
-        state_code = MICRO_EXEC_STATE_INVALIDATED
-    elif orderflow_bias == 1 and aligned_delta >= 0.35 and same_dir_count >= max(2, opp_dir_count + 1):
-        state_code = MICRO_EXEC_STATE_GREEN
-    elif orderflow_bias == 1:
-        state_code = MICRO_EXEC_STATE_ARMED
+    state_code = int(best["state_code"])
+    if direction_code == direction:
+        state_code = MICRO_EXEC_STATE_WATCH
+        if aligned_delta >= 0.35 and same_dir_count >= max(2, opp_dir_count + 1):
+            state_code = MICRO_EXEC_STATE_GREEN
+        elif orderflow_bias == 1:
+            state_code = MICRO_EXEC_STATE_ARMED
+        elif orderflow_bias == -1 and (opp_dir_count > same_dir_count or aligned_delta <= -0.20):
+            state_code = MICRO_EXEC_STATE_INVALIDATED
 
     if micro_exec_expired(state_code, reclaim_dist_atr, impulse_break_atr):
         state_code = MICRO_EXEC_STATE_EXPIRED
 
-    pattern_code = 0
-    if state_code == MICRO_EXEC_STATE_GREEN:
+    pattern_code = int(best["pattern_code"])
+    if pattern_code == 0 and state_code == MICRO_EXEC_STATE_GREEN:
         if direction == 1 and pocket_code in {236, 382, 500, 618, 786} and low_now <= fib_level_price <= high_now and close_now >= fib_level_price:
             pattern_code = 1
         elif direction == -1 and pocket_code in {382, 500, 618, 786} and low_now <= fib_level_price <= high_now and close_now <= fib_level_price:
             pattern_code = 2
-    elif state_code == MICRO_EXEC_STATE_INVALIDATED:
+    elif pattern_code == 0 and state_code == MICRO_EXEC_STATE_INVALIDATED:
         if pocket_code in {236, 382, 500}:
             pattern_code = 3
         else:
             pattern_code = 4
 
     context.tf_code = int(best["bucket_size"])
+    context.direction_code = direction_code
     context.state_code = state_code
     context.pattern_code = pattern_code
     context.impulse_break_atr = impulse_break_atr
@@ -996,7 +1096,14 @@ def derive_micro_exec_context(
     context.delta_norm = aligned_delta
     context.same_dir_imbalance_ct = same_dir_count
     context.opp_dir_imbalance_ct = opp_dir_count
-    context.target_leg_code = micro_target_leg_code(fib_level_touched, pattern_code)
+    if direction_code != direction:
+        context.target_leg_code = int(best["target_leg_code"])
+    else:
+        context.target_leg_code = (
+            int(best["target_leg_code"])
+            if int(best["target_leg_code"]) != 0
+            else micro_target_leg_code(fib_level_touched, pattern_code)
+        )
     return context
 
 
@@ -1215,6 +1322,7 @@ def insert_interactions(conn: psycopg2.extensions.connection, interactions: list
             r.energy,
             r.confluence_quality,
             r.ml_exec_tf_code,
+            r.ml_exec_direction_code,
             r.ml_exec_state_code,
             r.ml_exec_pattern_code,
             r.ml_exec_pocket_code,
@@ -1239,7 +1347,7 @@ def insert_interactions(conn: psycopg2.extensions.connection, interactions: list
             open, high, low, close, volume, body_pct, upper_wick_pct, lower_wick_pct,
             rvol, rsi14, ema9, ema21, ema50, ema200, ema_stacked_bull, ema_stacked_bear,
             ema9_dist_pct, macd_hist, adx, energy, confluence_quality,
-            ml_exec_tf_code, ml_exec_state_code, ml_exec_pattern_code, ml_exec_pocket_code,
+            ml_exec_tf_code, ml_exec_direction_code, ml_exec_state_code, ml_exec_pattern_code, ml_exec_pocket_code,
             ml_exec_impulse_break_atr, ml_exec_reclaim_dist_atr, ml_exec_orderflow_bias, ml_exec_delta_norm,
             ml_exec_absorption, ml_exec_zero_print, ml_exec_same_dir_imbalance_ct,
             ml_exec_opp_dir_imbalance_ct, ml_exec_target_leg_code
@@ -1305,6 +1413,12 @@ def insert_outcomes(conn: psycopg2.extensions.connection, outcomes: list[dict[st
     """
     with conn.cursor() as cur:
         execute_values(cur, sql, rows, page_size=2000)
+    conn.commit()
+
+
+def refresh_ag_training_view(conn: psycopg2.extensions.connection) -> None:
+    with conn.cursor() as cur:
+        cur.execute(AG_TRAINING_VIEW_SQL)
     conn.commit()
 
 
@@ -1443,6 +1557,7 @@ def main() -> None:
             interaction_ids = insert_interactions(conn, interactions)
             outcomes = attach_interaction_ids(outcomes, interaction_ids)
             insert_outcomes(conn, outcomes)
+            refresh_ag_training_view(conn)
 
             print(
                 json.dumps(
@@ -1460,6 +1575,8 @@ def main() -> None:
                     sort_keys=True,
                 )
             )
+        else:
+            refresh_ag_training_view(conn)
 
         manifest = build_walk_forward_structure(
             conn=conn,

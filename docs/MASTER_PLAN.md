@@ -222,6 +222,9 @@ and the parent `1.0` / `TARGET 1` path. The contract delta is:
   - `FAILED_EXPANSION`
 - Child states must remain point-in-time safe and keyed back to the same parent
   15m setup. They do not create a second canonical trade object.
+- Child execution direction is now an explicit field on the parent row. It may
+  match the parent map or oppose it when the lower timeframe emits a legal
+  failure trigger against the active 15m context.
 - Historical backfill may use real `mes_1m` OHLCV-derived microstructure plus
   TradingView footprint capture where available. Do not claim full-history
   footprint truth until a real lower-timeframe capture path exists.
@@ -429,9 +432,20 @@ Remaining Phase 4 blocker after this checkpoint:
   `06:00`, and `06:15` are all parent-aligned longs; `06:00` and `06:15` are
   `GREEN_LIGHT`. No counter-direction short row is emitted during the failure
   sequence the operator marked as obvious.
-- next contract blocker: the current parent-aligned interaction model cannot
-  legally express a child failure short while the parent 15m map remains long.
-  That is now a verified warehouse finding, not a chart-side intuition.
+- repair landed on 2026-04-14: child execution direction is now explicit on
+  the parent row, and the warehouse can emit counter-direction failure triggers
+  without creating a second trade object.
+- verified on 2026-04-14 morning tape: the `05:45 America/Chicago` parent row
+  now emits `ml_exec_direction_code = -1`, `ml_exec_tf_code = 3`,
+  `ml_exec_state_code = GREEN_LIGHT`, `ml_exec_pattern_code = FAILED_RECLAIM`,
+  and `ml_exec_orderflow_bias = -1` while the parent 15m `direction` remains
+  `1` (long). That is the first warehouse-proof of the missed failure short.
+- AG-ready contract decision: stop adding child-route taxonomy by hand. The
+  admitted child surface is the primitive feature family already on the parent
+  row (`ml_exec_tf_code`, `ml_exec_direction_code`, `ml_exec_state_code`,
+  `ml_exec_pattern_code`, pressure, imbalance, and target-leg context). AG and
+  SHAP decide what survives; warehouse work should not pre-commit an extra
+  routing policy first.
 - the tuner must split into two scopes:
   - parent 15m fib/settings profile
   - child 1m/3m/5m execution profile
