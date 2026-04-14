@@ -50,7 +50,7 @@ Phase execution order:
   enums, strict boolean logic, dynamic requests, dynamic loops, `request.footprint()`,
   and `polyline` are available for the exhaustion/hold architecture.
 - 2026-04-14 contract delta: the MES 15m fib setup remains the parent object,
-  but execution is reopening as a child `1m` / `3m` / `5m` layer keyed back to
+  but execution is reopening as a micro `5m` / `15m` entry layer keyed back to
   the same parent setup. Fibs are the map; order-flow at the level is the trigger.
 - Automated indicator capture pipeline is designed:
   Pine alert at `barstate.isconfirmed` -> Supabase Edge Function (`indicator-capture`)
@@ -71,16 +71,18 @@ Phase execution order:
 - Python pipeline in `scripts/ag/`:
   - CDP tuner automation built (`tv_auto_tune.py` + `tune_strategy_params.py` + `strategy_tuning_space.json` — applies inputs via CDP, polls recalc, reads trades without CSV export). 2026-04-13 tuner hardening landed: new profile `mes15m_agfit_v3`, narrowed search ranges, non-causal locked inputs removed from trial signatures, coupled-parameter rejection rules added, and objective upgraded to include drawdown efficiency, rolling-window stability, footprint-tail stability, and yearly consistency. No authoritative `mes15m_agfit_v3` recorded trials yet.
 - Phase 4 bootstrap pipeline now implemented (`scripts/ag/build_ag_pipeline.py`) and executed on local `warbird` (2026-04-13): `ag_fib_snapshots=3,101`, `ag_fib_interactions=37,450`, `ag_fib_outcomes=37,450`, `ag_training=17,100` rows.
-  - 2026-04-14 child execution follow-on landed:
-    - migration `011_mes_1m_micro_execution.sql` adds local `mes_1m` plus child execution fields on `ag_fib_interactions`
+  - 2026-04-14 micro execution follow-on landed:
+    - migration `011_mes_1m_micro_execution.sql` adds local `mes_1m` plus micro execution fields on `ag_fib_interactions`
     - `data/mes_1m.parquet` loaded into local `warbird.mes_1m` via `local_warehouse/bootstrap/load_mes_1m_from_parquet.py`
     - local `mes_1m` now holds 2,207,167 rows (`2020-01-01 17:00:00-06` -> `2026-04-03 08:14:00-05`)
-    - `build_ag_pipeline.py` now populates child execution fields (`ml_exec_*`) from local 1m microstructure
+    - `build_ag_pipeline.py` now populates micro execution fields (`ml_exec_*`) from local 1m microstructure
     - latest local rebuild (`agfit_20260414T112223Z`) completed with `micro_bars_loaded=2,207,167`
   - Walk-forward split structure now generated at `artifacts/ag_runs/agfit_20260413T192255Z/` (`train.csv`, `val.csv`, `test.csv`, `manifest.json`).
-  - Repo-native baseline trainer now exists (`scripts/ag/train_ag_baseline.py`). It joins real `cross_asset_1h` + `FRED/econ_calendar`, removes label leakage from `ag_training`, writes run artifacts under `artifacts/ag_runs/`, and blocks training when a validation/test slice has fewer than 2 target classes.
-  - Remaining Phase 4 blocker: current `outcome_label` sparsity breaks several time-safe multiclass eval slices (`TP1_ONLY` disappears after 2022-06-28; 2024+ is almost entirely `STOPPED`). Next blocking item is evaluation-policy repair on top of the current label regime, then actual AutoGluon fit + SHAP lineage.
-- Full-surface SHAP program: not yet built (Phase 5)
+- Repo-native baseline trainer now exists (`scripts/ag/train_ag_baseline.py`). It joins the canonical `ag_training` rows with the curated `FRED/econ_calendar` regime context, enforces the required series set in the FRED catalog, removes label leakage from `ag_training`, writes run artifacts under `artifacts/ag_runs/`, and blocks training when a validation/test slice has fewer than 2 target classes.
+  - 2026-04-14 lineage update: migration `014_ag_training_run_lineage.sql` creates the local run/SHAP spine (`ag_training_runs`, `ag_training_run_metrics`, `ag_artifacts`, `ag_shap_feature_summary`, `ag_shap_cohort_summary`, `ag_shap_interaction_summary`, `ag_shap_temporal_stability`, `ag_shap_feature_decisions`, `ag_shap_run_drift`), and the trainer now writes run metadata, fold metrics, and artifact registry rows for dry and real runs.
+  - Dry-run verification `agtrain_20260414T183606833153Z` passed: `ag_training_runs` row present (`SUCCEEDED`, `dry_run=true`), baseline fold metrics written, and `DATASET_SUMMARY` / `FEATURE_MANIFEST` / `FOLD_SUMMARY` / `TRAINING_SUMMARY` artifacts registered.
+  - Remaining Phase 4 blocker: current `outcome_label` sparsity breaks several time-safe multiclass eval slices (`TP1_ONLY` disappears after 2022-06-28; 2024+ is almost entirely `STOPPED`). Next blocking item is evaluation-policy repair on top of the current label regime, then actual AutoGluon fit + SHAP population.
+- Full-surface SHAP program: lineage spine landed; raw SHAP artifacts and summary population are still pending the first corrected fitted run (Phase 5)
 - Cloud serving promotion: blocked on Phases 1-5 (Phase 6)
 - `artifacts/` directory: now active for AG split/baseline runs. `artifacts/shap/` still not created.
 - `data/` directory for raw Databento archives: not yet organized per v5
@@ -95,14 +97,14 @@ Phase execution order:
 - Historical seed ingest for indicator snapshots: not yet executed.
 - Trade-review timestamp join into feature lineage surfaces: not yet executed.
 - Current tuning harness only optimizes parent 15m strategy knobs. It does not
-  choose `1m` / `3m` / `5m` child execution triggers or expose
-  `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED -> EXPIRED` operator states.
+  choose `5m` / `15m` micro execution triggers or expose
+  `FORMING -> READY -> TRADE_ON -> INVALIDATED -> EXPIRED` operator states.
 - Local `mes_1m` admission is now complete for subordinate micro-execution
-  context. `3m/5m` remain derived on read.
-- Current child execution layer is a first deterministic 1m OHLCV-derived
-  scaffold. Footprint-specific child fields such as true absorption and
+  context. `5m` remains derived on read; `15m` remains the parent-bar candidate.
+- Current micro execution layer is a first deterministic 1m OHLCV-derived
+  scaffold. Footprint-specific micro fields such as true absorption and
   zero-print remain false until lower-timeframe capture is wired.
-- Canonical stale child-state heuristic: provisional `WATCH` / `ARMED` rows
+- Canonical stale micro-state heuristic: provisional `FORMING` / `READY` rows
   become `EXPIRED` once `ml_exec_reclaim_dist_atr >= 1.5` and
   `ml_exec_impulse_break_atr <= 0.15`.
 - Local verification on 2026-04-14: `EXPIRED` yielded `968` rows in
@@ -110,15 +112,15 @@ Phase execution order:
 - Local `mes_1m` now extends through `2026-04-14 08:40 America/Chicago` via
   direct Databento gap-fill. Local `mes_15m` has been rolled forward from
   canonical `mes_1m` through `2026-04-14 08:15 America/Chicago`.
-- First April 14 warehouse audit result: the current child engine emits only
+- First April 14 warehouse audit result: the current micro engine emits only
   parent-aligned long rows at `05:00`, `05:30`, `05:45`, `06:00`, and `06:15`
-  CT, with `GREEN_LIGHT` at `06:00` and `06:15`. It does not emit the obvious
+  CT, with `TRADE_ON` at `06:00` and `06:15`. It does not emit the obvious
   counter-direction failure short the operator marked on tape.
-- Direction repair landed: child execution direction is explicit on the parent
+- Direction repair landed: micro execution direction is explicit on the parent
   row, so lower-timeframe failure triggers can oppose the active 15m map
   without creating a second trade object.
-- AG-ready scope lock: do not add a second child routing taxonomy ahead of AG.
-  The admitted child surface is the primitive `ml_exec_*` field family; AG and
+- AG-ready scope lock: do not add a second micro routing taxonomy ahead of AG.
+  The admitted micro surface is the primitive `ml_exec_*` field family; AG and
   SHAP decide which states/timeframes matter.
 
 ### Legacy / Stale Code (Known Debt)
@@ -138,7 +140,7 @@ Follow Warbird Full Reset Plan v5 only. No other plan drives implementation.
 ### Locked Rules
 
 - 15m is the parent model/chart/setup timeframe.
-- `1m` / `3m` / `5m` are subordinate execution timeframes once the 2026-04-14
+- `5m` / `15m` are the subordinate/entry execution timeframes once the 2026-04-14
   micro-execution delta is implemented.
 - The canonical trade object is the MES 15m fib setup keyed by MES 15m bar close in `America/Chicago`.
 - Any `1H` wording outside archived docs is legacy and must not drive new work.
@@ -151,11 +153,15 @@ Follow Warbird Full Reset Plan v5 only. No other plan drives implementation.
 - Cloud DDL lives in `supabase/migrations/` only.
 - Removed from canonical local build: `cross_asset_1d`, all news surfaces, all options surfaces, all legacy setup/trade/news tables.
 - `mes_1m` is reopened only as subordinate local micro-execution context for the
-  parent MES 15m setup. It is not a new primary trade object and does not
-  authorize canonical stored `3m` / `5m` tables.
+  parent MES 15m setup. It is not a new primary trade object and only exists to
+  derive `5m` entry context. `15m` remains the parent-bar entry candidate.
 - First model target: multiclass `outcome_label`.
-- First feature scope: `MES + cross-asset + macro`.
-- Macro scope: `FRED + econ_calendar` only. No news or narrative sources.
+- First feature scope: `MES 1m/15m/1h/4h + SP500 spot + macro`.
+- Current operational truth: the trainer currently admits `SP500` as the daily FRED regime series. True intraday S&P 500 cash spot is not yet present in local `warbird`.
+- Macro scope: curated `FRED + econ_calendar` only. No news or narrative sources.
+- Project-home raw parity cleanup completed on 2026-04-14: `data/mes_1m.parquet`
+  and `data/mes_1h.parquet` were de-duplicated on `(ts, symbol)`, and the
+  legacy options backup CSVs were removed from `data/local-db-backups/`.
 - Cloud promotion is manual. Local training and SHAP complete first; publish-up only after explicit approval.
 - Cloud never receives: `ag_fib_snapshots`, `ag_fib_interactions`, `ag_fib_outcomes`, `ag_training`, raw features, raw labels, raw SHAP matrices, raw SHAP interaction matrices.
 - Full-surface SHAP is mandatory.

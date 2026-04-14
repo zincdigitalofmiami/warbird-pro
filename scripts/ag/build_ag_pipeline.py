@@ -156,9 +156,9 @@ class MicroExecContext:
 
 
 MICRO_EXEC_STATE_NONE = 0
-MICRO_EXEC_STATE_WATCH = 1
-MICRO_EXEC_STATE_ARMED = 2
-MICRO_EXEC_STATE_GREEN = 3
+MICRO_EXEC_STATE_FORMING = 1
+MICRO_EXEC_STATE_READY = 2
+MICRO_EXEC_STATE_TRADE_ON = 3
 MICRO_EXEC_STATE_INVALIDATED = 4
 MICRO_EXEC_STATE_EXPIRED = 5
 
@@ -915,7 +915,7 @@ def micro_exec_expired(
     reclaim_dist_atr: float,
     impulse_break_atr: float,
 ) -> bool:
-    if state_code not in {MICRO_EXEC_STATE_WATCH, MICRO_EXEC_STATE_ARMED}:
+    if state_code not in {MICRO_EXEC_STATE_FORMING, MICRO_EXEC_STATE_READY}:
         return False
     return reclaim_dist_atr >= 1.5 and impulse_break_atr <= 0.15
 
@@ -967,7 +967,7 @@ def derive_micro_exec_context(
         return context
 
     scored_timeframes: list[dict[str, float | int]] = []
-    for bucket_size in (1, 3, 5):
+    for bucket_size in (5, 15):
         rolled = rollup_micro_bars(window_bars, bucket_size)
         if not rolled:
             continue
@@ -1003,7 +1003,7 @@ def derive_micro_exec_context(
             {
                 "bucket_size": bucket_size,
                 "direction_code": direction,
-                "state_code": MICRO_EXEC_STATE_WATCH,
+                "state_code": MICRO_EXEC_STATE_FORMING,
                 "pattern_code": 0,
                 "directional_pressure": directional_pressure,
                 "same_dir_count": same_dir_count,
@@ -1025,11 +1025,11 @@ def derive_micro_exec_context(
         )
         if level_failed_reclaim:
             counter_state = (
-                MICRO_EXEC_STATE_GREEN
+                MICRO_EXEC_STATE_TRADE_ON
                 if counter_score >= 0.20 and counter_tail_pressure >= 0.05 and counter_tail_move >= 0.10
-                else MICRO_EXEC_STATE_ARMED
+                else MICRO_EXEC_STATE_READY
                 if counter_score >= 0.10
-                else MICRO_EXEC_STATE_WATCH
+                else MICRO_EXEC_STATE_FORMING
             )
             scored_timeframes.append(
                 {
@@ -1063,11 +1063,11 @@ def derive_micro_exec_context(
 
     state_code = int(best["state_code"])
     if direction_code == direction:
-        state_code = MICRO_EXEC_STATE_WATCH
+        state_code = MICRO_EXEC_STATE_FORMING
         if aligned_delta >= 0.35 and same_dir_count >= max(2, opp_dir_count + 1):
-            state_code = MICRO_EXEC_STATE_GREEN
+            state_code = MICRO_EXEC_STATE_TRADE_ON
         elif orderflow_bias == 1:
-            state_code = MICRO_EXEC_STATE_ARMED
+            state_code = MICRO_EXEC_STATE_READY
         elif orderflow_bias == -1 and (opp_dir_count > same_dir_count or aligned_delta <= -0.20):
             state_code = MICRO_EXEC_STATE_INVALIDATED
 
@@ -1075,7 +1075,7 @@ def derive_micro_exec_context(
         state_code = MICRO_EXEC_STATE_EXPIRED
 
     pattern_code = int(best["pattern_code"])
-    if pattern_code == 0 and state_code == MICRO_EXEC_STATE_GREEN:
+    if pattern_code == 0 and state_code == MICRO_EXEC_STATE_TRADE_ON:
         if direction == 1 and pocket_code in {236, 382, 500, 618, 786} and low_now <= fib_level_price <= high_now and close_now >= fib_level_price:
             pattern_code = 1
         elif direction == -1 and pocket_code in {382, 500, 618, 786} and low_now <= fib_level_price <= high_now and close_now <= fib_level_price:

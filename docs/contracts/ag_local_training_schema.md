@@ -202,26 +202,27 @@ from trades that stay within structural stop range.
 ## Micro Execution Feature Contract
 
 The canonical trade object remains the MES 15m fib setup. Micro execution is a
-child layer attached to that parent row. Do not create a fourth canonical AG
-table for `1m` / `3m` / `5m` triggers.
+subordinate layer attached to that parent row. Do not create a fourth canonical AG
+table for `5m` / `15m` entry candidates.
 
 Data-source rules:
 
-- local `mes_1m` is the canonical backfill tape for child execution context
-- `3m` and `5m` are derived on read from `mes_1m`; they are not separate stored tables
-- TradingView footprint/order-flow capture may enrich the child layer where available
+- local `mes_1m` is the canonical source tape for derived `5m` micro execution context
+- `5m` is derived on read from `mes_1m`; it is not a separate stored table
+- `15m` is the parent-bar execution candidate and is not reconstructed as a second trade object
+- TradingView footprint/order-flow capture may enrich the micro execution layer where available
 - do not claim full-history footprint truth until a real lower-timeframe capture
   path exists
 
-Required child execution states:
+Required micro execution states:
 
-- `WATCH` — parent 15m setup is actionable soon; operator should monitor the lower timeframe
-- `ARMED` — price has reached the execution pocket and is waiting for lower-timeframe confirmation
-- `GREEN_LIGHT` — lower-timeframe trigger confirmed; operator can engage
-- `INVALIDATED` — the child trigger is no longer valid against the parent map
-- `EXPIRED` — the child setup drifted too far from pocket without fresh impulse and is no longer actionable
+- `FORMING` — the parent 15m setup is taking shape and lower-timeframe context is developing
+- `READY` — price has reached the execution pocket and the setup is close to tradable
+- `TRADE_ON` — lower-timeframe trigger confirmed; operator can engage
+- `INVALIDATED` — the micro trigger is no longer valid against the parent map
+- `EXPIRED` — the micro setup drifted too far from pocket without fresh impulse and is no longer actionable
 
-First admitted child execution patterns:
+First admitted micro execution patterns:
 
 - `PULLBACK_HOLD`
 - `FAILED_RECLAIM`
@@ -229,16 +230,16 @@ First admitted child execution patterns:
 - `FAILED_EXPANSION`
 
 Required columns (add to `ag_fib_interactions` or a 1:1 local join surface keyed by `id`):
-  ml_exec_tf_code               INT      1=1m, 3=3m, 5=5m, 0=none
-  ml_exec_direction_code        INT      -1=short child trigger, 0=none, 1=long child trigger
-  ml_exec_state_code            INT      0=none, 1=WATCH, 2=ARMED, 3=GREEN_LIGHT, 4=INVALIDATED, 5=EXPIRED
+  ml_exec_tf_code               INT      0=none, 5=5m, 15=15m
+  ml_exec_direction_code        INT      -1=short micro trigger, 0=none, 1=long micro trigger
+  ml_exec_state_code            INT      0=none, 1=FORMING, 2=READY, 3=TRADE_ON, 4=INVALIDATED, 5=EXPIRED
   ml_exec_pattern_code          INT      0=none, 1=PULLBACK_HOLD, 2=FAILED_RECLAIM, 3=CLIMAX_REVERSAL, 4=FAILED_EXPANSION
-  ml_exec_pocket_code           INT      dominant child trigger pocket (236/382/500/618/786)
-  ml_exec_impulse_break_atr     FLOAT8   normalized size of the impulse break that created the child setup
-  ml_exec_reclaim_dist_atr      FLOAT8   normalized distance from child trigger close to the reclaim / half-back line
+  ml_exec_pocket_code           INT      dominant micro trigger pocket (236/382/500/618/786)
+  ml_exec_impulse_break_atr     FLOAT8   normalized size of the impulse break that created the micro setup
+  ml_exec_reclaim_dist_atr      FLOAT8   normalized distance from micro trigger close to the reclaim / half-back line
   ml_exec_orderflow_bias        INT      -1=counter-to-parent, 0=neutral, 1=parent-aligned at trigger
   ml_exec_delta_norm            FLOAT8   normalized signed delta at the trigger
-  ml_exec_absorption            BOOLEAN  absorption confirmed near the child trigger level
+  ml_exec_absorption            BOOLEAN  absorption confirmed near the micro trigger level
   ml_exec_zero_print            BOOLEAN  zero-print / finished-auction condition confirmed
   ml_exec_same_dir_imbalance_ct INT      imbalance rows aligned with parent 15m direction
   ml_exec_opp_dir_imbalance_ct  INT      imbalance rows opposing parent 15m direction
@@ -248,17 +249,17 @@ These fields describe how the parent MES 15m setup becomes actionable. They do
 not alter candidate identity, do not create a second trade object, and do not
 permit cloud mirroring of raw lower-timeframe execution history.
 
-`ml_exec_direction_code` is the admitted child execution direction. It may
+`ml_exec_direction_code` is the admitted micro execution direction. It may
 match the parent `direction`, or oppose it when the lower-timeframe tape emits a
 legal failure / reversal trigger while the parent 15m map remains unchanged.
 
-These child execution fields are AG-facing primitives. They are not a hand-built
-execution policy. AutoGluon and SHAP determine which child timeframe, state,
+These micro execution fields are AG-facing primitives. They are not a hand-built
+execution policy. AutoGluon and SHAP determine which micro timeframe, state,
 direction, and pressure combinations survive.
 
 Current warehouse heuristic for `EXPIRED`:
 
-- only admitted from provisional `WATCH` or `ARMED`
+- only admitted from provisional `FORMING` or `READY`
 - `ml_exec_reclaim_dist_atr >= 1.5`
 - `ml_exec_impulse_break_atr <= 0.15`
 

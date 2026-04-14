@@ -1,4 +1,4 @@
--- Local warehouse schema — research child tables
+-- Local warehouse schema — research micro-execution tables
 -- NOT deployed to cloud Supabase. Apply to local PostgreSQL only.
 --
 -- Prerequisites: the canonical cloud tables must exist in the local DB first.

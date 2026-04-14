@@ -96,8 +96,8 @@ Everything else is archived or reference-only and should not drive current imple
 - `news_signals` and all news/options surfaces are retired from the active contract. Do not build new schema, writer logic, dashboard logic, or training assumptions around them unless the user explicitly reopens it.
 - AutoGluon is offline only and may only promote Pine-ready packet outputs.
 - First model target is locked to multiclass `outcome_label`.
-- First feature scope is locked to `MES + cross-asset + macro`.
-- Macro scope is locked to `FRED + econ_calendar` only. No news or narrative sources.
+- First feature scope is locked to `MES 1m/15m/1h/4h + SP500 spot + macro`.
+- Macro scope is locked to the curated FRED regime set + `econ_calendar` only. No news or narrative sources.
 
 ## Stack
 
@@ -142,12 +142,13 @@ Everything else is archived or reference-only and should not drive current imple
 
 ### Removed from Canonical Local Build
 
-These are explicitly excluded from the canonical `warbird` warehouse:
+These are explicitly excluded from the canonical AG training zoo:
 
-- `mes_1m`
 - `cross_asset_1d`
+- cross-asset futures feature admission for first-run AG training
 - all news surfaces
 - all options surfaces
+- all options backup CSV inputs
 - all legacy setup/trade/news tables (`warbird_setups`, `scored_trades`, `news_signals`, `econ_news_1d`, `policy_news_1d`)
 
 ### Scheduling

@@ -14,7 +14,7 @@ This document is a subordinate reference for the model contract. It must not ove
 1. The canonical trade object is the **MES 15m fib setup**.
 2. The canonical key is the MES 15m **bar-close timestamp** in `America/Chicago`.
    The MES 15m setup is the parent object even when a lower-timeframe execution
-   trigger is used. `1m` / `3m` / `5m` triggers are subordinate child execution
+   trigger is used. `5m` / `15m` entry candidates are subordinate micro execution
    states keyed back to that same parent setup; they do not replace it.
 3. Pine is the canonical **live generator** (signal surface).
 4. The **training generator** is the Python reconstruction pipeline in `scripts/ag/`. It reconstructs snapshots/interactions/outcomes from local warehouse OHLCV/context and is the only local AG training population path.
@@ -25,7 +25,7 @@ This document is a subordinate reference for the model contract. It must not ove
 9. AutoGluon is offline only. It trains, calibrates, and emits a Pine-ready packet.
 10. The adaptive fib engine snapshot is the canonical base object. Live/runtime candidate semantics are defined by Pine on chart, while offline/training rows are reconstructed in Python from warehouse OHLCV/context with no Pine dependency.
     Fibs define the map and target ladder. Order-flow at the level defines the
-    child execution trigger.
+    micro execution trigger.
 11. The model output is MES 15m setup-outcome state: TP1–TP5 probability distribution, reversal risk, and bounded stop-family selection. It is **not** a predicted-price forecast surface.
 12. AG and offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close, not repaint-prone live chart reads.
 13. The retained core historical window for training/support data starts at `2020-01-01T00:00:00Z`. Pre-2020 core rows are out of scope and must not be reintroduced into the canonical dataset.
@@ -36,16 +36,21 @@ This document is a subordinate reference for the model contract. It must not ove
 18. Canonical AG contract is **three canonical local AG tables and one canonical training view.**
 19. Exact local AG schema authority is `docs/contracts/ag_local_training_schema.md`.
 20. The canonical live flow is `fib_engine_snapshot -> candidate -> AG_decision (against active packet) -> signal -> outcome`. The training flow is Python reconstruction over local OHLCV/context into AG lineage tables -> `ag_training` view -> model training. Live and training flows are distinct.
-    Under the 2026-04-14 execution delta, the candidate stage may carry child
-    execution states `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED -> EXPIRED`
+    Under the 2026-04-14 execution delta, the candidate stage may carry micro
+    execution states `FORMING -> READY -> TRADE_ON -> INVALIDATED -> EXPIRED`
     without changing the parent 15m identity contract.
 21. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
 22. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
-23. Cloud core support data starts at `2020-01-01T00:00:00Z`. All Databento ingestion uses `.c.0` continuous front-month contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic. `contract-roll.ts` is dead code. MES uses `MES.c.0` via Live API (real-time) and Historical API (backfill). Cross-asset symbols (NQ, RTY, CL, HG, 6E, 6J) use `{SYMBOL}.c.0` via Historical API `ohlcv-1h`, pulled hourly by the `cross-asset` Edge Function.
+23. Cloud core support data starts at `2020-01-01T00:00:00Z`. All Databento ingestion uses `.c.0` continuous front-month contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic. `contract-roll.ts` is dead code. MES uses `MES.c.0` via Live API (real-time) and Historical API (backfill). Cross-asset symbols (NQ, RTY, CL, HG, 6E, 6J) may remain in warehouse/cloud reference surfaces, but they are excluded from the first-run AG training zoo.
 24. The operator-approved fib visual spec is a contract. Colors, line widths, line styles, and visible level-label presentation must be reproduced exactly across Pine and dashboard renderers unless explicitly reapproved.
 25. First model target is locked to multiclass `outcome_label`.
-26. First feature scope is locked to `MES + cross-asset + macro`.
-27. Macro scope is locked to `FRED + econ_calendar` only. No news or narrative sources.
+26. First feature scope is locked to `MES 1m/15m/1h/4h + SP500 spot + macro`.
+27. Macro scope is locked to the curated FRED regime set + `econ_calendar` only. No news or narrative sources.
+    Curated FRED regime set:
+    `SP500`, `DFF`, `SOFR`, `T10Y2Y`, `DGS2`, `DGS5`, `DGS10`, `DGS30`, `DGS3MO`,
+    `DFEDTARL`, `DFEDTARU`, `CPIAUCSL`, `CPILFESL`, `PCEPILFE`, `T5YIE`, `T10YIE`,
+    `DFII5`, `DFII10`, `DTWEXBGS`, `DEXUSEU`, `DEXJPUS`, `VIXCLS`, `VXNCLS`,
+    `RVXCLS`, `OVXCLS`, `GVZCLS`, `NFCI`.
 28. Exhaustion context is exported as `ml_*` hidden features in `ag_fib_interactions`.
     It is not a hard gate suppressing candidate row emission.
     Broad candidate emission is preserved. AG discovers the weights.
@@ -97,8 +102,8 @@ This document is a subordinate reference for the model contract. It must not ove
 The model evaluates the quality of canonical MES 15m interaction rows from `ag_fib_interactions`.
 
 It does **not** forecast a future MES price level or produce a standalone `1H` price prediction.
-It also does **not** turn `1m` / `3m` / `5m` into new standalone trade objects.
-Those lower-timeframe states exist only to decide how to enter the parent 15m
+It also does **not** turn `5m` / `15m` entry candidates into new standalone trade objects.
+Those execution-timeframe states exist only to decide how to enter the parent 15m
 setup and whether the map is currently actionable.
 
 For each candidate setup, the model estimates:
@@ -178,10 +183,10 @@ Canonical local training schema is the exact contract in `docs/contracts/ag_loca
 - `rsi14`, `ema9`, `ema21`, `ema50`, `ema200`
 - `ema_stacked_bull`, `ema_stacked_bear`, `ema9_dist_pct`, `macd_hist`, `adx`, `energy`, `confluence_quality`
 
-`ag_fib_interactions` is also the admitted home for child execution-state
+`ag_fib_interactions` is also the admitted home for micro execution-state
 context once the migration lands. Do not create a fourth canonical AG table for
-`1m` / `3m` / `5m` triggers. Child execution features remain attached to the
-parent MES 15m setup row. Child execution direction may oppose the parent
+`5m` / `15m` entry candidates. Micro execution features remain attached to the
+parent MES 15m setup row. Micro execution direction may oppose the parent
 direction when the lower timeframe emits a legal failure / reversal trigger.
 
 `ag_fib_outcomes` holds realized path/outcome fields, including:
@@ -385,7 +390,7 @@ The regime gate produces a continuous score (0-100) from grouped intraday indica
 
 **AG Training Basket — CME Globex (Databento GLBX.MDP3):**
 
-All 6 symbols use `.c.0` continuous contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic needed.
+These cross-asset futures surfaces remain available for warehouse or cloud reference only. They are not admitted into the first-run AG training zoo after the 2026-04-14 scope cut.
 
 | Group         | Symbols                                                      | Detection                           | Databento               | Data Pipeline                                           |
 | ------------- | ------------------------------------------------------------ | ----------------------------------- | ----------------------- | ------------------------------------------------------- |
@@ -577,8 +582,8 @@ Runtime output families that may remain in Pine:
 - live direction/archetype/fib interaction state for chart and alerts
 - entry/exit event flags and TP hit event flags for runtime lifecycle tracking
 - runtime-only context codes required by the active packet and dashboard compatibility surfaces
-- child execution-state outputs (`WATCH`, `ARMED`, `GREEN_LIGHT`,
-  `INVALIDATED`, `EXPIRED`) and child pattern codes (`PULLBACK_HOLD`,
+- micro execution-state outputs (`FORMING`, `READY`, `TRADE_ON`,
+  `INVALIDATED`, `EXPIRED`) and micro pattern codes (`PULLBACK_HOLD`,
   `FAILED_RECLAIM`, `CLIMAX_REVERSAL`, `FAILED_EXPANSION`) for operator use
   once admitted by the active contract
 - chart-visual diagnostics that are explicitly marked non-training and non-canonical for warehouse ingestion
@@ -603,8 +608,8 @@ The packet must include:
 8. event-response thresholds and suppression rules
 9. fib snapshot / lookback-family decisions when they are part of the admitted contract
 10. decision-policy thresholds for `TAKE_TRADE` / `WAIT` / `PASS`
-11. child execution feature/timeframe evidence that survived AG/SHAP review,
-    including the preferred `1m` / `3m` / `5m` trigger family when the parent
+11. micro execution feature/timeframe evidence that survived AG/SHAP review,
+    including the preferred `5m` / `15m` trigger family when the parent
     15m setup is active
 12. run metadata and sample counts
 

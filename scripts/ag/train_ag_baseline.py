@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
+import sys
 from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -13,12 +15,12 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import psycopg2
+from psycopg2.extras import Json
 
 
 CHICAGO_TZ = ZoneInfo("America/Chicago")
 DEFAULT_DSN = os.environ.get("WARBIRD_PG_DSN", "host=127.0.0.1 port=5432 dbname=warbird")
 DEFAULT_OUTPUT_ROOT = "artifacts/ag_runs"
-CROSS_ASSET_SYMBOLS = ("NQ", "RTY", "CL", "HG", "6E", "6J")
 ECON_TABLES = (
     "econ_activity_1d",
     "econ_commodities_1d",
@@ -31,30 +33,34 @@ ECON_TABLES = (
     "econ_vol_1d",
     "econ_yields_1d",
 )
-FRED_SERIES = (
+CURATED_FRED_SERIES = (
+    "SP500",
     "DFF",
     "SOFR",
     "T10Y2Y",
     "DGS2",
+    "DGS5",
     "DGS10",
     "DGS30",
-    "DGS5",
     "DGS3MO",
-    "DFII10",
+    "DFEDTARL",
+    "DFEDTARU",
+    "CPIAUCSL",
+    "CPILFESL",
+    "PCEPILFE",
     "T5YIE",
     "T10YIE",
-    "VIXCLS",
-    "VXNCLS",
-    "GVZCLS",
-    "OVXCLS",
-    "NFCI",
+    "DFII5",
+    "DFII10",
     "DTWEXBGS",
     "DEXUSEU",
     "DEXJPUS",
-    "SP500",
-    "NASDAQCOM",
-    "DCOILWTICO",
-    "DCOILBRENTEU",
+    "VIXCLS",
+    "VXNCLS",
+    "RVXCLS",
+    "OVXCLS",
+    "GVZCLS",
+    "NFCI",
 )
 LEAKAGE_COLS = {
     "id",
@@ -121,7 +127,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--excluded-model-types",
-        default="KNN",
+        default="",
         help="Comma-separated AutoGluon model types to exclude. Empty string means none.",
     )
     parser.add_argument("--n-folds", type=int, default=5, help="Number of walk-forward folds.")
@@ -134,7 +140,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-sessions", type=int, default=63, help="Validation window size.")
     parser.add_argument("--test-sessions", type=int, default=63, help="Test window size.")
     parser.add_argument("--session-embargo", type=int, default=1, help="Embargo between slices.")
-    parser.add_argument("--no-cross-asset", action="store_true", help="Disable cross-asset joins.")
     parser.add_argument("--no-macro", action="store_true", help="Disable FRED/econ joins.")
     parser.add_argument(
         "--allow-single-class-eval",
@@ -149,8 +154,12 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def fetch_df(conn: psycopg2.extensions.connection, sql: str) -> pd.DataFrame:
-    return pd.read_sql_query(sql, conn)
+def fetch_df(
+    conn: psycopg2.extensions.connection,
+    sql: str,
+    params: tuple[Any, ...] | list[Any] | None = None,
+) -> pd.DataFrame:
+    return pd.read_sql_query(sql, conn, params=params)
 
 
 def load_base_training(conn: psycopg2.extensions.connection) -> pd.DataFrame:
@@ -199,42 +208,39 @@ def filter_session_window(df: pd.DataFrame, start_date: str | None, end_date: st
     return out
 
 
-def load_cross_asset_features(conn: psycopg2.extensions.connection) -> pd.DataFrame:
-    sql = """
-        SELECT symbol, ts, open, high, low, close, volume, open_interest
-        FROM cross_asset_1h
-        WHERE symbol = ANY(%s)
-        ORDER BY symbol ASC, ts ASC
-    """
-    df = pd.read_sql_query(sql, conn, params=(list(CROSS_ASSET_SYMBOLS),))
-    if df.empty:
-        return pd.DataFrame(columns=["hour_ts"])
-
-    df["ts"] = pd.to_datetime(df["ts"], utc=True)
-    df["bar_ret_pct"] = (df["close"] - df["open"]) / df["open"].replace(0, pd.NA) * 100.0
-    df["range_pct"] = (df["high"] - df["low"]) / df["open"].replace(0, pd.NA) * 100.0
-    df["close_ret_1h_pct"] = df.groupby("symbol")["close"].pct_change(fill_method=None) * 100.0
-    df["oi_change_pct"] = df.groupby("symbol")["open_interest"].pct_change(fill_method=None) * 100.0
-    wide = df.pivot_table(
-        index="ts",
-        columns="symbol",
-        values=["bar_ret_pct", "range_pct", "close_ret_1h_pct", "oi_change_pct"],
-        aggfunc="last",
+def load_fred_series_ids(conn: psycopg2.extensions.connection) -> list[str]:
+    catalog = fetch_df(
+        conn,
+        """
+        SELECT series_id
+        FROM economic_series
+        WHERE source = 'FRED'
+          AND is_active = true
+          AND series_id = ANY(%s)
+        ORDER BY series_id ASC
+        """,
+        params=(list(CURATED_FRED_SERIES),),
     )
-    wide.columns = [
-        f"xa_{symbol.lower()}_{feature}"
-        for feature, symbol in wide.columns.to_flat_index()
-    ]
-    wide = wide.reset_index().rename(columns={"ts": "hour_ts"})
-    return wide
+    series_ids = catalog["series_id"].dropna().astype(str).tolist()
+    if not series_ids:
+        raise SystemExit("economic_series does not contain the curated active FRED regime set.")
+    missing_required = [series_id for series_id in CURATED_FRED_SERIES if series_id not in series_ids]
+    if missing_required:
+        raise SystemExit(f"economic_series is missing curated FRED series: {', '.join(missing_required)}")
+    return series_ids
 
 
-def load_fred_panel(conn: psycopg2.extensions.connection, min_date: pd.Timestamp, max_date: pd.Timestamp) -> pd.DataFrame:
+def load_fred_panel(
+    conn: psycopg2.extensions.connection,
+    min_date: pd.Timestamp,
+    max_date: pd.Timestamp,
+    series_ids: list[str],
+) -> pd.DataFrame:
     union_sql = "\nUNION ALL\n".join(
         f"SELECT series_id, event_date, value FROM {table}" for table in ECON_TABLES
     )
     econ = fetch_df(conn, union_sql)
-    econ = econ[econ["series_id"].isin(FRED_SERIES)].copy()
+    econ = econ[econ["series_id"].isin(series_ids)].copy()
     if econ.empty:
         return pd.DataFrame(columns=["session_date_ct"])
 
@@ -242,7 +248,7 @@ def load_fred_panel(conn: psycopg2.extensions.connection, min_date: pd.Timestamp
     econ = econ.sort_values(["series_id", "event_date"])
     calendar = pd.DataFrame({"session_date_ct": pd.date_range(min_date, max_date, freq="D")})
 
-    for series_id in FRED_SERIES:
+    for series_id in series_ids:
         series_df = econ.loc[econ["series_id"] == series_id, ["event_date", "value"]].drop_duplicates(
             subset=["event_date"], keep="last"
         )
@@ -283,32 +289,28 @@ def load_calendar_features(conn: psycopg2.extensions.connection) -> pd.DataFrame
 def attach_context_features(
     conn: psycopg2.extensions.connection,
     base: pd.DataFrame,
-    use_cross_asset: bool,
     use_macro: bool,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     df = add_time_context(base)
     coverage: dict[str, Any] = {
-        "cross_asset_enabled": use_cross_asset,
+        "training_zoo_scope": "MES_1m_15m_1h_4h + SP500 + curated_FRED + econ_calendar",
+        "cross_asset_enabled": False,
         "macro_enabled": use_macro,
     }
-
-    if use_cross_asset:
-        cross_asset = load_cross_asset_features(conn)
-        df = df.merge(cross_asset, on="hour_ts", how="left")
-        xa_cols = [col for col in df.columns if col.startswith("xa_")]
-        coverage["cross_asset_feature_columns"] = len(xa_cols)
-        coverage["cross_asset_rows_with_all_symbols"] = int(df[xa_cols].notna().all(axis=1).sum()) if xa_cols else 0
-        coverage["cross_asset_rows_total"] = int(len(df))
 
     if use_macro:
         min_date = df["session_date_ct"].min()
         max_date = df["session_date_ct"].max()
-        fred = load_fred_panel(conn, min_date=min_date, max_date=max_date)
+        fred_series_ids = load_fred_series_ids(conn)
+        fred = load_fred_panel(conn, min_date=min_date, max_date=max_date, series_ids=fred_series_ids)
         calendar = load_calendar_features(conn)
         df = df.merge(fred, on="session_date_ct", how="left")
         df = df.merge(calendar, on="session_date_ct", how="left")
         fred_cols = [col for col in df.columns if col.startswith("fred_")]
         econ_cols = [col for col in df.columns if col.startswith("econ_")]
+        coverage["fred_series_profile"] = "curated_regime_v1"
+        coverage["fred_series_admitted"] = len(fred_series_ids)
+        coverage["sp500_series_present"] = "SP500" in fred_series_ids
         coverage["fred_feature_columns"] = len(fred_cols)
         coverage["fred_rows_with_any_value"] = int(df[fred_cols].notna().any(axis=1).sum()) if fred_cols else 0
         coverage["calendar_feature_columns"] = len(econ_cols)
@@ -425,8 +427,7 @@ def coerce_feature_frame(df: pd.DataFrame, label: str) -> tuple[pd.DataFrame, li
         "dropped_leakage_or_identity": sorted(drop_cols),
         "dropped_constant_columns": sorted(constant_cols),
         "feature_groups": {
-            "core": len([col for col in feature_cols if not col.startswith(("xa_", "fred_", "econ_"))]),
-            "cross_asset": len([col for col in feature_cols if col.startswith("xa_")]),
+            "core": len([col for col in feature_cols if not col.startswith(("fred_", "econ_"))]),
             "fred": len([col for col in feature_cols if col.startswith("fred_")]),
             "calendar": len([col for col in feature_cols if col.startswith("econ_")]),
         },
@@ -437,6 +438,387 @@ def coerce_feature_frame(df: pd.DataFrame, label: str) -> tuple[pd.DataFrame, li
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, default=str, sort_keys=True) + "\n")
+
+
+def current_git_commit_sha() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    sha = result.stdout.strip()
+    return sha or None
+
+
+def normalize_artifact_path(path: Path) -> str:
+    resolved = path.resolve()
+    cwd = Path.cwd().resolve()
+    try:
+        return str(resolved.relative_to(cwd))
+    except ValueError:
+        return str(resolved)
+
+
+def artifact_file_size(path: Path) -> int | None:
+    return int(path.stat().st_size) if path.exists() and path.is_file() else None
+
+
+def upsert_training_run(
+    conn: psycopg2.extensions.connection,
+    *,
+    run_id: str,
+    run_status: str,
+    dry_run: bool,
+    args: argparse.Namespace,
+    dataset_summary: dict[str, Any],
+    feature_manifest: dict[str, Any],
+    started_at: datetime,
+    completed_at: datetime | None,
+    git_commit_sha: str | None,
+    error_message: str | None,
+) -> None:
+    coverage = dataset_summary.get("coverage", {})
+    session_window = dataset_summary.get("session_window", {})
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO ag_training_runs (
+              run_id,
+              run_status,
+              dry_run,
+              problem_type,
+              label_name,
+              eval_metric,
+              presets,
+              time_limit_sec,
+              num_bag_folds,
+              num_stack_levels,
+              dynamic_stacking_mode,
+              excluded_model_types_json,
+              training_zoo_scope,
+              start_date_ct,
+              end_date_ct,
+              actual_start_date_ct,
+              actual_end_date_ct,
+              rows_total,
+              sessions_total,
+              feature_count,
+              fold_count,
+              coverage_json,
+              feature_manifest_json,
+              command_json,
+              git_commit_sha,
+              error_message,
+              started_at,
+              completed_at
+            ) VALUES (
+              %(run_id)s,
+              %(run_status)s,
+              %(dry_run)s,
+              'multiclass',
+              %(label_name)s,
+              %(eval_metric)s,
+              %(presets)s,
+              %(time_limit_sec)s,
+              %(num_bag_folds)s,
+              %(num_stack_levels)s,
+              %(dynamic_stacking_mode)s,
+              %(excluded_model_types_json)s,
+              %(training_zoo_scope)s,
+              %(start_date_ct)s,
+              %(end_date_ct)s,
+              %(actual_start_date_ct)s,
+              %(actual_end_date_ct)s,
+              %(rows_total)s,
+              %(sessions_total)s,
+              %(feature_count)s,
+              %(fold_count)s,
+              %(coverage_json)s,
+              %(feature_manifest_json)s,
+              %(command_json)s,
+              %(git_commit_sha)s,
+              %(error_message)s,
+              %(started_at)s,
+              %(completed_at)s
+            )
+            ON CONFLICT (run_id) DO UPDATE SET
+              run_status = EXCLUDED.run_status,
+              dry_run = EXCLUDED.dry_run,
+              problem_type = EXCLUDED.problem_type,
+              label_name = EXCLUDED.label_name,
+              eval_metric = EXCLUDED.eval_metric,
+              presets = EXCLUDED.presets,
+              time_limit_sec = EXCLUDED.time_limit_sec,
+              num_bag_folds = EXCLUDED.num_bag_folds,
+              num_stack_levels = EXCLUDED.num_stack_levels,
+              dynamic_stacking_mode = EXCLUDED.dynamic_stacking_mode,
+              excluded_model_types_json = EXCLUDED.excluded_model_types_json,
+              training_zoo_scope = EXCLUDED.training_zoo_scope,
+              start_date_ct = EXCLUDED.start_date_ct,
+              end_date_ct = EXCLUDED.end_date_ct,
+              actual_start_date_ct = EXCLUDED.actual_start_date_ct,
+              actual_end_date_ct = EXCLUDED.actual_end_date_ct,
+              rows_total = EXCLUDED.rows_total,
+              sessions_total = EXCLUDED.sessions_total,
+              feature_count = EXCLUDED.feature_count,
+              fold_count = EXCLUDED.fold_count,
+              coverage_json = EXCLUDED.coverage_json,
+              feature_manifest_json = EXCLUDED.feature_manifest_json,
+              command_json = EXCLUDED.command_json,
+              git_commit_sha = EXCLUDED.git_commit_sha,
+              error_message = EXCLUDED.error_message,
+              started_at = EXCLUDED.started_at,
+              completed_at = EXCLUDED.completed_at
+            """,
+            {
+                "run_id": run_id,
+                "run_status": run_status,
+                "dry_run": dry_run,
+                "label_name": args.label,
+                "eval_metric": args.eval_metric,
+                "presets": args.presets,
+                "time_limit_sec": args.time_limit,
+                "num_bag_folds": args.num_bag_folds,
+                "num_stack_levels": args.num_stack_levels,
+                "dynamic_stacking_mode": args.dynamic_stacking,
+                "excluded_model_types_json": Json(
+                    [item.strip() for item in args.excluded_model_types.split(",") if item.strip()]
+                ),
+                "training_zoo_scope": coverage.get("training_zoo_scope"),
+                "start_date_ct": session_window.get("start_date"),
+                "end_date_ct": session_window.get("end_date"),
+                "actual_start_date_ct": session_window.get("actual_start_date"),
+                "actual_end_date_ct": session_window.get("actual_end_date"),
+                "rows_total": dataset_summary.get("rows_total"),
+                "sessions_total": dataset_summary.get("sessions_total"),
+                "feature_count": feature_manifest.get("feature_count"),
+                "fold_count": None,
+                "coverage_json": Json(coverage),
+                "feature_manifest_json": Json(feature_manifest),
+                "command_json": Json(
+                    {
+                        "argv": sys.argv,
+                        "args": vars(args),
+                    }
+                ),
+                "git_commit_sha": git_commit_sha,
+                "error_message": error_message,
+                "started_at": started_at,
+                "completed_at": completed_at,
+            },
+        )
+
+
+def update_training_run_fold_count(
+    conn: psycopg2.extensions.connection,
+    *,
+    run_id: str,
+    fold_count: int,
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute(
+            "UPDATE ag_training_runs SET fold_count = %s WHERE run_id = %s",
+            (fold_count, run_id),
+        )
+
+
+def replace_run_metrics(
+    conn: psycopg2.extensions.connection,
+    *,
+    run_id: str,
+    target_name: str,
+    fold_summaries: list[dict[str, Any]],
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM ag_training_run_metrics WHERE run_id = %s", (run_id,))
+        rows: list[tuple[Any, ...]] = []
+        for fold in fold_summaries:
+            fold_code = fold["fold_code"]
+            row_counts = {
+                "train": fold["train_rows"],
+                "val": fold["val_rows"],
+                "test": fold["test_rows"],
+            }
+            class_counts = {
+                "train": fold["train_class_count"],
+                "val": fold["val_class_count"],
+                "test": fold["test_class_count"],
+            }
+            for split_code in ("val", "test"):
+                baseline = fold["majority_baseline"][split_code]
+                rows.append(
+                    (
+                        run_id,
+                        target_name,
+                        fold_code,
+                        split_code,
+                        "BASELINE",
+                        "accuracy",
+                        baseline["accuracy"],
+                        row_counts[split_code],
+                        class_counts[split_code],
+                        baseline["majority_class"],
+                    )
+                )
+                rows.append(
+                    (
+                        run_id,
+                        target_name,
+                        fold_code,
+                        split_code,
+                        "BASELINE",
+                        "macro_f1",
+                        baseline["macro_f1"],
+                        row_counts[split_code],
+                        class_counts[split_code],
+                        baseline["majority_class"],
+                    )
+                )
+            autogluon = fold.get("autogluon")
+            if autogluon:
+                rows.append(
+                    (
+                        run_id,
+                        target_name,
+                        fold_code,
+                        "test",
+                        "AUTOGLOON",
+                        "accuracy",
+                        autogluon["test_accuracy"],
+                        row_counts["test"],
+                        class_counts["test"],
+                        autogluon.get("best_model"),
+                    )
+                )
+                rows.append(
+                    (
+                        run_id,
+                        target_name,
+                        fold_code,
+                        "test",
+                        "AUTOGLOON",
+                        "macro_f1",
+                        autogluon["test_macro_f1"],
+                        row_counts["test"],
+                        class_counts["test"],
+                        autogluon.get("best_model"),
+                    )
+                )
+        if rows:
+            cur.executemany(
+                """
+                INSERT INTO ag_training_run_metrics (
+                  run_id,
+                  target_name,
+                  fold_code,
+                  split_code,
+                  metric_scope,
+                  metric_name,
+                  metric_value,
+                  row_count,
+                  class_count,
+                  model_name
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                rows,
+            )
+
+
+def replace_artifacts(
+    conn: psycopg2.extensions.connection,
+    *,
+    run_id: str,
+    artifacts: list[dict[str, Any]],
+) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM ag_artifacts WHERE run_id = %s", (run_id,))
+        rows = [
+            (
+                run_id,
+                artifact["artifact_type"],
+                artifact.get("target_name"),
+                artifact.get("fold_code"),
+                artifact.get("split_code"),
+                artifact["artifact_path"],
+                artifact.get("media_type"),
+                artifact.get("file_size_bytes"),
+                artifact.get("sha256"),
+            )
+            for artifact in artifacts
+        ]
+        if rows:
+            cur.executemany(
+                """
+                INSERT INTO ag_artifacts (
+                  run_id,
+                  artifact_type,
+                  target_name,
+                  fold_code,
+                  split_code,
+                  artifact_path,
+                  media_type,
+                  file_size_bytes,
+                  sha256
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                rows,
+            )
+
+
+def collect_run_artifacts(run_dir: Path, *, target_name: str, fold_summaries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    artifacts: list[dict[str, Any]] = []
+
+    def add_artifact(
+        path: Path,
+        artifact_type: str,
+        *,
+        fold_code: str | None = None,
+        split_code: str | None = None,
+        media_type: str | None = None,
+    ) -> None:
+        if not path.exists():
+            return
+        artifacts.append(
+            {
+                "artifact_type": artifact_type,
+                "target_name": target_name,
+                "fold_code": fold_code,
+                "split_code": split_code,
+                "artifact_path": normalize_artifact_path(path),
+                "media_type": media_type,
+                "file_size_bytes": artifact_file_size(path),
+                "sha256": None,
+            }
+        )
+
+    add_artifact(run_dir / "dataset_summary.json", "DATASET_SUMMARY", media_type="application/json")
+    add_artifact(run_dir / "feature_manifest.json", "FEATURE_MANIFEST", media_type="application/json")
+    add_artifact(run_dir / "training_summary.json", "TRAINING_SUMMARY", media_type="application/json")
+
+    for fold in fold_summaries:
+        fold_code = fold["fold_code"]
+        fold_dir = run_dir / fold_code
+        add_artifact(fold_dir / "fold_summary.json", "FOLD_SUMMARY", fold_code=fold_code, media_type="application/json")
+        autogluon = fold.get("autogluon")
+        if autogluon:
+            leaderboard_path = Path(autogluon["leaderboard_path"])
+            add_artifact(
+                leaderboard_path,
+                "LEADERBOARD",
+                fold_code=fold_code,
+                split_code="test",
+                media_type="text/csv",
+            )
+            add_artifact(
+                fold_dir / "predictor",
+                "PREDICTOR_DIR",
+                fold_code=fold_code,
+            )
+    return artifacts
 
 
 def load_tabular_predictor() -> Any:
@@ -513,6 +895,7 @@ def fit_fold(
         "time_limit": args.time_limit,
         "num_gpus": 0,
         "ag_args_ensemble": {"fold_fitting_strategy": "sequential_local"},
+        "use_bag_holdout": True,
     }
     if args.num_bag_folds is not None:
         fit_kwargs["num_bag_folds"] = args.num_bag_folds
@@ -551,60 +934,137 @@ def fit_fold(
 
 def main() -> None:
     args = parse_args()
-    run_id = datetime.now(UTC).strftime("agtrain_%Y%m%dT%H%M%S%fZ")
-    run_dir = Path(args.output_root) / run_id
+    run_started_at = datetime.now(UTC)
+    run_id = run_started_at.strftime("agtrain_%Y%m%dT%H%M%S%fZ")
+    run_dir = (Path(args.output_root) / run_id).resolve()
+    git_commit_sha = current_git_commit_sha()
 
-    with psycopg2.connect(args.dsn) as conn:
-        base = load_base_training(conn)
-        base = add_time_context(base)
-        base = filter_session_window(base, args.start_date, args.end_date)
-        base = base.drop(columns=["hour_ts", "hour_ct", "minute_ct", "dow_ct", "month_ct", "is_rth_ct", "is_opening_window_ct", "session_tier_code"], errors="ignore")
-        enriched, coverage = attach_context_features(
-            conn,
-            base=base,
-            use_cross_asset=not args.no_cross_asset,
-            use_macro=not args.no_macro,
+    dataset_summary: dict[str, Any] = {}
+    feature_manifest: dict[str, Any] = {}
+    fold_summaries: list[dict[str, Any]] = []
+    blocked_folds: list[str] = []
+    planned_fold_count = 0
+    run_status = "RUNNING"
+    error_message: str | None = None
+
+    try:
+        with psycopg2.connect(args.dsn) as conn:
+            base = load_base_training(conn)
+            base = add_time_context(base)
+            base = filter_session_window(base, args.start_date, args.end_date)
+            base = base.drop(
+                columns=[
+                    "hour_ts",
+                    "hour_ct",
+                    "minute_ct",
+                    "dow_ct",
+                    "month_ct",
+                    "is_rth_ct",
+                    "is_opening_window_ct",
+                    "session_tier_code",
+                ],
+                errors="ignore",
+            )
+            enriched, coverage = attach_context_features(
+                conn,
+                base=base,
+                use_macro=not args.no_macro,
+            )
+
+        enriched, feature_cols, feature_manifest = coerce_feature_frame(enriched, label=args.label)
+        sessions = sorted(enriched["session_date_ct"].drop_duplicates().tolist())
+        folds = build_walk_forward_folds(
+            sessions=sessions,
+            n_folds=args.n_folds,
+            min_train_sessions=args.min_train_sessions,
+            val_sessions=args.val_sessions,
+            test_sessions=args.test_sessions,
+            session_embargo=args.session_embargo,
         )
+        planned_fold_count = len(folds)
 
-    enriched, feature_cols, feature_manifest = coerce_feature_frame(enriched, label=args.label)
-    sessions = sorted(enriched["session_date_ct"].drop_duplicates().tolist())
-    folds = build_walk_forward_folds(
-        sessions=sessions,
-        n_folds=args.n_folds,
-        min_train_sessions=args.min_train_sessions,
-        val_sessions=args.val_sessions,
-        test_sessions=args.test_sessions,
-        session_embargo=args.session_embargo,
-    )
+        dataset_summary = {
+            "run_id": run_id,
+            "created_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat(),
+            "rows_total": int(len(enriched)),
+            "sessions_total": int(len(sessions)),
+            "session_window": {
+                "start_date": None if args.start_date is None else args.start_date,
+                "end_date": None if args.end_date is None else args.end_date,
+                "actual_start_date": sessions[0].date().isoformat(),
+                "actual_end_date": sessions[-1].date().isoformat(),
+            },
+            "label_distribution": label_distribution(enriched[args.label].astype(str)),
+            "coverage": coverage,
+        }
+        write_json(run_dir / "dataset_summary.json", dataset_summary)
+        write_json(run_dir / "feature_manifest.json", feature_manifest)
 
-    dataset_summary = {
-        "run_id": run_id,
-        "created_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat(),
-        "rows_total": int(len(enriched)),
-        "sessions_total": int(len(sessions)),
-        "session_window": {
-            "start_date": None if args.start_date is None else args.start_date,
-            "end_date": None if args.end_date is None else args.end_date,
-            "actual_start_date": sessions[0].date().isoformat(),
-            "actual_end_date": sessions[-1].date().isoformat(),
-        },
-        "label_distribution": label_distribution(enriched[args.label].astype(str)),
-        "coverage": coverage,
-    }
-    write_json(run_dir / "dataset_summary.json", dataset_summary)
-    write_json(run_dir / "feature_manifest.json", feature_manifest)
+        with psycopg2.connect(args.dsn) as conn:
+            upsert_training_run(
+                conn,
+                run_id=run_id,
+                run_status="RUNNING",
+                dry_run=bool(args.dry_run),
+                args=args,
+                dataset_summary=dataset_summary,
+                feature_manifest=feature_manifest,
+                started_at=run_started_at,
+                completed_at=None,
+                git_commit_sha=git_commit_sha,
+                error_message=None,
+            )
+            update_training_run_fold_count(conn, run_id=run_id, fold_count=planned_fold_count)
 
-    fold_summaries = [fit_fold(run_dir, fold, enriched, feature_cols, args) for fold in folds]
-    training_summary = {
-        "run_id": run_id,
-        "dry_run": bool(args.dry_run),
-        "dataset_summary_path": str(run_dir / "dataset_summary.json"),
-        "feature_manifest_path": str(run_dir / "feature_manifest.json"),
-        "fold_count": len(fold_summaries),
-        "folds": fold_summaries,
-    }
-    write_json(run_dir / "training_summary.json", training_summary)
-    blocked_folds = [fold["fold_code"] for fold in fold_summaries if fold.get("blocked_training")]
+        fold_summaries = [fit_fold(run_dir, fold, enriched, feature_cols, args) for fold in folds]
+        training_summary = {
+            "run_id": run_id,
+            "dry_run": bool(args.dry_run),
+            "dataset_summary_path": str(run_dir / "dataset_summary.json"),
+            "feature_manifest_path": str(run_dir / "feature_manifest.json"),
+            "fold_count": len(fold_summaries),
+            "folds": fold_summaries,
+        }
+        write_json(run_dir / "training_summary.json", training_summary)
+        blocked_folds = [fold["fold_code"] for fold in fold_summaries if fold.get("blocked_training")]
+        run_status = "BLOCKED" if blocked_folds else "SUCCEEDED"
+    except Exception as exc:
+        run_status = "FAILED"
+        error_message = str(exc)
+        raise
+    finally:
+        if dataset_summary and feature_manifest:
+            with psycopg2.connect(args.dsn) as conn:
+                upsert_training_run(
+                    conn,
+                    run_id=run_id,
+                    run_status=run_status,
+                    dry_run=bool(args.dry_run),
+                    args=args,
+                    dataset_summary=dataset_summary,
+                    feature_manifest=feature_manifest,
+                    started_at=run_started_at,
+                    completed_at=datetime.now(UTC),
+                    git_commit_sha=git_commit_sha,
+                    error_message=error_message,
+                )
+                update_training_run_fold_count(conn, run_id=run_id, fold_count=planned_fold_count)
+                replace_run_metrics(
+                    conn,
+                    run_id=run_id,
+                    target_name=args.label,
+                    fold_summaries=fold_summaries,
+                )
+                replace_artifacts(
+                    conn,
+                    run_id=run_id,
+                    artifacts=collect_run_artifacts(
+                        run_dir,
+                        target_name=args.label,
+                        fold_summaries=fold_summaries,
+                    ),
+                )
+
     console_summary = {
         "run_id": run_id,
         "dry_run": bool(args.dry_run),
