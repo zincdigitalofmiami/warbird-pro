@@ -107,9 +107,15 @@ Phase execution order:
   `ml_exec_impulse_break_atr <= 0.15`.
 - Local verification on 2026-04-14: `EXPIRED` yielded `968` rows in
   `ag_fib_interactions`, with `901 STOPPED` and only `1 TP5_HIT`.
-- Current child audit ceiling is local `mes_1m` coverage through
-  `2026-04-03 08:14 America/Chicago`. Later parent rows remain valid 15m
-  candidates but do not carry proven child execution context yet.
+- Local `mes_1m` now extends through `2026-04-14 08:40 America/Chicago` via
+  direct Databento gap-fill. Local `mes_15m` has been rolled forward from
+  canonical `mes_1m` through `2026-04-14 08:15 America/Chicago`.
+- First April 14 warehouse audit result: the current child engine emits only
+  parent-aligned long rows at `05:00`, `05:30`, `05:45`, `06:00`, and `06:15`
+  CT, with `GREEN_LIGHT` at `06:00` and `06:15`. It does not emit the obvious
+  counter-direction failure short the operator marked on tape.
+- Verified blocker: current parent-direction interaction contract cannot
+  represent a failure short while the active parent 15m map remains long.
 
 ### Legacy / Stale Code (Known Debt)
 

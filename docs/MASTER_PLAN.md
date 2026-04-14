@@ -420,10 +420,18 @@ Remaining Phase 4 blocker after this checkpoint:
 - local validation on 2026-04-14: `EXPIRED` populated `968` child rows, with
   `901 STOPPED`, `1 TP5_HIT`, and the remainder unresolved or minor-path cases.
   That is strong enough to keep the stale-state rule in the warehouse contract.
-- child execution audit is currently bounded by local `mes_1m` coverage ending
-  `2026-04-03 08:14 America/Chicago`. Parent 15m rows continue past that date,
-  but they cannot claim real child execution context until newer project-home
-  1m data is loaded.
+- local bootstrap on 2026-04-14 extended canonical `mes_1m` to
+  `2026-04-14 08:40 America/Chicago` using direct Databento historical
+  `GLBX.MDP3 / MES.c.0 / ohlcv-1m`, then rolled local `mes_15m` forward to
+  `2026-04-14 08:15 America/Chicago` from canonical local `mes_1m`.
+- first April 14 warehouse audit now has real parent+child coverage through the
+  morning tape. Current result: child rows at `05:00`, `05:30`, `05:45`,
+  `06:00`, and `06:15` are all parent-aligned longs; `06:00` and `06:15` are
+  `GREEN_LIGHT`. No counter-direction short row is emitted during the failure
+  sequence the operator marked as obvious.
+- next contract blocker: the current parent-aligned interaction model cannot
+  legally express a child failure short while the parent 15m map remains long.
+  That is now a verified warehouse finding, not a chart-side intuition.
 - the tuner must split into two scopes:
   - parent 15m fib/settings profile
   - child 1m/3m/5m execution profile
