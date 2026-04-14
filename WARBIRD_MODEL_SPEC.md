@@ -37,8 +37,8 @@ This document is a subordinate reference for the model contract. It must not ove
 19. Exact local AG schema authority is `docs/contracts/ag_local_training_schema.md`.
 20. The canonical live flow is `fib_engine_snapshot -> candidate -> AG_decision (against active packet) -> signal -> outcome`. The training flow is Python reconstruction over local OHLCV/context into AG lineage tables -> `ag_training` view -> model training. Live and training flows are distinct.
     Under the 2026-04-14 execution delta, the candidate stage may carry child
-    execution states `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED` without
-    changing the parent 15m identity contract.
+    execution states `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED -> EXPIRED`
+    without changing the parent 15m identity contract.
 21. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
 22. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
 23. Cloud core support data starts at `2020-01-01T00:00:00Z`. All Databento ingestion uses `.c.0` continuous front-month contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic. `contract-roll.ts` is dead code. MES uses `MES.c.0` via Live API (real-time) and Historical API (backfill). Cross-asset symbols (NQ, RTY, CL, HG, 6E, 6J) use `{SYMBOL}.c.0` via Historical API `ohlcv-1h`, pulled hourly by the `cross-asset` Edge Function.
@@ -576,9 +576,10 @@ Runtime output families that may remain in Pine:
 - live direction/archetype/fib interaction state for chart and alerts
 - entry/exit event flags and TP hit event flags for runtime lifecycle tracking
 - runtime-only context codes required by the active packet and dashboard compatibility surfaces
-- child execution-state outputs (`WATCH`, `ARMED`, `GREEN_LIGHT`, `INVALIDATED`)
-  and child pattern codes (`PULLBACK_HOLD`, `FAILED_RECLAIM`, `CLIMAX_REVERSAL`,
-  `FAILED_EXPANSION`) for operator use once admitted by the active contract
+- child execution-state outputs (`WATCH`, `ARMED`, `GREEN_LIGHT`,
+  `INVALIDATED`, `EXPIRED`) and child pattern codes (`PULLBACK_HOLD`,
+  `FAILED_RECLAIM`, `CLIMAX_REVERSAL`, `FAILED_EXPANSION`) for operator use
+  once admitted by the active contract
 - chart-visual diagnostics that are explicitly marked non-training and non-canonical for warehouse ingestion
 
 AG-owned features remain server-side from Databento OHLCV and local warehouse context; they are not Pine plot exports and must not be backfilled into Pine output budget.

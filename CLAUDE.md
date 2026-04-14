@@ -96,12 +96,20 @@ Phase execution order:
 - Trade-review timestamp join into feature lineage surfaces: not yet executed.
 - Current tuning harness only optimizes parent 15m strategy knobs. It does not
   choose `1m` / `3m` / `5m` child execution triggers or expose
-  `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED` operator states.
+  `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED -> EXPIRED` operator states.
 - Local `mes_1m` admission is now complete for subordinate micro-execution
   context. `3m/5m` remain derived on read.
 - Current child execution layer is a first deterministic 1m OHLCV-derived
   scaffold. Footprint-specific child fields such as true absorption and
   zero-print remain false until lower-timeframe capture is wired.
+- Canonical stale child-state heuristic: provisional `WATCH` / `ARMED` rows
+  become `EXPIRED` once `ml_exec_reclaim_dist_atr >= 1.5` and
+  `ml_exec_impulse_break_atr <= 0.15`.
+- Local verification on 2026-04-14: `EXPIRED` yielded `968` rows in
+  `ag_fib_interactions`, with `901 STOPPED` and only `1 TP5_HIT`.
+- Current child audit ceiling is local `mes_1m` coverage through
+  `2026-04-03 08:14 America/Chicago`. Later parent rows remain valid 15m
+  candidates but do not carry proven child execution context yet.
 
 ### Legacy / Stale Code (Known Debt)
 

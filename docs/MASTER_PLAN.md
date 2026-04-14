@@ -214,6 +214,7 @@ and the parent `1.0` / `TARGET 1` path. The contract delta is:
   - `ARMED`
   - `GREEN_LIGHT`
   - `INVALIDATED`
+  - `EXPIRED`
 - First admitted child execution patterns:
   - `PULLBACK_HOLD`
   - `FAILED_RECLAIM`
@@ -409,10 +410,20 @@ Outputs:
 Remaining Phase 4 blocker after this checkpoint:
 - child execution semantics still need Pine/runtime admission. The local
   training pipeline now emits `ml_exec_*`, but the chart surface does not yet
-  expose `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED`.
+  expose `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED -> EXPIRED`.
 - child pattern math still needs a second pass against real live tape examples.
   The current implementation is a deterministic 1m OHLCV scaffold, not the
   final order-flow contract.
+- the warehouse child-state contract now treats stale `WATCH` / `ARMED` rows as
+  `EXPIRED` once they drift `>= 1.5 ATR` from the pocket without printing more
+  than `0.15 ATR` of fresh impulse.
+- local validation on 2026-04-14: `EXPIRED` populated `968` child rows, with
+  `901 STOPPED`, `1 TP5_HIT`, and the remainder unresolved or minor-path cases.
+  That is strong enough to keep the stale-state rule in the warehouse contract.
+- child execution audit is currently bounded by local `mes_1m` coverage ending
+  `2026-04-03 08:14 America/Chicago`. Parent 15m rows continue past that date,
+  but they cannot claim real child execution context until newer project-home
+  1m data is loaded.
 - the tuner must split into two scopes:
   - parent 15m fib/settings profile
   - child 1m/3m/5m execution profile

@@ -138,6 +138,14 @@ class MicroExecContext:
     target_leg_code: int = 0
 
 
+MICRO_EXEC_STATE_NONE = 0
+MICRO_EXEC_STATE_WATCH = 1
+MICRO_EXEC_STATE_ARMED = 2
+MICRO_EXEC_STATE_GREEN = 3
+MICRO_EXEC_STATE_INVALIDATED = 4
+MICRO_EXEC_STATE_EXPIRED = 5
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build canonical AG tables and walk-forward split structure from local warbird data."
@@ -884,6 +892,16 @@ def micro_target_leg_code(fib_level_touched: int, pattern_code: int) -> int:
     return 0
 
 
+def micro_exec_expired(
+    state_code: int,
+    reclaim_dist_atr: float,
+    impulse_break_atr: float,
+) -> bool:
+    if state_code not in {MICRO_EXEC_STATE_WATCH, MICRO_EXEC_STATE_ARMED}:
+        return False
+    return reclaim_dist_atr >= 1.5 and impulse_break_atr <= 0.15
+
+
 def derive_micro_exec_context(
     window_bars: list[MesBar],
     direction: int,
@@ -946,21 +964,24 @@ def derive_micro_exec_context(
     elif aligned_delta <= -0.15:
         orderflow_bias = -1
 
-    state_code = 1
+    state_code = MICRO_EXEC_STATE_WATCH
     if orderflow_bias == -1 and (opp_dir_count > same_dir_count or aligned_delta <= -0.20):
-        state_code = 4
+        state_code = MICRO_EXEC_STATE_INVALIDATED
     elif orderflow_bias == 1 and aligned_delta >= 0.35 and same_dir_count >= max(2, opp_dir_count + 1):
-        state_code = 3
+        state_code = MICRO_EXEC_STATE_GREEN
     elif orderflow_bias == 1:
-        state_code = 2
+        state_code = MICRO_EXEC_STATE_ARMED
+
+    if micro_exec_expired(state_code, reclaim_dist_atr, impulse_break_atr):
+        state_code = MICRO_EXEC_STATE_EXPIRED
 
     pattern_code = 0
-    if state_code == 3:
+    if state_code == MICRO_EXEC_STATE_GREEN:
         if direction == 1 and pocket_code in {236, 382, 500, 618, 786} and low_now <= fib_level_price <= high_now and close_now >= fib_level_price:
             pattern_code = 1
         elif direction == -1 and pocket_code in {382, 500, 618, 786} and low_now <= fib_level_price <= high_now and close_now <= fib_level_price:
             pattern_code = 2
-    elif state_code == 4:
+    elif state_code == MICRO_EXEC_STATE_INVALIDATED:
         if pocket_code in {236, 382, 500}:
             pattern_code = 3
         else:

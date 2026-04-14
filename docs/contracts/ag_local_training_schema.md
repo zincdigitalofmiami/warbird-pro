@@ -218,6 +218,7 @@ Required child execution states:
 - `ARMED` — price has reached the execution pocket and is waiting for lower-timeframe confirmation
 - `GREEN_LIGHT` — lower-timeframe trigger confirmed; operator can engage
 - `INVALIDATED` — the child trigger is no longer valid against the parent map
+- `EXPIRED` — the child setup drifted too far from pocket without fresh impulse and is no longer actionable
 
 First admitted child execution patterns:
 
@@ -228,7 +229,7 @@ First admitted child execution patterns:
 
 Required columns (add to `ag_fib_interactions` or a 1:1 local join surface keyed by `id`):
   ml_exec_tf_code               INT      1=1m, 3=3m, 5=5m, 0=none
-  ml_exec_state_code            INT      0=none, 1=WATCH, 2=ARMED, 3=GREEN_LIGHT, 4=INVALIDATED
+  ml_exec_state_code            INT      0=none, 1=WATCH, 2=ARMED, 3=GREEN_LIGHT, 4=INVALIDATED, 5=EXPIRED
   ml_exec_pattern_code          INT      0=none, 1=PULLBACK_HOLD, 2=FAILED_RECLAIM, 3=CLIMAX_REVERSAL, 4=FAILED_EXPANSION
   ml_exec_pocket_code           INT      dominant child trigger pocket (236/382/500/618/786)
   ml_exec_impulse_break_atr     FLOAT8   normalized size of the impulse break that created the child setup
@@ -244,6 +245,15 @@ Required columns (add to `ag_fib_interactions` or a 1:1 local join surface keyed
 These fields describe how the parent MES 15m setup becomes actionable. They do
 not alter candidate identity, do not create a second trade object, and do not
 permit cloud mirroring of raw lower-timeframe execution history.
+
+Current warehouse heuristic for `EXPIRED`:
+
+- only admitted from provisional `WATCH` or `ARMED`
+- `ml_exec_reclaim_dist_atr >= 1.5`
+- `ml_exec_impulse_break_atr <= 0.15`
+
+This is a deterministic stale-state guard for warehouse research, not a claim
+that lower-timeframe footprint truth has been historically reconstructed.
 
 
 ## TV v6 Capabilities, Backtesting, and Automation Architecture
