@@ -17,6 +17,7 @@ Tier 1 features must be:
 Allowed Tier 1 families:
 
 - fib geometry and anchor state
+- micro execution-state and order-flow trigger state attached to the parent 15m setup
 - pivot state and pivot distance
 - target-viability state
 - exhaustion and event-response state
@@ -49,6 +50,7 @@ Every feature must declare:
 - source surface
 - event timestamp
 - bar-close alignment rule
+- parent 15m setup linkage when the feature comes from a child `1m` / `3m` / `5m` trigger state
 - whether it is Tier 1 or Tier 2
 
 If a feature cannot be proven point-in-time valid, it is not admitted.

@@ -185,6 +185,54 @@ Trades with excessive adverse excursion have distinct outcome distributions
 from trades that stay within structural stop range.
 
 
+## Micro Execution Feature Contract
+
+The canonical trade object remains the MES 15m fib setup. Micro execution is a
+child layer attached to that parent row. Do not create a fourth canonical AG
+table for `1m` / `3m` / `5m` triggers.
+
+Data-source rules:
+
+- local `mes_1m` is the canonical backfill tape for child execution context
+- `3m` and `5m` are derived on read from `mes_1m`; they are not separate stored tables
+- TradingView footprint/order-flow capture may enrich the child layer where available
+- do not claim full-history footprint truth until a real lower-timeframe capture
+  path exists
+
+Required child execution states:
+
+- `WATCH` — parent 15m setup is actionable soon; operator should monitor the lower timeframe
+- `ARMED` — price has reached the execution pocket and is waiting for lower-timeframe confirmation
+- `GREEN_LIGHT` — lower-timeframe trigger confirmed; operator can engage
+- `INVALIDATED` — the child trigger is no longer valid against the parent map
+
+First admitted child execution patterns:
+
+- `PULLBACK_HOLD`
+- `FAILED_RECLAIM`
+- `CLIMAX_REVERSAL`
+- `FAILED_EXPANSION`
+
+Required columns (add to `ag_fib_interactions` or a 1:1 local join surface keyed by `id`):
+  ml_exec_tf_code               INT      1=1m, 3=3m, 5=5m, 0=none
+  ml_exec_state_code            INT      0=none, 1=WATCH, 2=ARMED, 3=GREEN_LIGHT, 4=INVALIDATED
+  ml_exec_pattern_code          INT      0=none, 1=PULLBACK_HOLD, 2=FAILED_RECLAIM, 3=CLIMAX_REVERSAL, 4=FAILED_EXPANSION
+  ml_exec_pocket_code           INT      dominant child trigger pocket (236/382/500/618/786)
+  ml_exec_impulse_break_atr     FLOAT8   normalized size of the impulse break that created the child setup
+  ml_exec_reclaim_dist_atr      FLOAT8   normalized distance from child trigger close to the reclaim / half-back line
+  ml_exec_orderflow_bias        INT      -1=counter, 0=neutral, 1=same-direction at trigger
+  ml_exec_delta_norm            FLOAT8   normalized signed delta at the trigger
+  ml_exec_absorption            BOOLEAN  absorption confirmed near the child trigger level
+  ml_exec_zero_print            BOOLEAN  zero-print / finished-auction condition confirmed
+  ml_exec_same_dir_imbalance_ct INT      same-direction imbalance rows near the trigger
+  ml_exec_opp_dir_imbalance_ct  INT      opposing imbalance rows near the trigger
+  ml_exec_target_leg_code       INT      1=to_1_0, 2=to_t1, 3=to_1_0_then_t1
+
+These fields describe how the parent MES 15m setup becomes actionable. They do
+not alter candidate identity, do not create a second trade object, and do not
+permit cloud mirroring of raw lower-timeframe execution history.
+
+
 ## TV v6 Capabilities, Backtesting, and Automation Architecture
 
 Pine v6 capabilities adopted in this contract:

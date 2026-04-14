@@ -49,6 +49,9 @@ Phase execution order:
 - Pine Script v6 capability set for the active indicator path is confirmed:
   enums, strict boolean logic, dynamic requests, dynamic loops, `request.footprint()`,
   and `polyline` are available for the exhaustion/hold architecture.
+- 2026-04-14 contract delta: the MES 15m fib setup remains the parent object,
+  but execution is reopening as a child `1m` / `3m` / `5m` layer keyed back to
+  the same parent setup. Fibs are the map; order-flow at the level is the trigger.
 - Automated indicator capture pipeline is designed:
   Pine alert at `barstate.isconfirmed` -> Supabase Edge Function (`indicator-capture`)
   -> cloud relay table `indicator_snapshots_15m` -> nightly local sync to `warbird`.
@@ -85,6 +88,11 @@ Phase execution order:
 - Per-level Fib ladder AG exports: not yet in indicator. Required in Phase 0.5.
 - Historical seed ingest for indicator snapshots: not yet executed.
 - Trade-review timestamp join into feature lineage surfaces: not yet executed.
+- Current tuning harness only optimizes parent 15m strategy knobs. It does not
+  choose `1m` / `3m` / `5m` child execution triggers or expose
+  `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED` operator states.
+- Local `mes_1m` is reopened as pending Phase 4 input for subordinate
+  micro-execution context. `3m/5m` remain derived on read.
 
 ### Legacy / Stale Code (Known Debt)
 
@@ -102,7 +110,9 @@ Follow Warbird Full Reset Plan v5 only. No other plan drives implementation.
 
 ### Locked Rules
 
-- 15m is the primary model/chart/setup timeframe.
+- 15m is the parent model/chart/setup timeframe.
+- `1m` / `3m` / `5m` are subordinate execution timeframes once the 2026-04-14
+  micro-execution delta is implemented.
 - The canonical trade object is the MES 15m fib setup keyed by MES 15m bar close in `America/Chicago`.
 - Any `1H` wording outside archived docs is legacy and must not drive new work.
 - Pine is the canonical **live generator**; the Python reconstruction pipeline is the **training generator**.
@@ -112,7 +122,10 @@ Follow Warbird Full Reset Plan v5 only. No other plan drives implementation.
 - `rabid_raccoon` is bootstrap-only. After one-time import into `warbird`, it is legacy reference only.
 - Local warehouse DDL lives in `local_warehouse/migrations/` with its own `local_schema_migrations` ledger. Not in `supabase/migrations/`.
 - Cloud DDL lives in `supabase/migrations/` only.
-- Removed from canonical local build: `mes_1m`, `cross_asset_1d`, all news surfaces, all options surfaces, all legacy setup/trade/news tables.
+- Removed from canonical local build: `cross_asset_1d`, all news surfaces, all options surfaces, all legacy setup/trade/news tables.
+- `mes_1m` is reopened only as subordinate local micro-execution context for the
+  parent MES 15m setup. It is not a new primary trade object and does not
+  authorize canonical stored `3m` / `5m` tables.
 - First model target: multiclass `outcome_label`.
 - First feature scope: `MES + cross-asset + macro`.
 - Macro scope: `FRED + econ_calendar` only. No news or narrative sources.

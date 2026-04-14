@@ -12,11 +12,13 @@
 - Exact column/type and view SQL authority: `docs/contracts/ag_local_training_schema.md`
 - Canonical names never use version suffixes.
 - Removed from the canonical local build:
-  - `mes_1m`
   - `cross_asset_1d`
   - all news surfaces
   - all options surfaces
   - all legacy setup/trade/news tables
+- `mes_1m` is readmitted only as subordinate local micro-execution context for
+  canonical MES 15m parent setups. It is not a new primary trade object and
+  does not authorize canonical stored `3m` / `5m` tables.
 - First macro scope is locked to `FRED + econ_calendar`.
 - Cloud promotion is locked to `manual promote`.
 
@@ -190,6 +192,42 @@ Pine `alert()` at `barstate.isconfirmed`
 
 After one-time historical seed ingest, recurring manual TV CSV export is removed.
 
+### 2026-04-14 Execution Delta — Parent Setup, Child Trigger
+
+Live tape review on 2026-04-14 invalidated the assumption that a 15m-only
+accept/exhaustion trigger contract is sufficient for the best Warbird entries.
+The fib ladder repeatedly identified the correct map, but the current trigger
+surface missed obvious high-R executions that resolved between a pocket failure
+and the parent `1.0` / `TARGET 1` path. The contract delta is:
+
+- The canonical trade object remains the MES 15m fib setup keyed by the MES 15m
+  bar close in `America/Chicago`.
+- Execution becomes a subordinate child layer attached to that parent setup.
+  The parent defines the map and target ladder. The child defines when the
+  operator should engage.
+- Child trigger timeframes are `1m`, `3m`, or `5m`. `3m` and `5m` are derived
+  from canonical local `mes_1m`; they are not new stored canonical tables.
+- Order-flow is first-class execution evidence. Fibs are the map; order-flow at
+  the level is the trigger.
+- Pine runtime vocabulary for the child layer is locked to:
+  - `WATCH`
+  - `ARMED`
+  - `GREEN_LIGHT`
+  - `INVALIDATED`
+- First admitted child execution patterns:
+  - `PULLBACK_HOLD`
+  - `FAILED_RECLAIM`
+  - `CLIMAX_REVERSAL`
+  - `FAILED_EXPANSION`
+- Child states must remain point-in-time safe and keyed back to the same parent
+  15m setup. They do not create a second canonical trade object.
+- Historical backfill may use real `mes_1m` OHLCV-derived microstructure plus
+  TradingView footprint capture where available. Do not claim full-history
+  footprint truth until a real lower-timeframe capture path exists.
+- Current tuner profile `mes15m_agfit_v3` is a parent-settings sweep only. It
+  is not authorized to choose `1m/3m/5m` trigger policy. A separate
+  micro-execution tuning profile is required.
+
 ### Backtesting Protocol Locks
 
 - Deep Backtesting for multi-regime coverage.
@@ -261,6 +299,11 @@ Original requirements:
   - `HG` is mandatory; if missing in `rabid_raccoon`, source it from the raw drive files before bootstrap signoff
 - Retention floor is locked to `2020-01-01T00:00:00Z` for canonical training surfaces.
 
+2026-04-14 follow-on delta:
+- `mes_1m` is reopened as a new Phase 4 subordinate microstructure surface for
+  child execution-state reconstruction. This does not change the completed
+  Phase 2 bootstrap facts above and does not create a new primary trade object.
+
 ## Phase 3: Canonical AG Schema — COMPLETE 2026-04-11
 
 - Implement **three canonical local AG tables and one canonical training view.**
@@ -299,6 +342,10 @@ Original requirements:
   Not candidate gates. Spec in Phase 0.5 and `docs/contracts/ag_local_training_schema.md`.
 - Indicator snapshot features (from automated webhook pipeline) are first-run scope.
   Sourced from `indicator_snapshots_15m` local table via nightly sync from cloud capture.
+- Micro-execution features are reopened for first-run scope under the
+  2026-04-14 delta: local `mes_1m` supplies the canonical backfill tape,
+  `3m/5m` are derived on read, and order-flow / footprint evidence attaches to
+  the parent 15m setup as child execution-state context.
 - Live trade review loss drivers are required as feature-engineering context for Phase 4.
 - Macro scope is locked to:
   - daily FRED families
@@ -340,6 +387,14 @@ Outputs:
     `TabularPredictor.fit()` cannot complete in this workspace yet
 
 Remaining Phase 4 blocker after this checkpoint:
+- execution-contract repair. Current 15m-only trigger semantics do not express
+  `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED` child execution states or the
+  simple pocket-failure trades that resolve cleanly into `1.0` / `TARGET 1`.
+- local `mes_1m` admission is now required as subordinate microstructure input
+  for the child execution layer. `3m/5m` remain derived on read.
+- the tuner must split into two scopes:
+  - parent 15m fib/settings profile
+  - child 1m/3m/5m execution profile
 - evaluation-policy repair for the current `outcome_label` regime. Verified on 2026-04-13: `TP1_ONLY` disappears after 2022-06-28 and 2024+ is nearly all `STOPPED`, so several time-safe multiclass folds are structurally invalid.
 - ZigZag contract drift remains unresolved across docs, Pine runtime, and Python reconstruction. Do not claim reproducible AG/Pine parity until one depth contract is selected and enforced everywhere.
 - local lineage/reporting tables are still absent in `warbird`: `ag_training_runs`, `ag_shap_feature_summary`, `ag_shap_interactions`.

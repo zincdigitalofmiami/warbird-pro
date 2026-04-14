@@ -10,6 +10,9 @@ and produce a defensible minimum-viable settings lock before AutoGluon starts op
 
 This is **not** AutoGluon training. AG does the real optimization via live packets after Phase 4.
 This harness locks the settings floor AG trains from. AG must not train from a garbage baseline.
+This harness also does **not** choose the lower-timeframe child trigger (`1m` / `3m` / `5m`).
+It tunes the parent 15m strategy surface only. A separate micro-execution profile is required
+for the 2026-04-14 parent/child execution delta.
 
 Three commands: `suggest`, `record`, `leaderboard`.
 Authoritative scored evaluation modes are:
@@ -321,6 +324,8 @@ This prevents the tuner from treating chart-rendering tweaks as distinct strateg
 - TradingView Deep Backtesting date selection is still manual.
 - Footprint history quality is not stationary across the full sample. Recent bars are richer than the early `2020-2023` segment.
 - Walk-forward stability is approximated from rolling chronological trade windows. It is a penalty surface, not a replacement for a true purged re-optimization loop.
+- This runbook does not solve `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED`
+  child execution policy or select which `1m` / `3m` / `5m` trigger family should fire under an active 15m parent setup.
 
 ## Re-optimization Triggers
 

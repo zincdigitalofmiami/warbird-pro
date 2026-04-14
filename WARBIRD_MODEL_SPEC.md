@@ -13,6 +13,9 @@ This document is a subordinate reference for the model contract. It must not ove
 
 1. The canonical trade object is the **MES 15m fib setup**.
 2. The canonical key is the MES 15m **bar-close timestamp** in `America/Chicago`.
+   The MES 15m setup is the parent object even when a lower-timeframe execution
+   trigger is used. `1m` / `3m` / `5m` triggers are subordinate child execution
+   states keyed back to that same parent setup; they do not replace it.
 3. Pine is the canonical **live generator** (signal surface).
 4. The **training generator** is the Python reconstruction pipeline in `scripts/ag/`. It reconstructs snapshots/interactions/outcomes from local warehouse OHLCV/context and is the only local AG training population path.
 5. The Next.js dashboard is the richer mirrored operator surface using the same MES 15m fib contract; it is not a separate decision engine and must not recompute fib geometry locally.
@@ -21,6 +24,8 @@ This document is a subordinate reference for the model contract. It must not ove
 8. There are only two databases in scope: the local `warbird` PG17 warehouse and cloud Supabase.
 9. AutoGluon is offline only. It trains, calibrates, and emits a Pine-ready packet.
 10. The adaptive fib engine snapshot is the canonical base object. Live/runtime candidate semantics are defined by Pine on chart, while offline/training rows are reconstructed in Python from warehouse OHLCV/context with no Pine dependency.
+    Fibs define the map and target ladder. Order-flow at the level defines the
+    child execution trigger.
 11. The model output is MES 15m setup-outcome state: TP1–TP5 probability distribution, reversal risk, and bounded stop-family selection. It is **not** a predicted-price forecast surface.
 12. AG and offline training must consume point-in-time fib snapshots keyed to the MES 15m bar close, not repaint-prone live chart reads.
 13. The retained core historical window for training/support data starts at `2020-01-01T00:00:00Z`. Pre-2020 core rows are out of scope and must not be reintroduced into the canonical dataset.
@@ -31,6 +36,9 @@ This document is a subordinate reference for the model contract. It must not ove
 18. Canonical AG contract is **three canonical local AG tables and one canonical training view.**
 19. Exact local AG schema authority is `docs/contracts/ag_local_training_schema.md`.
 20. The canonical live flow is `fib_engine_snapshot -> candidate -> AG_decision (against active packet) -> signal -> outcome`. The training flow is Python reconstruction over local OHLCV/context into AG lineage tables -> `ag_training` view -> model training. Live and training flows are distinct.
+    Under the 2026-04-14 execution delta, the candidate stage may carry child
+    execution states `WATCH -> ARMED -> GREEN_LIGHT -> INVALIDATED` without
+    changing the parent 15m identity contract.
 21. Decision vocabulary is locked to `TAKE_TRADE`, `WAIT`, and `PASS`. Those decision codes are distinct from realized outcome labels.
 22. TradingView carries execution-facing visuals, alerts, and the exhaustion precursor diamond. Operator tables, mini charts, and dense diagnostics belong on the dashboard.
 23. Cloud core support data starts at `2020-01-01T00:00:00Z`. All Databento ingestion uses `.c.0` continuous front-month contracts with `stype_in=continuous`. Databento handles contract rolls automatically — no manual roll logic. `contract-roll.ts` is dead code. MES uses `MES.c.0` via Live API (real-time) and Historical API (backfill). Cross-asset symbols (NQ, RTY, CL, HG, 6E, 6J) use `{SYMBOL}.c.0` via Historical API `ohlcv-1h`, pulled hourly by the `cross-asset` Edge Function.
@@ -64,6 +72,9 @@ This document is a subordinate reference for the model contract. It must not ove
     approximation only. It does not replace the offline AG training pipeline.
 31. TV footprint history is not bulk-exportable. Footprint-derived features are
     captured via confirmed-bar alert/webhook from the indicator going forward.
+    Historical backfill may use real `mes_1m` OHLCV-derived microstructure plus
+    captured footprint where available. Do not claim full-history footprint
+    truth until a lower-timeframe capture path exists.
 32. Pine v6 capabilities required for exhaustion and hold logic include enums,
     strict boolean chains, dynamic loop boundaries, dynamic request strings,
     `request.footprint()`, and `polyline`-based rendering.
@@ -86,6 +97,9 @@ This document is a subordinate reference for the model contract. It must not ove
 The model evaluates the quality of canonical MES 15m interaction rows from `ag_fib_interactions`.
 
 It does **not** forecast a future MES price level or produce a standalone `1H` price prediction.
+It also does **not** turn `1m` / `3m` / `5m` into new standalone trade objects.
+Those lower-timeframe states exist only to decide how to enter the parent 15m
+setup and whether the map is currently actionable.
 
 For each candidate setup, the model estimates:
 
@@ -163,6 +177,11 @@ Canonical local training schema is the exact contract in `docs/contracts/ag_loca
 - `body_pct`, `upper_wick_pct`, `lower_wick_pct`, `rvol`
 - `rsi14`, `ema9`, `ema21`, `ema50`, `ema200`
 - `ema_stacked_bull`, `ema_stacked_bear`, `ema9_dist_pct`, `macd_hist`, `adx`, `energy`, `confluence_quality`
+
+`ag_fib_interactions` is also the admitted home for child execution-state
+context once the migration lands. Do not create a fourth canonical AG table for
+`1m` / `3m` / `5m` triggers. Child execution features remain attached to the
+parent MES 15m setup row.
 
 `ag_fib_outcomes` holds realized path/outcome fields, including:
 
@@ -546,13 +565,20 @@ The local AG training ingestion path is only: `scripts/ag/` Python reconstructio
 
 TradingView enforces a hard maximum of `64` output calls per script, and hidden `display.none` plots count toward that limit.
 
-**Current v7 budget: 33 plot + 1 plotshape + 3 alertcondition = 37/64 (27 headroom).** Any change that exceeds `64` is invalid.
+**Current v7 budget (verified 2026-04-13):**
+- Institutional: `51/64` (46 plot + 2 plotshape + 3 alertcondition, 13 headroom)
+- Strategy: `52/64` (50 plot + 2 plotshape, 12 headroom)
+
+Any change that exceeds `64` is invalid.
 
 Runtime output families that may remain in Pine:
 
 - live direction/archetype/fib interaction state for chart and alerts
 - entry/exit event flags and TP hit event flags for runtime lifecycle tracking
 - runtime-only context codes required by the active packet and dashboard compatibility surfaces
+- child execution-state outputs (`WATCH`, `ARMED`, `GREEN_LIGHT`, `INVALIDATED`)
+  and child pattern codes (`PULLBACK_HOLD`, `FAILED_RECLAIM`, `CLIMAX_REVERSAL`,
+  `FAILED_EXPANSION`) for operator use once admitted by the active contract
 - chart-visual diagnostics that are explicitly marked non-training and non-canonical for warehouse ingestion
 
 AG-owned features remain server-side from Databento OHLCV and local warehouse context; they are not Pine plot exports and must not be backfilled into Pine output budget.
@@ -575,7 +601,9 @@ The packet must include:
 8. event-response thresholds and suppression rules
 9. fib snapshot / lookback-family decisions when they are part of the admitted contract
 10. decision-policy thresholds for `TAKE_TRADE` / `WAIT` / `PASS`
-11. run metadata and sample counts
+11. parent-versus-child execution routing policy, including the preferred
+    `1m` / `3m` / `5m` trigger family when the parent 15m setup is active
+12. run metadata and sample counts
 
 Packet promotion rule:
 
