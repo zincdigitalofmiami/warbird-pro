@@ -19,7 +19,7 @@ echo "Compiling $PINE_FILE via TradingView pine-facade API..."
 pine_code=$(cat "$PINE_FILE")
 response=$(curl -s -X POST "https://pine-facade.tradingview.com/pine-facade/translate_light?user_name=admin&v=3" \
   -H 'Referer: https://www.tradingview.com/' \
-  -F "source=$pine_code")
+  --form-string "source=$pine_code")
 
 if echo "$response" | grep -q '"success":true'; then
   echo "✅ Compilation SUCCESS!"

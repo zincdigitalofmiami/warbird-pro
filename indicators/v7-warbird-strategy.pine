@@ -58,6 +58,7 @@ string fibAnchorTimeframe = input.timeframe("", "Anchor Timeframe Override", gro
 
 string fibCalcTimeframe = str.length(fibAnchorTimeframe) > 0 ? fibAnchorTimeframe : timeframe.period
 bool useFibAnchorTimeframeOverride = str.length(fibAnchorTimeframe) > 0 and fibAnchorTimeframe != timeframe.period
+int _chartTfSec = timeframe.in_seconds(timeframe.period)
 int _tfSec = timeframe.in_seconds(fibCalcTimeframe)
 float fibDeviation = autoTuneZZ
   ? (_tfSec >= 14400 ? 4.0 : _tfSec >= 3600 ? 3.5 : 3.0)
@@ -169,6 +170,8 @@ bool useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window
 string groupDebug = "Debug Diagnostics"
 bool enableDebugLogs = input.bool(false, "Enable Debug Logs", group=groupDebug, tooltip="Temporary state tracing for regime/probability diagnostics.")
 bool showFootprintAudit = input.bool(false, "Show Footprint Audit Table", group=groupDebug, tooltip="Displays current-bar footprint diagnostics plus the earliest loaded bar where TradingView returned footprint data.")
+bool disableProjectedHtfTrades = input.bool(true, "Disable Trading On Projected HTF Ladder", group=groupDebug,
+  tooltip="When a lower-timeframe chart projects a higher-timeframe fib ladder, keep it visual-only by default. Native 15m and native 1H backtests remain trustworthy; projected HTF ladder backtests do not.")
 
 yesNo(bool value) =>
     value ? "YES" : "NO"
@@ -638,6 +641,11 @@ bool htf4hStructureBull = htf4hHigh >= nz(htf4hHigh[1], htf4hHigh) and htf4hLow 
 bool htf4hStructureBear = htf4hHigh <= nz(htf4hHigh[1], htf4hHigh) and htf4hLow <= nz(htf4hLow[1], htf4hLow)
 bool htfTrendLongOk = not useHtfStructureFilter or (htf1hStructureBull and htf4hStructureBull and close >= htf4hP382)
 bool htfTrendShortOk = not useHtfStructureFilter or (htf1hStructureBear and htf4hStructureBear and close <= htf4hP618)
+bool projectedHtfLadder = useFibAnchorTimeframeOverride and _tfSec > _chartTfSec
+bool projectedHtfTradesSuppressed = projectedHtfLadder and disableProjectedHtfTrades
+bool htfBiasBull = htf1hStructureBull and htf4hStructureBull and close >= htf1hP500 and close >= htf4hP382
+bool htfBiasBear = htf1hStructureBear and htf4hStructureBear and close <= htf1hP500 and close <= htf4hP618
+int htfBiasDir = htfBiasBull ? 1 : htfBiasBear ? -1 : 0
 
 //=====================
 // VOLUME DELTA AT FIB TOUCHES
@@ -735,6 +743,7 @@ bool bullishTrendBlocksShorts = gateShortsInBullTrend and (
 // All signals gated to bar close — no mid-bar firing
 bool confirmed = barstate.isconfirmed
 int dir = fibBull ? 1 : -1
+bool htfBiasConflict = htfBiasDir != 0 and htfBiasDir != dir
 bool zoneReady = not na(zoneUpper) and not na(zoneLower) and not na(pPivot)
 bool breakInDir = zoneReady and confirmed ? (dir == 1 ? (close > zoneUpper and close[1] <= zoneUpper) : (close < zoneLower and close[1] >= zoneLower)) : false
 if breakInDir
@@ -1028,8 +1037,8 @@ bool priceAtFibLevel = isValid and confirmed and (
     math.abs(close - pOne) <= fibTouchTol)
 bool validArchetype = setupArchetypeCode == 1 or setupArchetypeCode == 2 or setupArchetypeCode == 3 or setupArchetypeCode == 5
 bool candidateSetup = priceAtFibLevel and validArchetype
-bool entryLongTrigger  = ((acceptEvent and longConfirmed) or scalpLongReady) and dir == 1 and not ladderInvalidated and htfWallLongOk
-bool entryShortTrigger = ((acceptEvent and shortConfirmed) or scalpShortReady) and dir == -1 and not ladderInvalidated and not bullishTrendBlocksShorts and htfWallShortOk
+bool entryLongTrigger  = ((acceptEvent and longConfirmed) or scalpLongReady) and dir == 1 and not ladderInvalidated and htfWallLongOk and not projectedHtfTradesSuppressed
+bool entryShortTrigger = ((acceptEvent and shortConfirmed) or scalpShortReady) and dir == -1 and not ladderInvalidated and not bullishTrendBlocksShorts and htfWallShortOk and not projectedHtfTradesSuppressed
 
 if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or entryLongTrigger or entryShortTrigger)
     log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} longTrig={5} shortTrig={6} shortGate={7} fpCount={8} htfLong={9} htfShort={10} wallLong={11} wallShort={12}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, entryLongTrigger, entryShortTrigger, bullishTrendBlocksShorts, footprintEvidenceCount, htfTrendLongOk, htfTrendShortOk, htfWallLongOk, htfWallShortOk))
@@ -1047,7 +1056,7 @@ if confirmed
     // Allow the setup state to arm on the actual confirmed accept bar, not only while price
     // is still sitting inside the zone. Otherwise valid accept events can never convert to entries.
     bool setupReadyNow = pivotNearZone or acceptEvent or scalpLongReady or scalpShortReady
-    if tradeState == TRADE_NONE and setupReadyNow and not cooldownActive and not ladderInvalidated
+    if tradeState == TRADE_NONE and setupReadyNow and not cooldownActive and not ladderInvalidated and not projectedHtfTradesSuppressed
         tradeState := TRADE_SETUP
         setupBar := bar_index
 
@@ -1350,6 +1359,9 @@ plot(float(htfConfPivot), "htf_conf_pivot", display=display.none, editable=false
 plot(float(htfConf382), "htf_conf_382", display=display.none, editable=false)
 plot(float(htfConf618), "htf_conf_618", display=display.none, editable=false)
 plot(float(htfConfTotal), "htf_conf_total", display=display.none, editable=false)
+plot(float(htfBiasDir), "ml_htf_bias_dir", display=display.none, editable=false)
+plot(htfBiasConflict ? 1.0 : 0.0, "ml_htf_bias_conflict", display=display.none, editable=false)
+plot(projectedHtfTradesSuppressed ? 1.0 : 0.0, "ml_htf_projection_suppressed", display=display.none, editable=false)
 
 // ── STRUCTURE / MODEL CONTRACT ──
 plot(float(dir), "ml_direction_code", display=display.none, editable=false)

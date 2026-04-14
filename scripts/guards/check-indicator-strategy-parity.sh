@@ -51,7 +51,7 @@ count_alertcondition_calls() {
 # Policy: all indicator ml_* fields must exist in the strategy (indicator ⊆ strategy).
 # Strategy-exclusive ml_* fields (footprint numerics AG cannot compute server-side)
 # are allowed and reported as INFO, not FAIL.
-STRATEGY_ONLY_ALLOWLIST="ml_exh_fp_delta ml_exh_trigger_row_delta ml_exh_extreme_vol_ratio ml_exh_stacked_imbalance_count"
+STRATEGY_ONLY_ALLOWLIST="ml_exh_fp_delta ml_exh_trigger_row_delta ml_exh_extreme_vol_ratio ml_exh_stacked_imbalance_count ml_htf_bias_dir ml_htf_bias_conflict ml_htf_projection_suppressed"
 
 extract_ml_fields "$INDICATOR_FILE" "$TMP_DIR/ml_indicator.txt"
 extract_ml_fields "$STRATEGY_FILE" "$TMP_DIR/ml_strategy.txt"
