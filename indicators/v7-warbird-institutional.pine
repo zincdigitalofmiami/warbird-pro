@@ -32,11 +32,11 @@ import TradingView/ZigZag/7 as zigzag
 //=====================
 string groupFibEngine = "Fibonacci Engine"
 bool autoTuneZZ = input.bool(false, "Auto-tune ZigZag by Timeframe", group=groupFibEngine,
-  tooltip="ON: 4H+ uses Deviation=4/Depth=20, 1H uses Deviation=3.5/Depth=15, 15m and below uses Deviation=3/Depth=15. Turn OFF to set values manually.")
-float fibDeviationManual = input.float(3.0, "ZigZag Deviation (manual)",
+  tooltip="ON: 4H+ uses Deviation=4/Depth=20, 1H uses Deviation=3.5/Depth=15, 15m uses Deviation=4/Depth=20, below 15m uses Deviation=3/Depth=15. Turn OFF to set values manually.")
+float fibDeviationManual = input.float(4.0, "ZigZag Deviation (manual)",
   minval=0.5, maxval=20.0, step=0.5, group=groupFibEngine,
   tooltip="Only used when Auto-tune is OFF.")
-int fibDepthManual = input.int(12, "ZigZag Depth (manual)",
+int fibDepthManual = input.int(20, "ZigZag Depth (manual)",
   minval=2, maxval=50, group=groupFibEngine,
   tooltip="Only used when Auto-tune is OFF.")
 float fibConfluenceTolPct = input.float(0.05, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupFibEngine)
@@ -46,10 +46,10 @@ float minFibRangeAtr = input.float(0.5, "Min Fib Range (ATR)", minval=0.5, maxva
 
 int _tfSec = timeframe.in_seconds()
 float fibDeviation = autoTuneZZ
-  ? (_tfSec >= 14400 ? 4.0 : _tfSec >= 3600 ? 3.5 : 3.0)
+  ? (_tfSec >= 14400 ? 4.0 : _tfSec >= 3600 ? 3.5 : _tfSec >= 900 ? 4.0 : 3.0)
   : fibDeviationManual
 int fibDepth = autoTuneZZ
-  ? (_tfSec >= 14400 ? 20 : 15)
+  ? (_tfSec >= 14400 ? 20 : _tfSec >= 3600 ? 15 : _tfSec >= 900 ? 20 : 15)
   : fibDepthManual
 
 //=====================

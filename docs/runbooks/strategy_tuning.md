@@ -10,8 +10,9 @@ and produce a defensible minimum-viable settings lock before AutoGluon starts op
 
 This is **not** AutoGluon training. AG does the real optimization via live packets after Phase 4.
 This harness locks the settings floor AG trains from. AG must not train from a garbage baseline.
-This harness also does **not** choose the lower-timeframe micro trigger (`5m` / `15m`).
-It tunes the parent 15m strategy surface only. A separate micro-execution profile is required
+This harness also does **not** choose the lower-timeframe micro trigger (`5m`)
+versus parent-bar `15m` execution. It tunes the parent 15m strategy surface
+only. A separate micro-execution profile is required
 for the 2026-04-14 parent/micro execution delta.
 
 Three commands: `suggest`, `record`, `leaderboard`.

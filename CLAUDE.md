@@ -41,7 +41,7 @@ Phase execution order:
 - All Databento calls use `.c.0` continuous front-month contracts with `stype_in=continuous`. No manual contract-roll logic.
 - Live core retention floor is `2020-01-01T00:00:00Z`.
 - `indicators/v7-warbird-institutional.pine` is the active Pine work surface. Compiles clean, TV-validated. Output budget: 51/64 (46 plot + 2 plotshape + 3 alertcondition, 13 headroom). 4 `request.security()` calls + 1 `request.footprint()` call (live, implemented). Budget verified 2026-04-13.
-- `indicators/v7-warbird-strategy.pine` is the AG training data generator. Compiles clean. Output budget: 52/64 (50 plot + 2 plotshape, 12 headroom). Commission floor at $1.00/side. `use_bar_magnifier=true`, `slippage=1` pinned in `strategy()`. Budget verified 2026-04-13. Dead HyperWave oscillator + energy computation blocks removed 2026-04-13 (were live in v6, orphaned in v7). Raw footprint numeric exports added 2026-04-13: `ml_exh_fp_delta`, `ml_exh_trigger_row_delta`, `ml_exh_extreme_vol_ratio`, `ml_exh_stacked_imbalance_count` — AG cannot compute these server-side (TV-exclusive API).
+- `indicators/v7-warbird-strategy.pine` is the AG training data generator. Compiles clean. Output budget: 52/64 (50 plot + 2 plotshape, 12 headroom). Commission floor at $1.00/side. `use_bar_magnifier=true`, `slippage=1` pinned in `strategy()`. Budget verified 2026-04-13. Dead HyperWave oscillator + energy computation blocks removed 2026-04-13 (were live in v6, orphaned in v7). Raw footprint numeric exports added 2026-04-13: `ml_exh_fp_delta`, `ml_exh_trigger_row_delta`, `ml_exh_extreme_vol_ratio`, `ml_exh_stacked_imbalance_count` — AG cannot compute these server-side (TV-exclusive API). First-run contract keeps all `ml_exh_*` / `ml_cont_*` diamond-path fields out of the canonical predictor and production SHAP; they are tuning-only unless explicitly reopened.
 - v7 parity guard (`scripts/guards/check-indicator-strategy-parity.sh`) updated for v7: ml_* parity, budget caps, coupled input defaults, strategy execution primitives, pinned TV defaults.
 - ESLint gate passes clean (`npm run lint` = 0 errors, 0 warnings).
 - Migration reconciliation through `045` is verified local↔remote.
@@ -50,8 +50,13 @@ Phase execution order:
   enums, strict boolean logic, dynamic requests, dynamic loops, `request.footprint()`,
   and `polyline` are available for the exhaustion/hold architecture.
 - 2026-04-14 contract delta: the MES 15m fib setup remains the parent object,
-  but execution is reopening as a micro `5m` / `15m` entry layer keyed back to
-  the same parent setup. Fibs are the map; order-flow at the level is the trigger.
+  but execution is reopening as a subordinate `5m` / `15m` trigger layer keyed
+  back to the same parent setup. `5m` provides execution context only; the
+  owning fib map remains `15m`. Fibs are the map; order-flow at the level is
+  the trigger.
+- 2026-04-14 `15m` fib-owner freeze: live and training now lock the parent map
+  to `Deviation=4`, `Depth=20`, `Threshold Floor=0.50`, `Min Fib Range=0.5`.
+  Do not let AG train against any other fib-owning timeframe contract.
 - Automated indicator capture pipeline is designed:
   Pine alert at `barstate.isconfirmed` -> Supabase Edge Function (`indicator-capture`)
   -> cloud relay table `indicator_snapshots_15m` -> nightly local sync to `warbird`.
@@ -81,7 +86,8 @@ Phase execution order:
 - Repo-native baseline trainer now exists (`scripts/ag/train_ag_baseline.py`). It joins the canonical `ag_training` rows with the curated `FRED/econ_calendar` regime context, enforces the required series set in the FRED catalog, removes label leakage from `ag_training`, writes run artifacts under `artifacts/ag_runs/`, and blocks training when a validation/test slice has fewer than 2 target classes.
   - 2026-04-14 lineage update: migration `014_ag_training_run_lineage.sql` creates the local run/SHAP spine (`ag_training_runs`, `ag_training_run_metrics`, `ag_artifacts`, `ag_shap_feature_summary`, `ag_shap_cohort_summary`, `ag_shap_interaction_summary`, `ag_shap_temporal_stability`, `ag_shap_feature_decisions`, `ag_shap_run_drift`), and the trainer now writes run metadata, fold metrics, and artifact registry rows for dry and real runs.
   - Dry-run verification `agtrain_20260414T183606833153Z` passed: `ag_training_runs` row present (`SUCCEEDED`, `dry_run=true`), baseline fold metrics written, and `DATASET_SUMMARY` / `FEATURE_MANIFEST` / `FOLD_SUMMARY` / `TRAINING_SUMMARY` artifacts registered.
-  - Remaining Phase 4 blocker: current `outcome_label` sparsity breaks several time-safe multiclass eval slices (`TP1_ONLY` disappears after 2022-06-28; 2024+ is almost entirely `STOPPED`). Next blocking item is evaluation-policy repair on top of the current label regime, then actual AutoGluon fit + SHAP population.
+  - 2026-04-14 evaluation-policy repair: the pipeline now censors only end-of-history truncated windows. Full-window rows retain `TP1_ONLY` through `TP4_HIT` instead of being mislabeled `CENSORED`. Current local outcome mix is `STOPPED=35792`, `TP1_ONLY=426`, `TP2_HIT=78`, `TP3_HIT=20`, `TP4_HIT=20`, `TP5_HIT=1114`, `CENSORED=11`.
+  - 2026-04-14 fold-policy repair: migration `015_ml_exec_tf_code_scope_cut.sql` aligned the warehouse to `ml_exec_tf_code IN (0, 5, 15)`, and the trainer now does a simple class-aware forward search for validation/test windows. Verified dry run `agtrain_20260414T184346894785Z` on `2020-01-03` through `2020-12-31` is now legal with `train_rows=3243`, `val_rows=682`, `test_rows=354`, `val_class_count=3`, `test_class_count=3`.
 - Full-surface SHAP program: lineage spine landed; raw SHAP artifacts and summary population are still pending the first corrected fitted run (Phase 5)
 - Cloud serving promotion: blocked on Phases 1-5 (Phase 6)
 - `artifacts/` directory: now active for AG split/baseline runs. `artifacts/shap/` still not created.
@@ -97,10 +103,11 @@ Phase execution order:
 - Historical seed ingest for indicator snapshots: not yet executed.
 - Trade-review timestamp join into feature lineage surfaces: not yet executed.
 - Current tuning harness only optimizes parent 15m strategy knobs. It does not
-  choose `5m` / `15m` micro execution triggers or expose
+  choose `5m` trigger policy versus parent-bar `15m` execution or expose
   `FORMING -> READY -> TRADE_ON -> INVALIDATED -> EXPIRED` operator states.
 - Local `mes_1m` admission is now complete for subordinate micro-execution
-  context. `5m` remains derived on read; `15m` remains the parent-bar candidate.
+  context. `5m` remains derived on read and does not own fib anchors; `15m`
+  remains the parent fib owner and parent-bar execution state.
 - Current micro execution layer is a first deterministic 1m OHLCV-derived
   scaffold. Footprint-specific micro fields such as true absorption and
   zero-print remain false until lower-timeframe capture is wired.
@@ -140,8 +147,8 @@ Follow Warbird Full Reset Plan v5 only. No other plan drives implementation.
 ### Locked Rules
 
 - 15m is the parent model/chart/setup timeframe.
-- `5m` / `15m` are the subordinate/entry execution timeframes once the 2026-04-14
-  micro-execution delta is implemented.
+- `5m` and parent-bar `15m` are the subordinate execution timeframes once the
+  2026-04-14 micro-execution delta is implemented.
 - The canonical trade object is the MES 15m fib setup keyed by MES 15m bar close in `America/Chicago`.
 - Any `1H` wording outside archived docs is legacy and must not drive new work.
 - Pine is the canonical **live generator**; the Python reconstruction pipeline is the **training generator**.
@@ -154,7 +161,8 @@ Follow Warbird Full Reset Plan v5 only. No other plan drives implementation.
 - Removed from canonical local build: `cross_asset_1d`, all news surfaces, all options surfaces, all legacy setup/trade/news tables.
 - `mes_1m` is reopened only as subordinate local micro-execution context for the
   parent MES 15m setup. It is not a new primary trade object and only exists to
-  derive `5m` entry context. `15m` remains the parent-bar entry candidate.
+  derive `5m` execution context. `15m` remains the owning fib map and may emit
+  the parent-bar execution state directly.
 - First model target: multiclass `outcome_label`.
 - First feature scope: `MES 1m/15m/1h/4h + SP500 spot + macro`.
 - Current operational truth: the trainer currently admits `SP500` as the daily FRED regime series. True intraday S&P 500 cash spot is not yet present in local `warbird`.

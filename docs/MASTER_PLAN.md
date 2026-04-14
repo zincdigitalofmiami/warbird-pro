@@ -18,7 +18,8 @@
   - all legacy setup/trade/news tables
 - `mes_1m` is readmitted only as subordinate local micro-execution context for
   canonical MES 15m parent setups. It is not a new primary trade object and
-  only exists to derive `5m` entry context. `15m` remains the parent-bar entry candidate.
+  only exists to derive `5m` execution context. `15m` remains the owning fib map
+  and may emit the parent-bar execution state directly.
 - First macro scope is locked to the curated FRED regime set + `econ_calendar`.
 - Cloud promotion is locked to `manual promote`.
 
@@ -205,8 +206,10 @@ and the parent `1.0` / `TARGET 1` path. The contract delta is:
 - Execution becomes a subordinate micro execution layer attached to that parent setup.
   The parent defines the map and target ladder. The micro layer defines when the
   operator should engage.
-- Entry-candidate timeframes are `5m` and `15m`. `5m` is derived from canonical
-  local `mes_1m`; `15m` remains the parent-bar candidate and is not a second trade object.
+- `5m` and parent-bar `15m` are the admitted execution timeframes. `5m` is
+  derived from canonical local `mes_1m` and exists only as execution context
+  around the active parent map; `15m` remains the only fib owner and is not a
+  second trade object.
 - Order-flow is first-class execution evidence. Fibs are the map; order-flow at
   the level is the trigger.
 - Pine runtime vocabulary for the micro execution layer is locked to:
@@ -229,8 +232,15 @@ and the parent `1.0` / `TARGET 1` path. The contract delta is:
   TradingView footprint capture where available. Do not claim full-history
   footprint truth until a real lower-timeframe capture path exists.
 - Current tuner profile `mes15m_agfit_v3` is a parent-settings sweep only. It
-  is not authorized to choose `5m/15m` trigger policy. A separate
-  micro-execution tuning profile is required.
+  is not authorized to choose `5m` trigger policy versus parent-bar `15m`
+  execution. A separate micro-execution tuning profile is required.
+- 2026-04-14 parent-owner fib freeze landed:
+  - canonical `15m` fib owner is now locked to `Deviation=4`, `Depth=20`,
+    `Threshold Floor=0.50`, `Min Fib Range=0.5`
+  - `5m` no longer owns fib anchors; it remains execution-only context around
+    the active parent map
+  - live Pine defaults and local AG reconstruction now share the same frozen
+    15m owner settings
 
 ### Backtesting Protocol Locks
 
@@ -346,8 +356,10 @@ Original requirements:
   Phase 0.5 and `docs/contracts/ag_local_training_schema.md`. Expected budget: 25-35 columns.
 - Behavioral features (`ml_session_tier` through `ml_favorable_excursion_pts`) are
   first-run scope. Spec in Phase 0.5 and `docs/contracts/ag_local_training_schema.md`.
-- Exhaustion features (`ml_exh_*` columns) are first-run scope. Feature enrichment only.
-  Not candidate gates. Spec in Phase 0.5 and `docs/contracts/ag_local_training_schema.md`.
+- Exhaustion / continuation / diamond features (`ml_exh_*`, `ml_cont_*`) are
+  tuning-only in the first run. Keep them out of the canonical AG training
+  matrix and any production predictor SHAP. Use a separate sidecar tuning/SHAP
+  study if their setting sensitivity needs explanation later.
 - Indicator snapshot features (from automated webhook pipeline) are first-run scope.
   Sourced from `indicator_snapshots_15m` local table via nightly sync from cloud capture.
 - Micro-execution features are reopened for first-run scope under the
@@ -481,7 +493,28 @@ Remaining Phase 4 blocker after this checkpoint:
 - current first-run feature parity gap:
   - the trainer admits `SP500` from the curated daily FRED regime set
   - true intraday S&P 500 cash spot is not yet admitted into local `warbird`
-- next blocking item: repair the `outcome_label` evaluation regime, then complete the first corrected AutoGluon fit and populate Phase 5 SHAP surfaces from that run.
+- 2026-04-14 evaluation-policy repair landed in `scripts/ag/build_ag_pipeline.py`:
+  rows are now censored only when the full forward observation window is not
+  observable at the end of the available history. Rows that complete the full
+  window but stop short of `TP5` keep their realized `highest_tp_hit` class
+  (`TP1_ONLY` through `TP4_HIT`) instead of being mislabeled `CENSORED`.
+- 2026-04-14 follow-on repair landed:
+  - migration `015_ml_exec_tf_code_scope_cut.sql` aligns the live warehouse
+    constraint with the active `ml_exec_tf_code` contract (`0`, `5`, `15`)
+  - `scripts/ag/train_ag_baseline.py` now performs a simple class-aware forward
+    search for validation/test windows so the one-year dry run does not die on
+    the first single-class slice when a legal later slice exists
+  - verified dry run `agtrain_20260414T184346894785Z` on `2020-01-03` through
+    `2020-12-31`: `train_rows=3243`, `val_rows=682`, `test_rows=354`,
+    `val_class_count=3`, `test_class_count=3`
+- 2026-04-14 owner-freeze rebuild landed:
+  - `scripts/ag/build_ag_pipeline.py` now reconstructs the parent 15m map with
+    `Deviation=4`, `Depth=20`, `Threshold Floor=0.50`, `Min Fib Range=0.5`
+  - rebuild run `agfit_20260414T204213Z` wrote
+    `snapshots=2240`, `interactions=54662`, `outcomes=54662`
+  - local `ag_fib_snapshots` now verify as one frozen contract:
+    `zz_deviation=4`, `zz_depth=20` across all `2240` rows
+- next blocking item: verify the frozen 15m owner behavior on-chart, especially flip/redraw behavior, then complete the first corrected one-year AutoGluon fit and populate the Phase 5 SHAP surfaces from that run.
 
 ## Phase 5: Full-Surface SHAP Program
 

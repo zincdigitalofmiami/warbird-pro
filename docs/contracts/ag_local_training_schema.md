@@ -151,7 +151,9 @@ All values normalized by ATR or percent. Raw price levels never enter the model.
 
 Exhaustion is exported as ml_* hidden features. NOT a hard entry gate.
 Do not suppress candidate rows based on exhaustion confluence.
-Feature enrichment only. AG discovers the weights.
+First-run contract: tuning/diagnostics only. Exclude these fields from the
+canonical AG predictor matrix and from production SHAP. If needed, analyze them
+in a separate sidecar tuning/SHAP workflow.
 
 Required hidden export columns (add to ag_fib_interactions or as join surface):
   ml_exh_geom_confluence      BOOLEAN  price at active leg 1.272 or 1.618 extension
@@ -203,13 +205,13 @@ from trades that stay within structural stop range.
 
 The canonical trade object remains the MES 15m fib setup. Micro execution is a
 subordinate layer attached to that parent row. Do not create a fourth canonical AG
-table for `5m` / `15m` entry candidates.
+table for standalone `5m` fib objects or separate `15m` child trade objects.
 
 Data-source rules:
 
 - local `mes_1m` is the canonical source tape for derived `5m` micro execution context
-- `5m` is derived on read from `mes_1m`; it is not a separate stored table
-- `15m` is the parent-bar execution candidate and is not reconstructed as a second trade object
+- `5m` is derived on read from `mes_1m`; it is not a separate stored table and does not own fib anchors
+- `15m` is the parent fib owner and may emit the parent-bar execution state directly; it is not reconstructed as a second trade object
 - TradingView footprint/order-flow capture may enrich the micro execution layer where available
 - do not claim full-history footprint truth until a real lower-timeframe capture
   path exists

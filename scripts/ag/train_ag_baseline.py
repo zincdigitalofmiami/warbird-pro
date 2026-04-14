@@ -81,6 +81,17 @@ LEAKAGE_COLS = {
     "session_date_ct",
     "hour_ts",
 }
+TUNING_ONLY_PREFIXES = (
+    "ml_exh_",
+    "ml_cont_",
+)
+TUNING_ONLY_EXACT_COLS = {
+    "ml_reversal_warning_in_trade",
+}
+TUNING_ONLY_NAME_TOKENS = (
+    "diamond",
+    "exhaustion",
+)
 
 
 @dataclass
@@ -117,6 +128,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-metric", default="f1_macro", help="AutoGluon evaluation metric.")
     parser.add_argument("--presets", default="best_quality", help="AutoGluon preset.")
     parser.add_argument("--time-limit", type=int, default=900, help="Per-fold fit limit in seconds.")
+    parser.add_argument(
+        "--label-count-threshold",
+        type=int,
+        default=1,
+        help="Minimum training rows required to keep a class in AutoGluon.",
+    )
     parser.add_argument("--num-bag-folds", type=int, default=5, help="AutoGluon bagging folds.")
     parser.add_argument("--num-stack-levels", type=int, default=2, help="AutoGluon stack depth.")
     parser.add_argument(
@@ -324,6 +341,13 @@ def label_distribution(values: pd.Series) -> dict[str, int]:
     return dict(sorted(counts.items(), key=lambda item: (-item[1], item[0])))
 
 
+def build_session_label_map(df: pd.DataFrame, label: str) -> dict[pd.Timestamp, set[str]]:
+    session_label_map: dict[pd.Timestamp, set[str]] = {}
+    for session, labels in df.groupby("session_date_ct")[label]:
+        session_label_map[session] = {str(value) for value in labels.dropna().tolist()}
+    return session_label_map
+
+
 def accuracy_score(y_true: list[str], y_pred: list[str]) -> float:
     if not y_true:
         return 0.0
@@ -358,6 +382,7 @@ def majority_baseline(train_labels: pd.Series, eval_labels: pd.Series, labels: l
 
 def build_walk_forward_folds(
     sessions: list[pd.Timestamp],
+    session_label_map: dict[pd.Timestamp, set[str]],
     n_folds: int,
     min_train_sessions: int,
     val_sessions: int,
@@ -370,18 +395,50 @@ def build_walk_forward_folds(
             f"Need at least {required} sessions for the configured walk-forward plan; found {len(sessions)}."
         )
 
+    def class_count(session_slice: list[pd.Timestamp]) -> int:
+        labels: set[str] = set()
+        for session in session_slice:
+            labels.update(session_label_map.get(session, set()))
+        return len(labels)
+
     max_offset = len(sessions) - required
     step = max(1, max_offset // max(1, n_folds - 1)) if n_folds > 1 else 1
     folds: list[FoldSpec] = []
 
     for fold_idx in range(n_folds):
-        train_end_ix = min_train_sessions - 1 + (fold_idx * step)
-        val_start_ix = train_end_ix + 1 + session_embargo
-        val_end_ix = val_start_ix + val_sessions - 1
-        test_start_ix = val_end_ix + 1 + session_embargo
-        test_end_ix = test_start_ix + test_sessions - 1
-        if test_end_ix >= len(sessions):
+        base_train_end_ix = min_train_sessions - 1 + (fold_idx * step)
+        base_val_start_ix = base_train_end_ix + 1 + session_embargo
+        last_val_start_ix = len(sessions) - (val_sessions + session_embargo + test_sessions)
+        if base_val_start_ix > last_val_start_ix:
             break
+
+        chosen_indices: tuple[int, int, int, int, int] | None = None
+        for val_start_ix in range(base_val_start_ix, last_val_start_ix + 1):
+            train_end_ix = val_start_ix - session_embargo - 1
+            if train_end_ix + 1 < min_train_sessions:
+                continue
+            val_end_ix = val_start_ix + val_sessions - 1
+            test_start_ix = val_end_ix + 1 + session_embargo
+            test_end_ix = test_start_ix + test_sessions - 1
+            if test_end_ix >= len(sessions):
+                break
+
+            val_slice = sessions[val_start_ix : val_end_ix + 1]
+            test_slice = sessions[test_start_ix : test_end_ix + 1]
+            if class_count(val_slice) >= 2 and class_count(test_slice) >= 2:
+                chosen_indices = (train_end_ix, val_start_ix, val_end_ix, test_start_ix, test_end_ix)
+                break
+
+        if chosen_indices is None:
+            train_end_ix = base_train_end_ix
+            val_start_ix = train_end_ix + 1 + session_embargo
+            val_end_ix = val_start_ix + val_sessions - 1
+            test_start_ix = val_end_ix + 1 + session_embargo
+            test_end_ix = test_start_ix + test_sessions - 1
+            if test_end_ix >= len(sessions):
+                break
+        else:
+            train_end_ix, val_start_ix, val_end_ix, test_start_ix, test_end_ix = chosen_indices
 
         train_slice = sessions[: train_end_ix + 1]
         val_slice = sessions[val_start_ix : val_end_ix + 1]
@@ -412,7 +469,15 @@ def coerce_feature_frame(df: pd.DataFrame, label: str) -> tuple[pd.DataFrame, li
     for col in bool_cols:
         out[col] = out[col].astype("int8")
 
-    drop_cols = [col for col in out.columns if col in LEAKAGE_COLS or col == label]
+    tuning_only_cols = [
+        col
+        for col in out.columns
+        if col.startswith(TUNING_ONLY_PREFIXES)
+        or col in TUNING_ONLY_EXACT_COLS
+        or any(token in col for token in TUNING_ONLY_NAME_TOKENS)
+    ]
+    leakage_or_identity_cols = [col for col in out.columns if col in LEAKAGE_COLS or col == label]
+    drop_cols = sorted(set(leakage_or_identity_cols + tuning_only_cols))
     feature_cols = [col for col in out.columns if col not in drop_cols]
 
     constant_cols: list[str] = []
@@ -424,7 +489,8 @@ def coerce_feature_frame(df: pd.DataFrame, label: str) -> tuple[pd.DataFrame, li
     manifest = {
         "label": label,
         "feature_count": len(feature_cols),
-        "dropped_leakage_or_identity": sorted(drop_cols),
+        "dropped_leakage_or_identity": sorted(leakage_or_identity_cols),
+        "dropped_tuning_only_columns": sorted(tuning_only_cols),
         "dropped_constant_columns": sorted(constant_cols),
         "feature_groups": {
             "core": len([col for col in feature_cols if not col.startswith(("fred_", "econ_"))]),
@@ -885,6 +951,7 @@ def fit_fold(
         path=str(fold_dir / "predictor"),
         verbosity=2,
         log_to_file=True,
+        learner_kwargs={"label_count_threshold": args.label_count_threshold},
     )
 
     excluded_model_types = [item.strip() for item in args.excluded_model_types.split(",") if item.strip()]
@@ -924,6 +991,7 @@ def fit_fold(
         "excluded_model_types": excluded_model_types,
         "presets": args.presets,
         "time_limit": args.time_limit,
+        "label_count_threshold": args.label_count_threshold,
         "num_bag_folds": args.num_bag_folds,
         "num_stack_levels": args.num_stack_levels,
         "dynamic_stacking": args.dynamic_stacking,
@@ -973,8 +1041,10 @@ def main() -> None:
 
         enriched, feature_cols, feature_manifest = coerce_feature_frame(enriched, label=args.label)
         sessions = sorted(enriched["session_date_ct"].drop_duplicates().tolist())
+        session_label_map = build_session_label_map(enriched, args.label)
         folds = build_walk_forward_folds(
             sessions=sessions,
+            session_label_map=session_label_map,
             n_folds=args.n_folds,
             min_train_sessions=args.min_train_sessions,
             val_sessions=args.val_sessions,

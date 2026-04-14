@@ -581,8 +581,10 @@ def build_snapshots_and_interactions(
     lows = ind["low"]
     closes = ind["close"]
 
-    fib_deviation = 3.0
-    fib_depth = 15
+    # Frozen 2026-04-14 parent-owner 15m fib contract. AG reconstruction must
+    # mirror the live 15m map rather than the retired faster 15m defaults.
+    fib_deviation = 4.0
+    fib_depth = 20
     fib_threshold_floor_pct = 0.50
     min_fib_range_atr = 0.5
     retest_bars = 6
@@ -960,6 +962,8 @@ def derive_micro_exec_context(
     low_now: float,
     atr14_now: float,
 ) -> MicroExecContext:
+    # This layer scores subordinate execution context around the active parent
+    # 15m fib snapshot. It does not create a second fib-owning 5m trade object.
     pocket_code = fib_level_touched if fib_level_touched in {236, 382, 500, 618, 786} else 0
     context = MicroExecContext(pocket_code=pocket_code)
     if len(window_bars) < 3 or atr14_now <= 0:
@@ -1107,8 +1111,9 @@ def derive_micro_exec_context(
     return context
 
 
-def outcome_label_for(highest_tp_hit: int, hit_sl: bool, resolved: bool) -> str:
-    if not resolved:
+def outcome_label_for(highest_tp_hit: int, hit_sl: bool, full_window_observed: bool) -> str:
+    # Censor only when we run out of future bars and cannot observe the full window.
+    if not full_window_observed:
         return "CENSORED"
     if highest_tp_hit >= 5:
         return "TP5_HIT"
@@ -1137,6 +1142,7 @@ def build_outcomes(
     for row in interactions:
         i = row.bar_index
         max_idx = min(len(bars) - 1, i + observation_window)
+        full_window_observed = (i + observation_window) <= (len(bars) - 1)
         highest_tp_hit = 0
         bars_to_tp1: int | None = None
         bars_to_sl: int | None = None
@@ -1197,7 +1203,7 @@ def build_outcomes(
                 "bars_to_resolution": bars_to_resolution,
                 "mae_pts": mae_pts,
                 "mfe_pts": mfe_pts,
-                "outcome_label": outcome_label_for(highest_tp_hit, hit_sl, resolved),
+                "outcome_label": outcome_label_for(highest_tp_hit, hit_sl, full_window_observed),
                 "observation_window": observation_window,
             }
         )

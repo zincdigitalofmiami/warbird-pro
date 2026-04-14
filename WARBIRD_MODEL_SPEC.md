@@ -14,8 +14,12 @@ This document is a subordinate reference for the model contract. It must not ove
 1. The canonical trade object is the **MES 15m fib setup**.
 2. The canonical key is the MES 15m **bar-close timestamp** in `America/Chicago`.
    The MES 15m setup is the parent object even when a lower-timeframe execution
-   trigger is used. `5m` / `15m` entry candidates are subordinate micro execution
-   states keyed back to that same parent setup; they do not replace it.
+   trigger is used. `5m` provides subordinate micro execution context and `15m`
+   may emit the parent-bar execution state directly; neither creates a second
+   fib-owning trade object.
+2a. The frozen parent-owner 15m fib baseline is `Deviation=4`, `Depth=20`,
+    `Threshold Floor=0.50`, `Min Fib Range=0.5` as of 2026-04-14. Any change to
+    that behavior is a retrain event for AG.
 3. Pine is the canonical **live generator** (signal surface).
 4. The **training generator** is the Python reconstruction pipeline in `scripts/ag/`. It reconstructs snapshots/interactions/outcomes from local warehouse OHLCV/context and is the only local AG training population path.
 5. The Next.js dashboard is the richer mirrored operator surface using the same MES 15m fib contract; it is not a separate decision engine and must not recompute fib geometry locally.
@@ -53,7 +57,10 @@ This document is a subordinate reference for the model contract. It must not ove
     `RVXCLS`, `OVXCLS`, `GVZCLS`, `NFCI`.
 28. Exhaustion context is exported as `ml_*` hidden features in `ag_fib_interactions`.
     It is not a hard gate suppressing candidate row emission.
-    Broad candidate emission is preserved. AG discovers the weights.
+    Broad candidate emission is preserved. First-run contract keeps these
+    exhaustion/continuation fields out of the canonical AG predictor matrix and
+    out of production SHAP; if needed they may be analyzed in a separate
+    sidecar tuning/SHAP workflow.
     Exhaustion has two distinct evidence paths in Pine v7 (2026-04-13):
     (a) **Reversal exhaustion** (`bearishExhaustion` / `bullishExhaustion`): fires at
         extension levels (1.272 / 1.618) when footprint shows counter-direction pressure.
@@ -102,9 +109,10 @@ This document is a subordinate reference for the model contract. It must not ove
 The model evaluates the quality of canonical MES 15m interaction rows from `ag_fib_interactions`.
 
 It does **not** forecast a future MES price level or produce a standalone `1H` price prediction.
-It also does **not** turn `5m` / `15m` entry candidates into new standalone trade objects.
-Those execution-timeframe states exist only to decide how to enter the parent 15m
-setup and whether the map is currently actionable.
+It also does **not** turn `5m` execution context or parent-bar `15m` execution
+states into new standalone trade objects. Those execution-timeframe states
+exist only to decide how to enter the parent 15m setup and whether the map is
+currently actionable.
 
 For each candidate setup, the model estimates:
 
@@ -185,9 +193,12 @@ Canonical local training schema is the exact contract in `docs/contracts/ag_loca
 
 `ag_fib_interactions` is also the admitted home for micro execution-state
 context once the migration lands. Do not create a fourth canonical AG table for
-`5m` / `15m` entry candidates. Micro execution features remain attached to the
-parent MES 15m setup row. Micro execution direction may oppose the parent
-direction when the lower timeframe emits a legal failure / reversal trigger.
+standalone `5m` fib owners or separate `15m` child trade objects. Micro
+execution features remain attached to the parent MES 15m setup row. `5m` only
+contributes execution context around the active parent map, while `15m` may
+express the parent-bar execution state directly. Micro execution direction may
+oppose the parent direction when the lower timeframe emits a legal failure /
+reversal trigger.
 
 `ag_fib_outcomes` holds realized path/outcome fields, including:
 
@@ -315,6 +326,12 @@ The locked first training target is `outcome_label` from `ag_fib_outcomes`.
 | `observation_window` | `int`     | Window used for label resolution                 |
 
 `ag_training` excludes censored rows with `WHERE outcome_label != 'CENSORED'`.
+
+`CENSORED` is reserved for rows where the canonical forward observation window is
+not fully observable because the interaction occurs too close to the end of the
+available bar history. Rows that complete the full observation window but never
+hit `TP5` or stop still keep their realized `highest_tp_hit` class (`TP1_ONLY`
+through `TP4_HIT`) and are not censored.
 
 ### 4.2 Derived Model-Stage Labels (Not Canonical Warehouse Columns)
 
