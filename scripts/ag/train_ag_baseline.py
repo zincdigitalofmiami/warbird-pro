@@ -98,6 +98,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dsn", default=DEFAULT_DSN, help="PostgreSQL DSN for local warbird.")
     parser.add_argument("--output-root", default=DEFAULT_OUTPUT_ROOT, help="Artifact root.")
     parser.add_argument("--label", default="outcome_label", help="Target column.")
+    parser.add_argument(
+        "--start-date",
+        default=None,
+        help="Optional inclusive America/Chicago session-date floor (YYYY-MM-DD).",
+    )
+    parser.add_argument(
+        "--end-date",
+        default=None,
+        help="Optional inclusive America/Chicago session-date ceiling (YYYY-MM-DD).",
+    )
     parser.add_argument("--eval-metric", default="f1_macro", help="AutoGluon evaluation metric.")
     parser.add_argument("--presets", default="best_quality", help="AutoGluon preset.")
     parser.add_argument("--time-limit", type=int, default=900, help="Per-fold fit limit in seconds.")
@@ -169,6 +179,24 @@ def add_time_context(df: pd.DataFrame) -> pd.DataFrame:
         (df["hour_ct"] >= 8) & (df["hour_ct"] <= 15)
     ).map({True: 1, False: 3}).astype("int8")
     return df
+
+
+def filter_session_window(df: pd.DataFrame, start_date: str | None, end_date: str | None) -> pd.DataFrame:
+    if not start_date and not end_date:
+        return df
+    if "session_date_ct" not in df.columns:
+        raise SystemExit("session_date_ct must exist before filtering the training window.")
+
+    out = df.copy()
+    if start_date:
+        start_ts = pd.Timestamp(start_date)
+        out = out[out["session_date_ct"] >= start_ts]
+    if end_date:
+        end_ts = pd.Timestamp(end_date)
+        out = out[out["session_date_ct"] <= end_ts]
+    if out.empty:
+        raise SystemExit("Filtered training window is empty.")
+    return out
 
 
 def load_cross_asset_features(conn: psycopg2.extensions.connection) -> pd.DataFrame:
@@ -528,6 +556,9 @@ def main() -> None:
 
     with psycopg2.connect(args.dsn) as conn:
         base = load_base_training(conn)
+        base = add_time_context(base)
+        base = filter_session_window(base, args.start_date, args.end_date)
+        base = base.drop(columns=["hour_ts", "hour_ct", "minute_ct", "dow_ct", "month_ct", "is_rth_ct", "is_opening_window_ct", "session_tier_code"], errors="ignore")
         enriched, coverage = attach_context_features(
             conn,
             base=base,
@@ -551,6 +582,12 @@ def main() -> None:
         "created_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat(),
         "rows_total": int(len(enriched)),
         "sessions_total": int(len(sessions)),
+        "session_window": {
+            "start_date": None if args.start_date is None else args.start_date,
+            "end_date": None if args.end_date is None else args.end_date,
+            "actual_start_date": sessions[0].date().isoformat(),
+            "actual_end_date": sessions[-1].date().isoformat(),
+        },
         "label_distribution": label_distribution(enriched[args.label].astype(str)),
         "coverage": coverage,
     }
