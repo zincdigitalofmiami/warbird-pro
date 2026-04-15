@@ -1117,6 +1117,7 @@ def write_summary_md(
     cohort_row_counts: dict[str, dict[str, int]],
     leakage_rank_threshold: int,
     leakage_cv_threshold: float,
+    run_integrity: dict[str, Any],
 ) -> None:
     lines: list[str] = []
     lines.append(f"# SHAP Deep-Dive — `{run_id}`")
@@ -1189,12 +1190,25 @@ def write_summary_md(
                 f"mean_abs={r['mean_abs_shap']:.4f}, cohort_cv={r['cohort_cv']:.4f}"
             )
         lines.append("")
-        lines.append(
-            "**Interpretation:** these features have high importance that is suspiciously uniform "
-            "across every cohort slice. That pattern matches IID bag-fold leakage (model uses the "
-            "feature as a time-identity proxy). Re-run SHAP on a clean `--num-bag-folds 0` training "
-            "run to confirm; if the same features stay flagged there, treat as real regime signal."
-        )
+        if run_integrity.get("has_internal_ensembling"):
+            lines.append(
+                "**Interpretation (source run had internal IID bagging/stacking):** these features "
+                "have high importance that is suspiciously uniform across every cohort slice. "
+                "That pattern matches IID bag-fold leakage (model uses the feature as a time-identity "
+                "proxy). Re-run SHAP on a clean `--num-bag-folds 0` training run to confirm; if the "
+                "same features stay flagged there, treat as real regime signal."
+            )
+        else:
+            lines.append(
+                "**Interpretation:** these features have high importance that is suspiciously uniform "
+                "across every cohort slice. Source run had no internal IID bagging/stacking "
+                "(`num_bag_folds=0`, `num_stack_levels=0`, `dynamic_stacking=off`), so IID bag-fold "
+                "leakage is NOT the likely explanation. Candidate causes: "
+                "(a) feature is target-derived (e.g., distances computed from TP/SL geometry at entry); "
+                "(b) feature encodes a monotonically-drifting macro signal that acts as a time-identity proxy; "
+                "(c) cohort definition is too coarse to separate regime-conditional behavior. "
+                "Human adjudication required — do not auto-drop."
+            )
     else:
         lines.append("No features passed both leakage gates.")
     lines.append("")
@@ -1466,6 +1480,7 @@ def run_postprocess_phase(
         cohort_row_counts=cohort_row_counts,
         leakage_rank_threshold=args.leakage_rank_threshold,
         leakage_cv_threshold=args.leakage_cv_threshold,
+        run_integrity=run_integrity,
     )
     leak_suspect_count = int((drops["reason_code"] == "LEAKAGE_SUSPECT").sum()) if not drops.empty else 0
     leakage_verdict = "SUSPECT" if leak_suspect_count > 0 else "LIKELY CLEAN"
