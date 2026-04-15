@@ -389,6 +389,7 @@ def load_fred_panel(
             left_on="session_date_ct",
             right_on="event_date",
             direction="backward",
+            allow_exact_matches=False,  # prevent same-day FRED close leaking into intraday bars
         )
         calendar[f"fred_{series_id.lower()}"] = merged["value"]
     return calendar
@@ -1082,6 +1083,11 @@ def fit_fold(
         # Contract block near the top of this file.
         "hyperparameters": CANONICAL_ZOO,
     }
+    # Allow RF/XT to use up to 200% of estimated memory — prevents silent OOM
+    # attrition on folds 3-5 where 300K-row matrices need ~6.7GB but the default
+    # 1.0 ratio caps at ~4.5GB and silently skips families without error.
+    fit_kwargs["ag_args_fit"] = {"ag.max_memory_usage_ratio": 2.0}
+
     if args.num_bag_folds is not None:
         fit_kwargs["num_bag_folds"] = args.num_bag_folds
     if args.num_bag_folds and args.num_bag_folds > 0:
@@ -1104,9 +1110,18 @@ def fit_fold(
     test_pred = predictor.predict(test_df[feature_cols])
     y_true = [str(v) for v in test_df[args.label].tolist()]
     y_pred = [str(v) for v in test_pred.tolist()]
+    # predictor.model_best = validation-best (same model that predict() uses).
+    # leaderboard.iloc[0] = test-set-best — a different model. Storing both for
+    # diagnostics but using val-best as best_model to match what predict() returned.
+    val_best_model = predictor.model_best if hasattr(predictor, "model_best") else (
+        None if leaderboard.empty else str(leaderboard.iloc[0]["model"])
+    )
+    leaderboard_top_model = None if leaderboard.empty else str(leaderboard.iloc[0]["model"])
+
     summary["autogluon"] = {
         "leaderboard_path": str(leaderboard_path),
-        "best_model": None if leaderboard.empty else str(leaderboard.iloc[0]["model"]),
+        "best_model": val_best_model,
+        "leaderboard_top_model": leaderboard_top_model,
         "test_accuracy": round(accuracy_score(y_true, y_pred), 6),
         "test_macro_f1": round(macro_f1_score(y_true, y_pred, labels), 6),
         "excluded_model_types": excluded_model_types,
@@ -1136,6 +1151,27 @@ def main() -> None:
     planned_fold_count = 0
     run_status = "RUNNING"
     error_message: str | None = None
+
+    # Write provenance artifacts before any training starts so they survive
+    # partial failures. command.txt / git_hash.txt / pip_freeze.txt mirror
+    # the format of pre-migration runs kept for reference diagnostics.
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "command.txt").write_text(" ".join(sys.argv) + "\n", encoding="utf-8")
+    (run_dir / "git_hash.txt").write_text(git_commit_sha + "\n", encoding="utf-8")
+    try:
+        pip_freeze = subprocess.check_output(
+            [sys.executable, "-m", "pip", "freeze"], text=True
+        )
+    except Exception:
+        pip_freeze = ""
+    (run_dir / "pip_freeze.txt").write_text(pip_freeze, encoding="utf-8")
+    write_json(run_dir / "run_config.json", {
+        "run_id": run_id,
+        "started_at_utc": run_started_at.replace(microsecond=0).isoformat(),
+        "git_commit_sha": git_commit_sha,
+        "argv": sys.argv,
+        "args": {k: v for k, v in vars(args).items()},
+    })
 
     try:
         with psycopg2.connect(args.dsn) as conn:
