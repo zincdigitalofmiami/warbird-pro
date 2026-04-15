@@ -33,14 +33,14 @@ import TradingView/ZigZag/7 as zigzag
 string groupFibEngine = "Fibonacci Engine"
 bool autoTuneZZ = input.bool(false, "Auto-tune ZigZag by Timeframe", group=groupFibEngine,
   tooltip="ON: 4H+ uses Deviation=4/Depth=20, 1H uses Deviation=3.5/Depth=15, 15m uses Deviation=4/Depth=20, below 15m uses Deviation=3/Depth=15. Turn OFF to set values manually.")
-float fibDeviationManual = input.float(4.0, "ZigZag Deviation (manual)",
+float fibDeviationManual = input.float(3.0, "ZigZag Deviation (manual)",
   minval=0.5, maxval=20.0, step=0.5, group=groupFibEngine,
   tooltip="Only used when Auto-tune is OFF.")
-int fibDepthManual = input.int(20, "ZigZag Depth (manual)",
+int fibDepthManual = input.int(12, "ZigZag Depth (manual)",
   minval=2, maxval=50, group=groupFibEngine,
   tooltip="Only used when Auto-tune is OFF.")
 float fibConfluenceTolPct = input.float(0.05, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupFibEngine)
-float fibThresholdFloorPct = input.float(0.50, "ZigZag Threshold Floor (%)", minval=0.0, maxval=5.0, step=0.05, group=groupFibEngine,
+float fibThresholdFloorPct = input.float(0.30, "ZigZag Threshold Floor (%)", minval=0.0, maxval=5.0, step=0.05, group=groupFibEngine,
   tooltip="Minimum percent move required by the ZigZag after ATR scaling.")
 float minFibRangeAtr = input.float(0.5, "Min Fib Range (ATR)", minval=0.5, maxval=10.0, step=0.1, group=groupFibEngine)
 
