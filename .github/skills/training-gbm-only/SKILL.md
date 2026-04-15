@@ -98,9 +98,16 @@ If the run failed and you want to retry:
 2. Leave the on-disk artifacts — they're self-contained
 3. Root-cause before retrying: running the same configuration again produces the same failure
 
+## Post-completion acceptance (added 2026-04-15)
+
+Same below-baseline / fold class-coverage gates as `training-full-zoo` apply to GBM-only runs — if any fold's `test_macro_f1 < majority_baseline.test.macro_f1`, flag it; ≥ 2 folds below baseline is `MODEL_UNDERPERFORMS_BASELINE` and must not proceed to SHAP/MC promotion.
+
+Since GBM-only is already a probe, the bar is lower for "OK to iterate," but it is NOT lower for "OK to promote." Promotion still requires clean gates in `training-hard-gate`.
+
 ## Related skills
 
 - `training-full-zoo` — multi-family comparison run
 - `training-pre-audit` — runs before this
 - `training-monte-carlo` — P&L analysis on completed predictors
 - `training-shap` — feature importance on completed predictors
+- `training-hard-gate` — enforces all post-run integrity contracts (narrative caveats, Task E viability, below-baseline fold escalation, calibration thresholds, fold class-coverage gaps)

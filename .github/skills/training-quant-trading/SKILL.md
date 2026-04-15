@@ -115,9 +115,61 @@ Before pushing a model forward, ask:
 2. Does `stop_family_id` SHAP importance make physical sense? Wider stops → more TP hits should be reflected in positive SHAP toward TP classes.
 3. Do top Task-D combos (training-monte-carlo) make directional sense? "Longs in thin overnight liquidity with wide stops" being worst is plausible; "fib_level_touched=2 dominates everything" is a leakage warning.
 
+## Named failure signals (added 2026-04-15 after agtrain_20260415T165437712806Z)
+
+These are the canonical failure signals for this project. Every report that discusses trust/promotion must reference this vocabulary.
+
+### Rank stability ≠ EV stability
+
+A Task-H regime check can report `Spearman rho = 1.0` (rank stable across early vs late halves) AND simultaneously show that every stop family's **absolute EV** collapsed from positive to negative between halves. That is NOT a stability pass — it means the bad families stayed bad and the good families got worse.
+
+Canonical rule: always emit BOTH `rank_stability_verdict` AND `ev_stability_verdict`. Promotion requires both to be STABLE. Evidence: `agtrain_20260415T165437712806Z` — rho 1.0, EV uniformly collapsed late. The run's stability narrative was misleading until this distinction was enforced.
+
+### Below-baseline fold
+
+A fold is "below baseline" when `fold_summary.test.macro_f1 < fold_summary.majority_baseline.test.macro_f1`. This means the model loses to a classifier that always predicts `STOPPED` (the majority class) on that fold.
+
+- 1 fold below → WARN; often regime noise, still a weak-signal candidate
+- ≥ 2 folds below → `MODEL_UNDERPERFORMS_BASELINE`; do NOT advance to promotion regardless of mean-fold F1
+
+Evidence: fold_01 on `agtrain_20260415T165437712806Z` (test 0.118 vs baseline 0.150). One fold; combined with other integrity flags, the overall run was not promotable. This signal lives upstream of SHAP/MC — by the time SHAP produces importance, below-baseline folds already mean "this fold's importance is noise."
+
+### LEAKAGE_SUSPECT propagation
+
+SHAP's `drop_candidates.csv` can raise `reason=LEAKAGE_SUSPECT` on a feature that has near-uniform importance across every cohort. When that happens, the feature is either:
+
+- **Actual leakage** (time-identity proxy, future data bled in) — in which case the training surface needs a fix before ANY promotion
+- **Real-but-structural signal** that happens to look uniform (e.g., `tp1_dist_pts` is target-derived and shows uniform importance because it's tightly correlated with the stop-family geometry used to generate it)
+
+Either way: do NOT auto-drop the feature. Human-review required. Promotion is blocked until root cause is named and either the feature is removed + retrained, or the human explicitly approves "this is structural, not leakage."
+
+Evidence: `tp1_dist_pts` flagged LEAKAGE_SUSPECT on `agtrain_20260415T165437712806Z` — but `tp1_dist_pts` is entry-time-computable (entry_price vs tp1_price where tp1_price comes from fib geometry at entry). It may be structural-not-leakage; that is a finding requiring human adjudication, not a silent drop.
+
+### Realized = predicted class distribution
+
+If Monte Carlo reports that per-cohort realized class frequency matches predicted class frequency almost exactly, the model is probably returning marginal frequencies (predicting at the prior) rather than discriminative signal. Even without bag leakage, this means the model learned nothing useful about per-cohort conditional distributions. Confirm by inspecting `task_G_calibration.json` — if every cohort's ratio is near 1.0 AND the predicted spread is near 0, the model has no edge.
+
+### Rank-stable + wide-confidence-range trap
+
+A model can be rank-stable across folds AND have a very wide range between its most-confident and least-confident predictions — and still miss all the rare classes entirely. Check `ZERO_PREDICTION_MISS` rows in SHAP `calibration_check.csv`: if the model predicts `P(TP4_HIT) = 0` for every row while TP4_HIT occurs at 0.1% of rows, the model will NEVER trigger TP4 thresholds in MC — even though its overall accuracy looks fine. This is the escape that makes rare-class P&L analysis useless. Hard threshold: if `ZERO_PREDICTION_MISS` count > 0 for any class with realized_freq ≥ 0.005, flag it in summary.md.
+
+## Report-integrity discipline
+
+Every SHAP and MC `summary.md` must be runtime-conditional on actual run metadata. Hardcoded caveats like "num_bag_folds=5 IID leakage" appearing on a `num_bag_folds=0` run make every subsequent report distrust itself.
+
+Rule: grep any narrative source for these strings and wrap them in `if run_metadata["num_bag_folds"] > 0:` (or equivalent) conditions:
+- `"IID bag leakage"`
+- `"valid_set f1_macro ~0.99"`
+- `"bag-fold leakage"`
+- `"GBM-only"`
+- `"only LightGBM in leaderboard"`
+
+`training-pre-audit` check 15 enforces this statically. `training-hard-gate` enforces it at integrity time.
+
 ## Related skills
 
-- `training-pre-audit` — catches embargo / bag-fold mistakes at launch time
-- `training-monte-carlo` — economic evaluation that exposes leakage via the probability-gating behavior
-- `training-shap` — feature-level leakage audit
+- `training-pre-audit` — catches embargo / bag-fold mistakes at launch time; check 13 previews per-fold class coverage; checks 14-15 catch SHAP non-bag branch + hardcoded caveats
+- `training-monte-carlo` — economic evaluation that exposes leakage via the probability-gating behavior; Gate C enforces rank-vs-EV stability distinction
+- `training-shap` — feature-level leakage audit; Gates A-F enforce narrative integrity / below-baseline / class coverage / LEAKAGE_SUSPECT / calibration / non-bag branch
+- `training-hard-gate` — single command that runs all gates and blocks promotion on any failure
 - `supabase-ml-ops` — broader Supabase + quant-ops reference (already in repo)

@@ -241,11 +241,96 @@ Parameterize with the list of `stop_variant_id` values from the parquet. One que
 
 Derive `hour_bucket` from `ts` (always present in META_COLS). Import `HOUR_BUCKETS` from `scripts/ag/monte_carlo_run.py` rather than redefining to prevent contract drift — the two scripts MUST partition hours identically so Task E / Task B / SHAP cohort slices align 1-to-1.
 
+## Post-run integrity gates (added 2026-04-15 after agtrain_20260415T165437712806Z)
+
+Every SHAP run MUST produce a top-level `integrity.json` capturing these verdicts. The run is NOT complete until all gates are evaluated and logged. `training-hard-gate` consumes this file.
+
+### Gate A — Narrative caveat contract (non-negotiable)
+
+`summary.md` text MUST NOT contain stale caveats that contradict the actual training run. Specifically:
+
+- The phrase `"IID bag leakage"` / `"valid_set f1_macro ~0.99"` / `"bag-fold"` / `"num_bag_folds > 0"` may appear in `summary.md` **only if `run_metadata["num_bag_folds"] > 0`**.
+- The phrase `"GBM-only"` / `"only LightGBM in leaderboard"` may appear **only if `run_metadata["family_count"] == 1 AND the single family == "GBM"`**.
+- The phrase `"single-family masquerade"` may appear **only if `run_metadata["family_count"] < 7`**.
+
+Every caveat string must be runtime-conditional in source code: `if num_bag_folds > 0: summary += "<caveat text>"`. Hardcoded unconditional caveat lines are a contract violation.
+
+Evidence from `agtrain_20260415T165437712806Z`: `num_bag_folds=0`, all 7 families present in every fold, yet `summary.md` still emitted bag-leakage + GBM-only warnings because those strings were hardcoded. Source: `scripts/ag/run_diagnostic_shap.py:1390`. Fix target: the skill can't fix the script — but the skill MUST catch the text at `integrity.json` generation time and fail the gate.
+
+### Gate B — Below-baseline fold escalation
+
+For every fold, compare `test_macro_f1` vs `baseline_macro_f1` from `fold_summary.json`.
+
+- `test_macro_f1 >= baseline_macro_f1` → OK
+- `test_macro_f1 < baseline_macro_f1` for ≥ 1 fold → `FOLD_UNDERPERFORMS_BASELINE` (individual fold flag)
+- `test_macro_f1 < baseline_macro_f1` for ≥ 2 folds → `MODEL_UNDERPERFORMS_BASELINE` (run-level block — promotion disallowed)
+
+Evidence from `agtrain_20260415T165437712806Z`: fold_01 test_macro_f1 = 0.118490 vs baseline 0.149565 (below by 0.031075). One fold is a warning; two folds below baseline means the model has no edge over majority-class prediction and must not be promoted regardless of mean-fold F1.
+
+`integrity.json` MUST include `fold_baselines: [{fold, test_f1, baseline_f1, below}]` array.
+
+### Gate C — Fold class-coverage gap
+
+For each fold, compare `fold_summary.json.val_class_count` vs `test_class_count`.
+
+- `val_class_count == test_class_count` → OK (all classes present in both slices)
+- `val_class_count < test_class_count` → `FOLD_CLASS_COVERAGE_GAP` (fold's validation is training on partial class signal)
+
+Evidence from `agtrain_20260415T165437712806Z`: fold_03 val=5 classes (missing TP4_HIT), test=6 classes. Per-class SHAP for TP4_HIT from fold_03 is unreliable because the model never saw TP4_HIT during that fold's early-stopping decisions.
+
+SHAP-level mitigation: mark fold_03's per-class SHAP as `COVERAGE_UNTRUSTED` in `per_class_importance.csv` for the missing class(es). Do not silently aggregate.
+
+### Gate D — LEAKAGE_SUSPECT promotion block
+
+If `drop_candidates.csv` contains any row with `reason = LEAKAGE_SUSPECT`:
+
+- `integrity.json.promotion_allowed = false`
+- `integrity.json.promotion_blocked_reason = "LEAKAGE_SUSPECT: <feature_list>"`
+- `summary.md` MUST lead with a LEAKAGE SUSPECT banner, not bury it in a diagnostics subsection
+
+Do NOT auto-drop the flagged feature. Root-cause first (is it leakage, or is it real signal that looks uniform because the feature is structurally important?). Human review before removing. Evidence: `tp1_dist_pts` flagged as LEAKAGE_SUSPECT on `agtrain_20260415T165437712806Z` — this is the target-derived distance from entry to TP1, which IS computed at entry time BUT also correlates tightly with the stop-family geometry it was designed alongside. Needs human audit.
+
+### Gate E — Calibration unreliable threshold
+
+Calibration rows (cohort × class) with `verdict != OK` count. Let `off_rate = off_calibration_rows / total_rows`.
+
+- `off_rate < 0.30` → CALIBRATION_OK
+- `0.30 <= off_rate < 0.70` → `CALIBRATION_UNRELIABLE` (MC threshold-gating findings become suspect; summary.md must say so)
+- `off_rate >= 0.70` → `CALIBRATION_CATASTROPHIC` (MC numbers must not be reported as edge; run is probe-only)
+
+Evidence from `agtrain_20260415T165437712806Z`: 67 of 84 rows off-calibration (off_rate = 0.798) — should have tripped `CALIBRATION_CATASTROPHIC`, but summary.md only listed a table without a verdict sentence. Gate must emit the verdict prominently.
+
+### Gate F — Non-bag explainer branch coverage (pre-run check)
+
+Before launching SHAP, grep the SHAP script for branches that assume `isinstance(model, BaggedEnsembleModel)`. Every such branch must have an `else` clause covering the non-bag case. If the script would `AttributeError` on a non-bag run, block the SHAP launch.
+
+Evidence: `agtrain_20260415T165437712806Z` was the FIRST full-zoo non-bag SHAP execution — the non-bag branch was latent and only now exercised. Regression coverage must include one non-bag fixture.
+
+## Narrative caveat integrity — how to actually enforce
+
+The SHAP script CANNOT be allowed to print hardcoded caveats. If you see source text like:
+
+```python
+# BAD
+summary.append("Note: this run's SHAP may be affected by IID bag leakage.")
+```
+
+Rewrite to:
+
+```python
+# GOOD — runtime-conditional on actual run metadata
+if run_metadata["num_bag_folds"] > 0:
+    summary.append(f"Note: num_bag_folds={run_metadata['num_bag_folds']} > 0 — SHAP may be affected by IID bag leakage.")
+```
+
+`training-pre-audit` check 15 grep-checks for hardcoded caveat strings. `training-hard-gate` re-checks at integrity time.
+
 ## Related skills
 
-- `training-monte-carlo` — consumes SHAP rankings to build feature-conditional EV analysis
-- `training-quant-trading` — leakage signals dictionary
-- `training-pre-audit` — catches training problems before they corrupt SHAP
+- `training-monte-carlo` — consumes SHAP rankings to build feature-conditional EV analysis; MC also enforces the narrative-caveat contract on its own summary.md
+- `training-quant-trading` — leakage signals dictionary; also names "rank stability ≠ EV stability" and "below-baseline fold" as canonical failure signals
+- `training-pre-audit` — catches training problems before they corrupt SHAP; now also grep-checks for hardcoded caveats and non-bag branch coverage
+- `training-hard-gate` — consumes `integrity.json` and blocks promotion on any gate failure
 - `training-ag-best-practices` — feature-transform gotchas affecting SHAP interpretation
 
 ## Checklist before declaring a SHAP run complete
@@ -259,5 +344,9 @@ Derive `hour_bucket` from `ts` (always present in META_COLS). Import `HOUR_BUCKE
 - [ ] `summary.md` contains: Top-5 actionable, Kill list, Leakage Verdict, Cohort divergences, Entry rules, TP-ladder rules, Cross-ref to MC
 - [ ] Leakage verdict is explicit (`SUSPECT` / `LIKELY CLEAN` / `CLEAN`) with supporting signals
 - [ ] Calibration check table in summary.md
+- [ ] `integrity.json` produced with verdicts for Gates A–F (narrative caveats / below-baseline / class-coverage / leakage promotion block / calibration / non-bag branch)
+- [ ] `integrity.json.promotion_allowed` is populated (true/false) with `promotion_blocked_reason` if false
+- [ ] No hardcoded bag-leakage / GBM-only strings appear in `summary.md` for a `num_bag_folds=0` + full-zoo run
+- [ ] Fold-level `{fold, test_f1, baseline_f1, below}` table included in `summary.md` if any fold is below baseline
 
 If any checkbox is missed, the SHAP run is incomplete — do not promote or report findings to the user as "final."

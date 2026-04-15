@@ -145,12 +145,65 @@ If any of these show up in leaderboard / logs, the run's conclusions are NOT tru
 3. **Only LightGBM in leaderboards** despite passing `--excluded-model-types ""`. The `hyperparameters` dict is locking the zoo to GBM-only. Re-read `fit_kwargs["hyperparameters"]` in the trainer.
 4. **Test f1_macro ~ majority-baseline f1_macro (fold_summary `majority_baseline.test.macro_f1`).** Model has no edge. Either the training surface is unlearnable, the split leaked, or the features are all uninformative. Run SHAP to diagnose before rerunning.
 
+## Post-completion acceptance gates (added 2026-04-15)
+
+Before calling a full-zoo run "successful," apply these gates against `fold_*/fold_summary.json`:
+
+### 1. Below-baseline fold check
+
+For every fold, compare `test_macro_f1` vs `majority_baseline.test.macro_f1`:
+
+- All 5 folds at or above baseline → OK, promote candidate
+- 1 fold below → WARN; document the fold in summary, keep candidate but mark it as weak signal
+- ≥ 2 folds below → **FAIL** — `MODEL_UNDERPERFORMS_BASELINE`. The model has no edge over majority-class prediction. Do NOT advance to SHAP/MC until you've root-caused (feature instability? leakage already removed so model has nothing left? indicator surface itself is unlearnable?).
+
+Quick check:
+```bash
+for f in artifacts/ag_runs/<RUN_ID>/fold_*/fold_summary.json; do
+  python3 -c "
+import json
+d = json.load(open('$f'))
+fold = '$f'.split('/')[-2]
+test = d['test']['macro_f1']
+base = d['majority_baseline']['test']['macro_f1']
+delta = test - base
+flag = 'OK' if delta >= 0 else 'BELOW_BASELINE'
+print(f'{fold}: test={test:.4f} baseline={base:.4f} delta={delta:+.4f} {flag}')
+"
+done
+```
+
+Evidence from `agtrain_20260415T165437712806Z`: fold_01 test 0.118 < baseline 0.150 (below). 1 fold → WARN under this gate, but combined with the other integrity flags the run should have been tagged "probe only, do not promote rules."
+
+### 2. Fold class-coverage check
+
+```bash
+for f in artifacts/ag_runs/<RUN_ID>/fold_*/fold_summary.json; do
+  python3 -c "
+import json
+d = json.load(open('$f'))
+fold = '$f'.split('/')[-2]
+vc = d.get('val_class_count')
+tc = d.get('test_class_count')
+print(f'{fold}: val={vc} test={tc} {\"GAP\" if vc != tc else \"OK\"}')
+"
+done
+```
+
+If any fold shows GAP, the model's early-stopping and weighter decisions for that fold lacked signal on the missing class. Per-class SHAP and per-class MC for that fold × class are untrusted — flag them downstream.
+
+### 3. Family coverage sanity
+
+Already enforced by the GBM-presence verification block above. No fold's leaderboard may be missing GBM/CAT/XGB.
+
 ## After successful completion
 
 Run in sequence:
 1. `training-shap` — feature importance per family (your GPT may handle this separately)
 2. `training-monte-carlo` — P&L analysis on the predictors
 3. Compare multi-family leaderboards: does the winning model change across folds? If yes, use the median-winner; if no, you have a clean preference
+
+If ANY of the post-completion gates above failed, DO NOT proceed to SHAP/MC promotion — SHAP and MC can still run for diagnostic value, but the run must be tagged `promotion_blocked` in summary.md.
 
 ## Related skills
 

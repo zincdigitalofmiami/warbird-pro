@@ -159,12 +159,59 @@ Result must be at least **`EXPECTED_AG_TRAINING_ROWS_FLOOR` = 327,000** (pinned 
 
 This catches the "pipeline half-loaded" failure mode where filters or joins trim the dataset and the training silently runs on the truncated surface.
 
+### 13. Fold class-coverage preview (added 2026-04-15)
+
+Before training, run the walk-forward splitter offline against the current `ag_training` + embargo + min_train_sessions settings. For each of the 5 planned folds, confirm:
+
+- `val_class_count == test_class_count` for every fold
+- Rare classes (TP4_HIT, TP5_HIT) are present in BOTH val and test slices of every fold
+
+If any fold's val slice misses a class the test slice has, the model's early-stopping and family-weighter decisions for that fold will be based on partial class signal — the final per-class SHAP/MC for the missing class is then unreliable for that fold.
+
+Implementation reference: import `build_walk_forward_folds` from `scripts/ag/train_ag_baseline.py`, call it on the loaded `ag_training`, inspect each fold's class distribution. Must complete in < 10 seconds; if it fails, either nudge embargo, expand min_train_sessions, or flag the run as probe-only with reduced SHAP/MC trust.
+
+Evidence: `agtrain_20260415T165437712806Z` fold_03 had `val_class_count=5, test_class_count=6` (missing `TP4_HIT` in validation). Training did not detect this until fold_summary.json was written AFTER the fold completed. The preview catches it 30 minutes earlier.
+
+### 14. Non-bag SHAP explainer branch coverage (added 2026-04-15)
+
+Static grep of `scripts/ag/run_diagnostic_shap.py` for any `isinstance(model, BaggedEnsembleModel)` branch. Every such branch must have an `else:` arm that handles the non-bag case. If the non-bag arm is missing or only `raise NotImplementedError`, the SHAP run WILL fail on the first full-zoo `num_bag_folds=0` run.
+
+Quick check:
+```bash
+grep -n "BaggedEnsembleModel\|isinstance.*bagg\|\.child_predictor_names" scripts/ag/run_diagnostic_shap.py
+```
+
+For every hit, read the surrounding control flow. If the branch assumes bagged-only and there's no else, flag it.
+
+Evidence: SHAP code assumed bagged child models only until `agtrain_20260415T165437712806Z`. The non-bag branch was latent and only got exercised when the trainer finally ran `num_bag_folds=0`. The patch is at `scripts/ag/run_diagnostic_shap.py:267` but is currently uncommitted — the pre-audit must detect that either (a) the fix is committed, or (b) a fresh SHAP run will hit the same latent branch.
+
+### 15. Hardcoded caveat sweep (added 2026-04-15)
+
+SHAP and MC summary.md text MUST be runtime-conditional on actual run metadata. Pre-audit must grep for caveat strings that are unconditionally appended:
+
+```bash
+# These strings must appear ONLY inside `if run_metadata["num_bag_folds"] > 0:` or equivalent
+grep -n "IID bag leakage\|valid_set f1_macro ~0.99\|GBM-only\|only LightGBM\|bag-fold leakage" \
+  scripts/ag/run_diagnostic_shap.py scripts/ag/monte_carlo_run.py
+```
+
+For every hit, trace upwards — is the caveat wrapped in a runtime condition? If not, it's hardcoded and will emit on every run regardless of actual state. That is a report-integrity violation.
+
+Known offenders (as of 2026-04-15, uncommitted fix pending):
+- `scripts/ag/monte_carlo_run.py:1209` — stale bag-leakage / GBM-only note hardcoded
+- `scripts/ag/run_diagnostic_shap.py:1390` — same
+
+If these are still present, the next training run's summary.md will contain contradictory caveats against a clean run. Pre-audit MUST fail the check and demand the runtime-conditional rewrite before launching.
+
 ## Failure modes — updated
 
 | Failure | Cost | Prevented by |
 |---------|------|--------------|
 | CANONICAL_ZOO drift (family removed) | Import-time `SystemExit` + commit-msg hook | Check 5 + module-level `_assert_canonical_zoo()` |
 | Data-floor trip (ag_training truncated) | Run refuses to start | Check 12 + trainer `EXPECTED_AG_TRAINING_ROWS_FLOOR` |
+| Fold val slice missing a test class | Unreliable per-class SHAP/MC for that fold/class | Check 13 (class-coverage preview) |
+| Non-bag SHAP branch latent → SHAP crash on clean `num_bag_folds=0` run | Entire SHAP wasted, must re-run | Check 14 (branch coverage grep) |
+| Hardcoded stale caveats in summary.md contradict clean run metadata | Report integrity suspect, user distrusts every subsequent run | Check 15 (caveat sweep) |
 
 ## When the checklist fails
 

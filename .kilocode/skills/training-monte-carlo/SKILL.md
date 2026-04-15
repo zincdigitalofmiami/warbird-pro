@@ -251,6 +251,69 @@ The parity check is the gate: if diffs appear beyond the narrow strip-list, the 
 | **H** | **"Did the best rule from early 2025 still work in late 2025, or do I need to re-train per regime?"** |
 | **I** | **"What does a typical winning trade / losing streak actually look like for this stop family?"** |
 
+## Post-run integrity gates (added 2026-04-15 after agtrain_20260415T165437712806Z)
+
+Every MC run MUST produce a top-level `integrity.json` alongside `summary.md` capturing these verdicts. `training-hard-gate` consumes this file. MC is NOT complete until every gate is evaluated.
+
+### Gate A — Task E viability (the gate that would have caught the degraded April-15 run)
+
+Task E output must satisfy ALL of:
+
+1. `top_k_take` contains **at least 10 rules** (floor).
+2. `top_k_take` contains **at least 5 positive-EV rules** (not all-negative — a "take" list full of negative EV is not a take list, it's the least-bad rejection list).
+3. `top_k_take ∩ top_k_avoid = ∅` (zero overlap — same rule cannot be both taken and avoided).
+4. `top_k_avoid` contains at least 10 rules.
+
+If any fails → `integrity.json.task_e_verdict = "DEGRADED"`, `summary.md` leads with "NO DEPLOYABLE ENTRY RULES — task_e degraded" banner, `promotion_allowed=false`.
+
+**Adaptive min_rule_n fallback is mandatory.** Task E must try `min_rule_n = 50`, then drop to 30, then 15, emitting a `min_rule_n_final` value and a dimension-reduction log. If 15 still fails to produce 10 positive-EV rules, the rule surface is genuinely barren — that's a finding, not an error, but `TASK_E_DEGRADED` fires either way.
+
+Evidence from `agtrain_20260415T165437712806Z`: `top_k_take = top_k_avoid = 6 combos, all negative EV`. That's not "no edge available" — the scan space was too narrow and the take/avoid sets collapsed onto the same degenerate combos. Adaptive fallback + dimension expansion would have surfaced this.
+
+### Gate B — Narrative caveat contract (same rule as training-shap Gate A)
+
+`summary.md` text MUST NOT contain stale caveats that contradict run metadata:
+
+- `"IID bag leakage"` / `"valid_set f1_macro ~0.99"` / `"bag-fold"` — only if `run_metadata["num_bag_folds"] > 0`.
+- `"GBM-only"` — only if `run_metadata["family_count"] == 1`.
+
+Every caveat must be runtime-conditional in `monte_carlo_run.py`, not a hardcoded string. Evidence: `agtrain_20260415T165437712806Z` summary.md still emitted bag-leakage warnings despite `num_bag_folds=0` + 7 families. Source: `scripts/ag/monte_carlo_run.py:1209`. The skill can't fix the script but MUST fail the gate at integrity time.
+
+### Gate C — Rank stability vs EV stability (task_H)
+
+Spearman rho = 1.0 on stop-family ranks is NOT proof of model stability. The absolute EV values can collapse from +$60/trade early to -$10/trade late while still preserving rank order (every family loses equally). Rank-stable + EV-unstable means "the bad families stayed bad and the good families got worse" — that is a regime failure, not a regime pass.
+
+MC Task H MUST emit BOTH verdicts:
+
+- `rank_stability_verdict ∈ {STABLE, FRAGILE, UNKNOWN}` (Spearman rho ≥ 0.7 → STABLE)
+- `ev_stability_verdict ∈ {STABLE, DRIFTING, COLLAPSING}` — compute per-stop-family `|ev_early - ev_late| / max(|ev_early|, 1e-6)`. If ≥ 3 families show drift > 0.5 → DRIFTING; if ≥ 3 families show drift > 1.0 (sign flip) → COLLAPSING.
+
+Final verdict table in summary.md MUST show both columns. Promotion is blocked if `ev_stability_verdict != STABLE` regardless of rank stability.
+
+Evidence from `agtrain_20260415T165437712806Z`: rho = 1.0 (STABLE), but "absolute EV shifted sharply down from early to late regime for every stop family" per the report. That IS drift — the current skill language didn't name the distinction, so the verdict read STABLE and the finding was buried.
+
+### Gate D — Calibration threshold (same contract as training-shap Gate E)
+
+`task_G_calibration.json` off-calibration count:
+
+- `off_rate < 0.30` → `calibration_verdict = OK`
+- `0.30 <= off_rate < 0.70` → `calibration_verdict = UNRELIABLE`, MC threshold-gating findings must be tagged suspect in summary.md
+- `off_rate >= 0.70` → `calibration_verdict = CATASTROPHIC`, MC absolute EV numbers must not be reported as edge; run is probe-only
+
+Evidence: 67 of 84 rows (79.8%) off-calibration on `agtrain_20260415T165437712806Z` — should have tripped CATASTROPHIC.
+
+### Gate E — Model-level promotion block propagation
+
+If SHAP's `integrity.json.promotion_allowed = false` (from LEAKAGE_SUSPECT or MODEL_UNDERPERFORMS_BASELINE), MC's summary.md MUST inherit that block visibly:
+
+```
+## PROMOTION BLOCKED — upstream SHAP integrity failed
+Reason: <SHAP.integrity.json.promotion_blocked_reason>
+MC findings below are INFORMATIONAL ONLY. Do NOT deploy rules from this run.
+```
+
+MC can still run for diagnostic value, but its rules cannot be promoted.
+
 ## Quality gates — checklist before declaring complete
 
 - [ ] All 9 tasks (A-I) produce JSON output files
@@ -259,10 +322,15 @@ The parity check is the gate: if diffs appear beyond the narrow strip-list, the 
 - [ ] TP-ladder decision tree present per stop_family
 - [ ] Top-5 "what to trade" rules have numerical risk/reward
 - [ ] Top-5 "what to avoid" rules have numerical loss floors
-- [ ] Regime stability verdict explicit (STABLE / FRAGILE / UNKNOWN)
+- [ ] Regime stability verdict explicit — **BOTH rank and EV**: `rank_stability_verdict` AND `ev_stability_verdict`
 - [ ] Leakage verdict pulled from SHAP or explicitly marked "SHAP not run — rerun required"
 - [ ] Win profile quantiles present per stop_family
 - [ ] Cross-ref to SHAP table (or explicit "missing" note)
+- [ ] `integrity.json` produced with Gates A–E verdicts
+- [ ] `integrity.json.task_e_verdict` ∈ {OK, DEGRADED} with `top_k_take_count`, `positive_ev_count`, `take_avoid_overlap_count`, `min_rule_n_final`
+- [ ] `integrity.json.promotion_allowed` is populated and propagates SHAP's block if present
+- [ ] No hardcoded bag-leakage / GBM-only strings appear in `summary.md` for `num_bag_folds=0` + full-zoo runs
+- [ ] If Task E is DEGRADED, summary.md LEADS with the degraded banner (not buried in diagnostics)
 
 If any checkbox misses → MC run is incomplete. Do not promote or report findings to the user as "final" until complete.
 
