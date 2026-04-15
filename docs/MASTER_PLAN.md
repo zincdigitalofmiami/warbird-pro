@@ -6,8 +6,8 @@
 - Canonical split is fixed:
   - local `warbird` on PG17 `127.0.0.1:5432` = full data zoo, canonical warehouse, training, artifacts, raw SHAP, diagnostics
   - cloud Supabase `qhwgrzqjcdtdqppvhhme` + Vercel `warbird-pro` = serving-only for frontend, TradingView/indicator support, packets, dashboard/admin read models, and curated SHAP/report surfaces
-- Canonical local AG contract is **three canonical local AG tables and one canonical training view.**
-  - tables: `ag_fib_snapshots`, `ag_fib_interactions`, `ag_fib_outcomes`
+- Canonical local AG contract is **four canonical local AG tables and one canonical training view.**
+  - tables: `ag_fib_snapshots`, `ag_fib_interactions`, `ag_fib_stop_variants`, `ag_fib_outcomes`
   - view: `ag_training`
 - Exact column/type and view SQL authority: `docs/contracts/ag_local_training_schema.md`
 - Canonical names never use version suffixes.
@@ -320,17 +320,19 @@ Original requirements:
 
 ## Phase 3: Canonical AG Schema — COMPLETE 2026-04-11
 
-- Implement **three canonical local AG tables and one canonical training view.**
-- Implement the three canonical local AG tables exactly as provided:
+- Implement **four canonical local AG tables and one canonical training view.**
+- Implement the four canonical local AG tables exactly as provided:
   - `ag_fib_snapshots`
-  - `ag_fib_interactions`
+  - `ag_fib_interactions` — stop-agnostic parent interaction surface
+  - `ag_fib_stop_variants` — stop-specific candidate surface; one row per (interaction, stop family)
   - `ag_fib_outcomes`
 - Implement `ag_training` exactly as defined in `docs/contracts/ag_local_training_schema.md`.
 - `ag_training` must use `WHERE outcome_label != 'CENSORED'`.
 - No versioned canonical name is allowed.
-- The canonical warehouse truth remains these three tables plus the supporting market/macro source tables, with `ag_training` as the canonical view over them. Stop-family comparisons and SHAP lineage expand around this base contract; they do not replace it.
+- The canonical warehouse truth remains these four tables plus the supporting market/macro source tables, with `ag_training` as the canonical view over them.
 
-**Verified 2026-04-11:** Migration `007_ag_schema.sql` applied. Tables `ag_fib_snapshots`, `ag_fib_interactions`, `ag_fib_outcomes` and view `ag_training` live in `warbird`. Censored filter (`WHERE outcome_label != 'CENSORED'`) present.
+**Verified 2026-04-11 (original three-table schema):** Migration `007_ag_schema.sql` applied. Tables `ag_fib_snapshots`, `ag_fib_interactions`, `ag_fib_outcomes` and view `ag_training` live in `warbird`. Censored filter (`WHERE outcome_label != 'CENSORED'`) present.
+**Contract expansion (migration 016):** `ag_fib_stop_variants` added; `ag_fib_interactions` made stop-agnostic; `ag_fib_outcomes` re-keyed to `stop_variant_id`; `ag_training` rebuilt with four-way join. Stop-family evaluation now produces six training rows per parent interaction.
 
 ## Phase 4: Python Pipeline in `scripts/ag/`
 
@@ -399,8 +401,11 @@ Outputs:
   - strips realized-outcome leakage before training
   - writes local run artifacts under `artifacts/ag_runs/`
   - blocks training when validation/test slices collapse below 2 target classes
-  - trainer defaults now force `presets=best_quality`, `num_bag_folds=5`,
-    `num_stack_levels=2`, `dynamic_stacking=auto`
+  - trainer defaults now force `presets=best_quality`, `time_limit=3600`,
+    `num_bag_folds=0`, `num_stack_levels=0`, `dynamic_stacking=off`
+  - AutoGluon internal ensembling is blocked by default for the MES
+    walk-forward harness: no IID bagging, no stacking, no weighted ensemble
+    unless a purged temporal child splitter is explicitly implemented and approved
 - verified current local training-state facts:
   - `ag_training` label distribution:
     - `STOPPED`: 15,893

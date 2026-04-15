@@ -81,6 +81,7 @@ These belong in the local canonical `warbird` warehouse unless explicitly reappr
 
 - `ag_fib_snapshots`
 - `ag_fib_interactions`
+- `ag_fib_stop_variants`
 - `ag_fib_outcomes`
 - `ag_training`
 - raw features

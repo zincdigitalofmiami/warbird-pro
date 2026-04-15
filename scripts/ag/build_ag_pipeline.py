@@ -38,12 +38,15 @@ SELECT
   i.*,
   s.anchor_high, s.anchor_low, s.fib_range, s.fib_bull,
   s.anchor_swing_bars, s.anchor_swing_velocity, s.atr14,
+  v.id AS stop_variant_id, v.stop_family_id, v.stop_level_price,
+  v.stop_distance_ticks, v.sl_dist_pts, v.sl_dist_atr, v.rr_to_tp1,
   o.highest_tp_hit, o.hit_tp1, o.hit_tp2, o.hit_tp3, o.hit_tp4, o.hit_tp5,
   o.tp1_before_sl, o.mae_pts, o.mfe_pts, o.outcome_label,
   o.bars_to_tp1, o.bars_to_sl
 FROM ag_fib_interactions i
 JOIN ag_fib_snapshots s ON i.snapshot_ts = s.ts
-JOIN ag_fib_outcomes o ON o.interaction_id = i.id
+JOIN ag_fib_stop_variants v ON v.interaction_id = i.id
+JOIN ag_fib_outcomes o ON o.stop_variant_id = v.id
 WHERE o.outcome_label != 'CENSORED'
 """
 
@@ -88,16 +91,12 @@ class InteractionRow:
     interaction_state: int
     archetype: int
     entry_price: float
-    sl_price: float
     tp1_price: float
     tp2_price: float
     tp3_price: float
     tp4_price: float
     tp5_price: float
-    sl_dist_pts: float
-    sl_dist_atr: float
     tp1_dist_pts: float
-    rr_to_tp1: float
     open: float
     high: float
     low: float
@@ -135,6 +134,93 @@ class InteractionRow:
     ml_exec_target_leg_code: int
     bar_index: int
     trade_dir: int
+
+
+MES_TICK_SIZE = 0.25  # MES tick = $1.25/tick; price increment = 0.25 pts
+
+
+@dataclass
+class StopVariantRow:
+    interaction_id: int  # filled after insert
+    stop_family_id: str
+    stop_level_price: float   # tick-rounded; exact name from stop_families.md
+    stop_distance_ticks: int  # exact name from stop_families.md
+    sl_dist_pts: float
+    sl_dist_atr: float
+    rr_to_tp1: float
+
+
+def tick_round(price: float) -> float:
+    """Round a price to the nearest MES tick (0.25 pts)."""
+    return round(round(price / MES_TICK_SIZE) * MES_TICK_SIZE, 10)
+
+
+def compute_stop_families(
+    direction: int,
+    entry_price: float,
+    tp1_price: float,
+    anchor_high: float,
+    anchor_low: float,
+    atr14: float,
+) -> list[StopVariantRow]:
+    """
+    Compute all six stop family prices per docs/contracts/stop_families.md.
+    Returns one StopVariantRow per family. interaction_id is set to 0 — caller
+    must fill it after the interaction row is inserted.
+
+    Formulas (longs — direction==1):
+      FIB_NEG_0236:            SLow - 0.236 × Range - 1 tick
+      FIB_NEG_0382:            SLow - 0.382 × Range - 1 tick
+      ATR_1_0:                 EntryPrice - 1.0 × ATR
+      ATR_1_5:                 EntryPrice - 1.5 × ATR
+      ATR_STRUCTURE_1_25:      max(SLow - 1tick, Entry - 1.25×ATR)
+      FIB_0236_ATR_COMPRESS:   max(SLow - 0.5×ATR, FibExt) - 1tick
+    Shorts mirror with direction reversed.
+    """
+    fib_range = anchor_high - anchor_low
+    s_low = anchor_low
+    s_high = anchor_high
+    one_tick = MES_TICK_SIZE
+
+    if direction == 1:
+        fib_ext = s_low - 0.236 * fib_range  # negative 0.236 extension
+        stops_raw = {
+            "FIB_NEG_0236":           s_low - 0.236 * fib_range - one_tick,
+            "FIB_NEG_0382":           s_low - 0.382 * fib_range - one_tick,
+            "ATR_1_0":                entry_price - 1.0 * atr14,
+            "ATR_1_5":                entry_price - 1.5 * atr14,
+            "ATR_STRUCTURE_1_25":     max(s_low - one_tick, entry_price - 1.25 * atr14),
+            "FIB_0236_ATR_COMPRESS_0_50": max(s_low - 0.5 * atr14, fib_ext) - one_tick,
+        }
+    else:
+        fib_ext = s_high + 0.236 * fib_range
+        stops_raw = {
+            "FIB_NEG_0236":           s_high + 0.236 * fib_range + one_tick,
+            "FIB_NEG_0382":           s_high + 0.382 * fib_range + one_tick,
+            "ATR_1_0":                entry_price + 1.0 * atr14,
+            "ATR_1_5":                entry_price + 1.5 * atr14,
+            "ATR_STRUCTURE_1_25":     min(s_high + one_tick, entry_price + 1.25 * atr14),
+            "FIB_0236_ATR_COMPRESS_0_50": min(s_high + 0.5 * atr14, fib_ext) + one_tick,
+        }
+
+    variants: list[StopVariantRow] = []
+    for family_id, sl_raw in stops_raw.items():
+        sl_price = tick_round(sl_raw)
+        sl_dist_pts = abs(entry_price - sl_price)
+        sl_dist_atr = sl_dist_pts / max(atr14, 1e-9)
+        tp1_dist_pts = abs(tp1_price - entry_price)
+        rr = tp1_dist_pts / max(sl_dist_pts, 1e-9)
+        ticks = max(1, round(sl_dist_pts / MES_TICK_SIZE))
+        variants.append(StopVariantRow(
+            interaction_id=0,
+            stop_family_id=family_id,
+            stop_level_price=sl_price,
+            stop_distance_ticks=ticks,
+            sl_dist_pts=sl_dist_pts,
+            sl_dist_atr=sl_dist_atr,
+            rr_to_tp1=rr,
+        ))
+    return variants
 
 
 @dataclass
@@ -736,11 +822,7 @@ def build_snapshots_and_interactions(
                 continue
 
         entry_price = p618 if direction == 1 else p382
-        sl_price = entry_price - 1.5 * atr14_now if direction == 1 else entry_price + 1.5 * atr14_now
-        sl_dist_pts = abs(entry_price - sl_price)
         tp1_dist_pts = abs(p_t1 - entry_price)
-        sl_dist_atr = sl_dist_pts / max(atr14_now, 1e-9)
-        rr_to_tp1 = tp1_dist_pts / max(sl_dist_pts, 1e-9)
 
         bar_range = max(high_now - low_now, 1e-9)
         body_pct = abs(close_now - bars[i].open) / bar_range
@@ -798,16 +880,12 @@ def build_snapshots_and_interactions(
                 interaction_state=interaction_state,
                 archetype=archetype,
                 entry_price=entry_price,
-                sl_price=sl_price,
                 tp1_price=p_t1,
                 tp2_price=p_t2,
                 tp3_price=p_t3,
                 tp4_price=p_t4,
                 tp5_price=p_t5,
-                sl_dist_pts=sl_dist_pts,
-                sl_dist_atr=sl_dist_atr,
                 tp1_dist_pts=tp1_dist_pts,
-                rr_to_tp1=rr_to_tp1,
                 open=bars[i].open,
                 high=high_now,
                 low=low_now,
@@ -1132,64 +1210,125 @@ def outcome_label_for(highest_tp_hit: int, hit_sl: bool, full_window_observed: b
 
 def build_outcomes(
     interactions: list[InteractionRow],
+    stop_variants: list[list[StopVariantRow]],
     bars: list[MesBar],
     observation_window: int,
 ) -> list[dict[str, Any]]:
+    """
+    Build one outcome dict per stop variant per interaction.
+    stop_variants[i] is the list of StopVariantRow for interactions[i].
+    Each variant gets its own outcome_label based on its own stop level.
+    Returns a flat list: len == sum(len(v) for v in stop_variants).
+    """
     outcomes: list[dict[str, Any]] = []
     if not interactions:
         return outcomes
 
-    for row in interactions:
+    for row, variants in zip(interactions, stop_variants, strict=True):
         i = row.bar_index
         max_idx = min(len(bars) - 1, i + observation_window)
         full_window_observed = (i + observation_window) <= (len(bars) - 1)
-        highest_tp_hit = 0
-        bars_to_tp1: int | None = None
-        bars_to_sl: int | None = None
-        resolved = False
-        resolution_idx = max_idx
+
+        # Scan the forward path once — collect per-bar target hits and MAE/MFE
+        # independently of stop so all variants share the same price path scan.
+        highest_tp_hit_global = 0
+        bars_to_tp1_global: int | None = None
+        path_segment_end = max_idx
 
         for k in range(i + 1, max_idx + 1):
             b = bars[k]
             if row.trade_dir == 1:
-                target_hit_now = 5 if b.high >= row.tp5_price else 4 if b.high >= row.tp4_price else 3 if b.high >= row.tp3_price else 2 if b.high >= row.tp2_price else 1 if b.high >= row.tp1_price else 0
-                stop_hit = b.low <= row.sl_price
+                th = (5 if b.high >= row.tp5_price else
+                      4 if b.high >= row.tp4_price else
+                      3 if b.high >= row.tp3_price else
+                      2 if b.high >= row.tp2_price else
+                      1 if b.high >= row.tp1_price else 0)
             else:
-                target_hit_now = 5 if b.low <= row.tp5_price else 4 if b.low <= row.tp4_price else 3 if b.low <= row.tp3_price else 2 if b.low <= row.tp2_price else 1 if b.low <= row.tp1_price else 0
-                stop_hit = b.high >= row.sl_price
-
-            if stop_hit:
-                bars_to_sl = k - i
-                resolved = True
-                resolution_idx = k
+                th = (5 if b.low <= row.tp5_price else
+                      4 if b.low <= row.tp4_price else
+                      3 if b.low <= row.tp3_price else
+                      2 if b.low <= row.tp2_price else
+                      1 if b.low <= row.tp1_price else 0)
+            if th > highest_tp_hit_global:
+                highest_tp_hit_global = th
+                if th >= 1 and bars_to_tp1_global is None:
+                    bars_to_tp1_global = k - i
+            if th >= 5:
+                path_segment_end = k
                 break
 
-            if target_hit_now > highest_tp_hit:
-                highest_tp_hit = target_hit_now
-                if target_hit_now >= 1 and bars_to_tp1 is None:
-                    bars_to_tp1 = k - i
-                if target_hit_now == 5:
+        path_segment = bars[i + 1: path_segment_end + 1] if i + 1 <= path_segment_end else []
+
+        for variant in variants:
+            sl = variant.stop_level_price
+            highest_tp_hit = 0
+            bars_to_tp1: int | None = None
+            bars_to_sl: int | None = None
+            resolved = False
+            resolution_idx = max_idx
+
+            for k in range(i + 1, max_idx + 1):
+                b = bars[k]
+                if row.trade_dir == 1:
+                    th = (5 if b.high >= row.tp5_price else
+                          4 if b.high >= row.tp4_price else
+                          3 if b.high >= row.tp3_price else
+                          2 if b.high >= row.tp2_price else
+                          1 if b.high >= row.tp1_price else 0)
+                    stop_hit = b.low <= sl
+                else:
+                    th = (5 if b.low <= row.tp5_price else
+                          4 if b.low <= row.tp4_price else
+                          3 if b.low <= row.tp3_price else
+                          2 if b.low <= row.tp2_price else
+                          1 if b.low <= row.tp1_price else 0)
+                    stop_hit = b.high >= sl
+
+                # Intrabar conflict: if both stop and target hit same bar,
+                # use open proximity to determine which triggered first.
+                if stop_hit and th > 0:
+                    tp_dist = abs(b.open - row.tp1_price)
+                    sl_dist = abs(b.open - sl)
+                    if sl_dist <= tp_dist:
+                        th = 0  # stop wins
+                    else:
+                        stop_hit = False  # target wins
+
+                if stop_hit:
+                    bars_to_sl = k - i
                     resolved = True
                     resolution_idx = k
                     break
 
-        path_segment = bars[i + 1 : resolution_idx + 1] if i + 1 <= resolution_idx else []
-        if not path_segment:
-            mae_pts = 0.0
-            mfe_pts = 0.0
-        elif row.trade_dir == 1:
-            mae_pts = max(0.0, row.entry_price - min(b.low for b in path_segment))
-            mfe_pts = max(0.0, max(b.high for b in path_segment) - row.entry_price)
-        else:
-            mae_pts = max(0.0, max(b.high for b in path_segment) - row.entry_price)
-            mfe_pts = max(0.0, row.entry_price - min(b.low for b in path_segment))
+                if th > highest_tp_hit:
+                    highest_tp_hit = th
+                    if th >= 1 and bars_to_tp1 is None:
+                        bars_to_tp1 = k - i
+                    if th >= 5:
+                        resolved = True
+                        resolution_idx = k
+                        break
 
-        hit_sl = bars_to_sl is not None
-        tp1_before_sl = highest_tp_hit >= 1 and (bars_to_sl is None or (bars_to_tp1 is not None and bars_to_tp1 < bars_to_sl))
-        bars_to_resolution = (resolution_idx - i) if resolved else observation_window
+            seg = bars[i + 1: resolution_idx + 1] if i + 1 <= resolution_idx else []
+            if not seg:
+                mae_pts = 0.0
+                mfe_pts = 0.0
+            elif row.trade_dir == 1:
+                mae_pts = max(0.0, row.entry_price - min(b.low for b in seg))
+                mfe_pts = max(0.0, max(b.high for b in seg) - row.entry_price)
+            else:
+                mae_pts = max(0.0, max(b.high for b in seg) - row.entry_price)
+                mfe_pts = max(0.0, row.entry_price - min(b.low for b in seg))
 
-        outcomes.append(
-            {
+            hit_sl = bars_to_sl is not None
+            tp1_before_sl = (highest_tp_hit >= 1 and
+                             (bars_to_sl is None or
+                              (bars_to_tp1 is not None and bars_to_tp1 < bars_to_sl)))
+            bars_to_resolution = (resolution_idx - i) if resolved else observation_window
+
+            outcomes.append({
+                # placeholder — main() patches DB-assigned stop_variant_id after insert_stop_variants()
+                "stop_variant_id": None,
                 "highest_tp_hit": highest_tp_hit,
                 "hit_tp1": highest_tp_hit >= 1,
                 "hit_tp2": highest_tp_hit >= 2,
@@ -1205,25 +1344,16 @@ def build_outcomes(
                 "mfe_pts": mfe_pts,
                 "outcome_label": outcome_label_for(highest_tp_hit, hit_sl, full_window_observed),
                 "observation_window": observation_window,
-            }
-        )
-    return outcomes
-
-
-def attach_interaction_ids(outcomes: list[dict[str, Any]], interaction_ids: list[int]) -> list[dict[str, Any]]:
-    if len(outcomes) != len(interaction_ids):
-        raise ValueError(
-            f"Outcome row count ({len(outcomes)}) does not match inserted interaction ids ({len(interaction_ids)})."
-        )
-
-    for outcome, interaction_id in zip(outcomes, interaction_ids, strict=True):
-        outcome["interaction_id"] = interaction_id
+            })
     return outcomes
 
 
 def truncate_ag_tables(conn: psycopg2.extensions.connection) -> None:
     with conn.cursor() as cur:
-        cur.execute("TRUNCATE TABLE ag_fib_outcomes, ag_fib_interactions, ag_fib_snapshots RESTART IDENTITY CASCADE;")
+        cur.execute(
+            "TRUNCATE TABLE ag_fib_outcomes, ag_fib_stop_variants, "
+            "ag_fib_interactions, ag_fib_snapshots RESTART IDENTITY CASCADE;"
+        )
     conn.commit()
 
 
@@ -1296,16 +1426,12 @@ def insert_interactions(conn: psycopg2.extensions.connection, interactions: list
             r.interaction_state,
             r.archetype,
             r.entry_price,
-            r.sl_price,
             r.tp1_price,
             r.tp2_price,
             r.tp3_price,
             r.tp4_price,
             r.tp5_price,
-            r.sl_dist_pts,
-            r.sl_dist_atr,
             r.tp1_dist_pts,
-            r.rr_to_tp1,
             r.open,
             r.high,
             r.low,
@@ -1348,8 +1474,8 @@ def insert_interactions(conn: psycopg2.extensions.connection, interactions: list
         INSERT INTO ag_fib_interactions (
             ts, snapshot_ts, direction, fib_level_touched, fib_level_price,
             touch_distance_pts, touch_distance_norm, interaction_state, archetype,
-            entry_price, sl_price, tp1_price, tp2_price, tp3_price, tp4_price, tp5_price,
-            sl_dist_pts, sl_dist_atr, tp1_dist_pts, rr_to_tp1,
+            entry_price, tp1_price, tp2_price, tp3_price, tp4_price, tp5_price,
+            tp1_dist_pts,
             open, high, low, close, volume, body_pct, upper_wick_pct, lower_wick_pct,
             rvol, rsi14, ema9, ema21, ema50, ema200, ema_stacked_bull, ema_stacked_bear,
             ema9_dist_pct, macd_hist, adx, energy, confluence_quality,
@@ -1370,12 +1496,73 @@ def insert_interactions(conn: psycopg2.extensions.connection, interactions: list
     return ids
 
 
+def insert_stop_variants(
+    conn: psycopg2.extensions.connection,
+    variants_by_interaction: list[list[StopVariantRow]],
+    interaction_ids: list[int],
+) -> list[list[int]]:
+    """
+    Insert all stop variants. Returns variant_ids_by_interaction:
+    a list of lists, each inner list holds the DB ids for one interaction's variants,
+    in the same order as the input.
+    """
+    if not variants_by_interaction:
+        return []
+
+    rows = []
+    for iid, variants in zip(interaction_ids, variants_by_interaction, strict=True):
+        for v in variants:
+            rows.append((iid, v.stop_family_id, v.stop_level_price,
+                         v.stop_distance_ticks, v.sl_dist_pts, v.sl_dist_atr, v.rr_to_tp1))
+
+    sql = """
+        INSERT INTO ag_fib_stop_variants (
+            interaction_id, stop_family_id, stop_level_price,
+            stop_distance_ticks, sl_dist_pts, sl_dist_atr, rr_to_tp1
+        ) VALUES %s
+        RETURNING id, interaction_id, stop_family_id
+    """
+    id_by_key: dict[tuple[int, str], int] = {}
+    with conn.cursor() as cur:
+        for start in range(0, len(rows), 2000):
+            batch = rows[start: start + 2000]
+            execute_values(cur, sql, batch, page_size=2000)
+            for variant_id, interaction_id, stop_family_id in cur.fetchall():
+                key = (int(interaction_id), str(stop_family_id))
+                if key in id_by_key:
+                    raise ValueError(f"Duplicate stop variant key returned from DB: {key}")
+                id_by_key[key] = int(variant_id)
+    conn.commit()
+
+    # Rebuild per-interaction IDs in the same family order as input.
+    variant_ids_by_interaction: list[list[int]] = []
+    expected_keys = 0
+    for interaction_id, variants in zip(interaction_ids, variants_by_interaction, strict=True):
+        ids_for_interaction: list[int] = []
+        for variant in variants:
+            expected_keys += 1
+            key = (int(interaction_id), str(variant.stop_family_id))
+            if key not in id_by_key:
+                raise ValueError(f"Missing stop variant id for key {key}")
+            ids_for_interaction.append(id_by_key[key])
+        variant_ids_by_interaction.append(ids_for_interaction)
+
+    if len(id_by_key) != expected_keys:
+        raise ValueError(
+            f"Stop variant id count mismatch: expected {expected_keys}, returned {len(id_by_key)}"
+        )
+    return variant_ids_by_interaction
+
+
 def insert_outcomes(conn: psycopg2.extensions.connection, outcomes: list[dict[str, Any]]) -> None:
     if not outcomes:
         return
+    missing_ids = [idx for idx, row in enumerate(outcomes) if row.get("stop_variant_id") is None]
+    if missing_ids:
+        raise ValueError(f"Missing stop_variant_id on {len(missing_ids)} outcomes (first index: {missing_ids[0]})")
     rows = [
         (
-            o["interaction_id"],
+            o["stop_variant_id"],
             o["highest_tp_hit"],
             o["hit_tp1"],
             o["hit_tp2"],
@@ -1396,11 +1583,11 @@ def insert_outcomes(conn: psycopg2.extensions.connection, outcomes: list[dict[st
     ]
     sql = """
         INSERT INTO ag_fib_outcomes (
-            interaction_id, highest_tp_hit, hit_tp1, hit_tp2, hit_tp3, hit_tp4, hit_tp5,
+            stop_variant_id, highest_tp_hit, hit_tp1, hit_tp2, hit_tp3, hit_tp4, hit_tp5,
             hit_sl, tp1_before_sl, bars_to_tp1, bars_to_sl, bars_to_resolution,
             mae_pts, mfe_pts, outcome_label, observation_window
         ) VALUES %s
-        ON CONFLICT (interaction_id) DO UPDATE SET
+        ON CONFLICT (stop_variant_id) DO UPDATE SET
             highest_tp_hit = EXCLUDED.highest_tp_hit,
             hit_tp1 = EXCLUDED.hit_tp1,
             hit_tp2 = EXCLUDED.hit_tp2,
@@ -1551,8 +1738,27 @@ def main() -> None:
                 micro_bars=micro_bars,
                 touch_tol_pts=args.touch_tol_pts,
             )
+            snapshot_map = {snapshot.ts: snapshot for snapshot in snapshots}
+            stop_variants_by_interaction: list[list[StopVariantRow]] = []
+            for interaction in interactions:
+                snapshot = snapshot_map.get(interaction.snapshot_ts)
+                if snapshot is None:
+                    raise ValueError(
+                        f"Missing snapshot for interaction at ts={interaction.ts} snapshot_ts={interaction.snapshot_ts}"
+                    )
+                stop_variants_by_interaction.append(
+                    compute_stop_families(
+                        direction=interaction.direction,
+                        entry_price=interaction.entry_price,
+                        tp1_price=interaction.tp1_price,
+                        anchor_high=snapshot.anchor_high,
+                        anchor_low=snapshot.anchor_low,
+                        atr14=snapshot.atr14,
+                    )
+                )
             outcomes = build_outcomes(
                 interactions=interactions,
+                stop_variants=stop_variants_by_interaction,
                 bars=bars,
                 observation_window=args.observation_window,
             )
@@ -1561,9 +1767,21 @@ def main() -> None:
                 truncate_ag_tables(conn)
             insert_snapshots(conn, snapshots)
             interaction_ids = insert_interactions(conn, interactions)
-            outcomes = attach_interaction_ids(outcomes, interaction_ids)
+            variant_ids_by_interaction = insert_stop_variants(conn, stop_variants_by_interaction, interaction_ids)
+            stop_variant_ids = [variant_id for group in variant_ids_by_interaction for variant_id in group]
+            if len(stop_variant_ids) != len(outcomes):
+                raise ValueError(
+                    f"Outcome count ({len(outcomes)}) does not match stop variant count ({len(stop_variant_ids)})."
+                )
+            for outcome, stop_variant_id in zip(outcomes, stop_variant_ids, strict=True):
+                outcome["stop_variant_id"] = stop_variant_id
             insert_outcomes(conn, outcomes)
             refresh_ag_training_view(conn)
+
+            stop_family_counts: dict[str, int] = {}
+            for variants in stop_variants_by_interaction:
+                for variant in variants:
+                    stop_family_counts[variant.stop_family_id] = stop_family_counts.get(variant.stop_family_id, 0) + 1
 
             print(
                 json.dumps(
@@ -1573,6 +1791,8 @@ def main() -> None:
                             "micro_bars_loaded": len(micro_bars),
                             "snapshots_written": len(snapshots),
                             "interactions_written": len(interactions),
+                            "stop_variants_written": len(stop_variant_ids),
+                            "stop_family_counts": dict(sorted(stop_family_counts.items())),
                             "outcomes_written": len(outcomes),
                             "outcome_labels": summarize_outcomes(outcomes),
                         }

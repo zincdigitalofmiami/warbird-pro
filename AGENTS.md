@@ -4,7 +4,7 @@ Read this file before any work.
 
 ## Agent Bootstrap
 
-Use this root `AGENTS.md` as the workspace instruction surface. Do not add a competing `.github/copilot-instructions.md` unless this file is intentionally retired.
+Use this root `AGENTS.md` as the workspace instruction surface. `.github/copilot-instructions.md` exists as a **thin redirector** that defers to this file for GitHub Copilot Chat compatibility; do not expand it into a competing instruction source. Any substantive rule belongs here.
 
 ### Read Order
 
@@ -63,9 +63,9 @@ Use this root `AGENTS.md` as the workspace instruction surface. Do not add a com
 - The local `warbird` database on PG17 (`127.0.0.1:5432`) is the canonical warehouse truth. It owns the full data zoo: market history, AG lineage tables, the canonical training view, features, labels, SHAP artifacts, and all non-serving data.
 - Supabase (`qhwgrzqjcdtdqppvhhme`) is the reduced cloud serving database for frontend, TradingView/indicator support, packet distribution, curated SHAP/admin reports, and other explicitly plan-approved published surfaces. It must not become a mirror of local.
 - `rabid_raccoon` is a bootstrap-only legacy input on the same PG instance. After the one-time bootstrap into `warbird`, it is reference-only and must not be treated as canonical again.
-- Canonical AG contract is **three canonical local AG tables and one canonical training view.** No version suffixes are allowed on canonical names.
+- Canonical AG contract is **four canonical local AG tables and one canonical training view.** No version suffixes are allowed on canonical names.
 - Exact local AG schema authority: `docs/contracts/ag_local_training_schema.md`.
-- No mock data, no inactive Databento symbols, no Prisma/ORM paths, and no hidden third-database dependency outside the local warehouse and cloud Supabase.
+- No mock data
 - Cloud promotion is manual. Local training and SHAP must complete first; publish-up happens only after explicit approval.
 
 ## Active Plan
@@ -83,12 +83,13 @@ Everything else is archived or reference-only and should not drive current imple
 - The canonical key is the MES 15m bar-close timestamp in `America/Chicago`.
 - Any remaining `1H` wording in old docs, specs, scripts, or comments is legacy and must not drive new work.
 - Pine is the canonical **live generator** (signal surface). The Next.js dashboard is the mirrored operator surface on the same contract, not a separate decision engine.
-- The **training generator** is the Python reconstruction pipeline in `scripts/ag/`. It reconstructs fib snapshots, generates interactions, labels forward outcomes, and populates the three canonical local AG tables. `ag_training` is a canonical view over those tables.
-- Canonical AG contract is **three canonical local AG tables and one canonical training view.**
-- The three canonical local AG tables are:
+- The **training generator** is the Python reconstruction pipeline in `scripts/ag/`. It reconstructs fib snapshots, generates interactions, expands into stop-family variants, labels forward outcomes, and populates the four canonical local AG tables. `ag_training` is a canonical view over those tables.
+- Canonical AG contract is **four canonical local AG tables and one canonical training view.**
+- The four canonical local AG tables are:
   - `ag_fib_snapshots` — frozen fib engine state at bar close
-  - `ag_fib_interactions` — candidate setups from fib-price interactions
-  - `ag_fib_outcomes` — realized forward path outcomes per interaction
+  - `ag_fib_interactions` — **stop-agnostic** parent interaction surface; records bar × fib level context; does not carry stop geometry
+  - `ag_fib_stop_variants` — **stop-specific candidate surface**; one row per `(interaction, stop family)`; `stop_family_id` is a real categorical AG feature
+  - `ag_fib_outcomes` — realized forward path outcomes; one row per stop variant
 - The canonical training view is:
   - `ag_training` — canonical flat join of the three tables with `WHERE outcome_label != 'CENSORED'`
 - Canonical names never use version suffixes.
@@ -186,6 +187,11 @@ These are explicitly excluded from the canonical AG training zoo:
 - Slippage floor: 1 tick minimum. 2 ticks recommended.
 - IS/OOS walk-forward splits: minimum one-session embargo between training
   window end and test window start. Not optional.
+- AutoGluon internal ensembling is prohibited by default for the MES
+  time-series harness. Do not enable `num_bag_folds > 0`,
+  `num_stack_levels > 0`, `dynamic_stacking=auto`, or weighted ensemble
+  re-enablement unless a purged temporal child splitter is explicitly
+  implemented and approved.
 - Hard stop requirement: structural stop at `0.618 x ATR(14)` from entry.
   Emergency stop at `1.000 x ATR(14)`. Both rendered on chart from entry bar.
 - Consecutive loss block: at 2 consecutive losses, signal warning. At 3, halt
@@ -261,3 +267,49 @@ These are explicitly excluded from the canonical AG training zoo:
 **Databento schemas (Standard $179/mo):** ohlcv-1s, ohlcv-1m, ohlcv-1h, ohlcv-1d, definition, statistics. Currently using: ohlcv-1s (Live API for real-time), ohlcv-1m (Historical API fallback), ohlcv-1h, ohlcv-1d.
 
 **Note:** This ingestion feeds cloud Supabase for live chart serving. The local `warbird` warehouse bootstraps its MES data from `rabid_raccoon` (one-time) and does not depend on cloud ingestion for canonical training truth.
+
+## Training Skills Registry
+
+Eleven training-specific skills are mirrored across three locations so any VS Code-hosted AI (Claude Code, Kilocode, GitHub Copilot Chat, Codex, etc.) can discover and consume them. Format is `SKILL.md` with `name` + `description` YAML frontmatter.
+
+**Locations (all three contain identical copies):**
+- `.claude/skills/<name>/SKILL.md` — Claude Code native (invoked via `Skill` tool)
+- `.kilocode/skills/<name>/SKILL.md` — Kilocode native (auto-loaded by name match)
+- `.github/skills/<name>/SKILL.md` — Copilot + generic consumer location
+
+**These are testing-phase skills — the Master Plan wording in `docs/MASTER_PLAN.md` is expected to evolve during training iteration. Skill files reference the plan but do NOT treat it as frozen production contract.**
+
+| Skill | When to use |
+|-------|-------------|
+| `training-pre-audit` | BEFORE every training launch — warehouse/row-count/constraint/interpreter/zoo checks |
+| `training-gbm-only` | Fast GBM-only iteration / pipeline smoke test |
+| `training-full-zoo` | Full multi-family AutoGluon run (GBM+CAT+XGB+RF+XT+NN_TORCH+FASTAI) for model comparison / promotion candidate |
+| `training-shap` | Feature importance + leakage audit on a completed run |
+| `training-monte-carlo` | P&L Monte Carlo on completed predictors: stop_family EV, threshold sweep, entry-condition breakdowns. Flat 1-tick fee, 1 contract, MES $5/pt |
+| `training-quant-trading` | Time-series discipline — walk-forward, session embargo, IID-leakage signals, eval-metric choice, position sizing, friction model |
+| `training-ag-best-practices` | AutoGluon 1.5 config gotchas: hyperparameters dict lockout, num_bag_folds/num_stack_levels interaction, OMP Apple Silicon, `finally:` transaction safety |
+| `training-ag-feature-finder` | AutoGluon 1.5 features not yet adopted on this project — inventory + adoption notes |
+| `training-supabase-data` | Training read patterns for local warbird PG17; legacy/stale table warnings |
+| `training-tv-backtesting` | TradingView strategy-tester workflow for validating Pine strategy vs trained-model expectations |
+| `training-indicator-optimization` | Sweep indicator parameters (ZigZag Deviation/Depth/Threshold/MinFibRange) via `tv_auto_tune.py` + `tune_strategy_params.py` |
+
+**Tool-specific invocation notes:**
+- **Claude Code** — use the `Skill` tool with the skill name (e.g., `Skill(skill="training-pre-audit")`).
+- **Kilocode** — skills auto-load when context matches the `description` field; reference by name in chat to force-load.
+- **GitHub Copilot Chat** — Copilot Chat will pick up `.github/skills/` content in workspace context; reference the skill path to steer a conversation.
+- **Codex / any AGENTS.md-aware tool** — read this registry section first, then open the relevant SKILL.md from any of the three locations.
+
+**Session-learned failure modes each skill prevents (from the 2026-04-15 training session):**
+- AUTOGLOON ↔ AUTOGLUON spelling drift between migration 014 and trainer → `training-pre-audit` check 4
+- Hardcoded `hyperparameters={"GBM": [...]}` masquerading as "full zoo" → `training-full-zoo` + `training-ag-best-practices`
+- AutoGluon default IID bag-fold split destroying session embargo → `training-quant-trading` + `training-ag-best-practices`
+- `.venv-autogluon` referenced in stale handoffs but doesn't exist → `training-pre-audit` check 6
+- `replace_run_metrics` CheckViolation inside `finally:` block rolling back SUCCEEDED upsert → `training-ag-best-practices` transaction-safety section
+- Predictor feature drift (FRED columns missing from later inference) → `training-monte-carlo` NaN-pad pattern
+- Confusing market-context optimization with indicator-parameter optimization → `training-monte-carlo` vs `training-indicator-optimization` explicit distinction
+
+**When adding new training skills:**
+1. Create `.claude/skills/<new-name>/SKILL.md` first (Claude Code native location)
+2. Copy to `.kilocode/skills/<new-name>/SKILL.md` and `.github/skills/<new-name>/SKILL.md`
+3. Append a row to the table above in this section
+4. Do not modify existing skills without reading them first; they encode expensive lessons

@@ -72,7 +72,7 @@ Phase execution order:
 - ~~`local_warehouse/migrations/` directory: not yet created (Phase 1)~~ **DONE 2026-04-11** — 6 migrations applied (001-006). 18 tables + ledger live.
 - ~~`local_schema_migrations` ledger table: not yet created (Phase 1)~~ **DONE 2026-04-11**
 - ~~One-time bootstrap from `rabid_raccoon`: not yet run (Phase 2)~~ **DONE 2026-04-11** — All surfaces bootstrapped. HG loaded from `data/cross_asset_1h.parquet`. All 6 cross-asset symbols live. 221,954 cross-asset rows through 2026-04-03.
-- ~~Three canonical local AG tables and one canonical training view (`ag_training`): not yet created (Phase 3)~~ **DONE 2026-04-11** — migration 007. 3 tables + view live.
+- ~~Four canonical local AG tables and one canonical training view (`ag_training`): not yet created (Phase 3)~~ **DONE 2026-04-11 (three-table original) + migration 016 (stop-variant expansion)** — `ag_fib_snapshots`, `ag_fib_interactions`, `ag_fib_stop_variants`, `ag_fib_outcomes` + view live.
 - Python pipeline in `scripts/ag/`:
   - CDP tuner automation built (`tv_auto_tune.py` + `tune_strategy_params.py` + `strategy_tuning_space.json` — applies inputs via CDP, polls recalc, reads trades without CSV export). 2026-04-13 tuner hardening landed: new profile `mes15m_agfit_v3`, narrowed search ranges, non-causal locked inputs removed from trial signatures, coupled-parameter rejection rules added, and objective upgraded to include drawdown efficiency, rolling-window stability, footprint-tail stability, and yearly consistency. No authoritative `mes15m_agfit_v3` recorded trials yet.
 - Phase 4 bootstrap pipeline now implemented (`scripts/ag/build_ag_pipeline.py`) and executed on local `warbird` (2026-04-13): `ag_fib_snapshots=3,101`, `ag_fib_interactions=37,450`, `ag_fib_outcomes=37,450`, `ag_training=17,100` rows.
@@ -88,6 +88,7 @@ Phase execution order:
   - Dry-run verification `agtrain_20260414T183606833153Z` passed: `ag_training_runs` row present (`SUCCEEDED`, `dry_run=true`), baseline fold metrics written, and `DATASET_SUMMARY` / `FEATURE_MANIFEST` / `FOLD_SUMMARY` / `TRAINING_SUMMARY` artifacts registered.
   - 2026-04-14 evaluation-policy repair: the pipeline now censors only end-of-history truncated windows. Full-window rows retain `TP1_ONLY` through `TP4_HIT` instead of being mislabeled `CENSORED`. Current local outcome mix is `STOPPED=35792`, `TP1_ONLY=426`, `TP2_HIT=78`, `TP3_HIT=20`, `TP4_HIT=20`, `TP5_HIT=1114`, `CENSORED=11`.
   - 2026-04-14 fold-policy repair: migration `015_ml_exec_tf_code_scope_cut.sql` aligned the warehouse to `ml_exec_tf_code IN (0, 5, 15)`, and the trainer now does a simple class-aware forward search for validation/test windows. Verified dry run `agtrain_20260414T184346894785Z` on `2020-01-03` through `2020-12-31` is now legal with `train_rows=3243`, `val_rows=682`, `test_rows=354`, `val_class_count=3`, `test_class_count=3`.
+  - 2026-04-15 evaluation-integrity repair: trainer defaults now use `time_limit=3600`, `num_bag_folds=0`, `num_stack_levels=0`, and `dynamic_stacking=off`, with weighted ensembling disabled. AutoGluon internal ensembling is blocked by default because IID child folds violate the MES walk-forward embargo and can leak adjacent-session signal.
 - Full-surface SHAP program: lineage spine landed; raw SHAP artifacts and summary population are still pending the first corrected fitted run (Phase 5)
 - Cloud serving promotion: blocked on Phases 1-5 (Phase 6)
 - `artifacts/` directory: now active for AG split/baseline runs. `artifacts/shap/` still not created.
@@ -152,7 +153,7 @@ Follow Warbird Full Reset Plan v5 only. No other plan drives implementation.
 - The canonical trade object is the MES 15m fib setup keyed by MES 15m bar close in `America/Chicago`.
 - Any `1H` wording outside archived docs is legacy and must not drive new work.
 - Pine is the canonical **live generator**; the Python reconstruction pipeline is the **training generator**.
-- Canonical AG contract is **three canonical local AG tables and one canonical training view.** No version suffixes.
+- Canonical AG contract is **four canonical local AG tables and one canonical training view.** No version suffixes. Tables: `ag_fib_snapshots`, `ag_fib_interactions` (stop-agnostic), `ag_fib_stop_variants` (stop-specific candidate surface), `ag_fib_outcomes`.
 - Exact local AG schema authority: `docs/contracts/ag_local_training_schema.md`.
 - The local `warbird` PG17 warehouse is the single canonical database truth; cloud Supabase is the strict runtime/published subset only. No full cloud mirror.
 - `rabid_raccoon` is bootstrap-only. After one-time import into `warbird`, it is legacy reference only.

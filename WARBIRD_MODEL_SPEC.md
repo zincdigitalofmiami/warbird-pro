@@ -37,7 +37,7 @@ This document is a subordinate reference for the model contract. It must not ove
 15. Pivot distance and pivot-state are critical trigger/reversal inputs, but not the sole final decision maker.
 16. Intermarket trigger quality must respect each symbol's correlative path and aligned 15m / 1H / 4H state.
 17. Overlapping MA / volume / trend features across base logic and admitted harnesses must be de-duplicated by feature family.
-18. Canonical AG contract is **three canonical local AG tables and one canonical training view.**
+18. Canonical AG contract is **four canonical local AG tables and one canonical training view.**
 19. Exact local AG schema authority is `docs/contracts/ag_local_training_schema.md`.
 20. The canonical live flow is `fib_engine_snapshot -> candidate -> AG_decision (against active packet) -> signal -> outcome`. The training flow is Python reconstruction over local OHLCV/context into AG lineage tables -> `ag_training` view -> model training. Live and training flows are distinct.
     Under the 2026-04-14 execution delta, the candidate stage may carry micro
@@ -137,7 +137,7 @@ Warbird is split into three separate engines:
 
 1. **Generator**
    - **Live generator:** Pine defines the live candidate/signal object on chart runtime
-   - **Training generator:** Python reconstruction pipeline in `scripts/ag/` reconstructs snapshots/interactions/outcomes from local warehouse OHLCV/context and populates the three canonical local AG tables; `ag_training` is the read view
+   - **Training generator:** Python reconstruction pipeline in `scripts/ag/` reconstructs snapshots/interactions/outcomes from local warehouse OHLCV/context and populates the four canonical local AG tables; `ag_training` is the read view
 2. **Selector**
    - offline models score whether a frozen candidate is worth taking
 3. **Diagnostician**
@@ -154,11 +154,12 @@ The same model must not be treated as all three at once.
 
 ### 3.1 Canonical Local AG Contract
 
-Canonical AG contract is **three canonical local AG tables and one canonical training view.**
+Canonical AG contract is **four canonical local AG tables and one canonical training view.**
 
 - **`ag_fib_snapshots`** — frozen fib engine state at bar close
-- **`ag_fib_interactions`** — candidate setups from fib-price interactions
-- **`ag_fib_outcomes`** — realized forward path outcomes per interaction
+- **`ag_fib_interactions`** — **stop-agnostic parent interaction surface**; records which bar touched which fib level and all feature context; does not carry stop geometry
+- **`ag_fib_stop_variants`** — **stop-specific candidate surface**; one row per `(interaction, stop family)`; `stop_family_id` is a real categorical AG feature here
+- **`ag_fib_outcomes`** — realized forward path outcomes; one row per stop variant
 - **`ag_training`** — canonical training view with `WHERE outcome_label != 'CENSORED'`
 
 The exact column/type contract, PK/FK constraints, and full `ag_training` SQL definition are authoritative in `docs/contracts/ag_local_training_schema.md`.
@@ -184,8 +185,9 @@ Canonical local training schema is the exact contract in `docs/contracts/ag_loca
 
 - `snapshot_ts`, `direction`, `fib_level_touched`, `fib_level_price`
 - `touch_distance_pts`, `touch_distance_norm`, `interaction_state`, `archetype`
-- `entry_price`, `sl_price`, `tp1_price`, `tp2_price`, `tp3_price`, `tp4_price`, `tp5_price`
-- `sl_dist_pts`, `sl_dist_atr`, `tp1_dist_pts`, `rr_to_tp1`
+- `entry_price`, `tp1_price`, `tp2_price`, `tp3_price`, `tp4_price`, `tp5_price`
+- `tp1_dist_pts`
+- (stop geometry removed — lives in `ag_fib_stop_variants`)
 - `open`, `high`, `low`, `close`, `volume`
 - `body_pct`, `upper_wick_pct`, `lower_wick_pct`, `rvol`
 - `rsi14`, `ema9`, `ema21`, `ema50`, `ema200`
@@ -262,6 +264,7 @@ Cloud never receives:
 
 - `ag_fib_snapshots`
 - `ag_fib_interactions`
+- `ag_fib_stop_variants`
 - `ag_fib_outcomes`
 - `ag_training`
 - `ag_training_runs`
@@ -571,6 +574,7 @@ Training discipline is locked:
 - walk-forward splits only
 - one-session embargo minimum
 - no shuffle
+- AutoGluon internal ensembling is disabled by default; `num_bag_folds > 0`, `num_stack_levels > 0`, `dynamic_stacking=auto`, or weighted ensemble re-enablement require an explicitly approved purged temporal child splitter
 - no fit on full dataset
 - no tuning on test
 - naive baseline required

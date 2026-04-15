@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+# Apple Silicon / OpenMP guard — must be set before LightGBM or AutoGluon is imported.
+# Without this, LightGBM's OpenMP threads deadlock against AG's parallelism on M-series Macs,
+# causing GBM trials to stall indefinitely while holding ~400MB of memory.
+import os
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("LIGHTGBM_NUM_THREADS", "1")
+
 import argparse
 import json
-import os
 import subprocess
 import sys
 from collections import Counter
@@ -21,6 +27,7 @@ from psycopg2.extras import Json
 CHICAGO_TZ = ZoneInfo("America/Chicago")
 DEFAULT_DSN = os.environ.get("WARBIRD_PG_DSN", "host=127.0.0.1 port=5432 dbname=warbird")
 DEFAULT_OUTPUT_ROOT = "artifacts/ag_runs"
+DEFAULT_TIME_LIMIT_SEC = 3600
 ECON_TABLES = (
     "econ_activity_1d",
     "econ_commodities_1d",
@@ -66,6 +73,7 @@ LEAKAGE_COLS = {
     "id",
     "ts",
     "snapshot_ts",
+    "stop_variant_id",       # row identity from ag_fib_stop_variants — not a feature
     "outcome_label",
     "highest_tp_hit",
     "hit_tp1",
@@ -80,6 +88,8 @@ LEAKAGE_COLS = {
     "bars_to_sl",
     "session_date_ct",
     "hour_ts",
+    # stop_family_id, stop_level_price, stop_distance_ticks, sl_dist_pts,
+    # sl_dist_atr, rr_to_tp1 are admitted features — do NOT add them here.
 }
 TUNING_ONLY_PREFIXES = (
     "ml_exh_",
@@ -127,20 +137,28 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--eval-metric", default="f1_macro", help="AutoGluon evaluation metric.")
     parser.add_argument("--presets", default="best_quality", help="AutoGluon preset.")
-    parser.add_argument("--time-limit", type=int, default=900, help="Per-fold fit limit in seconds.")
+    parser.add_argument("--time-limit", type=int, default=DEFAULT_TIME_LIMIT_SEC, help="Per-fold fit limit in seconds.")
     parser.add_argument(
         "--label-count-threshold",
         type=int,
         default=1,
         help="Minimum training rows required to keep a class in AutoGluon.",
     )
-    parser.add_argument("--num-bag-folds", type=int, default=5, help="AutoGluon bagging folds.")
-    parser.add_argument("--num-stack-levels", type=int, default=2, help="AutoGluon stack depth.")
+    parser.add_argument("--num-bag-folds", type=int, default=0, help="AutoGluon bagging folds.")
+    parser.add_argument("--num-stack-levels", type=int, default=0, help="AutoGluon stack depth.")
     parser.add_argument(
         "--dynamic-stacking",
         choices=("off", "auto"),
-        default="auto",
+        default="off",
         help="Dynamic stacking mode.",
+    )
+    parser.add_argument(
+        "--allow-unsafe-internal-ensembling",
+        action="store_true",
+        help=(
+            "Allow AutoGluon internal IID bagging/stacking. Unsafe for the default "
+            "MES walk-forward harness unless you have an explicitly approved purged child splitter."
+        ),
     )
     parser.add_argument(
         "--excluded-model-types",
@@ -169,6 +187,36 @@ def parse_args() -> argparse.Namespace:
         help="Build the full dataset/fold manifest without fitting AutoGluon.",
     )
     return parser.parse_args()
+
+
+def validate_ensemble_args(args: argparse.Namespace) -> None:
+    if args.num_bag_folds < 0:
+        raise SystemExit("--num-bag-folds must be >= 0.")
+    if args.num_stack_levels < 0:
+        raise SystemExit("--num-stack-levels must be >= 0.")
+    if args.num_stack_levels > 0 and args.num_bag_folds == 0:
+        raise SystemExit(
+            "--num-stack-levels > 0 requires --num-bag-folds > 0. "
+            "For the default time-series harness, keep both at 0."
+        )
+    if args.dynamic_stacking == "auto" and args.num_bag_folds == 0:
+        raise SystemExit(
+            "--dynamic-stacking auto requires internal bagging. "
+            "Use --dynamic-stacking off for the default time-series-safe path."
+        )
+
+    unsafe_internal_ensembling = (
+        args.num_bag_folds > 0
+        or args.num_stack_levels > 0
+        or args.dynamic_stacking == "auto"
+    )
+    if unsafe_internal_ensembling and not args.allow_unsafe_internal_ensembling:
+        raise SystemExit(
+            "AutoGluon internal IID bagging/stacking is disabled by default for MES time-series runs "
+            "because it violates the outer walk-forward embargo. Keep --num-bag-folds 0, "
+            "--num-stack-levels 0, and --dynamic-stacking off unless you have an explicitly approved "
+            "purged temporal child splitter."
+        )
 
 
 def fetch_df(
@@ -752,7 +800,7 @@ def replace_run_metrics(
                         target_name,
                         fold_code,
                         "test",
-                        "AUTOGLOON",
+                        "AUTOGLUON",
                         "accuracy",
                         autogluon["test_accuracy"],
                         row_counts["test"],
@@ -766,7 +814,7 @@ def replace_run_metrics(
                         target_name,
                         fold_code,
                         "test",
-                        "AUTOGLOON",
+                        "AUTOGLUON",
                         "macro_f1",
                         autogluon["test_macro_f1"],
                         row_counts["test"],
@@ -961,11 +1009,23 @@ def fit_fold(
         "presets": args.presets,
         "time_limit": args.time_limit,
         "num_gpus": 0,
-        "ag_args_ensemble": {"fold_fitting_strategy": "sequential_local"},
-        "use_bag_holdout": True,
+        # Keep the corrected harness simple: no internal IID bagging, no
+        # stacking, no weighted ensemble, one clean temporal tuning set, and a
+        # bounded LightGBM-only run.
+        "fit_weighted_ensemble": False,
+        "fit_full_last_level_weighted_ensemble": False,
+        "hyperparameters": {
+            "GBM": [
+                {"num_threads": 1},
+                {"num_threads": 1, "extra_trees": True},
+            ]
+        },
     }
     if args.num_bag_folds is not None:
         fit_kwargs["num_bag_folds"] = args.num_bag_folds
+    if args.num_bag_folds and args.num_bag_folds > 0:
+        fit_kwargs["ag_args_ensemble"] = {"fold_fitting_strategy": "sequential_local"}
+        fit_kwargs["use_bag_holdout"] = True
     if args.num_stack_levels is not None:
         fit_kwargs["num_stack_levels"] = args.num_stack_levels
     if args.dynamic_stacking == "auto":
@@ -1002,6 +1062,7 @@ def fit_fold(
 
 def main() -> None:
     args = parse_args()
+    validate_ensemble_args(args)
     run_started_at = datetime.now(UTC)
     run_id = run_started_at.strftime("agtrain_%Y%m%dT%H%M%S%fZ")
     run_dir = (Path(args.output_root) / run_id).resolve()

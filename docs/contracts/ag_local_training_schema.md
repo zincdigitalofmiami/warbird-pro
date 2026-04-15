@@ -3,7 +3,13 @@
 **Date:** 2026-04-10
 **Status:** Active schema authority for local AG lineage and training base
 
-Canonical statement: **three canonical local AG tables and one canonical training view.**
+Canonical statement: **four canonical local AG tables and one canonical training view.**
+
+The four tables are:
+- `ag_fib_snapshots` — frozen fib engine state at bar close
+- `ag_fib_interactions` — **stop-agnostic** parent interaction surface; records which bar touched which fib level and all feature context at that bar; does not carry stop geometry
+- `ag_fib_stop_variants` — **stop-specific candidate surface**; one row per `(interaction, stop family)`; this is where `stop_family_id` lives as a real categorical dimension
+- `ag_fib_outcomes` — realized forward path outcomes; one row per stop variant
 
 ## Exact SQL Contract
 
@@ -37,16 +43,13 @@ CREATE TABLE ag_fib_interactions (
   interaction_state INT,
   archetype INT,
   entry_price FLOAT8,
-  sl_price FLOAT8,
+  -- sl_price, sl_dist_pts, sl_dist_atr, rr_to_tp1 removed: stop geometry lives in ag_fib_stop_variants
   tp1_price FLOAT8,
   tp2_price FLOAT8,
   tp3_price FLOAT8,
   tp4_price FLOAT8,
   tp5_price FLOAT8,
-  sl_dist_pts FLOAT8,
-  sl_dist_atr FLOAT8,
   tp1_dist_pts FLOAT8,
-  rr_to_tp1 FLOAT8,
   open FLOAT8,
   high FLOAT8,
   low FLOAT8,
@@ -84,8 +87,40 @@ CREATE TABLE ag_fib_interactions (
   ml_exec_target_leg_code INT
 );
 
+-- ag_fib_stop_variants: stop-specific candidate surface.
+-- One row per (interaction_id, stop_family_id). This is the normalized home for
+-- stop geometry. stop_family_id is an admitted AG feature. id (stop_variant_id)
+-- is row identity and must be in LEAKAGE_COLS in the trainer.
+-- Storage fields stop_level_price and stop_distance_ticks use exact names from
+-- docs/contracts/stop_families.md. sl_dist_pts, sl_dist_atr, and rr_to_tp1 are
+-- computed convenience fields admitted as AG features.
+-- best_stop_family must never appear in ag_training.
+CREATE TABLE ag_fib_stop_variants (
+  id                  BIGSERIAL PRIMARY KEY,
+  interaction_id      BIGINT NOT NULL REFERENCES ag_fib_interactions(id),
+  stop_family_id      TEXT NOT NULL,
+  stop_level_price    FLOAT8 NOT NULL,
+  stop_distance_ticks INT NOT NULL,
+  sl_dist_pts         FLOAT8 NOT NULL,
+  sl_dist_atr         FLOAT8 NOT NULL,
+  rr_to_tp1           FLOAT8 NOT NULL,
+  UNIQUE (interaction_id, stop_family_id),
+  CHECK (stop_family_id IN (
+    'FIB_NEG_0236',
+    'FIB_NEG_0382',
+    'ATR_1_0',
+    'ATR_1_5',
+    'ATR_STRUCTURE_1_25',
+    'FIB_0236_ATR_COMPRESS_0_50'
+  ))
+);
+CREATE INDEX IF NOT EXISTS ag_fib_stop_variants_interaction_idx
+  ON ag_fib_stop_variants (interaction_id);
+CREATE INDEX IF NOT EXISTS ag_fib_stop_variants_family_idx
+  ON ag_fib_stop_variants (stop_family_id);
+
 CREATE TABLE ag_fib_outcomes (
-  interaction_id BIGINT PRIMARY KEY REFERENCES ag_fib_interactions(id),
+  stop_variant_id     BIGINT PRIMARY KEY REFERENCES ag_fib_stop_variants(id),
   highest_tp_hit INT,
   hit_tp1 BOOLEAN,
   hit_tp2 BOOLEAN,
@@ -108,13 +143,20 @@ SELECT
   i.*,
   s.anchor_high, s.anchor_low, s.fib_range, s.fib_bull,
   s.anchor_swing_bars, s.anchor_swing_velocity, s.atr14,
+  v.stop_variant_id, v.stop_family_id, v.stop_level_price,
+  v.stop_distance_ticks, v.sl_dist_pts, v.sl_dist_atr, v.rr_to_tp1,
   o.highest_tp_hit, o.hit_tp1, o.hit_tp2, o.hit_tp3, o.hit_tp4, o.hit_tp5,
   o.tp1_before_sl, o.mae_pts, o.mfe_pts, o.outcome_label,
   o.bars_to_tp1, o.bars_to_sl
 FROM ag_fib_interactions i
 JOIN ag_fib_snapshots s ON i.snapshot_ts = s.ts
-JOIN ag_fib_outcomes o ON o.interaction_id = i.id
+JOIN ag_fib_stop_variants v ON v.interaction_id = i.id
+JOIN ag_fib_outcomes o ON o.stop_variant_id = v.id
 WHERE o.outcome_label != 'CENSORED';
+-- stop_variant_id must be in LEAKAGE_COLS in train_ag_baseline.py (row identity noise).
+-- stop_family_id, stop_level_price, stop_distance_ticks, sl_dist_pts, sl_dist_atr,
+-- rr_to_tp1 are admitted AG features.
+-- best_stop_family must never appear in ag_training.
 ```
 
 ## S/R Feature Architecture

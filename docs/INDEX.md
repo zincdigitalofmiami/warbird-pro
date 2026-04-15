@@ -28,7 +28,7 @@ Ignore all other plans, decisions, scratch notes, and historical architecture do
 - `docs/contracts/`
   - the only interface and payload authority
 - `docs/contracts/ag_local_training_schema.md`
-  - exact local AG column-level schema authority (three tables + `ag_training` view)
+  - exact local AG column-level schema authority (four tables + `ag_training` view: `ag_fib_snapshots`, `ag_fib_interactions`, `ag_fib_stop_variants`, `ag_fib_outcomes`)
 - `docs/cloud_scope.md`
   - the only cloud-whitelist authority
 - `docs/runbooks/README.md`
