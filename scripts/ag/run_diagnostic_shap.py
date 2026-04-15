@@ -71,6 +71,148 @@ COHORT_DIMS = {
     "by_fold": "fold_code",
 }
 
+CANONICAL_ZOO_FAMILIES = {"GBM", "CAT", "XGB", "RF", "XT", "NN_TORCH", "FASTAI"}
+
+
+def canonical_family_for_model(model_name: str | None) -> str | None:
+    if not model_name:
+        return None
+    name = str(model_name)
+    if name.startswith("LightGBM"):
+        return "GBM"
+    if name.startswith("CatBoost"):
+        return "CAT"
+    if name.startswith("XGBoost"):
+        return "XGB"
+    if name.startswith("RandomForest"):
+        return "RF"
+    if name.startswith("ExtraTrees"):
+        return "XT"
+    if name.startswith("NeuralNetTorch"):
+        return "NN_TORCH"
+    if name.startswith("NeuralNetFastAI") or "FastAI" in name:
+        return "FASTAI"
+    return None
+
+
+def infer_run_integrity(run_dir: Path, fold_codes: list[str]) -> dict[str, Any]:
+    has_internal_ensembling = False
+    missing_families_by_fold: dict[str, list[str]] = {}
+    lineage_failures: dict[str, str] = {}
+    partial_class_folds: list[str] = []
+
+    for fold_code in fold_codes:
+        fold_dir = run_dir / fold_code
+        summary_path = fold_dir / "fold_summary.json"
+        if not summary_path.exists():
+            continue
+        summary = read_json(summary_path)
+        autogluon = summary.get("autogluon") or {}
+        num_bag = int(autogluon.get("num_bag_folds") or 0)
+        num_stack = int(autogluon.get("num_stack_levels") or 0)
+        dynamic_stacking = str(autogluon.get("dynamic_stacking") or "").lower()
+        if num_bag > 0 or num_stack > 0 or dynamic_stacking == "auto":
+            has_internal_ensembling = True
+
+        families = set(autogluon.get("zoo_families_present") or [])
+        missing = sorted(CANONICAL_ZOO_FAMILIES - families)
+        if missing:
+            missing_families_by_fold[fold_code] = missing
+        else:
+            leaderboard_path = fold_dir / "leaderboard.csv"
+            if leaderboard_path.exists():
+                try:
+                    lb = pd.read_csv(leaderboard_path)
+                    lb_models = lb.get("model", pd.Series(dtype=str)).dropna().astype(str).tolist()
+                    lb_families = {
+                        fam
+                        for model_name in lb_models
+                        if (fam := canonical_family_for_model(model_name)) is not None
+                    }
+                    lb_missing = sorted(CANONICAL_ZOO_FAMILIES - lb_families)
+                    if lb_missing:
+                        missing_families_by_fold[fold_code] = lb_missing
+                except Exception:
+                    missing_families_by_fold[fold_code] = sorted(CANONICAL_ZOO_FAMILIES)
+
+        if summary.get("val_missing_labels") or summary.get("test_missing_labels"):
+            partial_class_folds.append(fold_code)
+
+        best_model = autogluon.get("best_model")
+        test_macro = autogluon.get("test_macro_f1")
+        leaderboard_file = autogluon.get("leaderboard_path")
+        if best_model and test_macro is not None and leaderboard_file:
+            try:
+                lb = pd.read_csv(leaderboard_file)
+                row = lb.loc[lb["model"].astype(str) == str(best_model)]
+                if row.empty:
+                    lineage_failures[fold_code] = f"best_model_missing:{best_model}"
+                elif "score_test" in row.columns:
+                    score_test = float(row["score_test"].iloc[0])
+                    if abs(score_test - float(test_macro)) > 1e-6:
+                        lineage_failures[fold_code] = (
+                            f"score_test={score_test:.6f} test_macro_f1={float(test_macro):.6f}"
+                        )
+            except Exception as exc:
+                lineage_failures[fold_code] = f"lineage_check_error:{exc}"
+
+    passed = (
+        (not has_internal_ensembling)
+        and (not missing_families_by_fold)
+        and (not lineage_failures)
+        and (not partial_class_folds)
+    )
+    return {
+        "passed": passed,
+        "has_internal_ensembling": has_internal_ensembling,
+        "missing_families_by_fold": missing_families_by_fold,
+        "lineage_failures": lineage_failures,
+        "partial_class_folds": sorted(partial_class_folds),
+    }
+
+
+def build_shap_notes(run_integrity: dict[str, Any], fold_artifacts: list[dict[str, Any]] | None) -> list[str]:
+    notes: list[str] = []
+    if run_integrity.get("passed"):
+        notes.append(
+            "Diagnostic SHAP only. Source run passed core integrity checks "
+            "(no internal IID bagging/stacking, full canonical zoo, strict class coverage, "
+            "consistent model↔metric lineage)."
+        )
+    else:
+        issues: list[str] = []
+        if run_integrity.get("has_internal_ensembling"):
+            issues.append("internal IID bagging/stacking detected")
+        if run_integrity.get("missing_families_by_fold"):
+            issues.append("partial zoo detected")
+        if run_integrity.get("lineage_failures"):
+            issues.append("model↔metric lineage mismatches detected")
+        if run_integrity.get("partial_class_folds"):
+            issues.append("validation/test class coverage gaps detected")
+        issue_text = ", ".join(issues) if issues else "unspecified run-integrity warnings"
+        notes.append(
+            f"Diagnostic SHAP only. Source run integrity warnings: {issue_text}. "
+            "Interpret absolute magnitudes cautiously and prefer relative rankings."
+        )
+
+    if fold_artifacts:
+        child_counts = sorted({int(a.get("child_count", 0)) for a in fold_artifacts})
+        if child_counts == [1]:
+            notes.append(
+                "SHAP values came from single non-bag tree models (child_count=1 per fold)."
+            )
+        else:
+            notes.append(
+                "SHAP values were averaged across saved bag children where available."
+            )
+    else:
+        notes.append(
+            "SHAP values were computed from the selected model per fold and written as raw per-row artifacts."
+        )
+
+    notes.append("Raw artifacts live under artifacts/shap/{run_id}/ and do not modify the source predictor.")
+    return notes
+
 
 @dataclass
 class FoldArtifact:
@@ -275,41 +417,60 @@ def explain_fold(
 ) -> FoldArtifact:
     predictor = TabularPredictor.load(str(run_dir / fold_code / "predictor"))
     trainer = predictor._trainer
-    bag_model = trainer.load_model(model_name)
+    model = trainer.load_model(model_name)
     class_labels = [str(label) for label in predictor.class_labels]
 
     transformed = predictor._learner.transform_features(fold_df[predictor.features()])
     child_features: list[str] | None = None
     shap_sum: np.ndarray | None = None
+    child_count = 1
 
-    for child_name in bag_model.models:
-        child = bag_model.load_child(child_name)
-        if child_features is None:
-            child_features = list(child.features)
-        elif list(child.features) != child_features:
-            raise ValueError(
-                f"{fold_code}: child feature mismatch in {model_name}. "
-                f"{child_name} differs from the prior child feature set."
+    # Support both bagged models (`*.models`) and single non-bag tree models.
+    if hasattr(model, "models") and getattr(model, "models"):
+        child_count = len(model.models)
+        for child_name in model.models:
+            child = model.load_child(child_name)
+            if child_features is None:
+                child_features = list(child.features)
+            elif list(child.features) != child_features:
+                raise ValueError(
+                    f"{fold_code}: child feature mismatch in {model_name}. "
+                    f"{child_name} differs from the prior child feature set."
+                )
+
+            X_child = transformed[child_features]
+            explainer = shap.TreeExplainer(child.model)
+            values = explainer.shap_values(X_child, check_additivity=False)
+            arr = standardize_shap_values(
+                values,
+                row_count=len(X_child),
+                feature_count=len(child_features),
+                class_count=len(class_labels),
             )
+            if shap_sum is None:
+                shap_sum = arr
+            else:
+                shap_sum += arr
+
+        if child_features is None or shap_sum is None:
+            raise ValueError(f"{fold_code}: {model_name} did not expose any bag children.")
+        shap_avg = shap_sum / float(child_count)
+    else:
+        child_features = list(getattr(model, "features", []) or [])
+        if not child_features:
+            raise ValueError(f"{fold_code}: {model_name} did not expose model features.")
+        if not hasattr(model, "model"):
+            raise ValueError(f"{fold_code}: {model_name} has no underlying tree model for SHAP.")
 
         X_child = transformed[child_features]
-        explainer = shap.TreeExplainer(child.model)
+        explainer = shap.TreeExplainer(model.model)
         values = explainer.shap_values(X_child, check_additivity=False)
-        arr = standardize_shap_values(
+        shap_avg = standardize_shap_values(
             values,
             row_count=len(X_child),
             feature_count=len(child_features),
             class_count=len(class_labels),
         )
-        if shap_sum is None:
-            shap_sum = arr
-        else:
-            shap_sum += arr
-
-    if child_features is None or shap_sum is None:
-        raise ValueError(f"{fold_code}: {model_name} did not expose any bag children.")
-
-    shap_avg = shap_sum / float(len(bag_model.models))
     raw = fold_df[[col for col in META_COLS if col in fold_df.columns]].copy().reset_index(drop=True)
     raw.insert(0, "split_code", split_code)
     raw.insert(0, "fold_code", fold_code)
@@ -351,7 +512,7 @@ def explain_fold(
         row_count=len(fold_df),
         feature_count=len(child_features),
         class_count=len(class_labels),
-        child_count=len(bag_model.models),
+        child_count=child_count,
         raw_path=str(raw_path),
         feature_summary_path=str(summary_path),
     )
@@ -1114,6 +1275,7 @@ def write_manifest(
     drop_candidates_count: int,
     calibration_ran: bool,
     postprocess_only: bool,
+    notes: list[str],
 ) -> None:
     manifest = {
         "run_id": run_id,
@@ -1136,12 +1298,7 @@ def write_manifest(
             "drop_candidates.csv",
             "summary.md",
         ],
-        "notes": [
-            "Diagnostic SHAP only. Source run used internal AutoGluon IID bagging/stacking "
-            "and is not promotion-safe.",
-            "SHAP values were averaged across the saved bag children of the selected AutoGluon model.",
-            "Raw artifacts live under artifacts/shap/{run_id}/ and do not modify the source predictor.",
-        ],
+        "notes": notes,
     }
     if fold_artifacts is not None:
         manifest["fold_artifacts"] = fold_artifacts
@@ -1296,6 +1453,7 @@ def run_postprocess_phase(
     )
 
     # Summary + manifest
+    run_integrity = infer_run_integrity(run_dir, fold_codes)
     write_summary_md(
         out_dir,
         run_id=args.run_id,
@@ -1311,6 +1469,7 @@ def run_postprocess_phase(
     )
     leak_suspect_count = int((drops["reason_code"] == "LEAKAGE_SUSPECT").sum()) if not drops.empty else 0
     leakage_verdict = "SUSPECT" if leak_suspect_count > 0 else "LIKELY CLEAN"
+    notes = build_shap_notes(run_integrity, fold_artifacts=None)
     write_manifest(
         out_dir,
         run_id=args.run_id,
@@ -1323,6 +1482,7 @@ def run_postprocess_phase(
         drop_candidates_count=int(len(drops)),
         calibration_ran=not calibration.empty,
         postprocess_only=args.postprocess_only,
+        notes=notes,
     )
     print(f"[postprocess] complete. leakage verdict: {leakage_verdict}. summary.md + manifest.json written.")
 
@@ -1360,6 +1520,8 @@ def run_compute_phase(args: argparse.Namespace) -> tuple[Path, dict[str, Any], d
         )
 
     write_overall_summary(out_dir, fold_artifacts)
+    run_integrity = infer_run_integrity(run_dir, [fa.fold_code for fa in fold_artifacts])
+    notes = build_shap_notes(run_integrity, [asdict(item) for item in fold_artifacts])
     # Preserve the existing diagnostic_shap_manifest.json so backward-compat readers still work.
     manifest = {
         "run_id": args.run_id,
@@ -1367,11 +1529,8 @@ def run_compute_phase(args: argparse.Namespace) -> tuple[Path, dict[str, Any], d
         "split_code": args.split_code,
         "model_name": args.model_name,
         "diagnostic_only": True,
-        "notes": [
-            "Diagnostic SHAP only. Source run used internal AutoGluon IID bagging/stacking and is not promotion-safe.",
-            "SHAP values were averaged across the saved bag children of the selected AutoGluon model.",
-            "Raw artifacts live under artifacts/shap/{run_id}/ and do not modify the source predictor.",
-        ],
+        "run_integrity": run_integrity,
+        "notes": notes,
         "fold_artifacts": [asdict(item) for item in fold_artifacts],
     }
     (out_dir / "diagnostic_shap_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

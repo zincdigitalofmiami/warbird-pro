@@ -293,7 +293,7 @@ These are explicitly excluded from the canonical AG training zoo:
 
 ## Training Skills Registry
 
-Eleven training-specific skills are mirrored across three locations so any VS Code-hosted AI (Claude Code, Kilocode, GitHub Copilot Chat, Codex, etc.) can discover and consume them. Format is `SKILL.md` with `name` + `description` YAML frontmatter.
+Twelve training-specific skills are mirrored across three locations so any VS Code-hosted AI (Claude Code, Kilocode, GitHub Copilot Chat, Codex, etc.) can discover and consume them. Format is `SKILL.md` with `name` + `description` YAML frontmatter.
 
 **Locations (all three contain identical copies):**
 - `.claude/skills/<name>/SKILL.md` — Claude Code native (invoked via `Skill` tool)
@@ -305,6 +305,7 @@ Eleven training-specific skills are mirrored across three locations so any VS Co
 | Skill | When to use |
 |-------|-------------|
 | `training-pre-audit` | BEFORE every training launch — warehouse/row-count/constraint/interpreter/zoo checks |
+| `training-hard-gate` | Single-command strict launcher for train+SHAP+MC with hard blocking on preflight, lineage, class-coverage, SHAP, and MC contract failures |
 | `training-gbm-only` | Fast GBM-only iteration / pipeline smoke test |
 | `training-full-zoo` | Full multi-family AutoGluon run (GBM+CAT+XGB+RF+XT+NN_TORCH+FASTAI) for model comparison / promotion candidate |
 | `training-shap` | Feature importance + leakage audit on a completed run |
@@ -330,6 +331,7 @@ Eleven training-specific skills are mirrored across three locations so any VS Co
 - `replace_run_metrics` CheckViolation inside `finally:` block rolling back SUCCEEDED upsert → `training-ag-best-practices` transaction-safety section
 - Predictor feature drift (FRED columns missing from later inference) → `training-monte-carlo` NaN-pad pattern
 - Confusing market-context optimization with indicator-parameter optimization → `training-monte-carlo` vs `training-indicator-optimization` explicit distinction
+- Manual train/SHAP/MC chains allowing silent regressions → `training-hard-gate` command path (`scripts/ag/train_hard_gate.py`)
 
 **When adding new training skills:**
 1. Create `.claude/skills/<new-name>/SKILL.md` first (Claude Code native location)

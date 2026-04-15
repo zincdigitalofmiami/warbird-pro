@@ -182,6 +182,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--min-rule-n", type=int, default=50, help="Task E: minimum trades per combo.")
     p.add_argument(
+        "--task-e-min-required-rules",
+        type=int,
+        default=10,
+        help="Task E: minimum eligible rules required before fallback dims are accepted.",
+    )
+    p.add_argument(
         "--min-stable-corr",
         type=float,
         default=0.7,
@@ -653,6 +659,7 @@ def task_E_entry_rules(
     n_paths: int,
     rng_root: np.random.Generator,
     min_rule_n: int,
+    min_required_rules: int,
     top_k: int = 30,
 ) -> dict[str, Any]:
     """Entry rules across (stop_family × direction × fib_level × hour_bucket × SHAP-top-feature quartiles).
@@ -660,41 +667,76 @@ def task_E_entry_rules(
     Score = 0.5 × MC_p5_EV + 0.3 × Sharpe × 100 + 0.2 × (n_trades / max_n_trades).
     Top-30 'take' + bottom-30 'avoid' rules with n_trades >= min_rule_n.
     """
-    dims = ["stop_family_id", "direction", "fib_level_touched", "hour_bucket"]
+    static_dims = ["stop_family_id", "direction", "fib_level_touched", "hour_bucket"]
+    missing_static = [d for d in static_dims if d not in base.columns]
+    if missing_static:
+        return {"error": f"missing columns: {missing_static}", "requested_dims": static_dims}
+
+    quartile_dims = []
     for feat in shap_top_features:
         q_col = f"{feat}_q"
         if q_col in base.columns:
-            dims.append(q_col)
+            quartile_dims.append(q_col)
 
-    missing = [d for d in dims if d not in base.columns]
-    if missing:
-        return {"error": f"missing columns: {missing}", "dims": dims}
+    dim_plans: list[list[str]] = []
+    for keep_count in range(len(quartile_dims), -1, -1):
+        dim_plans.append(static_dims + quartile_dims[:keep_count])
 
-    combo_series = base[dims].astype(str).agg(" | ".join, axis=1).to_numpy()
-    scored: dict[str, dict[str, Any]] = {}
-    max_n = 0
-    for combo in np.unique(combo_series):
-        mask = combo_series == combo
-        n = int(mask.sum())
-        if n < min_rule_n:
-            continue
-        max_n = max(max_n, n)
-        rng = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
-        r = rollup(probs[mask], payoffs[mask], n_paths, rng)
-        scored[combo] = r
+    chosen_dims: list[str] | None = None
+    chosen_scored: dict[str, dict[str, Any]] = {}
+    fallback_steps: list[dict[str, Any]] = []
+    best_by_count: tuple[int, list[str], dict[str, dict[str, Any]]] = (-1, static_dims, {})
 
-    # Score each combo for ranking
-    for combo, r in scored.items():
-        p5 = r["mc_total_pnl"].get("p5") or 0.0
-        sharpe = r.get("analytical_per_trade_sharpe") or 0.0
-        coverage_norm = (r["n_trades"] / max_n) if max_n else 0.0
-        r["entry_score"] = 0.5 * p5 + 0.3 * sharpe * 100.0 + 0.2 * coverage_norm
+    for dims in dim_plans:
+        combo_series = base[dims].astype(str).agg(" | ".join, axis=1).to_numpy()
+        scored: dict[str, dict[str, Any]] = {}
+        max_n = 0
+        for combo in np.unique(combo_series):
+            mask = combo_series == combo
+            n = int(mask.sum())
+            if n < min_rule_n:
+                continue
+            max_n = max(max_n, n)
+            rng = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
+            r = rollup(probs[mask], payoffs[mask], n_paths, rng)
+            scored[combo] = r
 
-    ranked_desc = sorted(scored.items(), key=lambda kv: kv[1]["entry_score"], reverse=True)
-    ranked_asc = sorted(scored.items(), key=lambda kv: kv[1]["entry_score"])
+        for combo, r in scored.items():
+            p5 = r["mc_total_pnl"].get("p5") or 0.0
+            sharpe = r.get("analytical_per_trade_sharpe") or 0.0
+            coverage_norm = (r["n_trades"] / max_n) if max_n else 0.0
+            r["entry_score"] = 0.5 * p5 + 0.3 * sharpe * 100.0 + 0.2 * coverage_norm
+
+        fallback_steps.append(
+            {
+                "dims": dims,
+                "eligible_combo_count": len(scored),
+            }
+        )
+        if len(scored) > best_by_count[0]:
+            best_by_count = (len(scored), dims, scored)
+        if len(scored) >= min_required_rules:
+            chosen_dims = dims
+            chosen_scored = scored
+            break
+
+    if chosen_dims is None:
+        chosen_dims = best_by_count[1]
+        chosen_scored = best_by_count[2]
+
+    ranked_desc = sorted(chosen_scored.items(), key=lambda kv: kv[1]["entry_score"], reverse=True)
+    ranked_asc = sorted(chosen_scored.items(), key=lambda kv: kv[1]["entry_score"])
+    overlap_keys = sorted(set(k for k, _ in ranked_desc[:top_k]).intersection(k for k, _ in ranked_asc[:top_k]))
+    degraded = bool(len(chosen_scored) < min_required_rules or overlap_keys)
     return {
-        "dims": dims,
+        "requested_dims": static_dims + quartile_dims,
+        "dims": chosen_dims,
         "min_rule_n": min_rule_n,
+        "min_required_rules": min_required_rules,
+        "eligible_combo_count": len(chosen_scored),
+        "degraded": degraded,
+        "overlap_keys": overlap_keys,
+        "fallback_steps": fallback_steps,
         "shap_top_features": shap_top_features,
         "top_k_take": {k: v for k, v in ranked_desc[:top_k]},
         "top_k_avoid": {k: v for k, v in ranked_asc[:top_k]},
@@ -975,6 +1017,130 @@ def task_I_win_profile(
 # Orchestrator
 # ---------------------------------------------------------------------------
 
+CANONICAL_ZOO_FAMILIES = {"GBM", "CAT", "XGB", "RF", "XT", "NN_TORCH", "FASTAI"}
+
+
+def canonical_family_for_model(model_name: str | None) -> str | None:
+    if not model_name:
+        return None
+    name = str(model_name)
+    if name.startswith("LightGBM"):
+        return "GBM"
+    if name.startswith("CatBoost"):
+        return "CAT"
+    if name.startswith("XGBoost"):
+        return "XGB"
+    if name.startswith("RandomForest"):
+        return "RF"
+    if name.startswith("ExtraTrees"):
+        return "XT"
+    if name.startswith("NeuralNetTorch"):
+        return "NN_TORCH"
+    if name.startswith("NeuralNetFastAI") or "FastAI" in name:
+        return "FASTAI"
+    return None
+
+
+def infer_run_integrity(run_dir: Path) -> dict[str, Any]:
+    has_internal_ensembling = False
+    missing_families_by_fold: dict[str, list[str]] = {}
+    lineage_failures: dict[str, str] = {}
+    partial_class_folds: list[str] = []
+
+    for fold_dir in sorted(p for p in run_dir.glob("fold_*") if p.is_dir()):
+        fold_code = fold_dir.name
+        summary_path = fold_dir / "fold_summary.json"
+        if not summary_path.exists():
+            continue
+        summary = json.loads(summary_path.read_text())
+        autogluon = summary.get("autogluon") or {}
+        num_bag = int(autogluon.get("num_bag_folds") or 0)
+        num_stack = int(autogluon.get("num_stack_levels") or 0)
+        dynamic_stacking = str(autogluon.get("dynamic_stacking") or "").lower()
+        if num_bag > 0 or num_stack > 0 or dynamic_stacking == "auto":
+            has_internal_ensembling = True
+
+        families = set(autogluon.get("zoo_families_present") or [])
+        missing = sorted(CANONICAL_ZOO_FAMILIES - families)
+        if missing:
+            missing_families_by_fold[fold_code] = missing
+        else:
+            leaderboard_path = fold_dir / "leaderboard.csv"
+            if leaderboard_path.exists():
+                try:
+                    lb = pd.read_csv(leaderboard_path)
+                    lb_models = lb.get("model", pd.Series(dtype=str)).dropna().astype(str).tolist()
+                    lb_families = {
+                        fam
+                        for model_name in lb_models
+                        if (fam := canonical_family_for_model(model_name)) is not None
+                    }
+                    lb_missing = sorted(CANONICAL_ZOO_FAMILIES - lb_families)
+                    if lb_missing:
+                        missing_families_by_fold[fold_code] = lb_missing
+                except Exception:
+                    missing_families_by_fold[fold_code] = sorted(CANONICAL_ZOO_FAMILIES)
+
+        if summary.get("val_missing_labels") or summary.get("test_missing_labels"):
+            partial_class_folds.append(fold_code)
+
+        best_model = autogluon.get("best_model")
+        test_macro = autogluon.get("test_macro_f1")
+        leaderboard_file = autogluon.get("leaderboard_path")
+        if best_model and test_macro is not None and leaderboard_file:
+            try:
+                lb = pd.read_csv(leaderboard_file)
+                row = lb.loc[lb["model"].astype(str) == str(best_model)]
+                if row.empty:
+                    lineage_failures[fold_code] = f"best_model_missing:{best_model}"
+                elif "score_test" in row.columns:
+                    score_test = float(row["score_test"].iloc[0])
+                    if abs(score_test - float(test_macro)) > 1e-6:
+                        lineage_failures[fold_code] = (
+                            f"score_test={score_test:.6f} test_macro_f1={float(test_macro):.6f}"
+                        )
+            except Exception as exc:
+                lineage_failures[fold_code] = f"lineage_check_error:{exc}"
+
+    passed = (
+        (not has_internal_ensembling)
+        and (not missing_families_by_fold)
+        and (not lineage_failures)
+        and (not partial_class_folds)
+    )
+    return {
+        "passed": passed,
+        "has_internal_ensembling": has_internal_ensembling,
+        "missing_families_by_fold": missing_families_by_fold,
+        "lineage_failures": lineage_failures,
+        "partial_class_folds": sorted(partial_class_folds),
+    }
+
+
+def build_run_note(run_integrity: dict[str, Any]) -> str:
+    if run_integrity.get("passed"):
+        return (
+            "Source run passed integrity checks: no internal IID bagging/stacking, "
+            "canonical full zoo present in every fold, strict class coverage, and consistent "
+            "model↔metric lineage. Absolute $ figures still depend on calibration and regime drift."
+        )
+
+    issues: list[str] = []
+    if run_integrity.get("has_internal_ensembling"):
+        issues.append("internal IID bagging/stacking detected")
+    if run_integrity.get("missing_families_by_fold"):
+        issues.append("partial zoo detected")
+    if run_integrity.get("lineage_failures"):
+        issues.append("model↔metric lineage mismatches detected")
+    if run_integrity.get("partial_class_folds"):
+        issues.append("validation/test class coverage gaps detected")
+    issue_text = ", ".join(issues) if issues else "unspecified run-integrity warnings"
+    return (
+        f"Source run integrity warnings: {issue_text}. Relative rankings across stop_family / "
+        "threshold / entry features may still be informative; absolute $ numbers should be read skeptically."
+    )
+
+
 def main() -> None:
     args = parse_args()
     run_dir = Path(args.artifacts_root) / args.run_id
@@ -990,6 +1156,7 @@ def main() -> None:
     fold_dirs = sorted(p for p in run_dir.glob("fold_*") if p.is_dir())
     if not fold_dirs:
         raise SystemExit(f"No fold_* directories under {run_dir}")
+    run_integrity = infer_run_integrity(run_dir)
 
     print(f"[{datetime.now(UTC).isoformat()}] run_id={args.run_id} folds={len(fold_dirs)} tasks={sorted(tasks_enabled)}")
 
@@ -1160,6 +1327,7 @@ def main() -> None:
             n_paths=args.n_paths,
             rng_root=rng_root,
             min_rule_n=args.min_rule_n,
+            min_required_rules=args.task_e_min_required_rules,
         )
 
     # Task F — TP ladder
@@ -1205,14 +1373,8 @@ def main() -> None:
         "shap_top_n": args.shap_top_n,
         "regime_split_method": args.regime_split_method,
         "min_stable_corr": args.min_stable_corr,
-        "note": (
-            "Source run flagged for IID bag leakage and GBM-only model zoo. "
-            "Relative rankings across stop_family / threshold / entry features "
-            "may still be informative; absolute $ numbers should be read skeptically. "
-            "Indicator parameters (Deviation/Depth/Threshold/MinFibRange) are FIXED in this run — "
-            "'best settings' here means 'best market context and entry features given those fixed "
-            "indicator settings'. Varying indicator settings is the job of tv_auto_tune.py."
-        ),
+        "run_integrity": run_integrity,
+        "note": build_run_note(run_integrity),
     }
 
     def _write(name: str, payload: Any) -> None:
@@ -1350,7 +1512,13 @@ def main() -> None:
     # --- Task E entry rules ---
     if "E" in tasks_enabled and task_E.get("top_k_take"):
         summary += ["## Task E — Entry Rules", ""]
-        summary += [f"Dims: {task_E.get('dims', [])} — min_rule_n={task_E.get('min_rule_n')}", ""]
+        summary += [
+            f"Requested dims: {task_E.get('requested_dims', [])}",
+            f"Effective dims: {task_E.get('dims', [])} — min_rule_n={task_E.get('min_rule_n')} "
+            f"min_required_rules={task_E.get('min_required_rules')} eligible={task_E.get('eligible_combo_count')}",
+            f"Task E degraded: {task_E.get('degraded')} overlap_keys={len(task_E.get('overlap_keys', []))}",
+            "",
+        ]
         summary += ["### Top 10 TAKE rules (ranked by entry_score)", ""]
         summary += ["| combo | n_trades | EV/trade ($) | MC p5 PnL | Sharpe | entry_score |"]
         summary += ["|-------|---------:|-------------:|----------:|-------:|------------:|"]
