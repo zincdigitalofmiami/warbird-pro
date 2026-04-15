@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# commit-msg hook: enforce Warbird canonical-training-contract guards.
+#
+# Activated locally with:
+#   git config core.hooksPath .githooks
+#
+# Current guards:
+#   - scripts/guards/check-canonical-zoo.sh must pass, unless the commit
+#     message contains the ZOO_CHANGE_APPROVED: override token.
+set -euo pipefail
+
+msg_file="$1"
+msg="$(cat "$msg_file")"
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+# --- Zoo guard ----------------------------------------------------------------
+if ! ./scripts/guards/check-canonical-zoo.sh >/tmp/warbird_zoo_guard.$$ 2>&1; then
+  if grep -q 'ZOO_CHANGE_APPROVED:' <<<"$msg"; then
+    echo "commit-msg: ZOO_CHANGE_APPROVED: token present — allowing zoo change."
+    rm -f /tmp/warbird_zoo_guard.$$
+  else
+    echo "commit-msg: refusing commit — CANONICAL_ZOO drift detected."
+    cat /tmp/warbird_zoo_guard.$$
+    echo "commit-msg: if intentional, re-commit with 'ZOO_CHANGE_APPROVED:' in the message."
+    rm -f /tmp/warbird_zoo_guard.$$
+    exit 1
+  fi
+fi
+
+exit 0

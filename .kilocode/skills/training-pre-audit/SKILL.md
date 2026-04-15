@@ -58,11 +58,21 @@ grep -n "AUTOGL\|metric_scope\|run_kind" scripts/ag/train_ag_baseline.py
 
 Both sides must use the **same** spelling (`AUTOGLUON` / `AUTOGLUON_TABULAR`). If they drift, the metric insert throws `CheckViolation` inside the `finally:` block and psycopg2 rolls back the `SUCCEEDED` upsert — run status stays at `RUNNING` forever.
 
-### 5. Model zoo expectations vs trainer code
+### 5. Model zoo expectations vs trainer code (automated)
 
-Open `scripts/ag/train_ag_baseline.py` around `fit_kwargs["hyperparameters"]`. Read the dict. **If it only contains `"GBM": [...]` that is the ONLY model family that will fit** — `--excluded-model-types ""` does not put other models back in the pool. AutoGluon presets are overridden by an explicit hyperparameters dict.
+Run the canonical-zoo guard. It must exit 0:
 
-For a real multi-model comparison, the dict must explicitly list GBM + CAT + XGB + RF + XT + NN_TORCH + FASTAI.
+```bash
+./scripts/guards/check-canonical-zoo.sh
+```
+
+The guard verifies that `scripts/ag/train_ag_baseline.py` contains:
+- An active `_assert_canonical_zoo()` module-level call (the import-time drift guard)
+- All 7 required family keys in `CANONICAL_ZOO`: `GBM`, `CAT`, `XGB`, `RF`, `XT`, `NN_TORCH`, `FASTAI`
+
+The commit-msg hook at `.githooks/commit-msg` runs the same guard at commit time; it can only be bypassed with a `ZOO_CHANGE_APPROVED:` token in the commit message. If you find yourself tempted to bypass, stop — full zoo is mandatory on this project. **GBM-only runs do not exist here and have silently masqueraded as "full zoo" before, wasting wall time.**
+
+`--excluded-model-types ""` does NOT add families back to a subset dict. AutoGluon presets are overridden by any explicit `hyperparameters` dict, so the dict itself IS the zoo policy.
 
 ### 6. Python interpreter reality check
 
@@ -137,6 +147,24 @@ With the full 7-family zoo (GBM × 2 configs + CAT + XGB + RF × 2 + XT × 2 + N
 - If you see `Ran out of time, early stopping on iteration N` in the log for NN families, raise `--time-limit`
 
 Expected wall time per fold for 7-family zoo at `--time-limit 3600`: 30-60 min. Five folds: 2.5-5 h total.
+
+### 12. Data floor — ag_training row count not truncated
+
+```bash
+/opt/homebrew/opt/postgresql@17/bin/psql -d warbird -h 127.0.0.1 -p 5432 -At -c \
+  "SELECT count(*) FROM ag_training;"
+```
+
+Result must be at least **`EXPECTED_AG_TRAINING_ROWS_FLOOR` = 327,000** (pinned 2026-04-15 after migration 016; the true count was 327,942). Below that, the trainer itself refuses to fit — `load_base_training` raises `SystemExit` with a clear message. Raise the floor in `scripts/ag/train_ag_baseline.py` whenever the pipeline legitimately grows the row count; never lower it silently.
+
+This catches the "pipeline half-loaded" failure mode where filters or joins trim the dataset and the training silently runs on the truncated surface.
+
+## Failure modes — updated
+
+| Failure | Cost | Prevented by |
+|---------|------|--------------|
+| CANONICAL_ZOO drift (family removed) | Import-time `SystemExit` + commit-msg hook | Check 5 + module-level `_assert_canonical_zoo()` |
+| Data-floor trip (ag_training truncated) | Run refuses to start | Check 12 + trainer `EXPECTED_AG_TRAINING_ROWS_FLOOR` |
 
 ## When the checklist fails
 

@@ -192,6 +192,25 @@ These are explicitly excluded from the canonical AG training zoo:
   `num_stack_levels > 0`, `dynamic_stacking=auto`, or weighted ensemble
   re-enablement unless a purged temporal child splitter is explicitly
   implemented and approved.
+- Training zoo contract: `scripts/ag/train_ag_baseline.py` must import with
+  `CANONICAL_ZOO` containing all 7 families — `GBM`, `CAT`, `XGB`, `RF`,
+  `XT`, `NN_TORCH`, `FASTAI`. Any edit that removes or renames a family
+  dies at import time via `_assert_canonical_zoo()` and is refused by the
+  `.githooks/commit-msg` guard. Override only with a deliberate
+  `ZOO_CHANGE_APPROVED:` token in the commit message. **GBM-only runs
+  do not exist on this project** — they have silently masqueraded as "full
+  zoo" before and wasted wall time. Use the `training-gbm-only` skill as
+  an iteration probe only, never as final model selection.
+- Training data floor: `ag_training` row count must not fall below
+  `EXPECTED_AG_TRAINING_ROWS_FLOOR = 327,000`. `load_base_training()`
+  raises `SystemExit` below the floor. Raise the floor (with evidence)
+  whenever the pipeline legitimately grows the count; never lower it
+  silently. This catches half-loaded / truncated pipelines.
+- Local git hooks: after clone, run
+  `git config core.hooksPath .githooks` once so the `commit-msg` zoo
+  guard is active. The guard pairs with
+  `./scripts/guards/check-canonical-zoo.sh`, which can be invoked
+  directly and is also listed in the `training-pre-audit` skill.
 - Hard stop requirement: structural stop at `0.618 x ATR(14)` from entry.
   Emergency stop at `1.000 x ATR(14)`. Both rendered on chart from entry bar.
 - Consecutive loss block: at 2 consecutive losses, signal warning. At 3, halt
@@ -230,9 +249,13 @@ These are explicitly excluded from the canonical AG training zoo:
 ### Memory & Session Handoff — Non-Negotiable
 
 - `.remember/` files are **append-only**. NEVER overwrite any `.remember/today-*.md`, `.remember/now.md`, `.remember/recent.md`, or `.remember/archive.md`. All session history is permanent.
+- Durable memory state for this repo lives on the external drive at `/Volumes/Satechi Hub/warbird-pro-state/`. Do not move durable memory back onto internal-disk cache/temp paths.
+- The workspace `.remember/` path is a compatibility path into `/Volumes/Satechi Hub/warbird-pro-state/remember/`.
 - To save a session entry: append to `today-YYYY-MM-DD.md` using Edit (not Write/Bash overwrite). Update `now.md` with the current rolling state.
-- Persistent cross-session memories go to `/Users/zincdigital/.claude/projects/-Volumes-Satechi-Hub-warbird-pro/memory/` as typed files (`project_`, `feedback_`, `user_`, `reference_`). Always add a pointer line to `MEMORY.md`.
+- Persistent cross-session memories resolve through `/Users/zincdigital/.claude/projects/-Volumes-Satechi-Hub-warbird-pro/memory/`, which is the compatibility path for the external store at `/Volumes/Satechi Hub/warbird-pro-state/claude-project-memory/`. Store typed files there (`project_`, `feedback_`, `user_`, `reference_`) and always add a pointer line to `MEMORY.md`.
+- MCP memory for this repo must resolve to `/Volumes/Satechi Hub/warbird-pro-state/mcp-memory/memory.jsonl`.
 - Never use a Bash heredoc or the Write tool to overwrite an existing `.remember` file.
+- Keep timestamped safety copies under `/Volumes/Satechi Hub/warbird-pro-state/backups/` before any future path migration or cleanup.
 - At session end, roll `now.md` content into the dated `today-` file, then save any project/feedback memories that should persist to future sessions.
 
 ### No Hand-Rolling — Copy Working Code

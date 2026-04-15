@@ -28,6 +28,57 @@ CHICAGO_TZ = ZoneInfo("America/Chicago")
 DEFAULT_DSN = os.environ.get("WARBIRD_PG_DSN", "host=127.0.0.1 port=5432 dbname=warbird")
 DEFAULT_OUTPUT_ROOT = "artifacts/ag_runs"
 DEFAULT_TIME_LIMIT_SEC = 3600
+
+# ---------------------------------------------------------------------------
+# Canonical training contract — drift guards (2026-04-15).
+# ---------------------------------------------------------------------------
+# CANONICAL_ZOO is the only legal hyperparameters dict for this trainer.
+# Any edit that removes or renames a family dies at import time via
+# _assert_canonical_zoo(). GBM-only runs do not exist on this project —
+# they are scientifically useless for model selection and have silently
+# masqueraded as "full zoo" before, wasting wall time.
+#
+# Thread pins (num_threads=1 / thread_count=1 / n_jobs=1) are load-bearing:
+# they prevent LightGBM/OpenMP deadlocks on Apple Silicon.
+#
+# To change the zoo intentionally: edit both CANONICAL_ZOO and
+# CANONICAL_ZOO_FAMILIES together, commit with ZOO_CHANGE_APPROVED: in the
+# message (see .githooks/commit-msg), and announce in the session log.
+CANONICAL_ZOO_FAMILIES: frozenset[str] = frozenset({
+    "GBM", "CAT", "XGB", "RF", "XT", "NN_TORCH", "FASTAI",
+})
+CANONICAL_ZOO: dict[str, list[dict[str, Any]]] = {
+    "GBM":      [{"num_threads": 1}, {"num_threads": 1, "extra_trees": True}],
+    "CAT":      [{"thread_count": 1}],
+    "XGB":      [{"n_jobs": 1}],
+    "RF":       [{"criterion": "gini"}, {"criterion": "entropy"}],
+    "XT":       [{"criterion": "gini"}, {"criterion": "entropy"}],
+    "NN_TORCH": [{}],
+    "FASTAI":   [{}],
+}
+
+
+def _assert_canonical_zoo() -> None:
+    """Fail fast at import if the zoo has drifted from the 7-family canon."""
+    got = set(CANONICAL_ZOO)
+    if got != CANONICAL_ZOO_FAMILIES:
+        missing = sorted(CANONICAL_ZOO_FAMILIES - got)
+        extra = sorted(got - CANONICAL_ZOO_FAMILIES)
+        raise SystemExit(
+            "CANONICAL_ZOO drift detected. "
+            f"missing={missing} extra={extra}. "
+            "Full zoo is mandatory on this project — do NOT launch."
+        )
+
+
+_assert_canonical_zoo()
+
+# ag_training row count floor — pinned 2026-04-15 after migration 016 produced
+# 327,972 stop_variants / 327,942 training rows (end-of-history truncation).
+# Buffer below true count absorbs minor shifts as data extends forward, but
+# still screams if the pipeline loaded only a partial surface.
+EXPECTED_AG_TRAINING_ROWS_FLOOR: int = 327_000
+
 ECON_TABLES = (
     "econ_activity_1d",
     "econ_commodities_1d",
@@ -229,6 +280,18 @@ def fetch_df(
 
 def load_base_training(conn: psycopg2.extensions.connection) -> pd.DataFrame:
     df = fetch_df(conn, "SELECT * FROM ag_training ORDER BY ts ASC")
+    # Data-floor guard — refuses to train on a truncated / half-loaded surface.
+    # See EXPECTED_AG_TRAINING_ROWS_FLOOR at the top of this file. Lift the
+    # floor (with evidence) whenever the pipeline legitimately grows the row
+    # count; never lower it silently.
+    if len(df) < EXPECTED_AG_TRAINING_ROWS_FLOOR:
+        raise SystemExit(
+            f"ag_training row count {len(df):,} < floor "
+            f"{EXPECTED_AG_TRAINING_ROWS_FLOOR:,}. Pipeline did not load the "
+            f"full surface — refusing to train on a truncated dataset. "
+            f"Re-run scripts/ag/build_ag_pipeline.py and verify counts in "
+            f"the training-pre-audit skill before relaunching."
+        )
     if df.empty:
         raise SystemExit("ag_training is empty.")
     df["ts"] = pd.to_datetime(df["ts"], utc=True)
@@ -1014,12 +1077,10 @@ def fit_fold(
         # bounded LightGBM-only run.
         "fit_weighted_ensemble": False,
         "fit_full_last_level_weighted_ensemble": False,
-        "hyperparameters": {
-            "GBM": [
-                {"num_threads": 1},
-                {"num_threads": 1, "extra_trees": True},
-            ]
-        },
+        # Canonical full zoo — defined at module top, validated at import.
+        # Edit CANONICAL_ZOO there, not here. See the Canonical Training
+        # Contract block near the top of this file.
+        "hyperparameters": CANONICAL_ZOO,
     }
     if args.num_bag_folds is not None:
         fit_kwargs["num_bag_folds"] = args.num_bag_folds
