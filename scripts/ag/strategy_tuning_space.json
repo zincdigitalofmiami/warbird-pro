@@ -12,7 +12,8 @@
     "Anchor Span = Active Fib Window": true,
     "Auto-tune ZigZag by Timeframe": false,
     "Confluence Tolerance (%)": 0.05,
-    "Extend Levels Right": false,
+    "Extend Levels Right": true,
+    "Fallback Stop Family": "ATR_1_0",
     "Min Fib Range (ATR)": 0.5,
     "One-shot event markers/alerts": true,
     "Rejection = wick into zone then close back out": true,
@@ -20,7 +21,7 @@
     "Target Line Lookback Bars": 40,
     "ZigZag Depth (manual)": 12,
     "ZigZag Deviation (manual)": 3.0,
-    "ZigZag Threshold Floor (%)": 0.50
+    "ZigZag Threshold Floor (%)": 0.30
   },
   "objective": {
     "trade_count_bounds": {
@@ -93,12 +94,12 @@
   "search_parameters": {
     "Exhaustion Z Length": {
       "type": "int",
-      "values": [14, 20, 30]
+      "values": [10, 14, 20, 30]
     },
     "Exhaustion Z Threshold": {
-      "max": 2.8,
-      "min": 2.2,
-      "step": 0.1,
+      "max": 2.6,
+      "min": 1.8,
+      "step": 0.2,
       "type": "float"
     },
     "Extension ATR Tolerance": {
@@ -109,38 +110,21 @@
     },
     "Extreme Rows To Inspect": {
       "type": "int",
-      "values": [
-        2,
-        3,
-        4
-      ]
-    },
-    "Fallback Stop Family": {
-      "type": "categorical",
-      "values": [
-        "ATR_1_0",
-        "ATR_1_5",
-        "ATR_STRUCTURE_1_25",
-        "FIB_NEG_0236",
-        "FIB_0236_ATR_COMPRESS_0_50"
-      ]
+      "values": [2, 3, 4]
     },
     "Footprint Imbalance %": {
-      "max": 350,
-      "min": 250,
-      "step": 25,
+      "max": 300,
+      "min": 175,
+      "step": 20,
       "type": "float"
     },
     "Footprint Ticks Per Row": {
       "type": "int",
-      "values": [
-        4,
-        6
-      ]
+      "values": [4, 6]
     },
     "Footprint VA %": {
-      "max": 75,
-      "min": 65,
+      "max": 70,
+      "min": 45,
       "step": 5,
       "type": "float"
     },
@@ -148,23 +132,18 @@
       "type": "bool"
     },
     "Short Gate ADX Floor": {
-      "max": 24,
-      "min": 18,
+      "max": 20,
+      "min": 8,
       "step": 1,
       "type": "float"
     },
     "Tier 1 Hold Bars": {
       "type": "int",
-      "values": [
-        2,
-        3,
-        4,
-        5
-      ]
+      "values": [2, 3, 4, 5]
     },
     "Tier 1 Hold Stop ATR": {
-      "max": 2.25,
-      "min": 1.5,
+      "max": 2.0,
+      "min": 1.0,
       "step": 0.25,
       "type": "float"
     },

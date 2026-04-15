@@ -116,13 +116,13 @@ bool oneShotEvent = input.bool(true, "One-shot event markers/alerts", group=grou
 
 bool gateShortsInBullTrend = input.bool(true, "Gate Shorts In Bull Trend", group=groupLogic,
   tooltip="Blocks bearish accept-entry triggers when the broader trend context is bullish and rising. Keeps the engine from bleeding into obvious countertrend shorts.")
-float shortTrendGateAdx = input.float(23.0, "Short Gate ADX Floor", minval=5.0, maxval=50.0, step=0.5, group=groupLogic,
+float shortTrendGateAdx = input.float(10.0, "Short Gate ADX Floor", minval=5.0, maxval=50.0, step=0.5, group=groupLogic,
   tooltip="Minimum ADX required before the bullish-trend short gate activates.")
 
 string groupStops = "Stop Logic"
-string stopFamilyId = input.string("ATR_STRUCTURE_1_25", "Fallback Stop Family", options=["FIB_NEG_0236", "FIB_NEG_0382", "ATR_1_0", "ATR_1_5", "ATR_STRUCTURE_1_25", "FIB_0236_ATR_COMPRESS_0_50"], group=groupStops,
+string stopFamilyId = input.string("ATR_1_0", "Fallback Stop Family", options=["FIB_NEG_0236", "FIB_NEG_0382", "ATR_1_0", "ATR_1_5", "ATR_STRUCTURE_1_25", "FIB_0236_ATR_COMPRESS_0_50"], group=groupStops,
   tooltip="Local fallback stop family for strategy backtests until the AG packet runtime can publish a live stop-family decision back to TradingView.")
-float continuationHoldStopAtrMult = input.float(1.5, "Tier 1 Hold Stop ATR", minval=1.0, maxval=4.0, step=0.25, group=groupStops,
+float continuationHoldStopAtrMult = input.float(1.0, "Tier 1 Hold Stop ATR", minval=1.0, maxval=4.0, step=0.25, group=groupStops,
   tooltip="When a same-direction Tier 1 continuation signal fires during an active trade, temporarily widen the stop to entry +/- ATR x this multiplier for the configured hold bars.")
 
 string groupExecution = "Execution Contract"
@@ -148,15 +148,15 @@ bool runnerBreakevenAfterTp1 = input.bool(true, "Break-Even After TP1", group=gr
   tooltip="After a fast runner promotion, move the stop to entry once TP1 has been tagged.")
 
 string groupFootprint = "Footprint Exhaustion"
-int footprintTicksPerRow = input.int(6, "Footprint Ticks Per Row", minval=1, group=groupFootprint)
-float footprintVaPercent = input.float(70.0, "Footprint VA %", minval=1.0, maxval=100.0, step=1.0, group=groupFootprint)
-float footprintImbalancePercent = input.float(275.0, "Footprint Imbalance %", minval=100.0, maxval=1000.0, step=10.0, group=groupFootprint)
-int exhaustionZLen = input.int(14, "Exhaustion Z Length", minval=10, maxval=100, group=groupFootprint)
-float exhaustionZThreshold = input.float(2.5, "Exhaustion Z Threshold", minval=1.0, maxval=5.0, step=0.1, group=groupFootprint)
+int footprintTicksPerRow = input.int(4, "Footprint Ticks Per Row", minval=1, group=groupFootprint)
+float footprintVaPercent = input.float(50.0, "Footprint VA %", minval=1.0, maxval=100.0, step=1.0, group=groupFootprint)
+float footprintImbalancePercent = input.float(195.0, "Footprint Imbalance %", minval=100.0, maxval=1000.0, step=10.0, group=groupFootprint)
+int exhaustionZLen = input.int(10, "Exhaustion Z Length", minval=10, maxval=100, group=groupFootprint)
+float exhaustionZThreshold = input.float(2.0, "Exhaustion Z Threshold", minval=1.0, maxval=5.0, step=0.1, group=groupFootprint)
 float exhaustionLevelAtrTol = input.float(0.10, "Extension ATR Tolerance", minval=0.01, maxval=0.50, step=0.01, group=groupFootprint)
 float zeroPrintVolRatio = input.float(0.10, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
 int stackedImbalanceRows = input.int(3, "Extreme Rows To Inspect", minval=1, maxval=10, group=groupFootprint)
-int continuationHoldBars = input.int(4, "Tier 1 Hold Bars", minval=0, maxval=20, group=groupFootprint)
+int continuationHoldBars = input.int(3, "Tier 1 Hold Bars", minval=0, maxval=20, group=groupFootprint)
 
 
 //=====================
@@ -164,7 +164,7 @@ int continuationHoldBars = input.int(4, "Tier 1 Hold Bars", minval=0, maxval=20,
 //=====================
 string groupViz = "Visuals"
 int targetLookbackBars = input.int(40, "Target Line Lookback Bars", minval=5, maxval=500, group=groupViz)
-bool extendLevelsRight = input.bool(false, "Extend Levels Right", group=groupViz)
+bool extendLevelsRight = input.bool(true, "Extend Levels Right", group=groupViz)
 bool useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window", group=groupViz)
 
 string groupDebug = "Debug Diagnostics"
