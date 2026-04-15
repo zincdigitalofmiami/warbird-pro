@@ -36,6 +36,7 @@ import scripts.ag.train_ag_baseline as baseline
 RUN_ID_RE = re.compile(r"agtrain_[0-9]{8}T[0-9]+Z")
 
 CANONICAL_ZOO_FAMILIES = {"GBM", "CAT", "XGB", "RF", "XT", "NN_TORCH", "FASTAI"}
+TERMINAL_RUN_STATUSES = {"SUCCEEDED", "FAILED", "BLOCKED"}
 
 REQUIRED_TOPLEVEL_FILES = [
     "command.txt",
@@ -183,6 +184,86 @@ def normalize_passthrough_args(train_passthrough: list[str]) -> list[str]:
     return passthrough
 
 
+def reconcile_stale_running_rows(args: argparse.Namespace) -> list[dict[str, str]]:
+    reconciled: list[dict[str, str]] = []
+    with psycopg2.connect(args.dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT run_id, started_at, completed_at, error_message
+                FROM ag_training_runs
+                WHERE run_status='RUNNING'
+                ORDER BY started_at
+                """
+            )
+            running_rows = cur.fetchall()
+
+            for run_id, started_at, completed_at, error_message in running_rows:
+                run_dir = Path(args.output_root) / str(run_id)
+                status_path = run_dir / "run_status.json"
+                terminal_status: str | None = None
+                terminal_error: str | None = None
+                completed_at_override: datetime | None = None
+                reason = ""
+
+                if status_path.exists():
+                    try:
+                        payload = load_json(status_path)
+                    except Exception:
+                        payload = {}
+                    file_status = str(payload.get("run_status") or "").upper()
+                    if file_status in TERMINAL_RUN_STATUSES:
+                        terminal_status = file_status
+                        reason = "run_status.json terminal"
+                        terminal_error = payload.get("error_message")
+                        completed_at_utc = payload.get("completed_at_utc")
+                        if completed_at_utc:
+                            try:
+                                completed_at_override = datetime.fromisoformat(
+                                    str(completed_at_utc).replace("Z", "+00:00")
+                                )
+                            except ValueError:
+                                completed_at_override = None
+
+                if terminal_status is None and completed_at is not None:
+                    terminal_status = "FAILED"
+                    reason = "db.completed_at set while status RUNNING"
+                    terminal_error = (
+                        "Hard-gate preflight reconciliation: run left RUNNING after completion marker."
+                    )
+
+                if terminal_status is None:
+                    continue
+
+                final_error = terminal_error or error_message
+                cur.execute(
+                    """
+                    UPDATE ag_training_runs
+                    SET run_status = %s,
+                        completed_at = COALESCE(completed_at, %s),
+                        error_message = %s
+                    WHERE run_id = %s
+                      AND run_status = 'RUNNING'
+                    """,
+                    (
+                        terminal_status,
+                        completed_at_override,
+                        final_error,
+                        run_id,
+                    ),
+                )
+                if cur.rowcount > 0:
+                    reconciled.append(
+                        {
+                            "run_id": str(run_id),
+                            "status": terminal_status,
+                            "reason": reason,
+                        }
+                    )
+        conn.commit()
+    return reconciled
+
+
 def preflight(args: argparse.Namespace) -> None:
     print("\n[gate] preflight checks")
     run_quiet(["./scripts/guards/check-canonical-zoo.sh"], cwd=REPO_ROOT)
@@ -200,13 +281,22 @@ def preflight(args: argparse.Namespace) -> None:
     if STALE_MC_NOTE in mc_source:
         raise GateError("Monte Carlo script still contains stale hardcoded run-warning text.")
 
+    reconciled_rows = reconcile_stale_running_rows(args)
+    for row in reconciled_rows:
+        print(
+            f"[gate] reconciled stale RUNNING row: run_id={row['run_id']} "
+            f"-> {row['status']} ({row['reason']})"
+        )
+
     with psycopg2.connect(args.dsn) as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT count(*) FROM ag_training_runs WHERE run_status='RUNNING'")
-            running = int(cur.fetchone()[0])
-            if running > 0:
+            cur.execute(
+                "SELECT run_id FROM ag_training_runs WHERE run_status='RUNNING' ORDER BY started_at"
+            )
+            unresolved = [str(row[0]) for row in cur.fetchall()]
+            if unresolved:
                 raise GateError(
-                    f"Found {running} RUNNING rows in ag_training_runs. "
+                    f"Found active/unresolved RUNNING rows in ag_training_runs: {unresolved}. "
                     "Resolve orphan/stuck runs before launching a new training run."
                 )
 

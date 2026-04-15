@@ -264,6 +264,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Build the full dataset/fold manifest without fitting AutoGluon.",
     )
+    parser.add_argument(
+        "--allow-partial-class-coverage",
+        action="store_true",
+        help=(
+            "Allow validation/test folds that do not contain every target class present "
+            "in the full dataset. Disabled by default for strict multiclass comparability."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -529,6 +537,7 @@ def build_walk_forward_folds(
     val_sessions: int,
     test_sessions: int,
     session_embargo: int,
+    require_full_class_coverage: bool,
 ) -> list[FoldSpec]:
     required = min_train_sessions + val_sessions + test_sessions + (session_embargo * 2)
     if len(sessions) < required:
@@ -541,6 +550,16 @@ def build_walk_forward_folds(
         for session in session_slice:
             labels.update(session_label_map.get(session, set()))
         return len(labels)
+
+    def labels_for_slice(session_slice: list[pd.Timestamp]) -> set[str]:
+        labels: set[str] = set()
+        for session in session_slice:
+            labels.update(session_label_map.get(session, set()))
+        return labels
+
+    full_label_set: set[str] = set()
+    for label_set in session_label_map.values():
+        full_label_set.update(label_set)
 
     max_offset = len(sessions) - required
     step = max(1, max_offset // max(1, n_folds - 1)) if n_folds > 1 else 1
@@ -566,11 +585,23 @@ def build_walk_forward_folds(
 
             val_slice = sessions[val_start_ix : val_end_ix + 1]
             test_slice = sessions[test_start_ix : test_end_ix + 1]
+            val_label_set = labels_for_slice(val_slice)
+            test_label_set = labels_for_slice(test_slice)
             if class_count(val_slice) >= 2 and class_count(test_slice) >= 2:
+                if require_full_class_coverage and (
+                    val_label_set != full_label_set or test_label_set != full_label_set
+                ):
+                    continue
                 chosen_indices = (train_end_ix, val_start_ix, val_end_ix, test_start_ix, test_end_ix)
                 break
 
         if chosen_indices is None:
+            if require_full_class_coverage:
+                raise SystemExit(
+                    f"Unable to build fold_{fold_idx + 1:02d} with full class coverage. "
+                    f"Require labels={sorted(full_label_set)} in both validation and test windows "
+                    f"for this fold configuration."
+                )
             train_end_ix = base_train_end_ix
             val_start_ix = train_end_ix + 1 + session_embargo
             val_end_ix = val_start_ix + val_sessions - 1
@@ -1072,10 +1103,23 @@ def fit_fold(
         "majority_baseline": baseline,
         "feature_count": len(feature_cols),
     }
+    summary["val_missing_labels"] = sorted(set(labels) - set(summary["val_labels"]))
+    summary["test_missing_labels"] = sorted(set(labels) - set(summary["test_labels"]))
     if summary["val_class_count"] < 2 or summary["test_class_count"] < 2:
         summary["class_warning"] = "Validation or test slice has fewer than 2 classes."
+    elif summary["val_missing_labels"] or summary["test_missing_labels"]:
+        summary["class_warning"] = (
+            "Validation or test slice is missing one or more target classes. "
+            "Use strict fold selection or increase window sizes."
+        )
 
-    if summary.get("class_warning") and not args.allow_single_class_eval:
+    if summary.get("class_warning") and (
+        ((summary["val_class_count"] < 2 or summary["test_class_count"] < 2) and not args.allow_single_class_eval)
+        or (
+            (summary["val_missing_labels"] or summary["test_missing_labels"])
+            and not args.allow_partial_class_coverage
+        )
+    ):
         summary["blocked_training"] = True
         write_json(fold_dir / "fold_summary.json", summary)
         return summary
@@ -1273,6 +1317,7 @@ def main() -> None:
             val_sessions=args.val_sessions,
             test_sessions=args.test_sessions,
             session_embargo=args.session_embargo,
+            require_full_class_coverage=not args.allow_partial_class_coverage,
         )
         planned_fold_count = len(folds)
 
@@ -1382,6 +1427,8 @@ def main() -> None:
                 "train_class_count": fold["train_class_count"],
                 "val_class_count": fold["val_class_count"],
                 "test_class_count": fold["test_class_count"],
+                "val_missing_labels": fold.get("val_missing_labels"),
+                "test_missing_labels": fold.get("test_missing_labels"),
                 "majority_test_accuracy": fold["majority_baseline"]["test"]["accuracy"],
                 "majority_test_macro_f1": fold["majority_baseline"]["test"]["macro_f1"],
                 "class_warning": fold.get("class_warning"),
@@ -1394,8 +1441,10 @@ def main() -> None:
     print(json.dumps(console_summary, indent=2, default=str, sort_keys=True))
     if blocked_folds:
         raise SystemExit(
-            "Blocked AutoGluon training because one or more validation/test slices have fewer than 2 classes. "
-            "Use --allow-single-class-eval only if you explicitly accept misleading multiclass metrics."
+            "Blocked AutoGluon training because one or more validation/test slices are class-invalid "
+            "(fewer than 2 classes or missing required target classes). "
+            "Use --allow-single-class-eval and/or --allow-partial-class-coverage only if you explicitly "
+            "accept misleading multiclass comparisons."
         )
 
 

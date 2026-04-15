@@ -5,7 +5,7 @@
       "command": "/opt/homebrew/bin/npx",
       "args": ["-y", "@modelcontextprotocol/server-memory"],
       "env": {
-        "MEMORY_FILE_PATH": "/Volumes/Satechi Hub/warbird-pro/.claude/memory.jsonl"
+        "MEMORY_FILE_PATH": "/Volumes/Satechi Hub/warbird-pro-state/mcp-memory/memory.jsonl"
       }
     },
     "sequentialthinking": {

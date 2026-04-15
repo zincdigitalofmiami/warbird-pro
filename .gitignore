@@ -58,6 +58,7 @@ venv/
 .tradingview-mcp/
 .playwright-mcp/
 .kilo/
+.remember
 .remember/
 data/local-db-backups/
 
