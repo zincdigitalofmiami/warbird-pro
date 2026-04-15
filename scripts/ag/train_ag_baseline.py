@@ -28,6 +28,7 @@ CHICAGO_TZ = ZoneInfo("America/Chicago")
 DEFAULT_DSN = os.environ.get("WARBIRD_PG_DSN", "host=127.0.0.1 port=5432 dbname=warbird")
 DEFAULT_OUTPUT_ROOT = "artifacts/ag_runs"
 DEFAULT_TIME_LIMIT_SEC = 3600
+DEFAULT_AG_MAX_MEMORY_USAGE_RATIO = 2.5
 
 # ---------------------------------------------------------------------------
 # Canonical training contract — drift guards (2026-04-15).
@@ -57,6 +58,16 @@ CANONICAL_ZOO: dict[str, list[dict[str, Any]]] = {
     "FASTAI":   [{}],
 }
 
+MODEL_NAME_PREFIX_TO_FAMILY: tuple[tuple[str, str], ...] = (
+    ("LightGBM", "GBM"),
+    ("CatBoost", "CAT"),
+    ("XGBoost", "XGB"),
+    ("RandomForest", "RF"),
+    ("ExtraTrees", "XT"),
+    ("NeuralNetTorch", "NN_TORCH"),
+    ("NeuralNetFastAI", "FASTAI"),
+)
+
 
 def _assert_canonical_zoo() -> None:
     """Fail fast at import if the zoo has drifted from the 7-family canon."""
@@ -72,6 +83,13 @@ def _assert_canonical_zoo() -> None:
 
 
 _assert_canonical_zoo()
+
+
+def canonical_family_for_model(model_name: str) -> str | None:
+    for prefix, family in MODEL_NAME_PREFIX_TO_FAMILY:
+        if model_name.startswith(prefix):
+            return family
+    return None
 
 # ag_training row count floor — pinned 2026-04-15 after migration 016 produced
 # 327,972 stop_variants / 327,942 training rows (end-of-history truncation).
@@ -190,6 +208,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--presets", default="best_quality", help="AutoGluon preset.")
     parser.add_argument("--time-limit", type=int, default=DEFAULT_TIME_LIMIT_SEC, help="Per-fold fit limit in seconds.")
     parser.add_argument(
+        "--ag-max-memory-usage-ratio",
+        type=float,
+        default=DEFAULT_AG_MAX_MEMORY_USAGE_RATIO,
+        help=(
+            "AutoGluon safety multiplier for memory admission checks "
+            "(ag.max_memory_usage_ratio). Values > 1.0 relax skip guards."
+        ),
+    )
+    parser.add_argument(
         "--label-count-threshold",
         type=int,
         default=1,
@@ -241,6 +268,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def validate_ensemble_args(args: argparse.Namespace) -> None:
+    if args.ag_max_memory_usage_ratio <= 0:
+        raise SystemExit("--ag-max-memory-usage-ratio must be > 0.")
     if args.num_bag_folds < 0:
         raise SystemExit("--num-bag-folds must be >= 0.")
     if args.num_stack_levels < 0:
@@ -303,7 +332,7 @@ def add_time_context(df: pd.DataFrame) -> pd.DataFrame:
     session_date_ct = ts_ct.dt.tz_localize(None).dt.normalize()
     df = df.copy()
     df["session_date_ct"] = session_date_ct
-    df["hour_ts"] = df["ts"].dt.floor("H")
+    df["hour_ts"] = df["ts"].dt.floor("h")
     df["hour_ct"] = ts_ct.dt.hour.astype("int16")
     df["minute_ct"] = ts_ct.dt.minute.astype("int16")
     df["dow_ct"] = ts_ct.dt.dayofweek.astype("int16")
@@ -1083,10 +1112,9 @@ def fit_fold(
         # Contract block near the top of this file.
         "hyperparameters": CANONICAL_ZOO,
     }
-    # Allow RF/XT to use up to 200% of estimated memory — prevents silent OOM
-    # attrition on folds 3-5 where 300K-row matrices need ~6.7GB but the default
-    # 1.0 ratio caps at ~4.5GB and silently skips families without error.
-    fit_kwargs["ag_args_fit"] = {"ag.max_memory_usage_ratio": 2.0}
+    # Relax AutoGluon memory admission checks so RF/XT are not silently skipped
+    # by conservative heuristics on larger folds.
+    fit_kwargs["ag_args_fit"] = {"ag.max_memory_usage_ratio": args.ag_max_memory_usage_ratio}
 
     if args.num_bag_folds is not None:
         fit_kwargs["num_bag_folds"] = args.num_bag_folds
@@ -1104,6 +1132,23 @@ def fit_fold(
 
     predictor.fit(**fit_kwargs)
     leaderboard = predictor.leaderboard(test_df[feature_cols + [args.label]], silent=True)
+    leaderboard_models = leaderboard["model"].dropna().astype(str).tolist() if "model" in leaderboard.columns else []
+    present_families = sorted(
+        {
+            family
+            for model_name in leaderboard_models
+            if (family := canonical_family_for_model(model_name)) is not None
+        }
+    )
+    missing_families = sorted(CANONICAL_ZOO_FAMILIES - set(present_families))
+    if missing_families:
+        raise SystemExit(
+            f"{fold.fold_code}: canonical zoo incomplete after fit. "
+            f"missing_families={missing_families} present_families={present_families}. "
+            f"leaderboard_models={leaderboard_models}. "
+            "Refusing to continue with a partial-zoo fold."
+        )
+
     leaderboard_path = fold_dir / "leaderboard.csv"
     leaderboard.to_csv(leaderboard_path, index=False)
 
@@ -1118,12 +1163,32 @@ def fit_fold(
     )
     leaderboard_top_model = None if leaderboard.empty else str(leaderboard.iloc[0]["model"])
 
+    test_accuracy = round(accuracy_score(y_true, y_pred), 6)
+    test_macro_f1 = round(macro_f1_score(y_true, y_pred, labels), 6)
+    if val_best_model and "model" in leaderboard.columns:
+        val_best_rows = leaderboard.loc[leaderboard["model"].astype(str) == str(val_best_model)]
+        if val_best_rows.empty:
+            raise SystemExit(
+                f"{fold.fold_code}: predictor.model_best={val_best_model} is missing from leaderboard rows. "
+                "Refusing to persist inconsistent model lineage."
+            )
+        if args.eval_metric == "f1_macro" and "score_test" in val_best_rows.columns:
+            val_best_score_test = round(float(val_best_rows["score_test"].iloc[0]), 6)
+            if abs(val_best_score_test - test_macro_f1) > 1e-6:
+                raise SystemExit(
+                    f"{fold.fold_code}: model-lineage mismatch for {val_best_model}. "
+                    f"leaderboard_score_test={val_best_score_test} computed_test_macro_f1={test_macro_f1}. "
+                    "Refusing to persist inconsistent metric attribution."
+                )
+
     summary["autogluon"] = {
         "leaderboard_path": str(leaderboard_path),
         "best_model": val_best_model,
         "leaderboard_top_model": leaderboard_top_model,
-        "test_accuracy": round(accuracy_score(y_true, y_pred), 6),
-        "test_macro_f1": round(macro_f1_score(y_true, y_pred, labels), 6),
+        "zoo_families_present": present_families,
+        "test_accuracy": test_accuracy,
+        "test_macro_f1": test_macro_f1,
+        "ag_max_memory_usage_ratio": args.ag_max_memory_usage_ratio,
         "excluded_model_types": excluded_model_types,
         "presets": args.presets,
         "time_limit": args.time_limit,
@@ -1261,6 +1326,15 @@ def main() -> None:
         error_message = str(exc)
         raise
     finally:
+        write_json(run_dir / "run_status.json", {
+            "run_id": run_id,
+            "run_status": run_status,
+            "error_message": error_message,
+            "blocked_folds": blocked_folds,
+            "planned_fold_count": planned_fold_count,
+            "completed_fold_count": len(fold_summaries),
+            "completed_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat(),
+        })
         if dataset_summary and feature_manifest:
             with psycopg2.connect(args.dsn) as conn:
                 upsert_training_run(
