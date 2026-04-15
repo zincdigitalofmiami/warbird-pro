@@ -50,6 +50,89 @@ This rule exists because in this single session alone, the following assumptions
 
 ---
 
+## 🔴 POST-COMMIT AUDIT FINDINGS (2026-04-15)
+
+**Commit `ec0ae32` (this file's original form) was materially wrong on scope.** An audit ~15 minutes after commit, with file:line references, identified 5 concrete errors. All 5 verified against source code and artifact contents in this same session. This section documents the findings and the corrected scope that now governs — the original text below is preserved for audit-trail integrity but is SUPERSEDED by the corrections here.
+
+### Findings (all 5 verified against source)
+
+| # | Finding | Evidence verified | Correction |
+|---|---|---|---|
+| 1 | `Use Footprint Scalp Entries` is NOT a filter | Pine `v7-warbird-strategy.pine:925-926` defines `scalpLongReady/scalpShortReady` as alternate entry paths; `:1011` overrides `entryLevel = executionFibPivot` when scalp; `:1075` sets `tradeIsScalp`; `:1115-1150` routes through distinct scalp target / BE / max-hold logic. Pipeline `build_ag_pipeline.py:824` hardcodes `entry_price = p618/p382`. The scalp-entry contract does not exist in ag_training. | **Phase 3** — cannot be reconstructed post-hoc. All three scalp-specific exit knobs (Scalp Target Points, Scalp BE Trigger, Scalp Max Hold Bars) cascade with it. |
+| 2 | `Gate Shorts In Bull Trend` needs 5 unavailable inputs | Pine `:732-738` gate = `ADX >= floor AND diPlus > diMinus AND close > ema100 AND ema100 > ema100[1] AND vwapCode >= 0 AND adSlopeNorm >= 0`. ag_training persists `adx`, `ema9/21/50/200` only. Missing: DI components, ema100, ema100 slope, VWAP state, AD slope. Reconstructable: 1 of 6. | **Phase 3** — both `Gate Shorts In Bull Trend` and `Short Gate ADX Floor` defer together (same gate). |
+| 3 | Gate D references nonexistent `probs["stop_variant_id"]` | `monte_carlo_run.py:545-551` writes probs.parquet with only `pred_p__*` columns. Read path at `:560-572` aligns by row-order + length equality. Verified columns: `[pred_p__STOPPED, pred_p__TP1_ONLY, pred_p__TP2_HIT, pred_p__TP3_HIT, pred_p__TP4_HIT, pred_p__TP5_HIT]`. No row key. | **Rewrite Gate D** — assert `len(probs) == len(analysis_frame)` and canonical 6-column `pred_p__*` schema. Alignment is positional, not by embedded key. |
+| 4 | Gate H anchors to nonexistent `task_A.indicator_settings_frozen` row manifest | Verified: `task_A.indicator_settings_frozen = {fib_owner_timeframe, zigzag_deviation, zigzag_depth, threshold_floor, min_fib_range}` — no row count. `dataset_summary.json.rows_total = 327942` is the actual source. | **Rewrite Gate H** — anchor to `dataset_summary.json.rows_total` (327,942) AND `sessions_total` (1,712) AND md5 hash of `feature_manifest.json`. Abort if any drift. |
+| 5 | Sweep space mismatches live Pine | Live `Short Gate ADX Floor` default = `10.0` (verified at Pine `:119`); original sweep `{15, 18, 20, 23, 25, 28, 30}` missed the baseline. Live `Fast Runner Target` options = `["TP2", "TP3"]` only (verified at Pine `:145`); original sweep included invalid `TP1`. | ADX floor moot (Finding 2 defers it). **Restrict `Fast Runner Target` sweep to `{TP2, TP3}`**. |
+
+### Open questions — verified and resolved
+
+- **Cooldown Bars + Fast Runner Window** listed as scope at `:65, :213` but omitted from Phase 2 grid at `:259-268`: **inconsistency confirmed.** `Cooldown Bars` is sequence-dependent across trades (next-trade permission depends on prior-trade resolution bar) — cannot be scored with a per-trade independent evaluator. **Drop from sweep, defer to Phase 3.** `Fast Runner Window (bars)` IS tractable via per-trade trajectory — **add to Phase 2 grid explicitly.**
+- **Rejection = wick into zone** reconstructability unproven: wick data (`upper_wick_pct`, `lower_wick_pct`) is in ag_training, but the "zone bound" Pine logic is not specified in this doc. **Defer pending Pine-side zone-logic audit before inclusion.**
+- **Gate A 200-trade sample from fold_01 only**: too weak for regime coverage. **Expand to stratified 40 trades × 5 folds = 200 with full temporal coverage.**
+
+### Corrected scope cascade
+
+**Phase 1 (entry filters) — reduced from 4 knobs to 0–1:**
+- Gate Shorts In Bull Trend → **Phase 3** (Finding 2)
+- Short Gate ADX Floor → **Phase 3** (same gate, Finding 2)
+- Use Footprint Scalp Entries → **Phase 3** (Finding 1)
+- Rejection = wick into zone → **pending Pine-side audit** (open question 2)
+
+**Phase 1 may have zero sweepable knobs until the Rejection audit completes.** If it clears, Phase 1 has 1 knob × 2 levels = 2 combos.
+
+**Phase 2 (exit management) — reduced from 6 knobs to 4 macro-trade knobs:**
+- Scalp Target Points → **Phase 3** (scalp cascade, Finding 1)
+- Scalp Break-Even Trigger → **Phase 3** (same)
+- Scalp Max Hold Bars → **Phase 3** (same)
+- Let Fast Runners Run → **Phase 2 viable** (macro-fib trades are in training)
+- Fast Runner Window (bars) → **Phase 2 viable** (was missing, now added)
+- Fast Runner Target → **Phase 2 viable**, restricted to `{TP2, TP3}` only
+- Break-Even After TP1 → **Phase 2 viable**
+- Cooldown Bars → **Phase 3** (sequence-dependent)
+
+**Revised Phase 2 sweep grid:**
+| Knob | Levels |
+|---|---|
+| Let Fast Runners Run | {off, on} = 2 |
+| Fast Runner Window (bars) | {1, 2, 3, 4, 6, 8} = 6 |
+| Fast Runner Target | {TP2, TP3} = 2 |
+| Break-Even After TP1 | {off, on} = 2 |
+
+**Total Phase 2 combos: 2 × 6 × 2 × 2 = 48 per stop family** (was 4,032 per top-K filter in original — massively smaller, but entirely macro-trade-eligible and correct).
+
+### Corrected gates (replace original Section 3 text)
+
+**Gate D (replaces original):**
+- Assert `len(probs) == len(analysis_frame)` (matches existing `read_fold_cache` invariant at `monte_carlo_run.py:572`)
+- Assert `probs.columns == ['pred_p__STOPPED', 'pred_p__TP1_ONLY', 'pred_p__TP2_HIT', 'pred_p__TP3_HIT', 'pred_p__TP4_HIT', 'pred_p__TP5_HIT']` (6 columns, canonical order)
+- Alignment is positional per existing MC cache contract
+- On mismatch → abort with diff report (exit 1)
+
+**Gate H (replaces original):**
+- `SELECT count(*) FROM ag_training` must equal `dataset_summary.json.rows_total` (327,942 on current fixture)
+- `dataset_summary.json.sessions_total` must equal expected value (1,712 on current fixture)
+- `md5(feature_manifest.json)` must equal the hash recorded in the first script run (auto-recorded on first successful invocation, compared on subsequent runs)
+- On any drift → abort with diff report (exit 1)
+
+### What does NOT change
+
+- Objective function (P(TP1) primary, expected net $ tiebreaker)
+- Anti-Pattern A (no cross-family ranking, no NO_EDGE labeling)
+- Anti-Pattern B (no hardcoded caveat strings — runtime-conditional on source-run metadata)
+- Anti-Pattern C (re-derive source-run integrity in every invocation)
+- Script location `scripts/ag/policy_mc_sweep.py` and output dir layout
+- Gates A, B, C, E, F, G (unchanged)
+- PineSettingsEmitter output format
+- All 6 stop families emit their best-available policy (no NO_EDGE exclusion)
+
+### Scope assessment after correction
+
+Viable post-hoc sweep shrunk from ~10 knobs × ~5,000 combos to **4 knobs × 48 combos per stop family × 6 families = 288 combos total**. Most of the originally-hoped-for surface (scalp contract + bull-trend gate) requires **Phase 3** pipeline regeneration + retraining.
+
+**Phase 1+2 is now principally a validation vehicle** for the scoring function, trajectory cache, Pine-settings emitter, and anti-pattern enforcement — proving the infrastructure works before Phase 3 commits to 300+ hours of compute. The 4-knob exit-management sweep still has real trading value (Fast Runner policy is where the macro-fib exit tuning lives) but is no longer a standalone optimizer.
+
+---
+
 ## Context
 
 The Warbird indicator and strategy (`indicators/v7-warbird-institutional.pine`, `indicators/v7-warbird-strategy.pine`) expose ~30 tunable inputs ("knobs") spread across five TradingView sections: FIBONACCI ENGINE, STRUCTURE LOGIC, STOP LOGIC, EXECUTION CONTRACT, FOOTPRINT EXHAUSTION, plus VISUALS and HTF CONFLUENCE. Manually tuning this space is estimated at roughly a year of work. This design specifies a Monte-Carlo-driven policy sweep that replaces a portion of that manual work on existing training artifacts — specifically the knobs that can be swept POST-HOC without retraining AG.
