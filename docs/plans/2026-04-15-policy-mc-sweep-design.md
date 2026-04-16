@@ -141,12 +141,16 @@ The remaining knobs (those that change what AG sees as features, or which intera
 
 ## Knob taxonomy
 
+> ### ⚠ Rows C and D below are SUPERSEDED — see Post-Commit Audit Findings 1, 2 at top of document
+>
+> Rows A and B are correct (both defer to Phase 3). Rows C and D were wrong: scalp knobs in Cat C and bull-trend / footprint-scalp knobs in Cat D all defer to Phase 3 and are NOT post-hoc sweepable. The corrected scope at top of this document is the sole normative spec. Do NOT implement from the C/D row claims below.
+
 | Category | Examples | Swept in this design? |
 |---|---|---|
 | **A. Upstream feature/gate knobs** | Footprint Ticks Per Row, VA%, Imbalance%, Z Length, Z Threshold, HTF Wall Buffer, Use 1H/4H Filter, ZigZag Dev/Depth/Threshold, Min Fib Range, Confluence Tolerance, Anchor TF Override, Extension ATR Tolerance, Zero-Print Volume Ratio, Extreme Rows, Tier 1 Hold Bars | **No — Phase 3 only.** Changing them changes the feature set or interaction set, requiring pipeline regen + full AG retrain per combo. |
 | **B. Stop-family sub-parameters** | Tier 1 Hold Stop ATR, structural stop ATR mult, emergency stop ATR mult | **No — Phase 3 only.** New values require new `ag_fib_stop_variants` rows and outcome regen. |
-| **C. Post-prediction exit management** | Cooldown Bars, Scalp Target Points, Scalp BE Trigger, Scalp Max Hold, Let Fast Runners Run, Fast Runner Window, Fast Runner Target, Break-Even After TP1 | **Yes — Phase 2** (requires per-trade forward trajectory). |
-| **D. Structural entry filters** | Gate Shorts In Bull Trend, Short Gate ADX Floor, Rejection=wick, Use Footprint Scalp Entries | **Yes — Phase 1** (pure filter on existing labeled outcomes; no trajectory needed). |
+| **C. Post-prediction exit management** *(⚠ SUPERSEDED — see top of doc)* | Cooldown Bars, Scalp Target Points, Scalp BE Trigger, Scalp Max Hold, Let Fast Runners Run, Fast Runner Window, Fast Runner Target, Break-Even After TP1 | ~~Yes — Phase 2~~ **CORRECTED:** only Let Fast Runners Run, Fast Runner Window, Fast Runner Target (TP2/TP3 only), Break-Even After TP1 are Phase 2. Scalp knobs + Cooldown Bars → Phase 3. |
+| **D. Structural entry filters** *(⚠ SUPERSEDED — see top of doc)* | Gate Shorts In Bull Trend, Short Gate ADX Floor, Rejection=wick, Use Footprint Scalp Entries | ~~Yes — Phase 1~~ **CORRECTED:** all defer to Phase 3 except Rejection=wick which is pending Pine audit. Phase 1 may have 0 sweepable knobs. |
 
 ## Objective function (locked)
 
@@ -329,27 +333,41 @@ python3 scripts/ag/policy_mc_sweep.py \
 
 ### Phase 1 sweep space (entry filters)
 
-4 knobs, cartesian product:
-- `Gate Shorts In Bull Trend`: {off, on}
-- `Short Gate ADX Floor`: {15, 18, 20, 23, 25, 28, 30} (7 levels)
-- `Rejection = wick into zone`: {off, on}
-- `Use Footprint Scalp Entries`: {off, on}
+> ### ⚠ SUPERSEDED — see "Corrected scope cascade" at top of document
+>
+> Three of the four knobs below defer to Phase 3 (Findings 1 and 2). The correct Phase 1 scope is documented in the Corrected scope cascade section and is at most 1 knob (Rejection=wick, pending Pine audit). Implementation MUST NOT use this 56-combo grid.
 
-Total combos: 2 × 7 × 2 × 2 = **56**
+**SUPERSEDED content preserved below for audit trail only:**
+
+~~4 knobs, cartesian product:~~
+- ~~`Gate Shorts In Bull Trend`: {off, on}~~ → Phase 3 (Finding 2)
+- ~~`Short Gate ADX Floor`: {15, 18, 20, 23, 25, 28, 30} (7 levels)~~ → Phase 3 (Finding 2)
+- ~~`Rejection = wick into zone`: {off, on}~~ → pending Pine audit
+- ~~`Use Footprint Scalp Entries`: {off, on}~~ → Phase 3 (Finding 1)
+
+~~Total combos: 2 × 7 × 2 × 2 = **56**~~ → see corrected scope (0–2 combos)
 
 ### Phase 2 sweep space (exit management)
 
-6 knobs per top-K filter combo from Phase 1:
-- `Scalp Target (Points)`: {12, 16, 20, 24, 28, 32, 36, 40} (8 levels)
-- `Scalp Break-Even Trigger`: {5, 8, 10, 12, 15, 20} (6 levels)
-- `Scalp Max Hold Bars`: {6, 10, 12, 16, 20, 25, 30} (7 levels)
-- `Fast Runner Target`: {TP1, TP2, TP3} (3 levels)
-- `Break-Even After TP1`: {off, on}
-- `Let Fast Runners Run`: {off, on}
+> ### ⚠ SUPERSEDED — see "Corrected scope cascade" at top of document
+>
+> Scalp knobs (3 of 6) defer to Phase 3 (Finding 1). `Fast Runner Target` includes invalid TP1 (Finding 5). The correct Phase 2 scope has 4 knobs and 48 combos per stop family, documented in the Corrected scope cascade section. Implementation MUST NOT use this 6-knob 4,032-combo grid.
 
-Per top-5-filter-combo exit space: 8 × 6 × 7 × 3 × 2 × 2 = **4,032 combos per filter**
-Total Phase 2 combos per family: 5 × 4,032 = 20,160
-Across 6 families: ~121,000 exit evaluations (all against cached trajectories)
+**SUPERSEDED content preserved below for audit trail only:**
+
+~~6 knobs per top-K filter combo from Phase 1:~~
+- ~~`Scalp Target (Points)`: {12, 16, 20, 24, 28, 32, 36, 40} (8 levels)~~ → Phase 3 (scalp cascade, Finding 1)
+- ~~`Scalp Break-Even Trigger`: {5, 8, 10, 12, 15, 20} (6 levels)~~ → Phase 3 (scalp cascade)
+- ~~`Scalp Max Hold Bars`: {6, 10, 12, 16, 20, 25, 30} (7 levels)~~ → Phase 3 (scalp cascade)
+- ~~`Fast Runner Target`: {TP1, TP2, TP3}~~ → **{TP2, TP3} only** (Finding 5; TP1 invalid in Pine)
+- ~~`Break-Even After TP1`: {off, on}~~ → Phase 2 viable (unchanged)
+- ~~`Let Fast Runners Run`: {off, on}~~ → Phase 2 viable (unchanged)
+
+Missing from the original grid: `Fast Runner Window (bars)`: {1, 2, 3, 4, 6, 8}, which IS Phase 2 viable — added per open-question-1 resolution.
+
+~~Per top-5-filter-combo exit space: 8 × 6 × 7 × 3 × 2 × 2 = **4,032 combos per filter**~~ → see corrected scope (48 combos per stop family)
+~~Total Phase 2 combos per family: 5 × 4,032 = 20,160~~
+~~Across 6 families: ~121,000 exit evaluations~~
 
 ## Error handling & drift detection (Gates A–H)
 
@@ -377,11 +395,17 @@ Combos with `n_trades < min_combo_n` excluded from ranking, logged in `integrity
 
 ### Gate D — predict_proba alignment
 
-On loading `monte_carlo/cache/fold_0N/probs.parquet`:
-- Assert `len(probs) == len(joined_dataset_fold)`
-- Assert `probs["stop_variant_id"]` set equals joined dataset's set
+> ### ⚠ SUPERSEDED — see "Corrected gates" block at top of document (Finding 3)
+>
+> `probs["stop_variant_id"]` does NOT exist — probs.parquet contains only `pred_p__*` columns (verified in `monte_carlo_run.py:545-551` and by reading the parquet). Alignment is positional by row order + length equality. The assertion below would crash. Implementation MUST use corrected Gate D from the top-of-doc findings section.
 
-On mismatch → **abort** with diff report (exit 1).
+**SUPERSEDED content preserved below for audit trail only:**
+
+~~On loading `monte_carlo/cache/fold_0N/probs.parquet`:~~
+- ~~Assert `len(probs) == len(joined_dataset_fold)`~~ → still correct, keep in corrected Gate D
+- ~~Assert `probs["stop_variant_id"]` set equals joined dataset's set~~ → IMPOSSIBLE, column does not exist; replace with canonical `pred_p__*` column-list assertion per corrected Gate D
+
+~~On mismatch → **abort** with diff report (exit 1).~~ → corrected Gate D retains abort-on-mismatch semantic with correct assertions.
 
 ### Gate E — Stop-family coverage
 
@@ -414,11 +438,17 @@ If `mes_1m` has a data gap for a trade's window (no bars between `entry_ts` and 
 
 ### Gate H — Fixture row count assertion
 
-At script start, `SELECT count(*) FROM ag_training`. Assert equals the count in `task_A.json.indicator_settings_frozen` row manifest (if present) or the source-run expected floor.
+> ### ⚠ SUPERSEDED — see "Corrected gates" block at top of document (Finding 4)
+>
+> `task_A.json.indicator_settings_frozen` does NOT contain a row manifest — that object holds only `{fib_owner_timeframe, zigzag_deviation, zigzag_depth, threshold_floor, min_fib_range}` (verified). The correct anchor is `dataset_summary.json.rows_total` + `sessions_total` + feature_manifest md5. Implementation MUST use corrected Gate H from the top-of-doc findings section.
 
-On drift → **abort** (exit 1): "Source fixture changed since Task A was generated. Re-run MC tasks A–I first."
+**SUPERSEDED content preserved below for audit trail only:**
 
-Prevents the "someone reran the pipeline mid-sweep" failure.
+~~At script start, `SELECT count(*) FROM ag_training`. Assert equals the count in `task_A.json.indicator_settings_frozen` row manifest (if present) or the source-run expected floor.~~ → WRONG anchor; see corrected Gate H.
+
+~~On drift → **abort** (exit 1): "Source fixture changed since Task A was generated. Re-run MC tasks A–I first."~~ → abort semantic retained in corrected Gate H with correct anchor.
+
+~~Prevents the "someone reran the pipeline mid-sweep" failure.~~ → correct goal, correct gate now lives above.
 
 ## Outputs
 
@@ -612,8 +642,9 @@ Before the script is claimed ready:
 
 ## Open questions
 
-- None blocking for implementation. All design forks have been decided with user approval.
-- Execution dependency: `scripts/ag/policy_mc_sweep.py` does not exist yet. Creation is the next step.
+- **BLOCKING for Phase 1 inclusion logic:** `Rejection = wick into zone` reconstructability is not verified. Pine-side audit required to determine whether the knob is post-hoc sweepable. If it fails the audit, Phase 1 has 0 sweepable knobs and emits only the identity-combo baseline. If it passes, Phase 1 gains 1 knob × 2 levels = 2 combos. Implementation should proceed with identity-combo baseline as the minimum-viable Phase 1; the Rejection knob can be added later without architectural change.
+- **Non-blocking:** `scripts/ag/policy_mc_sweep.py` does not exist yet. Creation follows the plan at `docs/plans/2026-04-15-policy-mc-sweep-plan.md`.
+- **Non-blocking, orthogonal:** `monte_carlo_run.py:1084-1085` and `run_diagnostic_shap.py:138-139` have a backward-compat hole in `infer_run_integrity()` (detect partial class coverage only when `val_missing_labels`/`test_missing_labels` fields are present; pre-fix fold summaries lack these fields but have `val_class_count`/`test_class_count`). Separate patch; does not block policy_mc_sweep implementation because this sweep's Gate F uses the class-count comparison directly.
 
 ## Design approval trail
 
