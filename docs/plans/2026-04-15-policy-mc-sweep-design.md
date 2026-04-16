@@ -64,7 +64,7 @@ This rule exists because in this single session alone, the following assumptions
 | 4 | Gate H anchors to nonexistent `task_A.indicator_settings_frozen` row manifest | Verified: `task_A.indicator_settings_frozen = {fib_owner_timeframe, zigzag_deviation, zigzag_depth, threshold_floor, min_fib_range}` — no row count. `dataset_summary.json.rows_total = 327942` is the actual source. | **Rewrite Gate H** — anchor to `dataset_summary.json.rows_total` (327,942) AND `sessions_total` (1,712) AND md5 hash of `feature_manifest.json`. Abort if any drift. |
 | 5 | Sweep space mismatches live Pine | Live `Short Gate ADX Floor` default = `10.0` (verified at Pine `:119`); original sweep `{15, 18, 20, 23, 25, 28, 30}` missed the baseline. Live `Fast Runner Target` options = `["TP2", "TP3"]` only (verified at Pine `:145`); original sweep included invalid `TP1`. | ADX floor moot (Finding 2 defers it). **Restrict `Fast Runner Target` sweep to `{TP2, TP3}`**. |
 
-### Open questions — verified and resolved
+### Open questions — verified (post-commit audit)
 
 - **Cooldown Bars + Fast Runner Window** listed as scope at `:65, :213` but omitted from Phase 2 grid at `:259-268`: **inconsistency confirmed.** `Cooldown Bars` is sequence-dependent across trades (next-trade permission depends on prior-trade resolution bar) — cannot be scored with a per-trade independent evaluator. **Drop from sweep, defer to Phase 3.** `Fast Runner Window (bars)` IS tractable via per-trade trajectory — **add to Phase 2 grid explicitly.**
 - **Rejection = wick into zone** reconstructability unproven: wick data (`upper_wick_pct`, `lower_wick_pct`) is in ag_training, but the "zone bound" Pine logic is not specified in this doc. **Defer pending Pine-side zone-logic audit before inclusion.**
@@ -459,7 +459,7 @@ Top-level keys:
 - `sweep_space`: {knob_name: [values]}
 - `total_combos`, `combos_below_min_n`, `combos_ranked`
 - `per_stop_family`: dict keyed by stop_family_id; each entry has `top_k_take` + `top_k_avoid` lists of combos with full per-combo metrics
-- `global_combos`: dict of all 56 × 6 = 336 combos keyed by `<stop_family>|<filter_combo_key>`, full metrics
+- `global_combos`: dict of all combos keyed by `<stop_family>|<filter_combo_key>`, full metrics (48 combos per family at corrected scope — see corrected cascade above)
 
 Per-combo metrics stored:
 - `filter_knobs`: {knob_name: value}
@@ -621,7 +621,7 @@ Before the script is claimed ready:
 
 1. **Phase 1 parity check:** run with default knob values (matching current live settings) and confirm that the full-data combo's metrics match what direct aggregation of `ag_training + monte_carlo/cache` produces. If they differ, the filter logic has a bug.
 
-2. **Phase 2 drift check:** at default knob values (Scalp Target=20, BE Trigger=10, Max Hold=12, Fast Runner Target=TP2, BE After TP1=on, Let Fast Runners Run=on), Phase 2's re-simulated `tp1_reach_rate` per family should match Phase 1's within tolerance. If trajectory re-simulation gives a different answer than label-counting at matched knob settings, trajectory is drifting — Gate A should catch this, but this is a belt-and-suspenders check.
+2. **Phase 2 drift check:** at default knob values (Fast Runner Target=TP2, BE After TP1=on, Let Fast Runners Run=on — scalp knobs deferred to Phase 3), Phase 2's re-simulated `tp1_reach_rate` per family should match Phase 1's within tolerance. If trajectory re-simulation gives a different answer than label-counting at matched knob settings, trajectory is drifting — Gate A should catch this, but this is a belt-and-suspenders check.
 
 3. **Gate H fixture assertion** runs clean.
 
