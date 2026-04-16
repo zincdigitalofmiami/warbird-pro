@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-SCRIPT_VERSION = "1.0.0"
+SCRIPT_VERSION = "1.2.0"
 ARTIFACTS_ROOT = Path("artifacts/ag_runs")
 DEFAULT_DSN = "host=127.0.0.1 port=5432 dbname=warbird"
 
@@ -142,6 +142,10 @@ TP_HIT_LABELS = {"TP1_ONLY", "TP2_HIT", "TP3_HIT", "TP4_HIT", "TP5_HIT"}
 STOPPED_LABEL = "STOPPED"
 FLAT_FEE_USD = 1.25
 MES_POINT_VALUE = 5.0
+TP_PRIORITY = ("TP5_HIT", "TP4_HIT", "TP3_HIT", "TP2_HIT", "TP1_ONLY")
+TP_RANK = {label: idx for idx, label in enumerate(TP_PRIORITY)}
+WAR_FIRST_BAR_OFFSET = 15
+WAR_LAST_BAR_OFFSET = 32 * 15 + 14  # 494
 
 # Raw price level columns that should not be features (admitted as regime proxies)
 RAW_PRICE_FEATURE_COLS = {
@@ -270,7 +274,6 @@ def build_or_load_trajectory(
 
     for idx, row in enumerate(joined.itertuples(index=False)):
         entry_ts_ns = int(joined_ts_ns[idx])
-        entry_px = float(row.entry_price)
         svid = row.stop_variant_id
         end_ts_ns = entry_ts_ns + window_ns
 
@@ -280,6 +283,8 @@ def build_or_load_trajectory(
         slice_h = mes_high[start_idx:end_idx]
         slice_l = mes_low[start_idx:end_idx]
         slice_c = mes_close[start_idx:end_idx]
+
+        entry_px = float(row.entry_price)
 
         for i in range(len(slice_h)):
             rows.append({
@@ -310,6 +315,12 @@ def _reconstruct_outcome_from_trajectory(
        has no CENSORED labels so CENSORED is never a valid return value here.
     4. Same-window tie-break: if SL and TP1 both first hit in the same 15m window,
        STOPPED wins (bars_to_sl == bars_to_tp1 → tp1_before_sl=False).
+    5. Anchor: high_pts/low_pts in traj_slice are relative to the stored entry_price
+       (fib-computed retracement level from ag_training). TP/SL deltas are also
+       relative to entry_price, so both sides share the same reference frame.
+       NOTE: if mes_1m has been back-adjusted by Databento since build_ag_pipeline.py
+       ran, absolute bar prices differ from prices used for warehouse labeling and Gate A
+       agreement drops below 95%. The only fix is to rebuild the pipeline.
     """
     import numpy as np
 
@@ -318,7 +329,6 @@ def _reconstruct_outcome_from_trajectory(
     sl_price_delta = -sl_pts if direction == 1 else sl_pts
 
     # TP priority: highest first (TP5 > TP4 > ... > TP1)
-    tp_priority = ["TP5_HIT", "TP4_HIT", "TP3_HIT", "TP2_HIT", "TP1_ONLY"]
     tp_deltas = {
         "TP5_HIT": float(tr_row.tp5_price) - entry,
         "TP4_HIT": float(tr_row.tp4_price) - entry,
@@ -339,10 +349,6 @@ def _reconstruct_outcome_from_trajectory(
     # The signal bar (bar_offsets 0–14, window 0) is NOT included in the warehouse scan.
     # bar_offset 15–29 = warehouse bar 1; bar_offset 480–494 = warehouse bar 32.
     # Filter to exactly the warehouse-equivalent range: [15, 494].
-    WAR_FIRST_BAR_OFFSET = 15        # first offset included = first forward 15m bar
-    WAR_LAST_BAR_OFFSET  = 32 * 15 - 1  # = 479; (bar_offset 479 → window 479//15=31)
-    # Actually bar 32 → offsets 480–494, so last = 494.
-    WAR_LAST_BAR_OFFSET  = 32 * 15 + 14  # = 494; window 494//15=32
     in_scan = (bar_offsets >= WAR_FIRST_BAR_OFFSET) & (bar_offsets <= WAR_LAST_BAR_OFFSET)
     bar_offsets = bar_offsets[in_scan]
     highs = highs[in_scan]
@@ -367,7 +373,7 @@ def _reconstruct_outcome_from_trajectory(
         # Highest TP hit in this window (TP5 checked first — once TP5 is reached,
         # TP1-TP4 are also implied for in-window path continuity).
         tp_this_window: str | None = None
-        for label in tp_priority:
+        for label in TP_PRIORITY:
             td = tp_deltas[label]
             if direction == 1 and window_high >= td:
                 tp_this_window = label
@@ -393,7 +399,7 @@ def _reconstruct_outcome_from_trajectory(
                 first_tp1_window = int(w)
             # Keep highest TP reached
             if highest_tp is None or (
-                tp_priority.index(tp_this_window) < tp_priority.index(highest_tp)
+                TP_RANK[tp_this_window] < TP_RANK[highest_tp]
             ):
                 highest_tp = tp_this_window
 
@@ -415,6 +421,9 @@ def gate_a_trajectory_drift(
     vs warehouse outcome_label. Requires ≥ 95% agreement to PASS.
 
     tp*_price columns are read from analysis.parquet (no DB roundtrip needed).
+    Trajectory high_pts/low_pts are relative to entry_price (fib level). If mes_1m has
+    been back-adjusted since build_ag_pipeline.py ran, agreement will be below 95% and
+    the gate will FAIL — this is correct behaviour. Rebuild the pipeline to fix.
     """
     import numpy as np
 
@@ -454,6 +463,560 @@ def gate_a_trajectory_drift(
         "agreement_rate": float(agreement),
         "disagreements": disagreements,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 7 — ExitSweeper (Phase 2 re-simulation)
+# ─────────────────────────────────────────────────────────────────────────────
+
+EXIT_COMBO_GRID = {
+    "let_fast_runners_run": [False, True],
+    "fast_runner_window_bars": [1, 2, 3, 4, 6, 8],
+    "fast_runner_target": ["TP2", "TP3"],       # NOT TP1 — Pine rejects it
+    "break_even_after_tp1": [False, True],
+}
+
+
+def enumerate_exit_combos() -> list[dict[str, Any]]:
+    from itertools import product
+    keys = list(EXIT_COMBO_GRID.keys())
+    values = [EXIT_COMBO_GRID[k] for k in keys]
+    return [dict(zip(keys, combo)) for combo in product(*values)]
+
+
+def _simulate_exit_outcome(
+    tr: Any, traj_slice: tuple[Any, Any, Any] | None, sl_pts: float, combo: dict[str, Any],
+) -> tuple[str, float]:
+    """Re-simulate one trade under a given exit-management combo.
+
+    Scans bar_offset >= 15 (warehouse-equivalent window; signal bar excluded).
+    Uses tr.tp*_price columns (available from analysis.parquet via load_fold_dataset).
+
+    Rules:
+    - break_even_after_tp1: after first TP1+ tag, move SL to entry (0 delta).
+      A subsequent SL hit at BE returns TP1_ONLY.
+    - let_fast_runners_run: if TP1 first tagged within fast_runner_window_bars 15m
+      bars, promote exit target to fast_runner_target (TP2 or TP3). Hold until
+      promoted target is reached (or end of window → return highest reached).
+
+    Returns (outcome_label, net_dollars).
+    """
+    direction = int(tr.direction)
+    entry = float(tr.entry_price)
+    sl_price_delta = -sl_pts if direction == 1 else sl_pts
+
+    tp5_delta = float(tr.tp5_price) - entry
+    tp4_delta = float(tr.tp4_price) - entry
+    tp3_delta = float(tr.tp3_price) - entry
+    tp2_delta = float(tr.tp2_price) - entry
+    tp1_delta = float(tr.tp1_price) - entry
+    tp_deltas_by_rank = (tp5_delta, tp4_delta, tp3_delta, tp2_delta, tp1_delta)
+    target_rank = 3 if combo["fast_runner_target"] == "TP2" else 2
+    fast_runner_window_15m = combo["fast_runner_window_bars"]  # in 15m bars
+    let_fast_runners_run = bool(combo["let_fast_runners_run"])
+    break_even_after_tp1 = bool(combo["break_even_after_tp1"])
+
+    # traj_slice is pre-trimmed to warehouse-equivalent bars 1-32 by
+    # _build_fold_sweep_context to avoid per-trade filter/sort overhead.
+    if traj_slice is None:
+        return "STOPPED", -sl_pts * MES_POINT_VALUE - FLAT_FEE_USD
+    bar_offsets, highs, lows = traj_slice
+    if len(bar_offsets) == 0:
+        return "STOPPED", -sl_pts * MES_POINT_VALUE - FLAT_FEE_USD
+
+    tp1_hit_15m: int | None = None   # 15m bar number when TP1 first tagged
+    promoted_target_rank: int | None = None
+    highest_tp_rank: int | None = None
+
+    for i in range(len(bar_offsets)):
+        bar_15m_num = int(bar_offsets[i] // 15)  # 1 for offsets 15-29, 2 for 30-44, …
+        high = highs[i]
+        low = lows[i]
+
+        # Active stop: breakeven once TP1 is tagged and combo says so
+        active_sl = (
+            0.0 if (break_even_after_tp1 and tp1_hit_15m is not None)
+            else sl_price_delta
+        )
+
+        # SL check
+        sl_hit = (
+            (direction == 1 and low <= active_sl)
+            or (direction == -1 and high >= active_sl)
+        )
+        if sl_hit:
+            if tp1_hit_15m is not None and break_even_after_tp1:
+                # Stopped at breakeven after TP1: credit TP1 PnL
+                pnl = tp1_delta * direction * MES_POINT_VALUE - FLAT_FEE_USD
+                return "TP1_ONLY", pnl
+            return "STOPPED", -sl_pts * MES_POINT_VALUE - FLAT_FEE_USD
+
+        # Highest TP hit in this 1m bar by rank (TP5=0 ... TP1=4)
+        bar_top_rank: int | None = None
+        if direction == 1:
+            if high >= tp5_delta:
+                bar_top_rank = 0
+            elif high >= tp4_delta:
+                bar_top_rank = 1
+            elif high >= tp3_delta:
+                bar_top_rank = 2
+            elif high >= tp2_delta:
+                bar_top_rank = 3
+            elif high >= tp1_delta:
+                bar_top_rank = 4
+        else:
+            if low <= tp5_delta:
+                bar_top_rank = 0
+            elif low <= tp4_delta:
+                bar_top_rank = 1
+            elif low <= tp3_delta:
+                bar_top_rank = 2
+            elif low <= tp2_delta:
+                bar_top_rank = 3
+            elif low <= tp1_delta:
+                bar_top_rank = 4
+
+        if bar_top_rank is None:
+            continue
+
+        # First TP1+ hit: record 15m bar number and determine fast-runner status
+        if tp1_hit_15m is None:
+            tp1_hit_15m = bar_15m_num
+            if let_fast_runners_run and tp1_hit_15m <= fast_runner_window_15m:
+                promoted_target_rank = target_rank
+
+        # Update highest TP reached so far
+        if highest_tp_rank is None or bar_top_rank < highest_tp_rank:
+            highest_tp_rank = bar_top_rank
+
+        # Exit decision
+        if promoted_target_rank is not None:
+            # Fast runner: exit when promoted target (or above) is reached
+            if bar_top_rank <= promoted_target_rank:
+                pnl = tp_deltas_by_rank[promoted_target_rank] * direction * MES_POINT_VALUE - FLAT_FEE_USD
+                return TP_PRIORITY[promoted_target_rank], pnl
+            # Promoted target not yet reached — continue scanning
+        elif bar_top_rank == 0:
+            # No promotion active: exit at TP5 (natural cap)
+            pnl = tp5_delta * direction * MES_POINT_VALUE - FLAT_FEE_USD
+            return "TP5_HIT", pnl
+
+    # End of scan window
+    if tp1_hit_15m is not None:
+        exit_rank = highest_tp_rank if highest_tp_rank is not None else 4
+        exit_label = TP_PRIORITY[exit_rank]
+        pnl = tp_deltas_by_rank[exit_rank] * direction * MES_POINT_VALUE - FLAT_FEE_USD
+        return exit_label, pnl
+    return "STOPPED", -sl_pts * MES_POINT_VALUE - FLAT_FEE_USD
+
+
+PreparedTrajectory = tuple[Any, Any, Any]  # (bar_offsets, highs, lows) numpy arrays
+FoldSweepContext = dict[str, tuple[pd.DataFrame, dict[Any, PreparedTrajectory]]]
+
+
+def _build_fold_sweep_context(run_dir: Path, dsn: str = DEFAULT_DSN) -> FoldSweepContext:
+    """Load fold datasets + trajectory groups once for reuse across exit combos."""
+    cache_dir = run_dir / "policy_sweep" / "trajectory_cache"
+    context: FoldSweepContext = {}
+    for fold_code in FOLD_CODES:
+        ds = load_fold_dataset(run_dir, fold_code, dsn=dsn)
+        traj = build_or_load_trajectory(run_dir, fold_code, cache_dir, dsn=dsn)
+        traj = traj[
+            (traj["bar_offset"] >= WAR_FIRST_BAR_OFFSET)
+            & (traj["bar_offset"] <= WAR_LAST_BAR_OFFSET)
+        ]
+        prepared_traj: dict[Any, PreparedTrajectory] = {}
+        for svid, grp in traj.groupby("stop_variant_id", sort=False):
+            prepared_traj[svid] = (
+                grp["bar_offset"].to_numpy(copy=False),
+                grp["high_pts"].to_numpy(copy=False),
+                grp["low_pts"].to_numpy(copy=False),
+            )
+        context[fold_code] = (
+            ds,
+            prepared_traj,
+        )
+    return context
+
+
+def phase2_sweep_combo(
+    run_dir: Path,
+    combo: dict[str, Any],
+    dsn: str = DEFAULT_DSN,
+    fold_context: FoldSweepContext | None = None,
+) -> list[dict[str, Any]]:
+    """Re-simulate all trades under one exit combo. Returns per-stop-family metrics."""
+    context = fold_context or _build_fold_sweep_context(run_dir, dsn=dsn)
+    per_family: dict[str, list[tuple[str, float, float]]] = {}
+
+    for fold_code in FOLD_CODES:
+        ds, traj_by_svid = context[fold_code]
+
+        for tr in ds.itertuples(index=False):
+            svid = tr.stop_variant_id
+            traj_slice = traj_by_svid.get(svid)
+            if traj_slice is None:
+                continue
+            outcome, net = _simulate_exit_outcome(tr, traj_slice, float(tr.sl_dist_pts), combo)
+            per_family.setdefault(tr.stop_family_id, []).append(
+                (outcome, net, float(tr.sl_dist_pts))
+            )
+
+    results = []
+    for sf, records in per_family.items():
+        n = len(records)
+        tp1_reach = sum(1 for r in records if r[0] in TP_HIT_LABELS) / n
+        stop_rate = sum(1 for r in records if r[0] == STOPPED_LABEL) / n
+        results.append({
+            "stop_family_id": sf,
+            "combo": combo,
+            "n_trades": n,
+            "tp1_reach_rate": float(tp1_reach),
+            "stop_rate": float(stop_rate),
+            "expected_net_dollars_per_trade": float(sum(r[1] for r in records) / n),
+            "mean_sl_dist_pts": float(sum(r[2] for r in records) / n),
+        })
+    return results
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 8 — Ranker
+# ─────────────────────────────────────────────────────────────────────────────
+
+def rank_per_stop_family(
+    combo_results: list[dict[str, Any]], top_k: int, min_combo_n: int,
+) -> dict[str, Any]:
+    """Per stop family, sort by (tp1_reach DESC, net$ DESC). Emit top K + bottom K.
+    Combos below min_combo_n are excluded from ranking (counted separately).
+    Cross-family ranking is forbidden — never sort across stop families.
+    """
+    by_family: dict[str, list[dict]] = {}
+    below_n: dict[str, int] = {}
+    for r in combo_results:
+        sf = r["stop_family_id"]
+        if r["n_trades"] < min_combo_n:
+            below_n[sf] = below_n.get(sf, 0) + 1
+            continue
+        by_family.setdefault(sf, []).append(r)
+    out: dict[str, dict[str, Any]] = {}
+    for sf, rows in by_family.items():
+        rows_sorted = sorted(
+            rows,
+            key=lambda r: (-r["tp1_reach_rate"], -r["expected_net_dollars_per_trade"]),
+        )
+        out[sf] = {
+            "top_k": rows_sorted[:top_k],
+            "bottom_k": rows_sorted[-top_k:][::-1],
+            "below_min_n_count": below_n.get(sf, 0),
+            "total_combos_ranked": len(rows_sorted),
+        }
+    return out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 9 — Gate F: source-run integrity propagation (6 checks)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def gate_f_source_integrity(run_dir: Path) -> dict[str, Any]:
+    """Re-derive source-run integrity from raw artifacts. Anti-Pattern C: don't trust
+    prior summaries; read the raw data. Six checks; any failure blocks promotion.
+
+    Checks 1-3 (original): LEAKAGE_SUSPECT, below-baseline fold, class coverage gap.
+    Checks 4-6 (audit additions): raw price features, wrong SHAP model, severe calibration.
+    """
+    shap_dir = Path("artifacts/shap") / run_dir.name
+
+    # Check 1: LEAKAGE_SUSPECT in SHAP drop candidates
+    has_leakage = False
+    drop_csv = shap_dir / "drop_candidates.csv"
+    if drop_csv.exists():
+        drops = pd.read_csv(drop_csv)
+        has_leakage = bool(
+            "reason_code" in drops.columns
+            and (drops["reason_code"] == "LEAKAGE_SUSPECT").any()
+        )
+
+    # Checks 2 + 3: per-fold fold_summary.json
+    has_below_baseline = False
+    has_coverage_gap = False
+    for fp in sorted(run_dir.glob("fold_*/fold_summary.json")):
+        summary = json.loads(fp.read_text())
+        ag = summary.get("autogluon", {})
+        base_test = summary.get("majority_baseline", {}).get("test", {})
+        ag_f1 = ag.get("test_macro_f1")
+        base_f1 = base_test.get("macro_f1")
+        if ag_f1 is not None and base_f1 is not None and float(ag_f1) < float(base_f1):
+            has_below_baseline = True
+        val_cc = summary.get("val_class_count")
+        test_cc = summary.get("test_class_count")
+        if val_cc is not None and test_cc is not None and int(val_cc) < int(test_cc):
+            has_coverage_gap = True
+
+    # Check 4: raw price level columns present in actual training features (SHAP feature summary)
+    has_raw_price_features = False
+    shap_manifest_path = shap_dir / "diagnostic_shap_manifest.json"
+    if shap_manifest_path.exists():
+        shap_manifest = json.loads(shap_manifest_path.read_text())
+        for fa in shap_manifest.get("fold_artifacts", []):
+            fs_path = Path(fa.get("feature_summary_path", ""))
+            if fs_path.exists():
+                fs = pd.read_csv(fs_path)
+                if "feature_name" in fs.columns:
+                    if any(f in RAW_PRICE_FEATURE_COLS for f in fs["feature_name"].values):
+                        has_raw_price_features = True
+                        break
+
+    # Check 5: SHAP model != per-fold best model (wrong model used for SHAP)
+    has_wrong_shap_model = False
+    if shap_manifest_path.exists():
+        shap_manifest = json.loads(shap_manifest_path.read_text())
+        global_model = shap_manifest.get("model_name")
+        for fp in sorted(run_dir.glob("fold_*/fold_summary.json")):
+            best = json.loads(fp.read_text()).get("autogluon", {}).get("best_model")
+            if best and global_model and global_model != best:
+                has_wrong_shap_model = True
+                break
+
+    # Check 6: calibration OOR rows (over/underconfident predictions)
+    has_severe_calibration = False
+    calib_csv = shap_dir / "calibration_check.csv"
+    if calib_csv.exists():
+        calib = pd.read_csv(calib_csv)
+        if "verdict" in calib.columns:
+            has_severe_calibration = bool((calib["verdict"] != "OK").any())
+
+    promotion_allowed = not (
+        has_leakage or has_below_baseline or has_coverage_gap
+        or has_raw_price_features or has_wrong_shap_model or has_severe_calibration
+    )
+    reasons: list[str] = []
+    if has_leakage:
+        reasons.append("LEAKAGE_SUSPECT in SHAP drop candidates")
+    if has_below_baseline:
+        reasons.append("at least one fold below majority-class baseline")
+    if has_coverage_gap:
+        reasons.append("at least one fold has val_class_count < test_class_count")
+    if has_raw_price_features:
+        reasons.append("raw price level columns present in training features")
+    if has_wrong_shap_model:
+        reasons.append("SHAP model does not match per-fold best model")
+    if has_severe_calibration:
+        reasons.append("calibration OOR rows present")
+
+    return {
+        "source_run_has_leakage_suspects": has_leakage,
+        "source_run_has_below_baseline_fold": has_below_baseline,
+        "source_run_has_class_coverage_gap": has_coverage_gap,
+        "source_run_has_raw_price_features": has_raw_price_features,
+        "source_run_has_wrong_shap_model": has_wrong_shap_model,
+        "source_run_has_severe_calibration": has_severe_calibration,
+        "promotion_allowed": promotion_allowed,
+        "promotion_blocked_reason": "; ".join(reasons) if reasons else None,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 10 — Output writers + Anti-Pattern B
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Anti-Pattern B: these strings must NEVER appear unconditionally in policy_summary.md.
+# They are only valid when num_bag_folds > 0.
+FORBIDDEN_CAVEAT_STRINGS = [
+    "IID bag leakage", "GBM-only", "only LightGBM in leaderboard", "bag-fold leakage",
+]
+
+
+def _compute_file_checksums(out_dir: Path, filenames: list[str]) -> dict[str, str]:
+    result = {}
+    for fname in filenames:
+        p = out_dir / fname
+        if p.exists():
+            result[fname] = hashlib.md5(p.read_bytes()).hexdigest()
+    return result
+
+
+def _generate_policy_summary(
+    run_dir: Path,
+    gate_h: dict[str, Any],
+    gate_a: dict[str, Any],
+    gate_f: dict[str, Any],
+    baseline: list[dict[str, Any]],
+    ranked: dict[str, Any],
+    num_bag_folds: int,
+) -> str:
+    """Generate policy_summary.md. Bag-leakage caveats are emitted ONLY when
+    num_bag_folds > 0 (Anti-Pattern B guard). Never hardcode caveat strings.
+    """
+    lines: list[str] = []
+    lines.append(f"# Policy Sweep Summary — {run_dir.name}\n")
+
+    lines.append("## Gate Results\n")
+    lines.append(f"- **Gate H** (fixture integrity): {gate_h['status']}")
+    lines.append(
+        f"- **Gate A** (trajectory drift): {gate_a['status']} "
+        f"(agreement={gate_a['agreement_rate']:.3f}, n={gate_a['sample_size']})"
+    )
+    lines.append(
+        f"- **Gate F** (source integrity): promotion_allowed={gate_f['promotion_allowed']}"
+    )
+    if gate_f.get("promotion_blocked_reason"):
+        lines.append(f"  - Blocked: {gate_f['promotion_blocked_reason']}")
+
+    lines.append("\n## Phase 1 Baseline (warehouse labels, no policy)\n")
+    lines.append(
+        "| stop_family_id | n_trades | tp1_reach_rate | stop_rate "
+        "| mean_sl_dist_pts | net_$/trade |"
+    )
+    lines.append("|---|---|---|---|---|---|")
+    for r in sorted(baseline, key=lambda x: x["stop_family_id"]):
+        lines.append(
+            f"| {r['stop_family_id']} | {r['n_trades']} "
+            f"| {r['tp1_reach_rate']:.3f} | {r['stop_rate']:.3f} "
+            f"| {r['mean_sl_dist_pts']:.2f} | {r['expected_net_dollars_per_trade']:.2f} |"
+        )
+
+    lines.append("\n## Phase 2 Top Policy Per Stop Family\n")
+    for sf in sorted(ranked.keys()):
+        result = ranked[sf]
+        top = result["top_k"][0] if result["top_k"] else None
+        lines.append(f"### {sf}")
+        if top:
+            lines.append(f"- combo: `{top['combo']}`")
+            lines.append(f"- tp1_reach_rate: {top['tp1_reach_rate']:.3f}")
+            lines.append(f"- net_$/trade: {top['expected_net_dollars_per_trade']:.2f}")
+            lines.append(f"- n_trades: {top['n_trades']}")
+        else:
+            lines.append("- no combos above min_combo_n threshold")
+        if result["below_min_n_count"]:
+            lines.append(f"- {result['below_min_n_count']} combos below min_combo_n (excluded)")
+
+    # Anti-Pattern B: conditional caveats — only emit when bag folds were used
+    if num_bag_folds > 0:
+        lines.append("\n## Data Quality Caveats\n")
+        lines.append(
+            f"> WARNING: This run used num_bag_folds={num_bag_folds}. "
+            "AutoGluon internal bag splits are IID random shuffle which violates "
+            "the one-session embargo on MES 15m data. "
+            "IID bag leakage may inflate validation scores. "
+            "GBM-only dominance (only LightGBM in leaderboard) is a known symptom. "
+            "bag-fold leakage fingerprint: val f1_macro ~0.99, test collapses. "
+            "Re-run with --num-bag-folds 0 before trusting sweep results."
+        )
+
+    lines.append(f"\n---\n*Generated by policy_mc_sweep.py v{SCRIPT_VERSION}*\n")
+    return "\n".join(lines) + "\n"
+
+
+def run_end_to_end(
+    run_dir: Path,
+    out_dir: Path | None = None,
+    min_combo_n: int = 50,
+    top_k: int = 10,
+    phase: str = "both",
+    dsn: str = DEFAULT_DSN,
+) -> dict[str, Any]:
+    """Full pipeline: Gate H → Gate A → Phase 1 baseline → Phase 2 exit sweep →
+    Rank → Gate F → write all outputs. Returns integrity dict.
+
+    Outputs written to out_dir (default: run_dir/policy_sweep):
+      filter_sweep_results.json  — Phase 1 baseline per stop family
+      exit_sweep_results.json    — all Phase 2 combo results (flat list)
+      recommended_settings.json  — per-family top-1 winning policy
+      policy_summary.md          — narrative (Anti-Pattern B: no hardcoded bag caveats)
+      integrity.json             — gate statuses + promotion flag + caveat audit
+      MANIFEST.json              — md5 checksums of above files
+
+    Gate A FAIL does NOT abort — results are written and the FAIL is recorded in
+    integrity.json. Main() returns non-zero on Gate A FAIL.
+    """
+    if out_dir is None:
+        out_dir = run_dir / "policy_sweep"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Gate H (aborts via sys.exit on fixture drift — by design)
+    gate_h = gate_h_fixture_assertion(run_dir, dsn)
+
+    # Gate A (returns FAIL dict; does not abort)
+    gate_a = gate_a_trajectory_drift(run_dir, dsn=dsn)
+
+    # Phase 1 baseline
+    baseline = phase1_baseline_per_stop_family(run_dir, dsn=dsn)
+
+    # Phase 2 exit sweep — all combos (skip if phase=="filter")
+    all_combo_results: list[dict[str, Any]] = []
+    if phase in ("exit", "both"):
+        fold_context = _build_fold_sweep_context(run_dir, dsn=dsn)
+        for combo in enumerate_exit_combos():
+            all_combo_results.extend(
+                phase2_sweep_combo(run_dir, combo=combo, dsn=dsn, fold_context=fold_context)
+            )
+
+    # Rank per stop family
+    ranked = rank_per_stop_family(all_combo_results, top_k=top_k, min_combo_n=min_combo_n)
+
+    # Gate F
+    gate_f = gate_f_source_integrity(run_dir)
+
+    # Read run_config.json for Anti-Pattern B (num_bag_folds)
+    num_bag_folds = 0
+    rc_path = run_dir / "run_config.json"
+    if rc_path.exists():
+        rc = json.loads(rc_path.read_text())
+        num_bag_folds = int(rc.get("args", {}).get("num_bag_folds", 0))
+
+    # ── Write outputs ──────────────────────────────────────────────────────────
+
+    (out_dir / "filter_sweep_results.json").write_text(
+        json.dumps(baseline, indent=2)
+    )
+
+    (out_dir / "exit_sweep_results.json").write_text(
+        json.dumps(all_combo_results, indent=2)
+    )
+
+    winning: dict[str, Any] = {}
+    for sf, result in ranked.items():
+        if result["top_k"]:
+            winning[sf] = result["top_k"][0]
+    (out_dir / "recommended_settings.json").write_text(
+        json.dumps({"winning_policy_per_stop_family": winning}, indent=2)
+    )
+
+    summary_text = _generate_policy_summary(
+        run_dir, gate_h, gate_a, gate_f, baseline, ranked, num_bag_folds
+    )
+    (out_dir / "policy_summary.md").write_text(summary_text)
+
+    # Narrative caveat audit (Anti-Pattern B)
+    found_forbidden = [s for s in FORBIDDEN_CAVEAT_STRINGS if s in summary_text]
+
+    integrity: dict[str, Any] = {
+        "gates": {
+            "H": gate_h,
+            "A": gate_a,
+            "F": gate_f,
+        },
+        "cross_family_ranking_valid": False,   # cross-family ranking is always forbidden
+        "promotion_allowed": gate_f["promotion_allowed"],
+        "narrative_caveat_audit": {
+            "num_bag_folds": num_bag_folds,
+            "hardcoded_strings_found": found_forbidden,
+        },
+    }
+    (out_dir / "integrity.json").write_text(json.dumps(integrity, indent=2))
+
+    output_files = [
+        "filter_sweep_results.json", "exit_sweep_results.json",
+        "recommended_settings.json", "policy_summary.md", "integrity.json",
+    ]
+    manifest = {
+        "run_id": run_dir.name,
+        "script_version": SCRIPT_VERSION,
+        "files": _compute_file_checksums(out_dir, output_files),
+    }
+    (out_dir / "MANIFEST.json").write_text(json.dumps(manifest, indent=2))
+
+    return integrity
 
 
 def gate_h_fixture_assertion(run_dir: Path, dsn: str) -> dict[str, Any]:
@@ -512,14 +1075,41 @@ def main() -> int:
         )
         sys.exit(1)
 
-    gate_h = gate_h_fixture_assertion(run_dir, args.dsn)
-    print(f"Gate H: PASS (rows={gate_h['observed_rows']}, sessions={gate_h['expected_sessions']})")
-
     if args.dry_run:
+        gate_h = gate_h_fixture_assertion(run_dir, args.dsn)
+        print(f"Gate H: PASS (rows={gate_h['observed_rows']}, sessions={gate_h['expected_sessions']})")
         print("Dry run — exiting before any output.")
         return 0
 
-    sys.stderr.write("Not yet implemented beyond Gate H. See plan task list.\n")
+    out_dir = run_dir / "policy_sweep"
+    integrity = run_end_to_end(
+        run_dir=run_dir,
+        out_dir=out_dir,
+        min_combo_n=args.min_combo_n,
+        top_k=args.top_k,
+        phase=args.phase,
+        dsn=args.dsn,
+    )
+
+    gate_h_status = integrity["gates"]["H"]["status"]
+    gate_a = integrity["gates"]["A"]
+    print(f"Gate H: {gate_h_status}")
+    print(
+        f"Gate A: {gate_a['status']} "
+        f"(agreement={gate_a['agreement_rate']:.3f}, n={gate_a['sample_size']})"
+    )
+    print(f"promotion_allowed: {integrity['promotion_allowed']}")
+    print(f"Outputs: {out_dir}")
+
+    if gate_a["status"] == "FAIL":
+        sys.stderr.write(
+            f"Gate A FAIL — trajectory drift detected "
+            f"(agreement={gate_a['agreement_rate']:.3f} < 0.95). "
+            f"mes_1m may have been back-adjusted by Databento since build_ag_pipeline.py ran. "
+            f"Rebuild the pipeline and fixture to fix.\n"
+        )
+        return 1
+
     return 0
 
 

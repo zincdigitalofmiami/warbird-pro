@@ -157,8 +157,30 @@ LEAKAGE_COLS = {
     "bars_to_sl",
     "session_date_ct",
     "hour_ts",
-    # stop_family_id, stop_level_price, stop_distance_ticks, sl_dist_pts,
-    # sl_dist_atr, rr_to_tp1 are admitted features — do NOT add them here.
+    # Raw MES price levels — regime proxies, not signal features. The model
+    # would learn "what year it is" (price drift 2020→2026) instead of entry
+    # signal quality. SHAP confirmed: anchor_low rank-3 overall with cohort_cv
+    # near zero (uniform across every slice = time-identity proxy).
+    "entry_price",
+    "anchor_low",
+    "anchor_high",
+    "fib_level_price",
+    "stop_level_price",
+    "tp1_price",
+    "tp2_price",
+    "tp3_price",
+    "tp4_price",
+    "tp5_price",
+    # Outcome geometry — computed from TP/SL geometry that is derived from the
+    # labeling contract, not observable at entry time in a clean sense.
+    # SHAP flagged as LEAKAGE_SUSPECT (STABLE_CORE, cohort_cv=0.093).
+    "tp1_dist_pts",
+    # Admitted features (do NOT add here):
+    #   stop_family_id       — categorical stop policy, known at entry
+    #   stop_distance_ticks  — stop width in ticks, known at entry
+    #   sl_dist_pts          — stop distance in points, known at entry (risk sizing)
+    #   sl_dist_atr          — stop distance normalised by ATR, known at entry
+    #   rr_to_tp1            — reward/risk ratio to TP1, known at entry
 }
 TUNING_ONLY_PREFIXES = (
     "ml_exh_",
@@ -1241,6 +1263,18 @@ def fit_fold(
         "num_stack_levels": args.num_stack_levels,
         "dynamic_stacking": args.dynamic_stacking,
     }
+    # Below-baseline gate — AG must beat the majority-class classifier on test
+    # macro_f1 for every fold. A fold that scores at or below baseline learned
+    # nothing above a trivial predictor; the most common cause is feature leakage
+    # (raw prices or outcome geometry admitted as predictors).
+    baseline_test_f1 = baseline["test"]["macro_f1"]
+    if test_macro_f1 <= baseline_test_f1:
+        summary["below_baseline"] = True
+        summary["below_baseline_detail"] = {
+            "ag_test_macro_f1": test_macro_f1,
+            "baseline_test_macro_f1": baseline_test_f1,
+            "gap": round(baseline_test_f1 - test_macro_f1, 6),
+        }
     write_json(fold_dir / "fold_summary.json", summary)
     return summary
 
@@ -1257,6 +1291,7 @@ def main() -> None:
     feature_manifest: dict[str, Any] = {}
     fold_summaries: list[dict[str, Any]] = []
     blocked_folds: list[str] = []
+    below_baseline_folds: list[str] = []
     planned_fold_count = 0
     run_status = "RUNNING"
     error_message: str | None = None
@@ -1365,7 +1400,13 @@ def main() -> None:
         }
         write_json(run_dir / "training_summary.json", training_summary)
         blocked_folds = [fold["fold_code"] for fold in fold_summaries if fold.get("blocked_training")]
-        run_status = "BLOCKED" if blocked_folds else "SUCCEEDED"
+        below_baseline_folds = [fold["fold_code"] for fold in fold_summaries if fold.get("below_baseline")]
+        if blocked_folds:
+            run_status = "BLOCKED"
+        elif below_baseline_folds:
+            run_status = "BELOW_BASELINE"
+        else:
+            run_status = "SUCCEEDED"
     except Exception as exc:
         run_status = "FAILED"
         error_message = str(exc)
@@ -1376,6 +1417,7 @@ def main() -> None:
             "run_status": run_status,
             "error_message": error_message,
             "blocked_folds": blocked_folds,
+            "below_baseline_folds": below_baseline_folds,
             "planned_fold_count": planned_fold_count,
             "completed_fold_count": len(fold_summaries),
             "completed_at_utc": datetime.now(UTC).replace(microsecond=0).isoformat(),
@@ -1431,6 +1473,8 @@ def main() -> None:
                 "test_missing_labels": fold.get("test_missing_labels"),
                 "majority_test_accuracy": fold["majority_baseline"]["test"]["accuracy"],
                 "majority_test_macro_f1": fold["majority_baseline"]["test"]["macro_f1"],
+                "ag_test_macro_f1": fold.get("autogluon", {}).get("test_macro_f1"),
+                "below_baseline": fold.get("below_baseline", False),
                 "class_warning": fold.get("class_warning"),
             }
             for fold in fold_summaries
@@ -1438,6 +1482,8 @@ def main() -> None:
     }
     if blocked_folds:
         console_summary["blocked_folds"] = blocked_folds
+    if below_baseline_folds:
+        console_summary["below_baseline_folds"] = below_baseline_folds
     print(json.dumps(console_summary, indent=2, default=str, sort_keys=True))
     if blocked_folds:
         raise SystemExit(
@@ -1445,6 +1491,14 @@ def main() -> None:
             "(fewer than 2 classes or missing required target classes). "
             "Use --allow-single-class-eval and/or --allow-partial-class-coverage only if you explicitly "
             "accept misleading multiclass comparisons."
+        )
+    if below_baseline_folds:
+        raise SystemExit(
+            f"One or more folds scored at or below the majority-class baseline on test macro_f1: "
+            f"{below_baseline_folds}. "
+            "This run learned nothing above a trivial classifier. "
+            "Most likely cause: raw price levels or outcome geometry are still admitted as features. "
+            "Verify LEAKAGE_COLS covers all raw prices and tp1_dist_pts, then re-run."
         )
 
 

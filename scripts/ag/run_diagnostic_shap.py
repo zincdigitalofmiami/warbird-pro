@@ -44,7 +44,10 @@ warnings.filterwarnings(
 
 DEFAULT_OUTPUT_ROOT = "artifacts/shap"
 DEFAULT_SPLIT_CODE = "test"
-DEFAULT_MODEL_NAME = "LightGBM_BAG_L1"
+# "auto" means: read fold_summary.json → best_model per fold, fall back to the
+# highest-ranked tree model on the leaderboard if best_model is a neural net or
+# WeightedEnsemble (which are not compatible with shap.TreeExplainer).
+DEFAULT_MODEL_NAME = "auto"
 # `archetype` added forward-looking; old runs backfill via DB join in postprocess.
 META_COLS = [
     "id",
@@ -73,6 +76,11 @@ COHORT_DIMS = {
 
 CANONICAL_ZOO_FAMILIES = {"GBM", "CAT", "XGB", "RF", "XT", "NN_TORCH", "FASTAI"}
 
+# Families that expose a native tree structure compatible with shap.TreeExplainer.
+# Neural nets and WeightedEnsemble are excluded — they require KernelExplainer
+# which is prohibitively slow on this dataset size.
+_SHAP_TREE_FAMILIES = {"GBM", "CAT", "XGB", "RF", "XT"}
+
 
 def canonical_family_for_model(model_name: str | None) -> str | None:
     if not model_name:
@@ -93,6 +101,60 @@ def canonical_family_for_model(model_name: str | None) -> str | None:
     if name.startswith("NeuralNetFastAI") or "FastAI" in name:
         return "FASTAI"
     return None
+
+
+def _is_tree_model(model_name: str | None) -> bool:
+    return canonical_family_for_model(model_name or "") in _SHAP_TREE_FAMILIES
+
+
+def _resolve_fold_model(run_dir: Path, fold_code: str, requested: str) -> str:
+    """Return the model name to SHAP-explain for this fold.
+
+    If requested != 'auto', return it unchanged (caller's explicit choice).
+    Otherwise:
+      1. Read fold_summary.json → autogluon.best_model.
+      2. If best_model is tree-compatible, use it.
+      3. Else scan the fold leaderboard (sorted by score_test desc) for the
+         highest-ranked tree model and fall back to that.
+      4. Raise SystemExit if no tree model is found at all.
+    """
+    if requested != "auto":
+        return requested
+
+    fold_summary_path = run_dir / fold_code / "fold_summary.json"
+    if not fold_summary_path.exists():
+        raise SystemExit(f"{fold_code}: fold_summary.json not found — cannot auto-select model.")
+
+    fold_summary = read_json(fold_summary_path)
+    autogluon = fold_summary.get("autogluon") or {}
+    best_model = autogluon.get("best_model")
+
+    if _is_tree_model(best_model):
+        print(f"[{fold_code}] auto-selected model: {best_model!r} (AG best, tree-compatible)")
+        return str(best_model)
+
+    # Best model is non-tree (e.g. NeuralNetFastAI, NeuralNetTorch, WeightedEnsemble).
+    # Scan the leaderboard for the highest-scoring tree model.
+    leaderboard_path = autogluon.get("leaderboard_path")
+    if leaderboard_path and Path(leaderboard_path).exists():
+        lb = pd.read_csv(leaderboard_path)
+        if "model" in lb.columns and "score_test" in lb.columns:
+            lb_sorted = lb.dropna(subset=["score_test"]).sort_values("score_test", ascending=False)
+            for _, row in lb_sorted.iterrows():
+                mn = str(row["model"])
+                if _is_tree_model(mn):
+                    print(
+                        f"[{fold_code}] best_model={best_model!r} is not tree-compatible; "
+                        f"falling back to {mn!r} "
+                        f"(best tree on leaderboard, score_test={row['score_test']:.4f})"
+                    )
+                    return mn
+
+    raise SystemExit(
+        f"{fold_code}: best_model={best_model!r} is not SHAP-compatible via TreeExplainer "
+        "and no tree-based fallback was found in the fold leaderboard. "
+        "Pass --model-name explicitly with a tree model name (e.g. LightGBM)."
+    )
 
 
 def infer_run_integrity(run_dir: Path, fold_codes: list[str]) -> dict[str, Any]:
@@ -1523,6 +1585,7 @@ def run_compute_phase(args: argparse.Namespace) -> tuple[Path, dict[str, Any], d
             split_sessions=split_sessions,
             max_rows=args.max_rows_per_fold,
         )
+        fold_model_name = _resolve_fold_model(run_dir, fold_code, args.model_name)
         fold_artifacts.append(
             explain_fold(
                 run_dir=run_dir,
@@ -1530,7 +1593,7 @@ def run_compute_phase(args: argparse.Namespace) -> tuple[Path, dict[str, Any], d
                 fold_code=fold_code,
                 split_code=args.split_code,
                 fold_df=fold_df,
-                model_name=args.model_name,
+                model_name=fold_model_name,
             )
         )
 
