@@ -44,6 +44,42 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+CANONICAL_PROBS_COLUMNS = [
+    "pred_p__STOPPED", "pred_p__TP1_ONLY", "pred_p__TP2_HIT",
+    "pred_p__TP3_HIT", "pred_p__TP4_HIT", "pred_p__TP5_HIT",
+]
+
+
+def gate_d_probs_alignment(cache_dir: Path, fold_code: str, expected_row_count: int) -> dict[str, Any]:
+    """Gate D — assert probs.parquet has canonical 6 pred_p__* columns and matches
+    the expected row count. Alignment is positional (not by embedded key) per
+    monte_carlo_run.py:545-572 contract.
+
+    Per design amendment Finding 3: probs.parquet does NOT contain stop_variant_id.
+    Do not attempt to join-by-key. Row order is the contract.
+    """
+    import pandas as pd
+    probs_path = cache_dir / fold_code / "probs.parquet"
+    if not probs_path.exists():
+        sys.stderr.write(f"Gate D — FATAL: {probs_path} not found.\n")
+        sys.exit(1)
+    probs = pd.read_parquet(probs_path)
+    cols = list(probs.columns)
+    if cols != CANONICAL_PROBS_COLUMNS:
+        sys.stderr.write(
+            f"Gate D — FATAL: probs.parquet schema drift. "
+            f"expected={CANONICAL_PROBS_COLUMNS} actual={cols}\n"
+        )
+        sys.exit(1)
+    if len(probs) != expected_row_count:
+        sys.stderr.write(
+            f"Gate D — FATAL: probs.parquet length drift. "
+            f"expected={expected_row_count} actual={len(probs)}\n"
+        )
+        sys.exit(1)
+    return {"status": "PASS", "columns": cols, "row_count": len(probs)}
+
+
 def gate_h_fixture_assertion(run_dir: Path, dsn: str) -> dict[str, Any]:
     """Gate H — verify source fixture row count + session count + feature manifest hash.
 

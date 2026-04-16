@@ -38,3 +38,24 @@ def test_missing_fixture_aborts_gate_h():
     )
     assert r.returncode != 0, "nonexistent fixture should abort"
     assert "Gate H" in r.stderr or "fixture" in r.stderr.lower()
+
+
+# ─────────────────────────────────────────────
+# Task 2 — Gate D probs.parquet alignment
+# ─────────────────────────────────────────────
+
+def test_gate_d_passes_on_locked_fixture():
+    """Gate D passes on agtrain_20260415T165437712806Z fold_01."""
+    import pandas as pd
+    from scripts.ag import policy_mc_sweep as m
+
+    cache_dir = FIXTURE_RUN_DIR / "monte_carlo/cache"
+    fold_code = "fold_01"
+    analysis = pd.read_parquet(cache_dir / fold_code / "analysis.parquet")
+    result = m.gate_d_probs_alignment(cache_dir, fold_code, expected_row_count=len(analysis))
+    assert result["status"] == "PASS"
+    assert result["columns"] == [
+        "pred_p__STOPPED", "pred_p__TP1_ONLY", "pred_p__TP2_HIT",
+        "pred_p__TP3_HIT", "pred_p__TP4_HIT", "pred_p__TP5_HIT"
+    ]
+    assert result["row_count"] == len(analysis)
