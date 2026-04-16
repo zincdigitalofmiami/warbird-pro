@@ -103,3 +103,24 @@ def test_phase1_baseline_on_fixture():
             f"(got {r['tp1_reach_rate']} + {r['stop_rate']})"
         )
         assert r["mean_sl_dist_pts"] > 0
+
+
+# ─────────────────────────────────────────────
+# Task 5 — TrajectoryBuilder
+# ─────────────────────────────────────────────
+
+def test_trajectory_builder_on_fold_01():
+    from scripts.ag import policy_mc_sweep as m
+
+    cache_dir = FIXTURE_RUN_DIR / "policy_sweep" / "trajectory_cache"
+    df = m.build_or_load_trajectory(
+        FIXTURE_RUN_DIR, "fold_01", cache_dir,
+        max_trajectory_bars=120, force_rebuild=True,
+    )
+    for c in ["stop_variant_id", "bar_offset", "high_pts", "low_pts", "close_pts"]:
+        assert c in df.columns, f"missing column: {c}"
+    trade_counts = df.groupby("stop_variant_id").size()
+    assert trade_counts.min() >= 1
+    # entry bar (offset 0) must have high >= low
+    entry_bars = df[df["bar_offset"] == 0]
+    assert (entry_bars["high_pts"] >= entry_bars["low_pts"]).all()

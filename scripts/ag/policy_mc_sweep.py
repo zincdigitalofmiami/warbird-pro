@@ -200,6 +200,101 @@ def phase1_baseline_per_stop_family(run_dir: Path, dsn: str = DEFAULT_DSN) -> li
     return results
 
 
+def _trajectory_cache_key(run_dir: Path, fold_code: str, max_bars: int, dsn: str) -> str:
+    """md5 key that invalidates when mes_1m grows or script version changes."""
+    import psycopg2
+    with psycopg2.connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT max(ts)::text FROM mes_1m")
+            mes_1m_max = cur.fetchone()[0] or ""
+            cur.execute("SELECT count(*) FROM ag_training")
+            row_count = int(cur.fetchone()[0])
+    key_src = f"{fold_code}|{max_bars}|{mes_1m_max}|{row_count}|v{SCRIPT_VERSION}"
+    return hashlib.md5(key_src.encode()).hexdigest()
+
+
+def build_or_load_trajectory(
+    run_dir: Path, fold_code: str, cache_dir: Path,
+    max_trajectory_bars: int = 120, force_rebuild: bool = False,
+    dsn: str = DEFAULT_DSN,
+) -> pd.DataFrame:
+    """Per-trade forward mes_1m trajectory keyed by stop_variant_id.
+
+    Output columns: stop_variant_id, bar_offset (0-based, 1m bars),
+    high_pts, low_pts, close_pts — where *_pts = bar.value - entry_price.
+
+    Caches to parquet. Re-runs are instant unless mes_1m grows or script
+    version changes.
+    """
+    import numpy as np
+    import psycopg2
+
+    cache_key = _trajectory_cache_key(run_dir, fold_code, max_trajectory_bars, dsn)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{fold_code}__{cache_key}.parquet"
+    if cache_path.exists() and not force_rebuild:
+        return pd.read_parquet(cache_path)
+
+    joined = load_fold_dataset(run_dir, fold_code, dsn=dsn)
+
+    window_minutes = max_trajectory_bars * 15
+    min_entry = joined["ts"].min()
+    max_entry = joined["ts"].max()
+    buf_end = max_entry + pd.Timedelta(minutes=window_minutes + 60)
+
+    with psycopg2.connect(dsn) as conn:
+        mes_1m = pd.read_sql(
+            "SELECT ts, high, low, close FROM mes_1m WHERE ts >= %s AND ts <= %s ORDER BY ts",
+            conn, params=(min_entry, buf_end),
+        )
+    if mes_1m.empty:
+        raise RuntimeError(
+            f"fold {fold_code}: no mes_1m bars in window [{min_entry}, {buf_end}]"
+        )
+
+    # Pre-sort and convert ts to UTC datetime64 then int64 ns for searchsorted
+    mes_1m = mes_1m.sort_values("ts").reset_index(drop=True)
+    mes_1m["ts"] = pd.to_datetime(mes_1m["ts"], utc=True)
+    mes_ts_ns = mes_1m["ts"].values.view("int64")
+    mes_high = mes_1m["high"].values
+    mes_low = mes_1m["low"].values
+    mes_close = mes_1m["close"].values
+
+    rows: list[dict[str, Any]] = []
+    window_ns = int(pd.Timedelta(minutes=window_minutes).value)
+
+    # Convert joined ts to int64 ns for fast comparison (same epoch as mes_ts_ns)
+    joined = joined.copy()
+    joined["ts"] = pd.to_datetime(joined["ts"], utc=True)
+    joined_ts_ns = joined["ts"].values.view("int64")
+
+    for idx, row in enumerate(joined.itertuples(index=False)):
+        entry_ts_ns = int(joined_ts_ns[idx])
+        entry_px = float(row.entry_price)
+        svid = row.stop_variant_id
+        end_ts_ns = entry_ts_ns + window_ns
+
+        start_idx = int(np.searchsorted(mes_ts_ns, entry_ts_ns, side="left"))
+        end_idx = int(np.searchsorted(mes_ts_ns, end_ts_ns, side="right"))
+
+        slice_h = mes_high[start_idx:end_idx]
+        slice_l = mes_low[start_idx:end_idx]
+        slice_c = mes_close[start_idx:end_idx]
+
+        for i in range(len(slice_h)):
+            rows.append({
+                "stop_variant_id": svid,
+                "bar_offset": i,
+                "high_pts": float(slice_h[i] - entry_px),
+                "low_pts": float(slice_l[i] - entry_px),
+                "close_pts": float(slice_c[i] - entry_px),
+            })
+
+    df = pd.DataFrame(rows)
+    df.to_parquet(cache_path, index=False, compression="gzip")
+    return df
+
+
 def gate_h_fixture_assertion(run_dir: Path, dsn: str) -> dict[str, Any]:
     """Gate H — verify source fixture row count + session count + feature manifest hash.
 
