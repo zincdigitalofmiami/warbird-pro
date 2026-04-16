@@ -1124,13 +1124,15 @@ git commit -m "Add Gate F — re-derive source-run integrity from raw artifacts"
 
 ---
 
-## Task 10: Output writers — all 5 artifacts + Anti-Pattern B audit
+## Task 10: Output writers — all 5 artifacts + Anti-Pattern B audit + bundle atomicity
 
 **Files:**
 - Modify: `scripts/ag/policy_mc_sweep.py`
 - Modify: `tests/ag/test_policy_mc_sweep_cli.py`
 
 **Purpose:** Write `filter_sweep_results.json`, `exit_sweep_results.json`, `recommended_settings.json`, `policy_summary.md`, `integrity.json`. Every narrative string in `policy_summary.md` must be runtime-conditional. Integrity.json records the caveat audit.
+
+**Bundle atomicity (added 2026-04-15 per third-round audit Finding 2):** The same stale-artifact bug exists in `monte_carlo_run.py:1149-1400` — split invocations leave mixed-age `task_*.json` files because `out_dir.mkdir(exist_ok=True)` doesn't clear existing files. This task's implementation MUST avoid that pattern: write all 5 output files plus a `MANIFEST.json` atomically via a staging subdir + rename, preserving `trajectory_cache/` (expensive to rebuild). Every bundle has a manifest listing files + md5 + timestamps so consumers can detect drift.
 
 **Step 1: Write the failing test**
 
