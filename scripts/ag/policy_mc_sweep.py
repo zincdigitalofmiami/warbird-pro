@@ -295,6 +295,167 @@ def build_or_load_trajectory(
     return df
 
 
+def _reconstruct_outcome_from_trajectory(
+    tr_row: Any, traj_slice: pd.DataFrame, sl_pts: float
+) -> str:
+    """Reconstruct trade outcome matching build_ag_pipeline.py warehouse labeling.
+
+    Key design decisions derived from warehouse audit:
+    1. 15m resolution: aggregate 1m bars into 15m windows (bar_offset // 15) to
+       match the 15m-bar granularity used by build_ag_pipeline.py for TP/SL detection.
+    2. Highest TP: continue scanning past TP1 to find TP2/TP3/TP4/TP5 — the
+       warehouse tracks highest_tp_hit across the full forward window, not just first hit.
+    3. STOPPED default: if TP1 not hit before SL (or window ends without TP1 hit),
+       return STOPPED — matches warehouse tp1_before_sl=False → STOPPED. ag_training
+       has no CENSORED labels so CENSORED is never a valid return value here.
+    4. Same-window tie-break: if SL and TP1 both first hit in the same 15m window,
+       STOPPED wins (bars_to_sl == bars_to_tp1 → tp1_before_sl=False).
+    """
+    import numpy as np
+
+    direction = int(tr_row.direction)
+    entry = float(tr_row.entry_price)
+    sl_price_delta = -sl_pts if direction == 1 else sl_pts
+
+    # TP priority: highest first (TP5 > TP4 > ... > TP1)
+    tp_priority = ["TP5_HIT", "TP4_HIT", "TP3_HIT", "TP2_HIT", "TP1_ONLY"]
+    tp_deltas = {
+        "TP5_HIT": float(tr_row.tp5_price) - entry,
+        "TP4_HIT": float(tr_row.tp4_price) - entry,
+        "TP3_HIT": float(tr_row.tp3_price) - entry,
+        "TP2_HIT": float(tr_row.tp2_price) - entry,
+        "TP1_ONLY": float(tr_row.tp1_price) - entry,
+    }
+
+    if traj_slice.empty:
+        return "STOPPED"  # no data → conservative label matches warehouse default
+
+    bars = traj_slice.sort_values("bar_offset")
+    bar_offsets = bars["bar_offset"].values
+    highs = bars["high_pts"].values
+    lows = bars["low_pts"].values
+
+    # Warehouse scans bars 1–32 forward from entry (confirmed: min=1, max=32 in ag_training).
+    # The signal bar (bar_offsets 0–14, window 0) is NOT included in the warehouse scan.
+    # bar_offset 15–29 = warehouse bar 1; bar_offset 480–494 = warehouse bar 32.
+    # Filter to exactly the warehouse-equivalent range: [15, 494].
+    WAR_FIRST_BAR_OFFSET = 15        # first offset included = first forward 15m bar
+    WAR_LAST_BAR_OFFSET  = 32 * 15 - 1  # = 479; (bar_offset 479 → window 479//15=31)
+    # Actually bar 32 → offsets 480–494, so last = 494.
+    WAR_LAST_BAR_OFFSET  = 32 * 15 + 14  # = 494; window 494//15=32
+    in_scan = (bar_offsets >= WAR_FIRST_BAR_OFFSET) & (bar_offsets <= WAR_LAST_BAR_OFFSET)
+    bar_offsets = bar_offsets[in_scan]
+    highs = highs[in_scan]
+    lows  = lows[in_scan]
+
+    if len(bar_offsets) == 0:
+        return "STOPPED"  # no forward bars available → conservative
+
+    # Group 1m bars → 15m windows (bar_offset//15 gives warehouse bar number 1–32)
+    window_ids = bar_offsets // 15
+    unique_windows = np.unique(window_ids)
+
+    first_tp1_window: int | None = None  # first window any TP level was reached
+    sl_window: int | None = None
+    highest_tp: str | None = None        # highest TP label reached before SL
+
+    for w in unique_windows:
+        mask = window_ids == w
+        window_high = highs[mask].max()
+        window_low = lows[mask].min()
+
+        # Highest TP hit in this window (TP5 checked first — once TP5 is reached,
+        # TP1-TP4 are also implied for in-window path continuity).
+        tp_this_window: str | None = None
+        for label in tp_priority:
+            td = tp_deltas[label]
+            if direction == 1 and window_high >= td:
+                tp_this_window = label
+                break
+            if direction == -1 and window_low <= td:
+                tp_this_window = label
+                break
+
+        sl_this_window = (
+            (direction == 1 and window_low <= sl_price_delta)
+            or (direction == -1 and window_high >= sl_price_delta)
+        )
+
+        if sl_this_window:
+            # SL hit this window — record and stop scanning.
+            # Any TP hit in THIS same window loses the tie (bars_to_sl == bars_to_tp1
+            # → tp1_before_sl=False → STOPPED per warehouse contract).
+            sl_window = int(w)
+            break
+
+        if tp_this_window is not None:
+            if first_tp1_window is None:
+                first_tp1_window = int(w)
+            # Keep highest TP reached
+            if highest_tp is None or (
+                tp_priority.index(tp_this_window) < tp_priority.index(highest_tp)
+            ):
+                highest_tp = tp_this_window
+
+    # Outcome decision (mirrors warehouse outcome_label_for logic)
+    if first_tp1_window is None:
+        # TP1 never reached before SL (or within window) → STOPPED
+        return "STOPPED"
+    if sl_window is None or first_tp1_window < sl_window:
+        # TP1 hit on a strictly earlier window than SL (or SL never hit)
+        return highest_tp or "TP1_ONLY"
+    # sl_window <= first_tp1_window → SL hit first or same window → STOPPED
+    return "STOPPED"
+
+
+def gate_a_trajectory_drift(
+    run_dir: Path, samples_per_fold: int = 40, dsn: str = DEFAULT_DSN
+) -> dict[str, Any]:
+    """Gate A — stratified 40×5 cross-validation of trajectory-derived outcomes
+    vs warehouse outcome_label. Requires ≥ 95% agreement to PASS.
+
+    tp*_price columns are read from analysis.parquet (no DB roundtrip needed).
+    """
+    import numpy as np
+
+    cache_dir = run_dir / "policy_sweep" / "trajectory_cache"
+    rng = np.random.default_rng(42)
+    disagreements: list[dict[str, Any]] = []
+    checked = 0
+
+    for fold_code in FOLD_CODES:
+        ds = load_fold_dataset(run_dir, fold_code, dsn=dsn)
+        if len(ds) < samples_per_fold:
+            continue
+        traj = build_or_load_trajectory(run_dir, fold_code, cache_dir, dsn=dsn)
+        traj_by_svid = {svid: grp for svid, grp in traj.groupby("stop_variant_id")}
+
+        sample_idx = rng.choice(len(ds), samples_per_fold, replace=False)
+        for i in sample_idx:
+            tr = ds.iloc[i]
+            svid = tr["stop_variant_id"]
+            traj_slice = traj_by_svid.get(svid, pd.DataFrame())
+            derived = _reconstruct_outcome_from_trajectory(
+                tr, traj_slice, float(tr["sl_dist_pts"])
+            )
+            checked += 1
+            if derived != tr["outcome_label"]:
+                disagreements.append({
+                    "stop_variant_id": str(svid),
+                    "warehouse": tr["outcome_label"],
+                    "trajectory_derived": derived,
+                })
+
+    agreement = 1.0 - len(disagreements) / max(checked, 1)
+    status = "PASS" if agreement >= 0.95 else "FAIL"
+    return {
+        "status": status,
+        "sample_size": checked,
+        "agreement_rate": float(agreement),
+        "disagreements": disagreements,
+    }
+
+
 def gate_h_fixture_assertion(run_dir: Path, dsn: str) -> dict[str, Any]:
     """Gate H — verify source fixture row count + session count + feature manifest hash.
 
