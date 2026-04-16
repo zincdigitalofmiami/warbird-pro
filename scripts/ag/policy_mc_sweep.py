@@ -138,6 +138,68 @@ def load_fold_dataset(run_dir: Path, fold_code: str, dsn: str = DEFAULT_DSN) -> 
     return joined
 
 
+TP_HIT_LABELS = {"TP1_ONLY", "TP2_HIT", "TP3_HIT", "TP4_HIT", "TP5_HIT"}
+STOPPED_LABEL = "STOPPED"
+FLAT_FEE_USD = 1.25
+MES_POINT_VALUE = 5.0
+
+# Raw price level columns that should not be features (admitted as regime proxies)
+RAW_PRICE_FEATURE_COLS = {
+    "anchor_low", "anchor_high", "entry_price",
+    "tp1_price", "tp2_price", "tp3_price", "tp4_price", "tp5_price",
+    "stop_level_price", "fib_level_price",
+}
+
+
+def compute_net_dollars(row: pd.Series) -> float:
+    """Per-trade net $ at macro-fib outcome with flat fee.
+    tp*_price columns are expected to be present in the row (from analysis.parquet).
+    """
+    label = row["outcome_label"]
+    direction = int(row["direction"])
+    entry = float(row["entry_price"])
+    if label == STOPPED_LABEL:
+        return -float(row["sl_dist_pts"]) * MES_POINT_VALUE - FLAT_FEE_USD
+    tp_price_col = {
+        "TP1_ONLY": "tp1_price", "TP2_HIT": "tp2_price", "TP3_HIT": "tp3_price",
+        "TP4_HIT": "tp4_price", "TP5_HIT": "tp5_price",
+    }.get(label)
+    if tp_price_col is None or tp_price_col not in row.index:
+        return 0.0
+    return (float(row[tp_price_col]) - entry) * direction * MES_POINT_VALUE - FLAT_FEE_USD
+
+
+def phase1_baseline_per_stop_family(run_dir: Path, dsn: str = DEFAULT_DSN) -> list[dict[str, Any]]:
+    """No filter applied. Per stop family, compute tp1_reach_rate, stop_rate,
+    net $, mean sl_dist_pts across all 5 folds combined.
+
+    tp*_price columns are available in analysis.parquet for the locked fixture,
+    so no separate DB query is required.
+    """
+    frames = []
+    for fold_code in FOLD_CODES:
+        frames.append(load_fold_dataset(run_dir, fold_code, dsn=dsn))
+    combined = pd.concat(frames, ignore_index=True)
+
+    results = []
+    for sf, grp in combined.groupby("stop_family_id"):
+        n = len(grp)
+        tp1_reach = grp["outcome_label"].isin(TP_HIT_LABELS).sum() / n
+        stop_rate = (grp["outcome_label"] == STOPPED_LABEL).sum() / n
+        mean_sl = float(grp["sl_dist_pts"].mean())
+        net_dollars = grp.apply(compute_net_dollars, axis=1)
+        results.append({
+            "stop_family_id": sf,
+            "n_trades": n,
+            "tp1_reach_rate": float(tp1_reach),
+            "stop_rate": float(stop_rate),
+            "mean_sl_dist_pts": mean_sl,
+            "expected_net_dollars_per_trade": float(net_dollars.mean()),
+            "mc_p5_ev_per_trade": None,  # Filled in when MC sampling is wired
+        })
+    return results
+
+
 def gate_h_fixture_assertion(run_dir: Path, dsn: str) -> dict[str, Any]:
     """Gate H — verify source fixture row count + session count + feature manifest hash.
 

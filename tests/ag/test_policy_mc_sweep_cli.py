@@ -82,3 +82,24 @@ def test_load_fold_dataset_shape():
     # row-count sanity — matches probs length
     probs = pd.read_parquet(FIXTURE_RUN_DIR / "monte_carlo/cache/fold_01/probs.parquet")
     assert len(df) == len(probs)
+
+
+# ─────────────────────────────────────────────
+# Task 4 — Phase 1 Baseline Scorer
+# ─────────────────────────────────────────────
+
+def test_phase1_baseline_on_fixture():
+    """Phase 1 baseline across all 5 folds produces 6 per-family metric rows."""
+    from scripts.ag import policy_mc_sweep as m
+
+    results = m.phase1_baseline_per_stop_family(FIXTURE_RUN_DIR)
+    assert len(results) == 6, f"expected 6 stop families, got {len(results)}"
+    for r in results:
+        assert r["n_trades"] > 0
+        assert 0.0 <= r["tp1_reach_rate"] <= 1.0
+        assert 0.0 <= r["stop_rate"] <= 1.0
+        assert abs(r["tp1_reach_rate"] + r["stop_rate"] - 1.0) < 1e-9, (
+            f"{r['stop_family_id']}: tp1_reach + stop_rate must sum to 1 "
+            f"(got {r['tp1_reach_rate']} + {r['stop_rate']})"
+        )
+        assert r["mean_sl_dist_pts"] > 0
