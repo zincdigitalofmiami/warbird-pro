@@ -80,6 +80,64 @@ def gate_d_probs_alignment(cache_dir: Path, fold_code: str, expected_row_count: 
     return {"status": "PASS", "columns": cols, "row_count": len(probs)}
 
 
+import pandas as pd
+
+FOLD_CODES = ["fold_01", "fold_02", "fold_03", "fold_04", "fold_05"]
+
+# Columns that must come from ag_training if not present in analysis.parquet.
+# For the agtrain_20260415T165437712806Z fixture these are all already in
+# analysis.parquet (confirmed at build time), but we guard defensively.
+REQUIRED_FROM_TRAINING = [
+    "stop_variant_id", "stop_family_id", "direction",
+    "outcome_label", "sl_dist_pts", "adx", "entry_price", "ts",
+]
+
+
+def load_fold_dataset(run_dir: Path, fold_code: str, dsn: str = DEFAULT_DSN) -> pd.DataFrame:
+    """Load the fold's analysis_frame + probs, joined by row order (MC cache contract).
+
+    analysis.parquet already contains outcome_label, sl_dist_pts, adx, entry_price,
+    stop_family_id, direction, stop_variant_id for the locked fixture.  If any
+    required column is missing (future fixture), fall back to a DB join on
+    stop_variant_id. Returns a single DataFrame.
+    """
+    cache_dir = run_dir / "monte_carlo" / "cache" / fold_code
+    analysis = pd.read_parquet(cache_dir / "analysis.parquet")
+    probs = pd.read_parquet(cache_dir / "probs.parquet")
+    if len(analysis) != len(probs):
+        raise RuntimeError(
+            f"fold {fold_code}: analysis len {len(analysis)} != probs len {len(probs)} "
+            "— MC cache is corrupt; re-run monte_carlo_run.py first"
+        )
+    # Positional concat — row order is the contract (no key join for probs)
+    joined = pd.concat([analysis.reset_index(drop=True), probs.reset_index(drop=True)], axis=1)
+
+    # Check if all required columns are already present
+    missing_cols = [c for c in REQUIRED_FROM_TRAINING if c not in joined.columns]
+    if missing_cols:
+        # Fall back: enrich from ag_training DB
+        import psycopg2
+        if "stop_variant_id" not in joined.columns:
+            raise RuntimeError(
+                "analysis_frame lacks stop_variant_id — expected in META_COLS. "
+                "Check monte_carlo_run.py prepare_fold() output contract."
+            )
+        stop_variant_ids = joined["stop_variant_id"].tolist()
+        cols_to_fetch = ["stop_variant_id"] + [c for c in missing_cols if c != "stop_variant_id"]
+        with psycopg2.connect(dsn) as conn:
+            enrichment = pd.read_sql(
+                f"SELECT {', '.join(cols_to_fetch)} FROM ag_training WHERE stop_variant_id = ANY(%s)",
+                conn, params=(stop_variant_ids,),
+            )
+        joined = joined.merge(enrichment, on="stop_variant_id", how="left", validate="one_to_one")
+        if joined["outcome_label"].isna().any():
+            bad = joined[joined["outcome_label"].isna()]["stop_variant_id"].tolist()[:10]
+            raise RuntimeError(
+                f"fold {fold_code}: {len(bad)} stop_variant_ids missing from ag_training: {bad}..."
+            )
+    return joined
+
+
 def gate_h_fixture_assertion(run_dir: Path, dsn: str) -> dict[str, Any]:
     """Gate H — verify source fixture row count + session count + feature manifest hash.
 

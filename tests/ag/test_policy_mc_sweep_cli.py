@@ -59,3 +59,26 @@ def test_gate_d_passes_on_locked_fixture():
         "pred_p__TP3_HIT", "pred_p__TP4_HIT", "pred_p__TP5_HIT"
     ]
     assert result["row_count"] == len(analysis)
+
+
+# ─────────────────────────────────────────────
+# Task 3 — OutcomeJoiner
+# ─────────────────────────────────────────────
+
+def test_load_fold_dataset_shape():
+    """Loader returns a joined DataFrame with known columns on fold_01."""
+    import pandas as pd
+    from scripts.ag import policy_mc_sweep as m
+
+    df = m.load_fold_dataset(FIXTURE_RUN_DIR, "fold_01")
+    expected_cols = {
+        "stop_variant_id", "stop_family_id", "direction", "outcome_label",
+        "sl_dist_pts", "adx", "entry_price",
+        "pred_p__STOPPED", "pred_p__TP1_ONLY", "pred_p__TP2_HIT",
+        "pred_p__TP3_HIT", "pred_p__TP4_HIT", "pred_p__TP5_HIT",
+    }
+    missing = expected_cols - set(df.columns)
+    assert not missing, f"missing columns: {missing}"
+    # row-count sanity — matches probs length
+    probs = pd.read_parquet(FIXTURE_RUN_DIR / "monte_carlo/cache/fold_01/probs.parquet")
+    assert len(df) == len(probs)
