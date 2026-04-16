@@ -726,8 +726,29 @@ def task_E_entry_rules(
 
     ranked_desc = sorted(chosen_scored.items(), key=lambda kv: kv[1]["entry_score"], reverse=True)
     ranked_asc = sorted(chosen_scored.items(), key=lambda kv: kv[1]["entry_score"])
-    overlap_keys = sorted(set(k for k, _ in ranked_desc[:top_k]).intersection(k for k, _ in ranked_asc[:top_k]))
-    degraded = bool(len(chosen_scored) < min_required_rules or overlap_keys)
+
+    # Enforce disjoint take/avoid sets. Split the eligible surface into a
+    # balanced take/avoid partition first, then cap each side by top_k.
+    eligible_count = len(chosen_scored)
+    take_count = min(top_k, max(0, eligible_count // 2))
+    avoid_count = min(top_k, max(0, eligible_count - take_count))
+
+    top_take_pairs = ranked_desc[:take_count]
+    take_keys = {k for k, _ in top_take_pairs}
+    top_avoid_pairs = [kv for kv in ranked_asc if kv[0] not in take_keys][:avoid_count]
+
+    overlap_keys = sorted(
+        set(k for k, _ in top_take_pairs).intersection(k for k, _ in top_avoid_pairs)
+    )
+    has_min_disjoint_rules = (
+        len(top_take_pairs) >= min_required_rules
+        and len(top_avoid_pairs) >= min_required_rules
+    )
+    degraded = bool(
+        len(chosen_scored) < min_required_rules
+        or overlap_keys
+        or not has_min_disjoint_rules
+    )
     return {
         "requested_dims": static_dims + quartile_dims,
         "dims": chosen_dims,
@@ -735,11 +756,12 @@ def task_E_entry_rules(
         "min_required_rules": min_required_rules,
         "eligible_combo_count": len(chosen_scored),
         "degraded": degraded,
+        "has_min_disjoint_rules": has_min_disjoint_rules,
         "overlap_keys": overlap_keys,
         "fallback_steps": fallback_steps,
         "shap_top_features": shap_top_features,
-        "top_k_take": {k: v for k, v in ranked_desc[:top_k]},
-        "top_k_avoid": {k: v for k, v in ranked_asc[:top_k]},
+        "top_k_take": {k: v for k, v in top_take_pairs},
+        "top_k_avoid": {k: v for k, v in top_avoid_pairs},
     }
 
 
