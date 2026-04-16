@@ -244,6 +244,10 @@ python3 scripts/ag/policy_mc_sweep.py \
 - `1` — gate failure (drift, alignment, integrity mismatch) — outputs partial or absent
 - `2` — invalid CLI args or missing source artifacts
 
+> ### ⚠ SUPERSEDED — combo counts and exit-rule lists below reflect pre-audit scope
+>
+> The FilterSweeper "56 filter combos" and ExitSweeper scalp/cooldown exit rules shown in this diagram are from the original commit. Correct Phase 1 scope is 0–1 knobs (see Corrected scope cascade). Correct Phase 2 scope is 4 macro knobs / 48 combos per family (see Corrected scope cascade). The dataflow architecture (component names, input/output relationships) remains valid.
+
 ## Components & data flow
 
 ```
@@ -372,6 +376,10 @@ Missing from the original grid: `Fast Runner Window (bars)`: {1, 2, 3, 4, 6, 8},
 ## Error handling & drift detection (Gates A–H)
 
 Every gate either aborts with a clear error or marks output as degraded — no silent failures.
+
+> ### ⚠ SUPERSEDED — sample strategy below replaced by stratified multi-fold sampling
+>
+> "Random 200 from fold_01" is replaced by "stratified 40 × 5 folds = 200" per post-commit audit correction. Implementation MUST use the corrected sampling strategy.
 
 ### Gate A — Trajectory drift detection
 
