@@ -14,6 +14,19 @@ All runs on CME_MINI:MES1! 15m, **Strategy Tester Deep Backtesting range Jan 1 2
 - **DOM selector:** use `.bottom-widgetbar-content.backtesting` (or `.backtestingReport-qyUx4U7K`) for strategy tester scrapes. The plan template's `[data-name="backtesting-content-wrapper"]` does not match.
 - **MCP `data_get_strategy_results` is broken** (returns `metric_count: 0, source: "internal_api"`). All R0 -> R5 captures must use the DOM scrape path.
 
+### Phase 0.2 — Invisible-table diagnosis (2026-04-17)
+
+**Finding: not invisible. False alarm.** The dashboard table IS rendering correctly on-chart. Phase 1.2 fix is not needed.
+
+- **Dashboard toggle = `showDashInput`** at `indicators/v8-warbird-prescreen.pine:154` (`input.bool(true, "Show Dashboard", group = GRP_DASH)`). Default `true`.
+- **TV input-id mapping** (counting `input.*()` calls from top of file, skipping `__chart_bgcolor`/`__profile`): `in_65=showDashInput`, `in_66=showTqiBreakdownInput`, `in_67=showBreakdownInput`, `in_68=showPerfInput`, `in_69=dashPosStr`.
+- **Live values on `jrwTt0`** via `mcp__tradingview__data_get_indicator`: `in_65=true`, `in_66=true`, `in_67=true`, `in_68=true`, `in_69="Bottom Right"`. All dashboard toggles are ON.
+- **Render gate at line 931** (`if showDashInput and barstate.islast`) is satisfied.
+- **`mcp__tradingview__data_get_pine_tables` (no filter)** returns 2 tables from the SATS-PS study — a 34-row dashboard (Preset | Crypto 24/7, TQI | .28, Signal | —, Regime | Mixed / High Vol, Performance | 85/100, Win Rate | 80.0%, Avg R | +1.40R, Streak W/L | W:5/11 L:0/3, ... through ST Break | 16.0) plus the 1-row watermark table. The dashboard `table.new()` at line 932 and all `table.cell()` calls at lines 934-1046 are firing.
+- **Visual confirmation**: screenshot `/Users/zincdigital/tradingview-mcp/screenshots/v8-prescreen-dashboard-check.png` shows the table rendered in the bottom-right corner of the chart with all sections (main stats, TQI Components, Performance, last-signal breakdown) visible.
+- **Why earlier filter returned 0**: the initial `data_get_pine_tables` call used `study_filter="SATS"`, which matches against the study's display name (`"Self-Aware Trend System [WillyAlgoTrader] — Prescreen"`) — no "SATS" substring. `study_filter="Self-Aware"` or no filter at all works.
+- **Action for Phase 1.2**: none required. The "invisible table" premise was incorrect. If Kirk still perceives a rendering issue, it is a position/theme/overlap problem with other on-chart studies (e.g. `Nexus Fusion Engine ML` dashboard may overlap), not a code-path failure. Phase 1.2 can either be skipped or repurposed to relocate the dashboard (`dashPosStr`) if a conflict is observed live.
+
 ## Runs
 
 | Run | Gates | Trades | PF | WR | Net P&L | Max DD | Commit |
