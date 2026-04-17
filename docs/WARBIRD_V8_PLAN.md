@@ -101,6 +101,11 @@ Phase 1 uses SATS verbatim skeleton only. The other three are not code donors un
 10. No FRED fields in Phase 1 training. `st_signals` is indicator-only.
 11. `+FRED` is a challenger model only. It runs after Pine v8 is Kirk-approved on live chart and parity audit passes.
 12. Slice 9 Pine budget check (`trading-indicators:pine:budget` skill) is a required DoD gate.
+13. **CODE FREEZE (2026-04-17): `indicators/v8-warbird-live.pine` and `indicators/v8-warbird-prescreen.pine`
+    are locked for code changes. The ONLY permitted modification is adjusting `input.*` default values
+    for settings optimization (e.g., ATR length, multiplier presets). No structural edits, no new code
+    blocks, no geometry changes, no signal logic changes, no new outputs. These files define the
+    training signal surface; code changes invalidate the model contract and corrupt the config grid.**
 
 ---
 
@@ -251,6 +256,12 @@ CREATE TABLE st_prescreen_ledger (
 ### Slice 2b — TV Prescreen (Coarse Config Filter)
 
 **Owner:** CDP tuner sweep, Codex ledger insert, Claude review, Kirk approve
+
+**Pine prescreen (v8-warbird-prescreen.pine): COMPLETE — 2026-04-17**
+- SATS v1.9.0 verbatim base + 5 surgical changes only (strategy() declaration,
+  entry/exit calls in confirmedBuy/confirmedSell, barstate.islast removed from
+  dashboard+watermark gates). TV smart_compile clean, pine-facade clean, delta=12
+  lines vs live. Commit cd5cbd5. **File is now CODE-FROZEN (Hard Constraint 13).**
 
 **What:** Run all 480 flip configs through TV Deep Backtesting on in-sample window only (`2020-01-01` through `2023-12-31`). Persist results to `st_prescreen_ledger`.
 
@@ -449,3 +460,6 @@ docs/contracts/st_execution_semantics.md                   <- Semantics authorit
 - [x] Slice 9 styling options surface covers table areas, font/text styling, and backgrounds
 - [x] Slice 4 and Slice 8 include SL leaderboard requirements
 - [x] Migration `018_st_training_schema.sql` exists and applies cleanly — DB verified 2026-04-17; ledger entry confirmed
+- [x] `v8-warbird-prescreen.pine` strategy wrapper: TV smart_compile clean, pine-facade clean, delta=12 lines, commit cd5cbd5 (2026-04-17)
+- [x] `v8-warbird-live.pine` CW10003/CW10004 hoist + presetInput="Custom": TV compile clean, commit cd5cbd5 (2026-04-17)
+- [x] Hard Constraint 13 (v8 code freeze) added — settings optimization only, no code changes

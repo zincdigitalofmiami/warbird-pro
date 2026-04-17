@@ -168,10 +168,18 @@ These are explicitly excluded from the canonical AG training zoo:
 - NEVER edit `indicators/v7-warbird-institutional.pine` without explicit approval
   in the current session. State intent, wait for approval, then edit.
 - NEVER push Pine changes to TradingView Pine Editor without explicit approval.
+- **v8 LOCK — `indicators/v8-warbird-live.pine` and `indicators/v8-warbird-prescreen.pine`
+  are CODE-FROZEN. The ONLY permitted changes are `input.*` default value adjustments
+  for settings optimization. No structural edits, no new blocks, no geometry changes,
+  no signal logic changes, no new output calls. Any code edit requires explicit
+  Kirk approval and a documented architectural reason. Violations are treated as
+  corrupting the training signal definition.**
 - Pine budget baselines (verified 2026-04-13):
   Institutional (`v7-warbird-institutional.pine`): 51/64 (46 plot + 2 plotshape + 3 alertcondition, 13 headroom)
   Strategy (`v7-warbird-strategy.pine`): 52/64 (50 plot + 2 plotshape, 12 headroom)
   Request budget: 4 `request.security()` + 1 `request.footprint()` = 5 paths (both files)
+  v8 Live (`v8-warbird-live.pine`): SATS v1.9.0 verbatim, TV compile clean, commit cd5cbd5
+  v8 Prescreen (`v8-warbird-prescreen.pine`): strategy() wrapper, TV compile clean, delta=12 lines vs live, commit cd5cbd5
   Any implementation must be priced against these baselines before code is written.
 - `request.footprint()` must be treated as a tightly budgeted call path.
   All footprint-derived features must be computed from one cached object per bar.

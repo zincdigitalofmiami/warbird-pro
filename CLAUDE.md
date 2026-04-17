@@ -43,6 +43,8 @@ Phase execution order:
 - `indicators/v7-warbird-institutional.pine` is the active Pine work surface. Compiles clean, TV-validated. Output budget: 51/64 (46 plot + 2 plotshape + 3 alertcondition, 13 headroom). 4 `request.security()` calls + 1 `request.footprint()` call (live, implemented). Budget verified 2026-04-13.
 - `indicators/v7-warbird-strategy.pine` is the AG training data generator. Compiles clean. Output budget: 52/64 (50 plot + 2 plotshape, 12 headroom). Commission floor at $1.00/side. `use_bar_magnifier=true`, `slippage=1` pinned in `strategy()`. Budget verified 2026-04-13. Dead HyperWave oscillator + energy computation blocks removed 2026-04-13 (were live in v6, orphaned in v7). Raw footprint numeric exports added 2026-04-13: `ml_exh_fp_delta`, `ml_exh_trigger_row_delta`, `ml_exh_extreme_vol_ratio`, `ml_exh_stacked_imbalance_count` — AG cannot compute these server-side (TV-exclusive API). First-run contract keeps all `ml_exh_*` / `ml_cont_*` diamond-path fields out of the canonical predictor and production SHAP; they are tuning-only unless explicitly reopened.
 - v7 parity guard (`scripts/guards/check-indicator-strategy-parity.sh`) updated for v7: ml_* parity, budget caps, coupled input defaults, strategy execution primitives, pinned TV defaults.
+- `indicators/v8-warbird-live.pine` — SATS v1.9.0 verbatim, code-frozen. presetInput="Custom". calcScoreBreakdown/calcSignalScore hoisted unconditionally (Pine v6 CW10003/CW10004). pine-facade + TV smart_compile clean. Commit cd5cbd5 (2026-04-17).
+- `indicators/v8-warbird-prescreen.pine` — strategy() wrapper on v8-warbird-live.pine, code-frozen. 5 surgical changes only: strategy() declaration, entry/exit in confirmedBuy/confirmedSell blocks, barstate.islast removed from dashboard+watermark gates. pine-facade + TV smart_compile clean. delta=12 lines vs live (8-20 tolerance). Commit cd5cbd5 (2026-04-17). Slice 2b complete.
 - ESLint gate passes clean (`npm run lint` = 0 errors, 0 warnings).
 - Migration reconciliation through `045` is verified local↔remote.
 - Security advisor: 0 code warnings.
@@ -182,6 +184,10 @@ Follow Warbird Full Reset Plan v5 only. No other plan drives implementation.
 - No mock data, no inactive Databento symbols, no Prisma/ORM paths.
 - Pine budget audit is required before any indicator implementation workstream.
 - Never touch `v7-warbird-institutional.pine` without explicit session approval.
+- **v8 CODE FREEZE (2026-04-17): `v8-warbird-live.pine` and `v8-warbird-prescreen.pine` are locked.
+  Zero code changes. Settings optimization (`input.*` defaults only) is the only permitted edit.
+  No structural edits, no new blocks, no geometry changes, no signal logic, no new outputs.
+  These files define the training signal surface. Code changes corrupt the model contract.**
 - Exhaustion is `ml_*` feature enrichment only. Never a hard candidate gate.
 - S/R features are per-type normalized numeric families. No string columns,
   no raw prices, no JSON/list feature blobs.
