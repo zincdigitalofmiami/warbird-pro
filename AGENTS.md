@@ -74,6 +74,8 @@ There is exactly one active architecture plan and one active documentation entry
 
 - `docs/INDEX.md`
 - `docs/MASTER_PLAN.md` — Warbird Full Reset Plan v5
+- v8 execution front: `docs/WARBIRD_V8_PLAN.md` (SuperTrend+TQI)
+- Cross-reference authority lives in `docs/MASTER_PLAN.md` Phase 4
 
 Everything else is archived or reference-only and should not drive current implementation unless explicitly reopened through the index.
 
@@ -98,6 +100,8 @@ Everything else is archived or reference-only and should not drive current imple
 - AutoGluon is offline only and may only promote Pine-ready packet outputs.
 - First model target is locked to multiclass `outcome_label`.
 - First feature scope is locked to `MES 1m/15m/1h/4h + SP500 spot + macro`.
+- **2026-04-16 override:** v8 baseline feature scope is indicator-only (12 features, all from OHLCV + timestamp).
+- +FRED is a challenger model only, gated on Pine↔Python parity proof. This overrides prior macro scope for v8 training.
 - Macro scope is locked to the curated FRED regime set + `econ_calendar` only. No news or narrative sources.
 
 ## Stack
@@ -120,7 +124,7 @@ Everything else is archived or reference-only and should not drive current imple
 
 ### Naming
 
-- Table prefix: `mes_`, `cross_asset_`, `econ_`, `warbird_`, `ag_`
+- Table prefix: `mes_`, `cross_asset_`, `econ_`, `warbird_`, `ag_`, `st_`
 - NEVER use `bhg_`, `BHG`, `mkt_futures_`, or rabid-raccoon legacy naming
 - All database columns: snake_case. No ORM mapping.
 - Canonical names never use version suffixes.
@@ -211,8 +215,8 @@ These are explicitly excluded from the canonical AG training zoo:
   guard is active. The guard pairs with
   `./scripts/guards/check-canonical-zoo.sh`, which can be invoked
   directly and is also listed in the `training-pre-audit` skill.
-- Hard stop requirement: structural stop at `0.618 x ATR(14)` from entry.
-  Emergency stop at `1.000 x ATR(14)`. Both rendered on chart from entry bar.
+- Stop floor requirement: `0.618 x ATR(14)` is the minimum structural stop candidate in optimization.
+- Live indicator enforcement: structural stop at `0.618 x ATR(14)` and emergency stop at `1.000 x ATR(14)` from entry bar regardless of AG ranking.
 - Consecutive loss block: at 2 consecutive losses, signal warning. At 3, halt
   recommended. Prevent revenge re-entry clusters.
 - Opening bar suppressor: no new entry signals during 9:30-9:44 ET.

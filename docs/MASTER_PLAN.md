@@ -23,6 +23,16 @@
 - First macro scope is locked to the curated FRED regime set + `econ_calendar`.
 - Cloud promotion is locked to `manual promote`.
 
+## Execution Supplement Reference
+
+- `docs/WARBIRD_V8_PLAN.md` is the active team execution supplement for the
+  SuperTrend + TQI slice workflow.
+- Use it for slice sequencing, handoff contracts, and Approval & Drift Gates
+  (Kirk approve -> Codex execute -> Claude review -> Kirk close).
+- This supplement does **not** replace this master plan as the architecture
+  authority; it governs execution discipline for the v8 lane.
+- v8 gate protocol: see `docs/WARBIRD_V8_PLAN.md` § Approval & Drift Gate
+
 ## Repository and Storage Layout
 
 - Everything is rooted on `/Volumes/Satechi Hub/warbird-pro/`.
@@ -335,6 +345,9 @@ Original requirements:
 **Contract expansion (migration 016):** `ag_fib_stop_variants` added; `ag_fib_interactions` made stop-agnostic; `ag_fib_outcomes` re-keyed to `stop_variant_id`; `ag_training` rebuilt with four-way join. Stop-family evaluation now produces six training rows per parent interaction.
 
 ## Phase 4: Python Pipeline in `scripts/ag/`
+
+> **2026-04-16:** Phase 4 execution front replaced by v8 SuperTrend+TQI architecture.
+> Active execution document: `docs/WARBIRD_V8_PLAN.md`. MASTER_PLAN.md remains governance spine.
 
 - Python owns the full offline pipeline:
   - extract from local `warbird`

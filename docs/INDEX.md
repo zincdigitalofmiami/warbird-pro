@@ -25,6 +25,7 @@ Ignore all other plans, decisions, scratch notes, and historical architecture do
 
 - `docs/MASTER_PLAN.md`
   - the only planning authority — Warbird Full Reset Plan v5
+  - v8 execution front is `docs/WARBIRD_V8_PLAN.md` (execution supplement; governance remains in MASTER_PLAN)
 - `docs/contracts/`
   - the only interface and payload authority
 - `docs/contracts/ag_local_training_schema.md`
