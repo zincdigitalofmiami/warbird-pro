@@ -1,0 +1,68 @@
+//@version=6
+strategy(
+    title              = "v8 Warbird Prescreen",
+    overlay            = true,
+    calc_on_every_tick = false,
+    pyramiding         = 0,
+    default_qty_type   = strategy.fixed,
+    default_qty_value  = 1,
+    commission_type    = strategy.commission.cash_per_contract,
+    commission_value   = 1.0,
+    slippage           = 1,
+    use_bar_magnifier  = true
+)
+
+i_atr_period  = input.int(14,    "ATR Period",     minval = 1,   maxval = 50)
+i_atr_mult    = input.float(3.0, "ATR Multiplier", minval = 0.5, maxval = 10.0, step = 0.5)
+i_atr_method  = input.string("atr", "ATR Method",  options = ["atr", "sma_tr"])
+i_source_id   = input.string("hl2", "Source",       options = ["hl2", "close", "ohlc4"])
+i_sl_atr_mult = input.float(1.0, "SL ATR Mult",    minval = 0.1, maxval = 5.0,  step = 0.1)
+i_start       = input.time(timestamp("2020-01-01"), "Window Start")
+i_end         = input.time(timestamp("2024-01-01"), "Window End")
+
+in_window = time >= i_start and time < i_end
+
+src     = i_source_id == "hl2" ? hl2 : i_source_id == "close" ? close : ohlc4
+raw_atr = i_atr_method == "atr" ? ta.atr(i_atr_period) : ta.sma(ta.tr(true), i_atr_period)
+
+upper_basic = src + i_atr_mult * raw_atr
+lower_basic = src - i_atr_mult * raw_atr
+
+var float upper_band = na
+var float lower_band = na
+var int   st_dir     = 1
+
+prev_upper     = nz(upper_band[1], upper_basic)
+prev_lower     = nz(lower_band[1], lower_basic)
+prev_close_val = nz(close[1], close)
+prev_dir       = nz(st_dir[1], 1)
+
+upper_band := upper_basic < prev_upper or prev_close_val > prev_upper ? upper_basic : prev_upper
+lower_band := lower_basic > prev_lower or prev_close_val < prev_lower ? lower_basic : prev_lower
+
+st_dir := prev_dir == -1 and close > upper_band ? 1 :
+          prev_dir ==  1 and close < lower_band ? -1 :
+          prev_dir
+
+flipped_bull = st_dir == 1  and prev_dir == -1
+flipped_bear = st_dir == -1 and prev_dir ==  1
+
+sl_dist = raw_atr * i_sl_atr_mult
+tp_dist = sl_dist * 2.0
+
+if in_window and barstate.isconfirmed
+    if flipped_bull
+        strategy.close("Short")
+        strategy.entry("Long", strategy.long)
+        strategy.exit("Long SL/TP", from_entry = "Long",
+             stop  = close - sl_dist,
+             limit = close + tp_dist)
+    if flipped_bear
+        strategy.close("Long")
+        strategy.entry("Short", strategy.short)
+        strategy.exit("Short SL/TP", from_entry = "Short",
+             stop  = close + sl_dist,
+             limit = close - tp_dist)
+
+st_line = st_dir == 1 ? lower_band : upper_band
+plot(st_line, "SuperTrend", color = st_dir == 1 ? color.teal : color.red, linewidth = 2)
