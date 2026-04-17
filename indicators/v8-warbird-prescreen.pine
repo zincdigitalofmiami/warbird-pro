@@ -62,10 +62,6 @@ atrLenInput      = input.int(13, "ATR Length", minval = 5, maxval = 100, group =
 baseMultInput    = input.float(2.0, "Base Band Width (xATR)", minval = 0.5, maxval = 5.0, step = 0.1, group = GRP_MAIN)
 sourceInput      = input.source(close, "Source", group = GRP_MAIN)
 
-// ── Backtest Window ───────────────────────────────────────
-i_win_start      = input.time(timestamp("2020-01-01"), "Backtest Start", group = GRP_MAIN)
-i_win_end        = input.time(timestamp("2024-01-01"), "Backtest End",   group = GRP_MAIN)
-
 // ── Adaptive Engine (legacy ER adaptation) ────────────────
 useAdaptiveInput    = input.bool(true, "Enable Vol-Adaptive Bands (legacy ER)", group = GRP_ADAPT, tooltip = "Legacy linear ER modulation. Kept for backwards compat — TQI Engine below is recommended.")
 erLengthInput       = input.int(20, "Efficiency Window", minval = 5, maxval = 100, group = GRP_ADAPT)
@@ -660,6 +656,8 @@ if confirmedBuy
         lastB := b
     lastDisplaySide := 1
     lastSignalBar   := bar_index
+    strategy.entry("Long",  strategy.long)
+    strategy.exit("Long Exit",  from_entry = "Long",  stop = tradeSl, limit = tradeTp3)
 
 if confirmedSell
     float tEntry = close
@@ -692,17 +690,6 @@ if confirmedSell
         lastB := b
     lastDisplaySide := -1
     lastSignalBar   := bar_index
-
-// ══════════════════════════════════════════════════════════
-// 7.6  STRATEGY ENTRIES / EXITS  (prescreen wrapper only)
-// ══════════════════════════════════════════════════════════
-in_window = time >= i_win_start and time < i_win_end
-
-if confirmedBuy and in_window
-    strategy.entry("Long",  strategy.long)
-    strategy.exit("Long Exit",  from_entry = "Long",  stop = tradeSl, limit = tradeTp3)
-
-if confirmedSell and in_window
     strategy.entry("Short", strategy.short)
     strategy.exit("Short Exit", from_entry = "Short", stop = tradeSl, limit = tradeTp3)
 
