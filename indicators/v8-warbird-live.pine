@@ -49,7 +49,7 @@ MULT_SMOOTH_ALPHA = 0.15
 // ══════════════════════════════════════════════════════════
 
 // ── Main ──────────────────────────────────────────────────
-presetInput      = input.string("Auto", "Preset", options = ["Auto", "Custom", "Scalping", "Default", "Swing", "Crypto 24/7"], group = GRP_MAIN, tooltip = "Quick presets that override key parameters.")
+presetInput      = input.string("Custom", "Preset", options = ["Auto", "Custom", "Scalping", "Default", "Swing", "Crypto 24/7"], group = GRP_MAIN, tooltip = "Quick presets that override key parameters.")
 atrLenInput      = input.int(13, "ATR Length", minval = 5, maxval = 100, group = GRP_MAIN)
 baseMultInput    = input.float(2.0, "Base Band Width (xATR)", minval = 0.5, maxval = 5.0, step = 0.1, group = GRP_MAIN)
 sourceInput      = input.source(close, "Source", group = GRP_MAIN)
@@ -391,7 +391,8 @@ float atrValue = effAtr
 float tqiEr = clamp(erValue, 0.0, 1.0)
 
 bool  hasVolume = nz(volume, 0) > 0
-float volZRaw   = hasVolume ? calcVolumeZ(volLenInput) : na
+float volZCalc  = calcVolumeZ(volLenInput)
+float volZRaw   = hasVolume ? volZCalc : na
 float tqiVol    = hasVolume ? mapClamp(volZRaw, -1.0, 2.0, 0.0, 1.0) : mapClamp(volRatio, 0.6, 1.8, 0.0, 1.0)
 
 float structHi = ta.highest(high, tqiStructLenInput)
@@ -583,9 +584,17 @@ int curCellIdx = cellIdx(curErBin, curVolBin)
 // ══════════════════════════════════════════════════════════
 // 7. SIGNAL LOGIC
 // ══════════════════════════════════════════════════════════
+// WARBIRD 2026-04-17: calcScoreBreakdown / calcSignalScore hoisted out of
+// conditional scopes (CW10003/CW10004). Pine v6 needs stateful ta.* calls
+// invoked on every bar for consistent series state. Both sides computed
+// unconditionally; ternaries gate the stored values, not the calls.
+[sbBuyM,  sbBuyE,  sbBuyV,  sbBuyR,  sbBuyS,  sbBuyB]  = calcScoreBreakdown(true)
+[sbSellM, sbSellE, sbSellV, sbSellR, sbSellS, sbSellB] = calcScoreBreakdown(false)
+float buyScoreCalc  = sbBuyM  + sbBuyE  + sbBuyV  + sbBuyR  + sbBuyS  + sbBuyB
+float sellScoreCalc = sbSellM + sbSellE + sbSellV + sbSellR + sbSellS + sbSellB
 bool needsScore = (flipUp or flipDown) and (showSignalsInput or enableAlertsInput or showBreakdownInput)
-float buyScore  = needsScore and flipUp   ? calcSignalScore(true)  : 0.0
-float sellScore = needsScore and flipDown ? calcSignalScore(false) : 0.0
+float buyScore  = needsScore and flipUp   ? buyScoreCalc  : 0.0
+float sellScore = needsScore and flipDown ? sellScoreCalc : 0.0
 
 bool confirmedBuy  = flipUp   and barstate.isconfirmed and isWarmedUp
 bool confirmedSell = flipDown and barstate.isconfirmed and isWarmedUp
@@ -639,13 +648,12 @@ if confirmedBuy
     hitTp3        := false
     tradeCellIdx  := curCellIdx
     if showBreakdownInput
-        [m, e, v, r, s, b] = calcScoreBreakdown(true)
-        lastM := m
-        lastE := e
-        lastV := v
-        lastR := r
-        lastS := s
-        lastB := b
+        lastM := sbBuyM
+        lastE := sbBuyE
+        lastV := sbBuyV
+        lastR := sbBuyR
+        lastS := sbBuyS
+        lastB := sbBuyB
     lastDisplaySide := 1
     lastSignalBar   := bar_index
 
@@ -671,13 +679,12 @@ if confirmedSell
     hitTp3        := false
     tradeCellIdx  := curCellIdx
     if showBreakdownInput
-        [m, e, v, r, s, b] = calcScoreBreakdown(false)
-        lastM := m
-        lastE := e
-        lastV := v
-        lastR := r
-        lastS := s
-        lastB := b
+        lastM := sbSellM
+        lastE := sbSellE
+        lastV := sbSellV
+        lastR := sbSellR
+        lastS := sbSellS
+        lastB := sbSellB
     lastDisplaySide := -1
     lastSignalBar   := bar_index
 

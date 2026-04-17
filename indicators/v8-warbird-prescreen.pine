@@ -6,21 +6,21 @@
 // Version: 1.9.0
 
 strategy(
-     title                  = "Self-Aware Trend System [WillyAlgoTrader] — Prescreen",
-     shorttitle             = "SATS-PS",
-     overlay                = true,
-     max_lines_count        = 500,
-     max_labels_count       = 500,
-     max_boxes_count        = 100,
-     max_bars_back          = 5000,
-     calc_on_every_tick     = false,
-     pyramiding             = 0,
-     default_qty_type       = strategy.fixed,
-     default_qty_value      = 1,
-     commission_type        = strategy.commission.cash_per_contract,
-     commission_value       = 1.0,
-     slippage               = 1,
-     use_bar_magnifier      = true)
+     title                 = "Self-Aware Trend System [WillyAlgoTrader] Prescreen",
+     shorttitle            = "SATS-PS",
+     overlay               = true,
+     max_lines_count       = 500,
+     max_labels_count      = 500,
+     max_boxes_count       = 100,
+     max_bars_back         = 5000,
+     calc_on_every_tick    = false,
+     pyramiding            = 0,
+     default_qty_type      = strategy.fixed,
+     default_qty_value     = 1,
+     commission_type       = strategy.commission.cash_per_contract,
+     commission_value      = 1.0,
+     slippage              = 1,
+     use_bar_magnifier     = true)
 
 // ══════════════════════════════════════════════════════════
 // 2. CONSTANTS
@@ -57,7 +57,7 @@ MULT_SMOOTH_ALPHA = 0.15
 // ══════════════════════════════════════════════════════════
 
 // ── Main ──────────────────────────────────────────────────
-presetInput      = input.string("Auto", "Preset", options = ["Auto", "Custom", "Scalping", "Default", "Swing", "Crypto 24/7"], group = GRP_MAIN, tooltip = "Quick presets that override key parameters.")
+presetInput      = input.string("Custom", "Preset", options = ["Auto", "Custom", "Scalping", "Default", "Swing", "Crypto 24/7"], group = GRP_MAIN, tooltip = "Quick presets that override key parameters.")
 atrLenInput      = input.int(13, "ATR Length", minval = 5, maxval = 100, group = GRP_MAIN)
 baseMultInput    = input.float(2.0, "Base Band Width (xATR)", minval = 0.5, maxval = 5.0, step = 0.1, group = GRP_MAIN)
 sourceInput      = input.source(close, "Source", group = GRP_MAIN)
@@ -399,7 +399,8 @@ float atrValue = effAtr
 float tqiEr = clamp(erValue, 0.0, 1.0)
 
 bool  hasVolume = nz(volume, 0) > 0
-float volZRaw   = hasVolume ? calcVolumeZ(volLenInput) : na
+float volZCalc  = calcVolumeZ(volLenInput)
+float volZRaw   = hasVolume ? volZCalc : na
 float tqiVol    = hasVolume ? mapClamp(volZRaw, -1.0, 2.0, 0.0, 1.0) : mapClamp(volRatio, 0.6, 1.8, 0.0, 1.0)
 
 float structHi = ta.highest(high, tqiStructLenInput)
@@ -591,9 +592,17 @@ int curCellIdx = cellIdx(curErBin, curVolBin)
 // ══════════════════════════════════════════════════════════
 // 7. SIGNAL LOGIC
 // ══════════════════════════════════════════════════════════
+// WARBIRD 2026-04-17: calcScoreBreakdown / calcSignalScore hoisted out of
+// conditional scopes (CW10003/CW10004). Pine v6 needs stateful ta.* calls
+// invoked on every bar for consistent series state. Both sides computed
+// unconditionally; ternaries gate the stored values, not the calls.
+[sbBuyM,  sbBuyE,  sbBuyV,  sbBuyR,  sbBuyS,  sbBuyB]  = calcScoreBreakdown(true)
+[sbSellM, sbSellE, sbSellV, sbSellR, sbSellS, sbSellB] = calcScoreBreakdown(false)
+float buyScoreCalc  = sbBuyM  + sbBuyE  + sbBuyV  + sbBuyR  + sbBuyS  + sbBuyB
+float sellScoreCalc = sbSellM + sbSellE + sbSellV + sbSellR + sbSellS + sbSellB
 bool needsScore = (flipUp or flipDown) and (showSignalsInput or enableAlertsInput or showBreakdownInput)
-float buyScore  = needsScore and flipUp   ? calcSignalScore(true)  : 0.0
-float sellScore = needsScore and flipDown ? calcSignalScore(false) : 0.0
+float buyScore  = needsScore and flipUp   ? buyScoreCalc  : 0.0
+float sellScore = needsScore and flipDown ? sellScoreCalc : 0.0
 
 bool confirmedBuy  = flipUp   and barstate.isconfirmed and isWarmedUp
 bool confirmedSell = flipDown and barstate.isconfirmed and isWarmedUp
@@ -647,17 +656,16 @@ if confirmedBuy
     hitTp3        := false
     tradeCellIdx  := curCellIdx
     if showBreakdownInput
-        [m, e, v, r, s, b] = calcScoreBreakdown(true)
-        lastM := m
-        lastE := e
-        lastV := v
-        lastR := r
-        lastS := s
-        lastB := b
+        lastM := sbBuyM
+        lastE := sbBuyE
+        lastV := sbBuyV
+        lastR := sbBuyR
+        lastS := sbBuyS
+        lastB := sbBuyB
     lastDisplaySide := 1
     lastSignalBar   := bar_index
-    strategy.entry("Long",  strategy.long)
-    strategy.exit("Long Exit",  from_entry = "Long",  stop = tradeSl, limit = tradeTp3)
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", from_entry = "Long", stop = tradeSl, limit = tradeTp3)
 
 if confirmedSell
     float tEntry = close
@@ -681,13 +689,12 @@ if confirmedSell
     hitTp3        := false
     tradeCellIdx  := curCellIdx
     if showBreakdownInput
-        [m, e, v, r, s, b] = calcScoreBreakdown(false)
-        lastM := m
-        lastE := e
-        lastV := v
-        lastR := r
-        lastS := s
-        lastB := b
+        lastM := sbSellM
+        lastE := sbSellE
+        lastV := sbSellV
+        lastR := sbSellR
+        lastS := sbSellS
+        lastB := sbSellB
     lastDisplaySide := -1
     lastSignalBar   := bar_index
     strategy.entry("Short", strategy.short)
@@ -928,7 +935,7 @@ string dynScaleStr = useDynTp ? "×" + str.tostring(dynScale, "#.00") : "—"
 string liveRStr    = str.tostring(liveTp1R, "#.0") + " / " + str.tostring(liveTp2R, "#.0") + " / " + str.tostring(liveTp3R, "#.0")
 color  tpModeCol   = useDynTp ? (dynScale > 1.2 ? bullColorInput : (dynScale < 0.8 ? bearColorInput : TEXT_COLOR)) : TEXT_COLOR
 
-if showDashInput and barstate.islast
+if showDashInput
     var table dashTable = table.new(getDashPos(dashPosStr), 2, 50, bgcolor = TABLE_BG, border_color = TABLE_BORDER, border_width = 1, frame_color = TABLE_BORDER, frame_width = 1)
 
     table.cell(dashTable, 0, 0, "WillyAlgoTrader", text_color = HEADER_TEXT, bgcolor = HEADER_BG, text_size = size.small, text_halign = text.align_center)
@@ -1049,7 +1056,7 @@ if showDashInput and barstate.islast
 // ══════════════════════════════════════════════════════════
 // 11. WATERMARK
 // ══════════════════════════════════════════════════════════
-if barstate.islast and showWatermarkInput
+if showWatermarkInput
     var table wmTable = table.new(position.bottom_center, 1, 1, bgcolor = color.new(color.black, 100), border_color = color.new(color.black, 100), border_width = 0, frame_color = color.new(color.black, 100), frame_width = 0)
     table.cell(wmTable, 0, 0, "WillyAlgoTrader", text_color = WM_COLOR, text_size = size.normal, text_halign = text.align_center, bgcolor = color.new(color.black, 100))
 
