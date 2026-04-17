@@ -412,7 +412,7 @@ Minimum appearance controls:
 ```text
 local_warehouse/migrations/018_st_training_schema.sql      <- Slice 1
 scripts/ag/populate_st_configs.py                          <- Slice 2
-indicators/v8-warbird-prescreen.pine                       <- Slice 2b prerequisite (TV strategy for CDP sweep)
+indicators/v8-warbird-prescreen.pine                       <- Slice 2b (SATS verbatim + strategy() declarations)
 scripts/ag/run_st_prescreen.py                             <- Slice 2b (CDP sweep + ledger insert)
 scripts/ag/extract_st_signals.py                           <- Slice 3
 scripts/ag/label_st_outcomes.py                            <- Slice 4
