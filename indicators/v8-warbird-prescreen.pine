@@ -697,12 +697,12 @@ if confirmedSell
     lastDisplaySide := -1
     lastSignalBar   := bar_index
 
-// Entry: bar close at/through ENTRY line, on a bar AFTER the flip bar only.
-if tradeDir == 1 and strategy.position_size == 0 and bar_index > tradeEntryBar and barstate.isconfirmed and not na(tradeEntry) and close <= tradeEntry
+// Entry: bar close crosses the ENTRY line (close[1] on opposite side, close on entry side).
+if tradeDir == 1 and strategy.position_size == 0 and barstate.isconfirmed and not na(tradeEntry) and close[1] < tradeEntry and close >= tradeEntry
     strategy.entry("Long",  strategy.long)
     strategy.exit("Long Exit",  from_entry = "Long",  stop = tradeSl, limit = tradeTp3)
 
-if tradeDir == -1 and strategy.position_size == 0 and bar_index > tradeEntryBar and barstate.isconfirmed and not na(tradeEntry) and close >= tradeEntry
+if tradeDir == -1 and strategy.position_size == 0 and barstate.isconfirmed and not na(tradeEntry) and close[1] > tradeEntry and close <= tradeEntry
     strategy.entry("Short", strategy.short)
     strategy.exit("Short Exit", from_entry = "Short", stop = tradeSl, limit = tradeTp3)
 
