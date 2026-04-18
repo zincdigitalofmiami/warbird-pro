@@ -1,12 +1,12 @@
 //@version=6
 // ══════════════════════════════════════════════════════════
-// SELF-AWARE TREND SYSTEM [WillyAlgoTrader]
+// SELF-AWARE TREND SYSTEM [Warbird Prescreen]
 // ══════════════════════════════════════════════════════════
-// Author:  Willy | WillyAlgoTrader
-// Version: 1.9.0
+// Author:  Kirk Musick
+// Version: 8
 
 strategy(
-     title                 = "Self-Aware Trend System [WillyAlgoTrader] Prescreen",
+     title                 = "Self-Aware Trend System [Warbird Prescreen]",
      shorttitle            = "SATS-PS",
      overlay               = true,
      max_lines_count       = 500,
@@ -14,6 +14,7 @@ strategy(
      max_boxes_count       = 100,
      max_bars_back         = 5000,
      calc_on_every_tick    = false,
+     process_orders_on_close = true,
      pyramiding            = 0,
      default_qty_type      = strategy.fixed,
      default_qty_value     = 1,
@@ -664,7 +665,7 @@ if confirmedBuy
         lastB := sbBuyB
     lastDisplaySide := 1
     lastSignalBar   := bar_index
-    strategy.entry("Long", strategy.long)
+    strategy.entry("Long",  strategy.long)
     strategy.exit("Long Exit", from_entry = "Long", stop = tradeSl, limit = tradeTp3)
 
 if confirmedSell
