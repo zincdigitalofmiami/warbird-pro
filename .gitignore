@@ -93,3 +93,9 @@ indicators/harnesses/
 
 # tuning artifacts (generated output — not source)
 artifacts/
+
+# Optuna study DB and run artifacts (resume-safe, but not tracked in git)
+data/sats_ps_optuna/study.db
+data/sats_ps_optuna/study.db-shm
+data/sats_ps_optuna/study.db-wal
+data/sats_ps_optuna/top*.json
