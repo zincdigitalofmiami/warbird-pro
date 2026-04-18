@@ -14,6 +14,7 @@ strategy(
      max_boxes_count       = 100,
      max_bars_back         = 5000,
      calc_on_every_tick    = false,
+     process_orders_on_close = true,
      pyramiding            = 0,
      default_qty_type      = strategy.fixed,
      default_qty_value     = 1,
@@ -664,8 +665,6 @@ if confirmedBuy
         lastB := sbBuyB
     lastDisplaySide := 1
     lastSignalBar   := bar_index
-    strategy.entry("Long",  strategy.long,  limit = tradeEntry)
-    strategy.exit("Long Exit", from_entry = "Long", stop = tradeSl, limit = tradeTp3)
 
 if confirmedSell
     float tEntry = close
@@ -697,7 +696,14 @@ if confirmedSell
         lastB := sbSellB
     lastDisplaySide := -1
     lastSignalBar   := bar_index
-    strategy.entry("Short", strategy.short, limit = tradeEntry)
+
+// Entry: bar close at/through ENTRY line, on a bar AFTER the flip bar only.
+if tradeDir == 1 and strategy.position_size == 0 and bar_index > tradeEntryBar and barstate.isconfirmed and not na(tradeEntry) and close <= tradeEntry
+    strategy.entry("Long",  strategy.long)
+    strategy.exit("Long Exit",  from_entry = "Long",  stop = tradeSl, limit = tradeTp3)
+
+if tradeDir == -1 and strategy.position_size == 0 and bar_index > tradeEntryBar and barstate.isconfirmed and not na(tradeEntry) and close >= tradeEntry
+    strategy.entry("Short", strategy.short)
     strategy.exit("Short Exit", from_entry = "Short", stop = tradeSl, limit = tradeTp3)
 
 // ══════════════════════════════════════════════════════════
@@ -786,7 +792,7 @@ if showRiskInput
 // ══════════════════════════════════════════════════════════
 // HIT DETECTION + LEARNING FEEDBACK
 // ══════════════════════════════════════════════════════════
-if tradeDir != 0 and barstate.isconfirmed and not na(tradeEntry) and not na(tradeSl) and bar_index > tradeEntryBar
+if tradeDir != 0 and strategy.position_size != 0 and barstate.isconfirmed and not na(tradeEntry) and not na(tradeSl) and bar_index > tradeEntryBar
     bool tp1Reached = tradeDir ==  1 ? high >= tradeTp1 : low <= tradeTp1
     bool tp2Reached = tradeDir ==  1 ? high >= tradeTp2 : low <= tradeTp2
     bool tp3Reached = tradeDir ==  1 ? high >= tradeTp3 : low <= tradeTp3
