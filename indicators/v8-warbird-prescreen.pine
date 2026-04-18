@@ -14,7 +14,6 @@ strategy(
      max_boxes_count       = 100,
      max_bars_back         = 5000,
      calc_on_every_tick    = false,
-     process_orders_on_close = true,
      pyramiding            = 0,
      default_qty_type      = strategy.fixed,
      default_qty_value     = 1,
@@ -665,7 +664,7 @@ if confirmedBuy
         lastB := sbBuyB
     lastDisplaySide := 1
     lastSignalBar   := bar_index
-    strategy.entry("Long",  strategy.long)
+    strategy.entry("Long",  strategy.long,  limit = tradeEntry)
     strategy.exit("Long Exit", from_entry = "Long", stop = tradeSl, limit = tradeTp3)
 
 if confirmedSell
@@ -698,7 +697,7 @@ if confirmedSell
         lastB := sbSellB
     lastDisplaySide := -1
     lastSignalBar   := bar_index
-    strategy.entry("Short", strategy.short)
+    strategy.entry("Short", strategy.short, limit = tradeEntry)
     strategy.exit("Short Exit", from_entry = "Short", stop = tradeSl, limit = tradeTp3)
 
 // ══════════════════════════════════════════════════════════
