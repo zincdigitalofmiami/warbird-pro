@@ -79,26 +79,35 @@ def _load_existing() -> set:
     """Return set of already-run config signatures."""
     if not CSV_PATH.exists():
         return set()
-    df = pd.read_csv(CSV_PATH, usecols=['config_tag'])
+    df = pd.read_csv(CSV_PATH, usecols=["config_tag"], on_bad_lines="skip")
     return set(df['config_tag'].tolist())
 
 
 def _append_result(cfg: dict, result: dict, stage: int, trial_idx: int):
     tag = _cfg_tag(cfg)
-    row = {'config_tag': tag,
-           'pf':          result['pf'],
-           'trades':      result['trades'],
-           'net_pnl':     round(result['gross_profit'] - result['gross_loss'], 2),
+    row = {'config_tag':  tag,
+           'pf':           result['pf'],
+           'trades':       result['trades'],
+           'net_pnl':      round(result['gross_profit'] - result['gross_loss'], 2),
            'gross_profit': result['gross_profit'],
            'gross_loss':   result['gross_loss'],
            'win_rate':     result['win_rate'],
-           'max_dd':       result['max_dd_abs'],
-           'stage':        stage}
+           'max_dd':       result['max_dd_abs']}
     for k in sorted(cfg):
         row[f'cfg_{k}'] = cfg[k]
+    row['stage'] = stage  # stage LAST to avoid column-shift against old headers
     df_row = pd.DataFrame([row])
-    write_header = not CSV_PATH.exists()
-    df_row.to_csv(CSV_PATH, mode='a', header=write_header, index=False)
+    if CSV_PATH.exists():
+        # Align to existing header to prevent column shift
+        existing_cols = pd.read_csv(CSV_PATH, nrows=0).columns.tolist()
+        for col in existing_cols:
+            if col not in df_row.columns:
+                df_row[col] = np.nan
+        # Add new columns not in original header (appended at end)
+        df_row = df_row[existing_cols + [c for c in df_row.columns if c not in existing_cols]]
+        df_row.to_csv(CSV_PATH, mode='a', header=False, index=False)
+    else:
+        df_row.to_csv(CSV_PATH, mode='a', header=True, index=False)
 
 
 def _update_champion(cfg: dict, result: dict):
@@ -166,7 +175,7 @@ def _lookup_pf_from_csv(tag: str) -> float | None:
     """Return PF for a given config_tag from CSV, or None if not found."""
     if not CSV_PATH.exists():
         return None
-    df = pd.read_csv(CSV_PATH, usecols=['config_tag', 'pf'])
+    df = pd.read_csv(CSV_PATH, usecols=["config_tag","pf"], on_bad_lines="skip")
     row = df[df['config_tag'] == tag]
     return float(row['pf'].iloc[0]) if not row.empty else None
 
@@ -279,7 +288,7 @@ def stage5(df: pd.DataFrame, stage4_winner: dict, done: set,
     # Collect all Stage 4 results sorted by PF
     if not CSV_PATH.exists():
         return stage4_winner
-    all_df = pd.read_csv(CSV_PATH)
+    all_df = pd.read_csv(CSV_PATH, on_bad_lines='skip')
     s4 = all_df.sort_values('pf', ascending=False).head(3)
     if s4.empty:
         return stage4_winner
@@ -295,16 +304,17 @@ def stage5(df: pd.DataFrame, stage4_winner: dict, done: set,
         'tradeMaxAgeInput': 20,
     }
     all_configs = []
+    dominant = list(NUMERIC_RANGES.keys())[:8]
     for _, row in s4.iterrows():
-        seed_cfg = {}
-        for col in row.index:
-            if col.startswith('cfg_'):
-                seed_cfg[col[4:]] = row[col]
-        dominant = [p for p in NUMERIC_RANGES if f'cfg_{p}' in row.index][:8]
+        # Parse config from config_tag (reliable JSON) rather than misaligned cfg_* columns
+        try:
+            seed_cfg = json.loads(row['config_tag'])
+        except Exception:
+            continue
         ranges = [
             np.linspace(
-                max(NUMERIC_RANGES[p][0], seed_cfg.get(p, NUMERIC_RANGES[p][0]) - n_steps * step_sizes.get(p, 0.1)),
-                min(NUMERIC_RANGES[p][1], seed_cfg.get(p, NUMERIC_RANGES[p][1]) + n_steps * step_sizes.get(p, 0.1)),
+                max(NUMERIC_RANGES[p][0], float(seed_cfg.get(p, NUMERIC_RANGES[p][0])) - n_steps * step_sizes.get(p, 0.1)),
+                min(NUMERIC_RANGES[p][1], float(seed_cfg.get(p, NUMERIC_RANGES[p][1])) + n_steps * step_sizes.get(p, 0.1)),
                 2 * n_steps + 1
             )
             for p in dominant
@@ -318,8 +328,14 @@ def stage5(df: pd.DataFrame, stage4_winner: dict, done: set,
             all_configs.append(cfg)
     total = len(all_configs)
     print(f"  {total} fine-grid trials across top-3 Stage-4 seeds")
-    best = {'pf': -1}
+    best = {'pf': -1, 'trades': 0, 'config': stage4_winner}
     for idx, cfg in enumerate(all_configs):
+        tag = _cfg_tag(cfg)
+        if tag in done:
+            pf = _lookup_pf_from_csv(tag)
+            if pf is not None and pf > best['pf']:
+                best = {'pf': pf, 'trades': 0, 'config': cfg}
+            continue
         result = run_trial(df, cfg, stage=5, trial_idx=idx, done=done, total=total)
         if result and result['pf'] > best['pf']:
             best = {**result, 'config': cfg}
@@ -418,7 +434,7 @@ def main():
 
     # Summary by stage
     if CSV_PATH.exists():
-        all_df = pd.read_csv(CSV_PATH)
+        all_df = pd.read_csv(CSV_PATH, on_bad_lines='skip')
         print(f"\nTotal trials in CSV: {len(all_df)}")
         print(f"Overall best PF: {all_df['pf'].max():.4f}")
         for s in range(2, 7):
