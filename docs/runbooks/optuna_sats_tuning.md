@@ -6,6 +6,10 @@ Optuna TPE replaces the 6-stage grid sweep (`sats_sweep.py`) for ongoing
 SATS v1.9.0 parameter optimization. The backtest engine is `backtesting.py`
 wrapping the same indicator math as the original `simulate_sats()`.
 
+**Ranking policy:** `win_rate` first, `PF` second (tie-break).  
+Optuna objective value is `win_rate`; `PF` is stored as trial metadata and used
+for deterministic leaderboard ordering.
+
 **Seeded from:** grid-sweep champion (PF=1.1748, 1307 trades, atrLen=15,
 erLen=16, adaptStrength=1.0, useTqi=OFF, multSmooth=OFF, slAtrMult=2.5).
 
@@ -24,7 +28,7 @@ python scripts/sats/sats_backtest.py
 python scripts/sats/sats_optuna.py --n-trials 3 --study-name smoke
 
 # Full run (resume-safe)
-python scripts/sats/sats_optuna.py --n-trials 300 --study-name sats_v1 --resume
+python scripts/sats/sats_optuna.py --n-trials 300 --study-name sats_2025_wr_pf --resume
 ```
 
 ---
@@ -52,16 +56,47 @@ running Optuna.
 
 | Window | Date Range | Purpose |
 |--------|-----------|---------|
-| IS (optimization) | 2020-01-01 → 2023-12-31 | Optuna objective |
-| OOS (validation) | 2024-01-01 → present | TV Deep Backtest only, after config lock |
+| IS (optimization) | 2025-01-01 → lock date | Optuna objective |
+| OOS (validation) | lock date onward | TV Deep Backtest only, after config lock |
 
-**Never run Optuna on OOS data.** The `--start` default is `2020-01-01`
-(full IS window). Use `--start 2025-01-01` only for quick spot-checks that
-match the grid-sweep window.
+**Never run Optuna on OOS data.** The `--start` default is `2025-01-01`.
 
 ---
 
 ## Dashboard Access
+
+### Warbird Card Hub (multi-indicator)
+
+```bash
+cd "/Volumes/Satechi Hub/warbird-pro"
+source .venv/bin/activate
+python scripts/optuna/warbird_optuna_hub.py --print-layout
+```
+
+Hub UI:
+- `http://127.0.0.1:8090`
+- JSON snapshot API: `http://127.0.0.1:8090/api/snapshot`
+
+The hub renders one card per indicator key from:
+- `scripts/optuna/indicator_registry.json`
+
+Each card points to:
+- the indicator folder (`data/optuna/<indicator_key>/` or legacy `data/sats_ps_optuna/`)
+- the organized model folder (`data/optuna/warbird_model/<surface>/<category>/<key>/`)
+- the current `study.db` status
+- a per-indicator `optuna-dashboard` child UI (when `study.db` exists)
+
+Folder scaffolding only (no web server):
+```bash
+python scripts/optuna/warbird_optuna_hub.py --init-folders-only
+```
+
+Optional launchd service:
+```bash
+cp "/Volumes/Satechi Hub/warbird-pro/scripts/optuna/warbird-optuna-hub.plist" \
+   ~/Library/LaunchAgents/com.warbird.optuna-hub.plist
+launchctl load ~/Library/LaunchAgents/com.warbird.optuna-hub.plist
+```
 
 ### Machine Service (persistent)
 
@@ -86,8 +121,8 @@ launchctl load   ~/Library/LaunchAgents/com.warbird.optuna-dashboard.plist
 
 1. Open the Optuna Dashboard panel in the VS Code sidebar.
 2. Point it at `data/sats_ps_optuna/study.db` (absolute path).
-3. Both the VS Code extension and the machine service read the same SQLite
-   file — no conflict.
+3. For additional indicator/strategy studies, use folder-wise DBs under
+   `data/optuna/<indicator_key>/study.db`.
 
 ---
 
@@ -101,35 +136,48 @@ create study → seed champion → run trials → inspect → export top-5 → T
 ```bash
 python scripts/sats/sats_optuna.py \
   --n-trials 300 \
-  --study-name sats_v1 \
-  --start 2020-01-01
+  --study-name sats_2025_wr_pf \
+  --start 2025-01-01
 ```
 
 ### 2. Resume (add more trials)
 ```bash
 python scripts/sats/sats_optuna.py \
   --n-trials 200 \
-  --study-name sats_v1 \
+  --study-name sats_2025_wr_pf \
   --resume
 ```
 
-### 3. Inspect in Python
+### 3. Non-SATS strategy profile (same dashboard contract)
+```bash
+python scripts/sats/sats_optuna.py \
+  --indicator-key wb7 \
+  --profile-module scripts.optuna.my_wb7_profile \
+  --study-name wb7_wr_pf \
+  --n-trials 300
+```
+
+Reference adapter template:
+- `scripts/optuna/profile_template.py`
+
+### 4. Inspect in Python
 ```python
 import optuna
 study = optuna.load_study(
-    study_name='sats_v1',
+    study_name='sats_2025_wr_pf',
     storage='sqlite:///data/sats_ps_optuna/study.db'
 )
 df = study.trials_dataframe()
-print(df.nlargest(10, 'value')[['number','value','params_atrLenInput','params_baseMultInput']])
+print(df.nlargest(10, 'value')[['number','value','user_attrs_win_rate','user_attrs_pf']])
 ```
 
-### 4. Export top-5 for TV validation
+### 5. Export top-5 for TV validation
 Top-5 configs are written automatically to `data/sats_ps_optuna/top5.json`
 at the end of each run. To re-export manually:
 ```python
 from scripts.sats.sats_optuna import export_top_n
-export_top_n(study, n=5)
+from pathlib import Path
+export_top_n(study, optuna_dir=Path("data/sats_ps_optuna"), n=5)
 ```
 
 ---
@@ -141,8 +189,8 @@ For each top-N config:
 2. Set `presetInput = Custom`.
 3. Apply config values from `top5.json` (`params` dict → TV input names).
 4. Enable **Deep Backtesting**, date range 2024-01-01 → present (OOS window).
-5. Record TV PF. Expect TV PF ≈ Optuna sim PF × 0.92–0.97 (bar magnifier gap).
-6. Lock the config with the highest TV PF.
+5. Rank candidates by **TV win rate first**, then **TV PF**.
+6. Lock the config that wins by this order.
 
 ---
 
@@ -162,8 +210,10 @@ For each top-N config:
 | Path | Purpose |
 |------|---------|
 | `scripts/sats/sats_backtest.py` | SATSStrategy + run_sats_bt() + parity CLI |
-| `scripts/sats/sats_optuna.py` | Optuna study wrapper + CLI |
+| `scripts/sats/sats_optuna.py` | Optuna study wrapper + CLI (WR-first, PF-second) |
+| `scripts/optuna/profile_template.py` | Adapter contract for non-SATS strategies |
 | `scripts/sats/optuna-dashboard.plist` | launchd agent template |
-| `data/sats_ps_optuna/study.db` | SQLite study DB (not tracked in git) |
-| `data/sats_ps_optuna/top5.json` | Top-N export (not tracked in git) |
+| `data/sats_ps_optuna/study.db` | Legacy SATS SQLite study DB (kept for existing dashboard links) |
+| `data/sats_ps_optuna/top5.json` | SATS top-N export (legacy path) |
+| `data/optuna/<indicator_key>/study.db` | Folder-wise study DB layout for additional indicators/strategies |
 | `data/sats_ps_sweep/champion.json` | Grid-sweep champion seed |

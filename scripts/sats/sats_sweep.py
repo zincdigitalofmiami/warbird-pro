@@ -37,7 +37,12 @@ BOOL_PARAMS = [
     'multSmoothInput',
     'useAsymBandsInput',
     'useEffAtrInput',
+    'useCharFlipInput',
 ]
+
+CATEGORICAL_PARAMS = {
+    'tpModeInput': ['Fixed', 'Dynamic'],
+}
 
 # Active numeric ranges [lo, hi] for OAT + LHS
 NUMERIC_RANGES = {
@@ -60,10 +65,14 @@ NUMERIC_RANGES = {
     'tp2RInput':            (0.5,  10.0),
     'tp3RInput':            (0.5,  10.0),
     'tradeMaxAgeInput':     (10,   500),
+    'charFlipHighInput':    (0.3,  0.9),
+    'charFlipLowInput':     (0.0,  0.5),
+    'charFlipMinAgeInput':  (1,    50),
 }
 
 INT_PARAMS = {'atrLenInput', 'erLengthInput', 'atrBaselineLenInput',
-              'tqiStructLenInput', 'tqiMomLenInput', 'tradeMaxAgeInput'}
+              'tqiStructLenInput', 'tqiMomLenInput', 'tradeMaxAgeInput',
+              'charFlipMinAgeInput'}
 
 
 # ── CSV helpers ─────────────────────────────────────────────────────────────

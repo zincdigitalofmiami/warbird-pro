@@ -20,7 +20,10 @@
     launchctl load   ~/Library/LaunchAgents/com.warbird.optuna-dashboard.plist  # start
 
   Dashboard opens at: http://localhost:8080
-  VS Code extension:  point to data/sats_ps_optuna/study.db in the extension pane
+  VS Code extension:
+    - legacy SATS: data/sats_ps_optuna/study.db
+    - other indicators: data/optuna/<indicator_key>/study.db
+  For non-SATS studies, duplicate this plist and swap the sqlite path.
 -->
 <plist version="1.0">
 <dict>

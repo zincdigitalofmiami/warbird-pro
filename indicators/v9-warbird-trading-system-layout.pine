@@ -1,0 +1,184 @@
+//@version=6
+// ============================================================================
+// WARBIRD TRADING SYSTEM [Layout]
+// Full output layout scaffold based on "warbird stack april 19 2026.csv"
+// ============================================================================
+indicator("Warbird Trading System [Layout]", shorttitle="WB-Layout", overlay=true, max_labels_count=500, max_lines_count=500)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+GRP_TREND = "Trend Engine"
+GRP_FLOW = "Volume Flow (VF)"
+GRP_NFE = "NFE Oscillator"
+GRP_RSI = "RSI KNN"
+GRP_SIG = "Signal Rules"
+GRP_VIZ = "Visual"
+
+atrLenInput = input.int(14, "ATR Length", minval=5, maxval=100, group=GRP_TREND)
+trendMultInput = input.float(2.0, "Trend Factor", minval=0.5, maxval=10.0, step=0.1, group=GRP_TREND)
+
+vfLenInput = input.int(20, "VF Window", minval=5, maxval=100, group=GRP_FLOW)
+vfFlowWeightInput = input.float(25.0, "VF Candle Weight", minval=5.0, maxval=60.0, step=1.0, group=GRP_FLOW)
+vfVolWeightInput = input.float(10.0, "VF Volume Weight", minval=1.0, maxval=30.0, step=1.0, group=GRP_FLOW)
+
+nfeLenInput = input.int(14, "NFE Length", minval=5, maxval=100, group=GRP_NFE)
+nfeSignalLenInput = input.int(5, "Signal Length", minval=2, maxval=30, group=GRP_NFE)
+obLevelInput = input.float(80.0, "OB Level", minval=50.0, maxval=100.0, step=1.0, group=GRP_NFE)
+midLevelInput = input.float(50.0, "Midline", minval=0.0, maxval=100.0, step=1.0, group=GRP_NFE)
+osLevelInput = input.float(20.0, "OS Level", minval=0.0, maxval=50.0, step=1.0, group=GRP_NFE)
+
+rsiLenInput = input.int(14, "RSI Length", minval=5, maxval=100, group=GRP_RSI)
+rsiKnnWindowInput = input.int(20, "RSI KNN Window", minval=5, maxval=100, group=GRP_RSI)
+
+buyConfluenceInput = input.float(60.0, "Buy Confluence Threshold", minval=0.0, maxval=100.0, step=1.0, group=GRP_SIG)
+sellConfluenceInput = input.float(40.0, "Sell Confluence Threshold", minval=0.0, maxval=100.0, step=1.0, group=GRP_SIG)
+
+showTrendLinesInput = input.bool(true, "Show Up/Down Trend Lines", group=GRP_VIZ)
+showSignalShapesInput = input.bool(true, "Show Strong Buy/Sell Markers", group=GRP_VIZ)
+showLayoutTableInput = input.bool(true, "Show Layout Table", group=GRP_VIZ)
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+clamp(float v, float lo, float hi) =>
+    math.max(lo, math.min(hi, v))
+
+safeDiv(float num, float den, float fallback) =>
+    den != 0 and not na(num) and not na(den) ? num / den : fallback
+
+boolToFloat(bool v) =>
+    v ? 1.0 : 0.0
+
+calcRsiKnnApprox(float src, int window) =>
+    float sumW = 0.0
+    float sumV = 0.0
+    for i = 1 to window
+        float d = math.abs(src - src[i])
+        float w = 1.0 / (d + 0.001)
+        sumW += w
+        sumV += src[i] * w
+    sumW > 0 ? sumV / sumW : src
+
+// ============================================================================
+// CORE SERIES
+// ============================================================================
+[stLine, stDir] = ta.supertrend(trendMultInput, atrLenInput)
+bool upTrend = stDir < 0
+bool downTrend = stDir > 0
+
+bool upTrendBegins = upTrend and downTrend[1]
+bool downTrendBegins = downTrend and upTrend[1]
+
+float upTrendLine = upTrend ? stLine : na
+float downTrendLine = downTrend ? stLine : na
+
+float bodyNorm = safeDiv(close - open, math.max(high - low, syminfo.mintick), 0.0)
+float volMean = ta.sma(volume, vfLenInput)
+float volStd = ta.stdev(volume, vfLenInput)
+float volZ = safeDiv(volume - volMean, volStd, 0.0)
+
+float vfBase = 50.0
+float vfBull = clamp(vfBase + bodyNorm * vfFlowWeightInput + volZ * vfVolWeightInput, 0.0, 100.0)
+float vfBear = clamp(vfBase - bodyNorm * vfFlowWeightInput - volZ * vfVolWeightInput, 0.0, 100.0)
+
+float nfeOscillator = ta.ema(ta.rsi(close, nfeLenInput), 3)
+float signalLine = ta.ema(nfeOscillator, nfeSignalLenInput)
+bool bullCross = ta.crossover(nfeOscillator, signalLine)
+bool bearCross = ta.crossunder(nfeOscillator, signalLine)
+
+float rsiRaw = ta.rsi(close, rsiLenInput)
+float rsiKnn = calcRsiKnnApprox(rsiRaw, rsiKnnWindowInput)
+
+float confluence = clamp((nfeOscillator + ((vfBull - vfBear + 100.0) * 0.5) + rsiKnn) / 3.0, 0.0, 100.0)
+
+float upperWick = high - math.max(open, close)
+float lowerWick = math.min(open, close) - low
+bool exhaustionBull = rsiRaw < osLevelInput and close > open and lowerWick > upperWick
+bool exhaustionBear = rsiRaw > obLevelInput and close < open and upperWick > lowerWick
+
+bool strongBuy = upTrendBegins and bullCross and confluence >= buyConfluenceInput
+bool strongSell = downTrendBegins and bearCross and confluence <= sellConfluenceInput
+
+float buyPrice = strongBuy ? close : na
+float sellPrice = strongSell ? close : na
+
+// ============================================================================
+// PLOTS (VISIBLE)
+// ============================================================================
+plot(showTrendLinesInput ? upTrendLine : na, "Up Trend Line", color=color.new(color.lime, 0), linewidth=2)
+plot(showTrendLinesInput ? downTrendLine : na, "Down Trend Line", color=color.new(color.red, 0), linewidth=2)
+
+plotshape(showSignalShapesInput and strongBuy, "Strong Buy Shape", style=shape.triangleup, location=location.belowbar, color=color.new(color.lime, 0), size=size.tiny, text="BUY")
+plotshape(showSignalShapesInput and strongSell, "Strong Sell Shape", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny, text="SELL")
+
+// ============================================================================
+// LAYOUT EXPORT FIELDS (HIDDEN)
+// These titles match the CSV layout columns.
+// ============================================================================
+plot(boolToFloat(strongBuy), "STRONG BUY", display=display.none)
+plot(boolToFloat(strongSell), "STRONG SELL", display=display.none)
+plot(boolToFloat(exhaustionBull), "Exhaustion Bull", display=display.none)
+plot(boolToFloat(exhaustionBear), "Exhaustion Bear", display=display.none)
+plot(upTrendLine, "Up Trend", display=display.none)
+plot(upTrendBegins ? close : na, "UpTrend Begins", display=display.none)
+plot(buyPrice, "Buy", display=display.none)
+plot(downTrendLine, "Down Trend", display=display.none)
+plot(downTrendBegins ? close : na, "DownTrend Begins", display=display.none)
+plot(sellPrice, "Sell", display=display.none)
+plot(vfBull, "VF Bull", display=display.none)
+plot(vfBear, "VF Bear", display=display.none)
+plot(vfBase, "VF Base", display=display.none)
+plot(nfeOscillator, "NFE Oscillator", display=display.none)
+plot(signalLine, "Signal Line", display=display.none)
+plot(bullCross ? signalLine : na, "Bull Cross", display=display.none)
+plot(bearCross ? signalLine : na, "Bear Cross", display=display.none)
+plot(obLevelInput, "OB Level", display=display.none)
+plot(midLevelInput, "Midline", display=display.none)
+plot(osLevelInput, "OS Level", display=display.none)
+plot(confluence, "Confluence", display=display.none)
+plot(rsiKnn, "RSI KNN", display=display.none)
+plot(50.0, "50 Level", display=display.none)
+
+// ============================================================================
+// TABLE (FULL LAYOUT LIVE READOUT)
+// ============================================================================
+if showLayoutTableInput
+    var table layoutTable = table.new(position.top_right, 2, 18, bgcolor=color.new(color.black, 80), border_width=1)
+    table.cell(layoutTable, 0, 0, "Warbird Layout", text_color=color.white, bgcolor=color.new(color.blue, 0))
+    table.cell(layoutTable, 1, 0, "Value", text_color=color.white, bgcolor=color.new(color.blue, 0))
+
+    table.cell(layoutTable, 0, 1, "STRONG BUY", text_color=color.silver)
+    table.cell(layoutTable, 1, 1, str.tostring(boolToFloat(strongBuy), "#"))
+    table.cell(layoutTable, 0, 2, "STRONG SELL", text_color=color.silver)
+    table.cell(layoutTable, 1, 2, str.tostring(boolToFloat(strongSell), "#"))
+    table.cell(layoutTable, 0, 3, "Exhaustion Bull", text_color=color.silver)
+    table.cell(layoutTable, 1, 3, str.tostring(boolToFloat(exhaustionBull), "#"))
+    table.cell(layoutTable, 0, 4, "Exhaustion Bear", text_color=color.silver)
+    table.cell(layoutTable, 1, 4, str.tostring(boolToFloat(exhaustionBear), "#"))
+    table.cell(layoutTable, 0, 5, "Up Trend", text_color=color.silver)
+    table.cell(layoutTable, 1, 5, str.tostring(upTrendLine, format.mintick))
+    table.cell(layoutTable, 0, 6, "Down Trend", text_color=color.silver)
+    table.cell(layoutTable, 1, 6, str.tostring(downTrendLine, format.mintick))
+    table.cell(layoutTable, 0, 7, "VF Bull / Bear / Base", text_color=color.silver)
+    table.cell(layoutTable, 1, 7, str.tostring(vfBull, "#.00") + " / " + str.tostring(vfBear, "#.00") + " / " + str.tostring(vfBase, "#.00"))
+    table.cell(layoutTable, 0, 8, "NFE / Signal", text_color=color.silver)
+    table.cell(layoutTable, 1, 8, str.tostring(nfeOscillator, "#.00") + " / " + str.tostring(signalLine, "#.00"))
+    table.cell(layoutTable, 0, 9, "Bull / Bear Cross", text_color=color.silver)
+    table.cell(layoutTable, 1, 9, str.tostring(boolToFloat(bullCross), "#") + " / " + str.tostring(boolToFloat(bearCross), "#"))
+    table.cell(layoutTable, 0, 10, "Confluence", text_color=color.silver)
+    table.cell(layoutTable, 1, 10, str.tostring(confluence, "#.00"))
+    table.cell(layoutTable, 0, 11, "RSI KNN", text_color=color.silver)
+    table.cell(layoutTable, 1, 11, str.tostring(rsiKnn, "#.00"))
+    table.cell(layoutTable, 0, 12, "OB / Mid / OS", text_color=color.silver)
+    table.cell(layoutTable, 1, 12, str.tostring(obLevelInput, "#") + " / " + str.tostring(midLevelInput, "#") + " / " + str.tostring(osLevelInput, "#"))
+    table.cell(layoutTable, 0, 13, "Buy Price", text_color=color.silver)
+    table.cell(layoutTable, 1, 13, str.tostring(buyPrice, format.mintick))
+    table.cell(layoutTable, 0, 14, "Sell Price", text_color=color.silver)
+    table.cell(layoutTable, 1, 14, str.tostring(sellPrice, format.mintick))
+    table.cell(layoutTable, 0, 15, "UpTrend Begins", text_color=color.silver)
+    table.cell(layoutTable, 1, 15, str.tostring(boolToFloat(upTrendBegins), "#"))
+    table.cell(layoutTable, 0, 16, "DownTrend Begins", text_color=color.silver)
+    table.cell(layoutTable, 1, 16, str.tostring(boolToFloat(downTrendBegins), "#"))
+    table.cell(layoutTable, 0, 17, "50 Level", text_color=color.silver)
+    table.cell(layoutTable, 1, 17, "50")
