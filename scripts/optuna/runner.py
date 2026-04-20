@@ -1,25 +1,21 @@
 #!/usr/bin/env python3
 """
-SATS Optuna study — Bayesian TPE search over the SATS v1.9.0 parameter space.
+Warbird Optuna runner — shared Bayesian TPE optimizer for all indicators.
 
-Replaces the 6-stage grid sweep (sats_sweep.py) with Optuna TPE, seeded from
-the champion config (PF=1.1748). Stores the study in an SQLite DB for
-resume-safe runs and optuna-dashboard visualization.
-
-Ranking policy:
-  1) win_rate (primary)
-  2) pf (secondary tie-break)
+Accepts a --profile-module argument pointing to any indicator's profile.py.
+Stores studies in data/optuna/<indicator_key>/study.db.
 
 Usage:
-  python scripts/sats/sats_optuna.py --n-trials 300 --study-name sats_2025_wr_pf
-  python scripts/sats/sats_optuna.py --n-trials 100 --study-name sats_2025_wr_pf --resume
+  python scripts/optuna/runner.py --indicator-key warbird_pro_sniper \
+    --profile-module scripts.precision_sniper.precision_sniper_profile \
+    --n-trials 2000 --n-jobs 2 --resume --start 2025-01-01
 
-Default Study DB:
-  - SATS legacy key: data/sats_ps_optuna/study.db (kept for existing dashboard links)
-  - Other indicator keys: data/optuna/<indicator_key>/study.db
+  python scripts/optuna/runner.py --indicator-key sats_ps \
+    --profile-module scripts.sats.sats_profile \
+    --n-trials 300 --study-name sats_2025_wr_pf
 
 Dashboard:
-  optuna-dashboard sqlite:///data/sats_ps_optuna/study.db --port 8080
+  optuna-dashboard sqlite:///data/optuna/<indicator_key>/study.db --port 8080
 """
 
 import sys

@@ -98,4 +98,9 @@ artifacts/
 data/sats_ps_optuna/study.db
 data/sats_ps_optuna/study.db-shm
 data/sats_ps_optuna/study.db-wal
+data/sats_ps_optuna/study.db.bak*
 data/sats_ps_optuna/top*.json
+data/optuna/
+
+# Screenshot artifacts (research/debugging — not source)
+*.png

@@ -1,7 +1,8 @@
 //@version=6
 // ============================================================================
 // WARBIRD TRADING SYSTEM [Layout]
-// SuperTrend contract + fib engine layout surface (table removed by request)
+// SuperTrend direction gate + exhaustion signal family + fib engine
+// PLOT BUDGET: 36 plot + 6 plotshape + 6 alertcondition = 48/64 (16 headroom)
 // ============================================================================
 indicator("Warbird Trading System [Layout]", shorttitle = "WB-Layout", overlay = true, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 100)
 import TradingView/ZigZag/7 as zigzag
@@ -37,16 +38,19 @@ rsiKnnWindowInput   = input.int(20, "RSI KNN Window", minval = 5, maxval = 100, 
 
 buyConfluenceInput  = input.float(60.0, "Buy Confluence Threshold", minval = 0.0, maxval = 100.0, step = 1.0, group = GRP_SIG)
 sellConfluenceInput = input.float(40.0, "Sell Confluence Threshold", minval = 0.0, maxval = 100.0, step = 1.0, group = GRP_SIG)
+exhaustionLookbackInput = input.int(4, "Exhaustion Memory (bars)", minval = 1, maxval = 20, group = GRP_SIG)
+strongCooldownInput     = input.int(6, "Strong Signal Cooldown (bars)", minval = 0, maxval = 50, group = GRP_SIG)
 
 autoTuneZZ = input.bool(true, "Auto-tune ZigZag by Timeframe", group = GRP_FIB,
   tooltip = "ON: 4H+ uses Deviation=4/Depth=20, 1H uses Deviation=3.5/Depth=15, 15m and below uses Deviation=3/Depth=10. Turn OFF to set values manually.")
 fibDeviationManual = input.float(3.0, "ZigZag Deviation (manual)", minval = 0.5, maxval = 10.0, step = 0.5, group = GRP_FIB, tooltip = "Only used when Auto-tune is OFF.")
 fibDepthManual = input.int(10, "ZigZag Depth (manual)", minval = 2, maxval = 50, group = GRP_FIB, tooltip = "Only used when Auto-tune is OFF.")
 
-showTrendLinesInput   = input.bool(true, "Show Up/Down Trend Lines", group = GRP_VIZ)
-showSignalShapesInput = input.bool(true, "Show SuperTrend Buy/Sell Markers", group = GRP_VIZ)
-showStrongSignalsInput = input.bool(true, "Show Strong Buy/Sell Markers", group = GRP_VIZ)
-showStHighlightInput  = input.bool(true, "Show SuperTrend Highlighter", group = GRP_VIZ)
+showTrendLinesInput       = input.bool(true,  "Show Up/Down Trend Lines", group = GRP_VIZ)
+showStFlipMarkersInput    = input.bool(false, "Show ST Flip Markers", group = GRP_VIZ)
+showExhaustionShapesInput = input.bool(true,  "Show Exhaustion Markers", group = GRP_VIZ)
+showStrongSignalsInput    = input.bool(true,  "Show Strong Buy/Sell Markers", group = GRP_VIZ)
+showStHighlightInput      = input.bool(true,  "Show SuperTrend Highlighter", group = GRP_VIZ)
 showFibLevelsInput    = input.bool(true, "Show Fib Levels", group = GRP_VIZ)
 targetLookbackBars    = input.int(55, "Target Line Lookback Bars", minval = 5, maxval = 500, group = GRP_VIZ)
 extendLevelsRight     = input.bool(false, "Extend Levels Right", group = GRP_VIZ)
@@ -100,8 +104,8 @@ bool downTrendBegins = downTrend and trend[1] == 1
 
 float upTrendLine = upTrend ? up : na
 float downTrendLine = downTrend ? dn : na
-float buyPrice = upTrendBegins ? up : na
-float sellPrice = downTrendBegins ? dn : na
+float stFlipBuyPrice = upTrendBegins ? up : na
+float stFlipSellPrice = downTrendBegins ? dn : na
 
 // ============================================================================
 // VF + NFE + RSI KNN
@@ -127,11 +131,38 @@ float confluence = clamp((nfeOscillator + ((vfBull - vfBear + 100.0) * 0.5) + rs
 
 float upperWick = high - math.max(open, close)
 float lowerWick = math.min(open, close) - low
-bool exhaustionBull = rsiRaw < osLevelInput and close > open and lowerWick > upperWick
-bool exhaustionBear = rsiRaw > obLevelInput and close < open and upperWick > lowerWick
 
-bool strongBuy = upTrendBegins and bullCross and confluence >= buyConfluenceInput
-bool strongSell = downTrendBegins and bearCross and confluence <= sellConfluenceInput
+bool exhaustionBullCore = rsiRaw <= osLevelInput and close > open and lowerWick > upperWick
+bool exhaustionBearCore = rsiRaw >= obLevelInput and close < open and upperWick > lowerWick
+
+bool vfBullConfirm = vfBull > vfBear
+bool vfBearConfirm = vfBear > vfBull
+bool rsiBullRecover = ta.rising(rsiRaw, 2)
+bool rsiBearRecover = ta.falling(rsiRaw, 2)
+
+bool exhaustionBull = exhaustionBullCore and vfBullConfirm and rsiBullRecover
+bool exhaustionBear = exhaustionBearCore and vfBearConfirm and rsiBearRecover
+
+int exBullBars = ta.barssince(exhaustionBull)
+int exBearBars = ta.barssince(exhaustionBear)
+bool exBullRecent = exBullBars >= 0 and exBullBars <= exhaustionLookbackInput
+bool exBearRecent = exBearBars >= 0 and exBearBars <= exhaustionLookbackInput
+
+bool strongBuyRaw  = upTrend and exBullRecent and bullCross and confluence >= buyConfluenceInput
+bool strongSellRaw = downTrend and exBearRecent and bearCross and confluence <= sellConfluenceInput
+
+var int lastStrongBuyBar  = na
+var int lastStrongSellBar = na
+bool strongBuy  = strongBuyRaw  and (na(lastStrongBuyBar)  or bar_index - lastStrongBuyBar  > strongCooldownInput)
+bool strongSell = strongSellRaw and (na(lastStrongSellBar) or bar_index - lastStrongSellBar > strongCooldownInput)
+
+if strongBuy
+    lastStrongBuyBar := bar_index
+if strongSell
+    lastStrongSellBar := bar_index
+
+float buyPrice  = strongBuy  ? close : na
+float sellPrice = strongSell ? close : na
 
 // ============================================================================
 // FIB ENGINE (direct extraction pattern from fibs-only.pine)
@@ -315,11 +346,11 @@ stMidPlot = plot(showStHighlightInput ? ohlc4 : na, "ST Mid", style = plot.style
 fill(stMidPlot, upPlot, title = "UpTrend Highlighter", color = showStHighlightInput and upTrend ? color.new(color.green, 90) : color.new(color.white, 100))
 fill(stMidPlot, dnPlot, title = "DownTrend Highlighter", color = showStHighlightInput and downTrend ? color.new(color.red, 90) : color.new(color.white, 100))
 
-plotshape(showSignalShapesInput and upTrendBegins ? upTrendLine : na, "UpTrend Begins", style = shape.circle, location = location.absolute, color = color.new(color.lime, 0), size = size.tiny)
-plotshape(showSignalShapesInput and upTrendBegins ? upTrendLine : na, "Buy", style = shape.labelup, location = location.absolute, color = color.new(color.lime, 0), textcolor = color.white, size = size.tiny, text = "Buy")
+plotshape(showStFlipMarkersInput ? stFlipBuyPrice : na, "ST Flip Up", style = shape.circle, location = location.absolute, color = color.new(color.lime, 0), size = size.tiny)
+plotshape(showStFlipMarkersInput ? stFlipSellPrice : na, "ST Flip Down", style = shape.circle, location = location.absolute, color = color.new(color.red, 0), size = size.tiny)
 
-plotshape(showSignalShapesInput and downTrendBegins ? downTrendLine : na, "DownTrend Begins", style = shape.circle, location = location.absolute, color = color.new(color.red, 0), size = size.tiny)
-plotshape(showSignalShapesInput and downTrendBegins ? downTrendLine : na, "Sell", style = shape.labeldown, location = location.absolute, color = color.new(color.red, 0), textcolor = color.white, size = size.tiny, text = "Sell")
+plotshape(showExhaustionShapesInput and exhaustionBull, "Exhaustion Bull Shape", style = shape.circle, location = location.belowbar, color = color.new(color.aqua, 0), size = size.tiny, text = "EXH")
+plotshape(showExhaustionShapesInput and exhaustionBear, "Exhaustion Bear Shape", style = shape.circle, location = location.abovebar, color = color.new(color.orange, 0), size = size.tiny, text = "EXH")
 
 plotshape(showStrongSignalsInput and strongBuy, "Strong Buy Shape", style = shape.triangleup, location = location.belowbar, color = color.new(color.lime, 0), size = size.tiny, text = "BUY")
 plotshape(showStrongSignalsInput and strongSell, "Strong Sell Shape", style = shape.triangledown, location = location.abovebar, color = color.new(color.red, 0), size = size.tiny, text = "SELL")
@@ -327,24 +358,26 @@ plotshape(showStrongSignalsInput and strongSell, "Strong Sell Shape", style = sh
 // ============================================================================
 // ALERTS (global scope)
 // ============================================================================
-alertcondition(upTrendBegins, "SuperTrend Buy", "SuperTrend Buy")
-alertcondition(downTrendBegins, "SuperTrend Sell", "SuperTrend Sell")
-alertcondition(strongBuy, "Strong Buy", "Strong Buy")
-alertcondition(strongSell, "Strong Sell", "Strong Sell")
+alertcondition(upTrendBegins,   "ST Flip Up",        "SuperTrend flipped bullish")
+alertcondition(downTrendBegins, "ST Flip Down",      "SuperTrend flipped bearish")
+alertcondition(exhaustionBull,  "Exhaustion Bull",   "Bull exhaustion/reversal context")
+alertcondition(exhaustionBear,  "Exhaustion Bear",   "Bear exhaustion/reversal context")
+alertcondition(strongBuy,       "Strong Buy",        "Strong Buy (exhaustion + recovery + ST gate)")
+alertcondition(strongSell,      "Strong Sell",       "Strong Sell (exhaustion + recovery + ST gate)")
 
 // ============================================================================
 // LAYOUT EXPORT FIELDS (HIDDEN)
 // ============================================================================
 plot(boolToFloat(strongBuy), "STRONG BUY", display = display.none)
 plot(boolToFloat(strongSell), "STRONG SELL", display = display.none)
-plot(boolToFloat(exhaustionBull), "Exhaustion Bull", display = display.none)
-plot(boolToFloat(exhaustionBear), "Exhaustion Bear", display = display.none)
+plot(boolToFloat(exhaustionBullCore), "Exhaustion Bull Raw", display = display.none)
+plot(boolToFloat(exhaustionBearCore), "Exhaustion Bear Raw", display = display.none)
 
 plot(upTrendLine, "Up Trend", display = display.none)
-plot(upTrendBegins ? upTrendLine : na, "UpTrend Begins", display = display.none)
+plot(boolToFloat(upTrendBegins), "UpTrend Begins", display = display.none)
 plot(buyPrice, "Buy", display = display.none)
 plot(downTrendLine, "Down Trend", display = display.none)
-plot(downTrendBegins ? downTrendLine : na, "DownTrend Begins", display = display.none)
+plot(boolToFloat(downTrendBegins), "DownTrend Begins", display = display.none)
 plot(sellPrice, "Sell", display = display.none)
 
 plot(vfBull, "VF Bull", display = display.none)
@@ -352,8 +385,8 @@ plot(vfBear, "VF Bear", display = display.none)
 plot(vfBase, "VF Base", display = display.none)
 plot(nfeOscillator, "NFE Oscillator", display = display.none)
 plot(signalLine, "Signal Line", display = display.none)
-plot(bullCross ? signalLine : na, "Bull Cross", display = display.none)
-plot(bearCross ? signalLine : na, "Bear Cross", display = display.none)
+plot(boolToFloat(bullCross), "Bull Cross", display = display.none)
+plot(boolToFloat(bearCross), "Bear Cross", display = display.none)
 plot(obLevelInput, "OB Level", display = display.none)
 plot(midLevelInput, "Midline", display = display.none)
 plot(osLevelInput, "OS Level", display = display.none)
@@ -370,3 +403,8 @@ plot(pT2, "pT2", display = display.none)
 plot(pT3, "pT3", display = display.none)
 plot(pT4, "pT4", display = display.none)
 plot(pT5, "pT5", display = display.none)
+
+plot(boolToFloat(upTrend),         "ST Bull",                    display = display.none)
+plot(boolToFloat(downTrend),       "ST Bear",                    display = display.none)
+plot(boolToFloat(exhaustionBull),  "Exhaustion Bull Confirmed",  display = display.none)
+plot(boolToFloat(exhaustionBear),  "Exhaustion Bear Confirmed",  display = display.none)

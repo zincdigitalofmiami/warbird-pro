@@ -32,6 +32,7 @@
 
   <key>ProgramArguments</key>
   <array>
+    <string>/Volumes/Satechi Hub/warbird-pro/.venv/bin/python3.12</string>
     <string>/Volumes/Satechi Hub/warbird-pro/.venv/bin/optuna-dashboard</string>
     <string>sqlite:////Volumes/Satechi Hub/warbird-pro/data/sats_ps_optuna/study.db</string>
     <string>--port</string>
