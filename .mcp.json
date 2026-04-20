@@ -22,6 +22,15 @@
       "type": "stdio",
       "command": "/opt/homebrew/bin/node",
       "args": ["/Volumes/Satechi Hub/warbird-pro/.tradingview-mcp/src/server.js"]
+    },
+    "postgres-warbird": {
+      "type": "stdio",
+      "command": "/opt/homebrew/bin/npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://zincdigital@127.0.0.1:5432/warbird"
+      ]
     }
   }
 }
