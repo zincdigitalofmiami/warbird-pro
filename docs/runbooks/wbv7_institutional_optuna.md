@@ -61,6 +61,7 @@ python3 scripts/optuna/runner.py \
   --indicator-key v7_warbird_institutional \
   --profile-module scripts.optuna.v7_warbird_institutional_profile \
   --study-name v7_warbird_institutional_wr_pf \
+  --db data/optuna/warbird.db \
   --n-trials 200 \
   --start 2020-01-01
 ```
@@ -75,6 +76,7 @@ python3 scripts/optuna/runner.py \
   --indicator-key v7_warbird_institutional \
   --profile-module scripts.optuna.v7_warbird_institutional_profile \
   --study-name v7_warbird_institutional_wr_pf \
+  --db data/optuna/warbird.db \
   --n-trials 100 \
   --start 2020-01-01 \
   --resume
@@ -99,13 +101,10 @@ for t in top5:
 
 ### Dashboard
 
-```bash
-optuna-dashboard \
-  sqlite:////Volumes/Satechi\ Hub/warbird-pro/data/optuna/v7_warbird_institutional/study.db \
-  --port 8081
-```
+All studies share `data/optuna/warbird.db`.  The persistent agent at port 8080 serves
+this DB automatically — no separate launch needed.
 
-Open: http://127.0.0.1:8081
+Open: http://localhost:8080/dashboard/
 
 ---
 
