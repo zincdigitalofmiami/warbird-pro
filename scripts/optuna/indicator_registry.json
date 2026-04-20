@@ -93,7 +93,15 @@
     "category": "chart-core",
     "pine_file": "indicators/v7-warbird-institutional.pine",
     "profile_module": "scripts.optuna.v7_warbird_institutional_profile",
-    "default_study_name": "v7_warbird_institutional_wr_pf"
+    "default_study_name": "v7_warbird_institutional_wr_pf",
+    "symbol": "MES1!",
+    "timeframe": "15",
+    "data_floor": "2020-01-01",
+    "label_column": "ml_last_exit_outcome",
+    "output_budget": "56/64",
+    "frozen_params": ["fibDeviationManual", "fibDepthManual", "fibThresholdFloorPct", "minFibRangeAtr", "autoTuneZZ"],
+    "tv_only_params": ["retestBars", "fibConfluenceTolPct", "footprintTicksPerRow", "footprintVaPercent", "footprintImbalancePercent", "zeroPrintVolRatio", "stackedImbalanceRows", "exhaustionZLen", "exhaustionZThreshold", "exhaustionLevelAtrTol"],
+    "notes": "Fib geometry frozen per 15m fib-owner freeze (CLAUDE.md 2026-04-14). Objective: composite 0.40xPF + 0.35xWR + 0.25xConsistency."
   },
   {
     "key": "v7_warbird_strategy",

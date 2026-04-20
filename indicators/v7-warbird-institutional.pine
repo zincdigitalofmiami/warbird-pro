@@ -1,6 +1,6 @@
 // This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © Kirk / ZINC Digital
-// Warbird v7 Institutional — MES Fib Structure + AG Contract Surface
+// Warbird Pro Optuna — MES Fib Structure + AG Contract Surface
 // Base: v6-warbird-complete.pine (2026-03-26)
 // Upgrade: v6 migration + 5 target extensions + AG hidden export surface
 // Date: 2026-04-13
@@ -21,11 +21,11 @@
 // Footprint (chart):    request.footprint()              = 1 call
 // TOTAL:                                                 = 5 request.* paths
 //
-// PLOT BUDGET: 51 plot + 2 plotshape + 3 alertcondition = 56/64 (8 headroom)
+// PLOT BUDGET: 51 plot + 2 plotshape + 3 alertcondition = 56/64 (8 headroom); 9 label.new slots (var+entry) — outside 64-slot counter
 // TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed.
 // Momentum Oscillators (5 plots: ml_vf_bull, ml_vf_bear, ml_nfe, ml_rsi_knn, ml_confluence) added 2026-04-20.
 //@version=6
-indicator("Warbird v7 Institutional", shorttitle="WB v7", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100)
+indicator("Warbird Pro Optuna", shorttitle="WB Optuna", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100)
 import TradingView/ZigZag/7 as zigzag
 
 //=====================
@@ -1067,6 +1067,14 @@ var line lineT5    = line.new(bar_index, close, bar_index, close, color=color(na
 
 var box zoneBox = box.new(bar_index, close, bar_index, close, bgcolor=color(na), border_color=color(na))
 
+var label _lblEntry = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(color.white, 20), size=size.small)
+var label _lblSl    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_STOP, 20),   size=size.small)
+var label _lblT1    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_TARGET, 20),  size=size.small)
+var label _lblT2    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_TARGET, 20),  size=size.small)
+var label _lblT3    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_TARGET, 20),  size=size.small)
+var label _lblT4    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_TARGET, 20),  size=size.small)
+var label _lblT5    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_TARGET, 20),  size=size.small)
+
 int fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
 int anchorLeftBar = int(math.max(0, na(anchorHighBar) or na(anchorLowBar) ? fallbackLeftBar : math.min(anchorHighBar, anchorLowBar)))
 int drawLeftBar = useConfluenceAnchorSpan ? anchorLeftBar : fallbackLeftBar
@@ -1098,6 +1106,27 @@ drawAnchoredLine(line1786,  true, p1786,  COLOR_RETRACEMENT,         WIDTH_RETRA
 drawAnchoredLine(lineT3,    true, pT3,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
 drawAnchoredLine(lineT4,    true, pT4,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
 drawAnchoredLine(lineT5,    true, pT5,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
+
+if barstate.islast and isValid and not na(pT1)
+    label.set_xy(_lblEntry, bar_index + 1, entryLevel)
+    label.set_text(_lblEntry, "ENTRY " + str.tostring(entryLevel, format.mintick))
+    label.set_xy(_lblSl, bar_index + 1, slLevel)
+    label.set_text(_lblSl, "SL " + str.tostring(slLevel, format.mintick))
+    label.set_xy(_lblT1, bar_index + 1, pT1)
+    label.set_text(_lblT1, "T1 " + str.tostring(pT1, format.mintick))
+    label.set_xy(_lblT2, bar_index + 1, pT2)
+    label.set_text(_lblT2, "T2 " + str.tostring(pT2, format.mintick))
+    label.set_xy(_lblT3, bar_index + 1, pT3)
+    label.set_text(_lblT3, "T3 " + str.tostring(pT3, format.mintick))
+    label.set_xy(_lblT4, bar_index + 1, pT4)
+    label.set_text(_lblT4, "T4 " + str.tostring(pT4, format.mintick))
+    label.set_xy(_lblT5, bar_index + 1, pT5)
+    label.set_text(_lblT5, "T5 " + str.tostring(pT5, format.mintick))
+
+if entryLongTrigger
+    label.new(bar_index, entryLevel, "▲", style=label.style_label_up, color=color.new(COLOR_TARGET, 20), textcolor=color.white, size=size.small, force_overlay=true)
+if entryShortTrigger
+    label.new(bar_index, entryLevel, "▼", style=label.style_label_down, color=color.new(COLOR_STOP, 20), textcolor=color.white, size=size.small, force_overlay=true)
 
 plotshape(showBearishExhaustion, "Bearish Exhaustion", shape.diamond, location.abovebar, bearishExhaustionColor, 0, "", color.white, true, size.small, force_overlay=true)
 plotshape(showBullishExhaustion, "Bullish Exhaustion", shape.diamond, location.belowbar, bullishExhaustionColor, 0, "", color.white, true, size.small, force_overlay=true)
