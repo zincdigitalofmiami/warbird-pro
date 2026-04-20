@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Warbird Optuna Hub (card UI + per-indicator child dashboards)
+
+  Install:
+    cp "/Volumes/Satechi Hub/warbird-pro/scripts/optuna/warbird-optuna-hub.plist" \
+       ~/Library/LaunchAgents/com.warbird.optuna-hub.plist
+    launchctl load ~/Library/LaunchAgents/com.warbird.optuna-hub.plist
+
+  Open:
+    http://127.0.0.1:8090
+
+  Manage:
+    launchctl unload ~/Library/LaunchAgents/com.warbird.optuna-hub.plist
+    launchctl load   ~/Library/LaunchAgents/com.warbird.optuna-hub.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.warbird.optuna-hub</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Volumes/Satechi Hub/warbird-pro/.venv/bin/python</string>
+    <string>/Volumes/Satechi Hub/warbird-pro/scripts/optuna/warbird_optuna_hub.py</string>
+    <string>--host</string>
+    <string>127.0.0.1</string>
+    <string>--port</string>
+    <string>8090</string>
+    <string>--child-port-start</string>
+    <string>8100</string>
+  </array>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>WorkingDirectory</key>
+  <string>/Volumes/Satechi Hub/warbird-pro</string>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/warbird-optuna-hub.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/warbird-optuna-hub.err</string>
+
+  <key>WatchPaths</key>
+  <array>
+    <string>/Volumes/Satechi Hub/warbird-pro/data/optuna</string>
+    <string>/Volumes/Satechi Hub/warbird-pro/data/sats_ps_optuna</string>
+  </array>
+</dict>
+</plist>

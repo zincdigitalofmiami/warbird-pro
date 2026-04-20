@@ -1,0 +1,170 @@
+[
+  {
+    "key": "warbird_pro_sniper",
+    "name": "Warbird Pro Sniper",
+    "surface_type": "strategy",
+    "category": "chart-core",
+    "pine_file": "indicators/v9-warbird-trading-system-layout.pine",
+    "notes": "Precision Sniper signal engine — isolated study, standalone DB",
+    "storage_mode": "standard",
+    "profile_module": "scripts.precision_sniper.precision_sniper_profile",
+    "default_study_name": "warbird_pro_sniper",
+    "topn_filename": "top5.json"
+  },
+  {
+    "key": "sats_ps",
+    "name": "SATS Prescreen",
+    "surface_type": "strategy",
+    "category": "chart-core",
+    "pine_file": "indicators/v8-warbird-prescreen.pine",
+    "notes": "Legacy SATS path: data/sats_ps_optuna",
+    "storage_mode": "legacy",
+    "profile_builtin": "sats_v1",
+    "default_study_name": "sats_2025_wr_pf",
+    "topn_filename": "top5.json"
+  },
+  {
+    "key": "wb7",
+    "name": "WB7 Institutional",
+    "surface_type": "indicator",
+    "category": "chart-core",
+    "pine_file": "indicators/v7-warbird-institutional.pine",
+    "profile_module": "scripts.optuna.wb7_profile",
+    "default_study_name": "wb7_wr_pf"
+  },
+  {
+    "key": "supertrend",
+    "name": "SuperTrend Gate",
+    "surface_type": "indicator",
+    "category": "chart-core",
+    "pine_file": "indicators/v9-warbird-trading-system-layout.pine",
+    "profile_module": "scripts.optuna.supertrend_profile",
+    "default_study_name": "supertrend_wr_pf"
+  },
+  {
+    "key": "qfp",
+    "name": "QFP",
+    "surface_type": "indicator",
+    "category": "chart-core",
+    "pine_file": "indicators/v9-warbird-trading-system-layout.pine",
+    "profile_module": "scripts.optuna.qfp_profile",
+    "default_study_name": "qfp_wr_pf"
+  },
+  {
+    "key": "v9_warbird_trading_system_layout",
+    "name": "Warbird Trading System Layout (v9)",
+    "surface_type": "strategy",
+    "category": "chart-core",
+    "pine_file": "indicators/v9-warbird-trading-system-layout.pine",
+    "profile_module": "scripts.optuna.v9_warbird_trading_system_layout_profile",
+    "default_study_name": "v9_warbird_trading_system_layout_wr_pf"
+  },
+  {
+    "key": "v8_warbird_live",
+    "name": "Warbird Live (v8)",
+    "surface_type": "indicator",
+    "category": "chart-core",
+    "pine_file": "indicators/v8-warbird-live.pine",
+    "profile_module": "scripts.optuna.v8_warbird_live_profile",
+    "default_study_name": "v8_warbird_live_wr_pf"
+  },
+  {
+    "key": "v8_warbird_prescreen",
+    "name": "Warbird Prescreen (v8)",
+    "surface_type": "strategy",
+    "category": "chart-core",
+    "pine_file": "indicators/v8-warbird-prescreen.pine",
+    "profile_module": "scripts.optuna.v8_warbird_prescreen_profile",
+    "default_study_name": "v8_warbird_prescreen_wr_pf"
+  },
+  {
+    "key": "v8_sats_fib_gate",
+    "name": "SATS Fib Gate (v8)",
+    "surface_type": "strategy",
+    "category": "chart-core",
+    "pine_file": "indicators/v8-sats-fib-gate.pine",
+    "profile_module": "scripts.optuna.v8_sats_fib_gate_profile",
+    "default_study_name": "v8_sats_fib_gate_wr_pf"
+  },
+  {
+    "key": "v7_warbird_institutional",
+    "name": "Warbird Institutional (v7)",
+    "surface_type": "indicator",
+    "category": "chart-core",
+    "pine_file": "indicators/v7-warbird-institutional.pine",
+    "profile_module": "scripts.optuna.v7_warbird_institutional_profile",
+    "default_study_name": "v7_warbird_institutional_wr_pf"
+  },
+  {
+    "key": "v7_warbird_strategy",
+    "name": "Warbird Strategy (v7)",
+    "surface_type": "strategy",
+    "category": "chart-core",
+    "pine_file": "indicators/v7-warbird-strategy.pine",
+    "profile_module": "scripts.optuna.v7_warbird_strategy_profile",
+    "default_study_name": "v7_warbird_strategy_wr_pf"
+  },
+  {
+    "key": "v6_warbird_complete",
+    "name": "Warbird Complete (v6)",
+    "surface_type": "indicator",
+    "category": "legacy",
+    "pine_file": "indicators/v6-warbird-complete.pine",
+    "profile_module": "scripts.optuna.v6_warbird_complete_profile",
+    "default_study_name": "v6_warbird_complete_wr_pf"
+  },
+  {
+    "key": "v6_warbird_complete_strategy",
+    "name": "Warbird Complete Strategy (v6)",
+    "surface_type": "strategy",
+    "category": "legacy",
+    "pine_file": "indicators/v6-warbird-complete-strategy.pine",
+    "profile_module": "scripts.optuna.v6_warbird_complete_strategy_profile",
+    "default_study_name": "v6_warbird_complete_strategy_wr_pf"
+  },
+  {
+    "key": "v2_warbird_unified",
+    "name": "Warbird Unified (v2)",
+    "surface_type": "indicator",
+    "category": "legacy",
+    "pine_file": "indicators/v2-warbird-unified.pine",
+    "profile_module": "scripts.optuna.v2_warbird_unified_profile",
+    "default_study_name": "v2_warbird_unified_wr_pf"
+  },
+  {
+    "key": "fibs_only",
+    "name": "Fibs Only",
+    "surface_type": "indicator",
+    "category": "experimental",
+    "pine_file": "indicators/fibs-only.pine",
+    "profile_module": "scripts.optuna.fibs_only_profile",
+    "default_study_name": "fibs_only_wr_pf"
+  },
+  {
+    "key": "nfe_ml",
+    "name": "NFE ML",
+    "surface_type": "indicator",
+    "category": "lower-pane",
+    "pine_file": "indicators/warbird-oscillator-matrix.pine",
+    "profile_module": "scripts.optuna.nfe_ml_profile",
+    "default_study_name": "nfe_ml_wr_pf"
+  },
+  {
+    "key": "ml_rsi_bullvision",
+    "name": "Machine Learning RSI (BullVision)",
+    "surface_type": "indicator",
+    "category": "lower-pane",
+    "pine_file": "indicators/warbird-oscillator-matrix.pine",
+    "profile_module": "scripts.optuna.ml_rsi_bullvision_profile",
+    "default_study_name": "ml_rsi_bullvision_wr_pf"
+  },
+  {
+    "key": "warbird_oscillator_matrix",
+    "name": "Warbird Oscillator Matrix",
+    "surface_type": "indicator",
+    "category": "lower-pane",
+    "pine_file": "indicators/warbird-oscillator-matrix.pine",
+    "profile_module": "scripts.optuna.warbird_oscillator_matrix_profile",
+    "default_study_name": "warbird_oscillator_matrix_wr_pf"
+  }
+]
