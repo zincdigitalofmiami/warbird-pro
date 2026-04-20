@@ -1,42 +1,57 @@
 //@version=6
 // ============================================================================
 // WARBIRD TRADING SYSTEM [Layout]
-// Full output layout scaffold based on "warbird stack april 19 2026.csv"
+// SuperTrend contract + fib engine layout surface (table removed by request)
 // ============================================================================
-indicator("Warbird Trading System [Layout]", shorttitle="WB-Layout", overlay=true, max_labels_count=500, max_lines_count=500)
+indicator("Warbird Trading System [Layout]", shorttitle = "WB-Layout", overlay = true, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 100)
+import TradingView/ZigZag/7 as zigzag
 
 // ============================================================================
 // INPUTS
 // ============================================================================
 GRP_TREND = "Trend Engine"
-GRP_FLOW = "Volume Flow (VF)"
-GRP_NFE = "NFE Oscillator"
-GRP_RSI = "RSI KNN"
-GRP_SIG = "Signal Rules"
-GRP_VIZ = "Visual"
+GRP_FLOW  = "Volume Flow (VF)"
+GRP_NFE   = "NFE Oscillator"
+GRP_RSI   = "RSI KNN"
+GRP_SIG   = "Signal Rules"
+GRP_FIB   = "Fibonacci Engine"
+GRP_VIZ   = "Visual"
 
-atrLenInput = input.int(14, "ATR Length", minval=5, maxval=100, group=GRP_TREND)
-trendMultInput = input.float(2.0, "Trend Factor", minval=0.5, maxval=10.0, step=0.1, group=GRP_TREND)
+stSrcInput       = input.source(hl2, "SuperTrend Source", group = GRP_TREND)
+atrLenInput      = input.int(14, "ATR Length", minval = 5, maxval = 100, group = GRP_TREND)
+trendMultInput   = input.float(2.0, "Trend Factor", minval = 0.5, maxval = 10.0, step = 0.1, group = GRP_TREND)
+changeAtrInput   = input.bool(true, "Use ATR (true) / SMA(TR) (false)", group = GRP_TREND)
 
-vfLenInput = input.int(20, "VF Window", minval=5, maxval=100, group=GRP_FLOW)
-vfFlowWeightInput = input.float(25.0, "VF Candle Weight", minval=5.0, maxval=60.0, step=1.0, group=GRP_FLOW)
-vfVolWeightInput = input.float(10.0, "VF Volume Weight", minval=1.0, maxval=30.0, step=1.0, group=GRP_FLOW)
+vfLenInput          = input.int(20, "VF Window", minval = 5, maxval = 100, group = GRP_FLOW)
+vfFlowWeightInput   = input.float(25.0, "VF Candle Weight", minval = 5.0, maxval = 60.0, step = 1.0, group = GRP_FLOW)
+vfVolWeightInput    = input.float(10.0, "VF Volume Weight", minval = 1.0, maxval = 30.0, step = 1.0, group = GRP_FLOW)
 
-nfeLenInput = input.int(14, "NFE Length", minval=5, maxval=100, group=GRP_NFE)
-nfeSignalLenInput = input.int(5, "Signal Length", minval=2, maxval=30, group=GRP_NFE)
-obLevelInput = input.float(80.0, "OB Level", minval=50.0, maxval=100.0, step=1.0, group=GRP_NFE)
-midLevelInput = input.float(50.0, "Midline", minval=0.0, maxval=100.0, step=1.0, group=GRP_NFE)
-osLevelInput = input.float(20.0, "OS Level", minval=0.0, maxval=50.0, step=1.0, group=GRP_NFE)
+nfeLenInput         = input.int(14, "NFE Length", minval = 5, maxval = 100, group = GRP_NFE)
+nfeSignalLenInput   = input.int(5, "Signal Length", minval = 2, maxval = 30, group = GRP_NFE)
+obLevelInput        = input.float(80.0, "OB Level", minval = 50.0, maxval = 100.0, step = 1.0, group = GRP_NFE)
+midLevelInput       = input.float(50.0, "Midline", minval = 0.0, maxval = 100.0, step = 1.0, group = GRP_NFE)
+osLevelInput        = input.float(20.0, "OS Level", minval = 0.0, maxval = 50.0, step = 1.0, group = GRP_NFE)
 
-rsiLenInput = input.int(14, "RSI Length", minval=5, maxval=100, group=GRP_RSI)
-rsiKnnWindowInput = input.int(20, "RSI KNN Window", minval=5, maxval=100, group=GRP_RSI)
+rsiLenInput         = input.int(14, "RSI Length", minval = 5, maxval = 100, group = GRP_RSI)
+rsiKnnWindowInput   = input.int(20, "RSI KNN Window", minval = 5, maxval = 100, group = GRP_RSI)
 
-buyConfluenceInput = input.float(60.0, "Buy Confluence Threshold", minval=0.0, maxval=100.0, step=1.0, group=GRP_SIG)
-sellConfluenceInput = input.float(40.0, "Sell Confluence Threshold", minval=0.0, maxval=100.0, step=1.0, group=GRP_SIG)
+buyConfluenceInput  = input.float(60.0, "Buy Confluence Threshold", minval = 0.0, maxval = 100.0, step = 1.0, group = GRP_SIG)
+sellConfluenceInput = input.float(40.0, "Sell Confluence Threshold", minval = 0.0, maxval = 100.0, step = 1.0, group = GRP_SIG)
 
-showTrendLinesInput = input.bool(true, "Show Up/Down Trend Lines", group=GRP_VIZ)
-showSignalShapesInput = input.bool(true, "Show Strong Buy/Sell Markers", group=GRP_VIZ)
-showLayoutTableInput = input.bool(true, "Show Layout Table", group=GRP_VIZ)
+autoTuneZZ = input.bool(true, "Auto-tune ZigZag by Timeframe", group = GRP_FIB,
+  tooltip = "ON: 4H+ uses Deviation=4/Depth=20, 1H uses Deviation=3.5/Depth=15, 15m and below uses Deviation=3/Depth=10. Turn OFF to set values manually.")
+fibDeviationManual = input.float(3.0, "ZigZag Deviation (manual)", minval = 0.5, maxval = 10.0, step = 0.5, group = GRP_FIB, tooltip = "Only used when Auto-tune is OFF.")
+fibDepthManual = input.int(10, "ZigZag Depth (manual)", minval = 2, maxval = 50, group = GRP_FIB, tooltip = "Only used when Auto-tune is OFF.")
+
+showTrendLinesInput   = input.bool(true, "Show Up/Down Trend Lines", group = GRP_VIZ)
+showSignalShapesInput = input.bool(true, "Show SuperTrend Buy/Sell Markers", group = GRP_VIZ)
+showStrongSignalsInput = input.bool(true, "Show Strong Buy/Sell Markers", group = GRP_VIZ)
+showStHighlightInput  = input.bool(true, "Show SuperTrend Highlighter", group = GRP_VIZ)
+showFibLevelsInput    = input.bool(true, "Show Fib Levels", group = GRP_VIZ)
+targetLookbackBars    = input.int(55, "Target Line Lookback Bars", minval = 5, maxval = 500, group = GRP_VIZ)
+extendLevelsRight     = input.bool(false, "Extend Levels Right", group = GRP_VIZ)
+useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window", group = GRP_VIZ)
+showZoneFill          = input.bool(true, "Show .382-.618 Zone Fill", group = GRP_VIZ)
 
 // ============================================================================
 // HELPERS
@@ -61,18 +76,36 @@ calcRsiKnnApprox(float src, int window) =>
     sumW > 0 ? sumV / sumW : src
 
 // ============================================================================
-// CORE SERIES
+// SUPERTREND (behavior contract port)
 // ============================================================================
-[stLine, stDir] = ta.supertrend(trendMultInput, atrLenInput)
-bool upTrend = stDir < 0
-bool downTrend = stDir > 0
+float atrSma = ta.sma(ta.tr, atrLenInput)
+float atr = changeAtrInput ? ta.atr(atrLenInput) : atrSma
 
-bool upTrendBegins = upTrend and downTrend[1]
-bool downTrendBegins = downTrend and upTrend[1]
+float up = stSrcInput - trendMultInput * atr
+float up1 = nz(up[1], up)
+up := close[1] > up1 ? math.max(up, up1) : up
 
-float upTrendLine = upTrend ? stLine : na
-float downTrendLine = downTrend ? stLine : na
+float dn = stSrcInput + trendMultInput * atr
+float dn1 = nz(dn[1], dn)
+dn := close[1] < dn1 ? math.min(dn, dn1) : dn
 
+var int trend = 1
+trend := nz(trend[1], trend)
+trend := trend == -1 and close > dn1 ? 1 : trend == 1 and close < up1 ? -1 : trend
+
+bool upTrend = trend == 1
+bool downTrend = trend == -1
+bool upTrendBegins = upTrend and trend[1] == -1
+bool downTrendBegins = downTrend and trend[1] == 1
+
+float upTrendLine = upTrend ? up : na
+float downTrendLine = downTrend ? dn : na
+float buyPrice = upTrendBegins ? up : na
+float sellPrice = downTrendBegins ? dn : na
+
+// ============================================================================
+// VF + NFE + RSI KNN
+// ============================================================================
 float bodyNorm = safeDiv(close - open, math.max(high - low, syminfo.mintick), 0.0)
 float volMean = ta.sma(volume, vfLenInput)
 float volStd = ta.stdev(volume, vfLenInput)
@@ -100,85 +133,240 @@ bool exhaustionBear = rsiRaw > obLevelInput and close < open and upperWick > low
 bool strongBuy = upTrendBegins and bullCross and confluence >= buyConfluenceInput
 bool strongSell = downTrendBegins and bearCross and confluence <= sellConfluenceInput
 
-float buyPrice = strongBuy ? close : na
-float sellPrice = strongSell ? close : na
+// ============================================================================
+// FIB ENGINE (direct extraction pattern from fibs-only.pine)
+// ============================================================================
+int tfSec = timeframe.in_seconds()
+float fibDeviation = autoTuneZZ ? (tfSec >= 14400 ? 4.0 : tfSec >= 3600 ? 3.5 : 3.0) : fibDeviationManual
+int fibDepth = autoTuneZZ ? (tfSec >= 14400 ? 20 : tfSec >= 3600 ? 15 : 10) : fibDepthManual
+
+float FIB_ZERO  = 0.0
+float FIB_236   = 0.236
+float FIB_382   = 0.382
+float FIB_PIVOT = 0.5
+float FIB_618   = 0.618
+float FIB_786   = 0.786
+float FIB_ONE   = 1.0
+float FIB_T1    = 1.236
+float FIB_W1382 = 1.382
+float FIB_W150  = 1.5
+float FIB_T2    = 1.618
+float FIB_W1786 = 1.786
+float FIB_T3    = 2.0
+float FIB_T4    = 2.236
+float FIB_T5    = 2.618
+
+color COLOR_ANCHOR = #FFFFFF
+color COLOR_RETRACEMENT = #808080
+color COLOR_RETRACEMENT_ORANGE = #E65100
+color COLOR_PIVOT = #FF9800
+color COLOR_TARGET = #4CAF50
+
+int WIDTH_ANCHOR = 1
+int WIDTH_RETRACEMENT = 1
+int WIDTH_PIVOT = 2
+int WIDTH_TARGET = 2
+
+fibZzUpdate() =>
+    var fibSettings = zigzag.Settings.new(fibDeviation, fibDepth, color(na), false, false, false, false, "Absolute", true)
+    var zigzag.ZigZag fibZZ = zigzag.newInstance(fibSettings)
+    var zigzag.Pivot lastPvt = na
+    fibSettings.devThreshold := ta.atr(10) / close * 100 * fibDeviation
+    bool newPivot = false
+    float pivotHighPrice = na
+    float pivotLowPrice = na
+    int pivotHighBar = na
+    int pivotLowBar = na
+    int swingDir = 0
+    if fibZZ.update()
+        lastPvt := fibZZ.lastPivot()
+        if not na(lastPvt)
+            newPivot := true
+            float startP = lastPvt.start.price
+            float endP = lastPvt.end.price
+            pivotHighPrice := math.max(startP, endP)
+            pivotLowPrice := math.min(startP, endP)
+            swingDir := endP > startP ? 1 : endP < startP ? -1 : 0
+            if startP >= endP
+                pivotHighBar := lastPvt.start.index
+                pivotLowBar := lastPvt.end.index
+            else
+                pivotHighBar := lastPvt.end.index
+                pivotLowBar := lastPvt.start.index
+    [newPivot, pivotHighPrice, pivotLowPrice, pivotHighBar, pivotLowBar, swingDir]
+
+[zzNewPivot, zzHighPrice, zzLowPrice, zzHighBar, zzLowBar, zzSwingDir] = fibZzUpdate()
+
+var float fibAnchorHigh = na
+var float fibAnchorLow = na
+var int anchorHighBar = na
+var int anchorLowBar = na
+
+if zzNewPivot
+    fibAnchorHigh := zzHighPrice
+    fibAnchorLow := zzLowPrice
+    anchorHighBar := zzHighBar
+    anchorLowBar := zzLowBar
+
+float fibRange = fibAnchorHigh - fibAnchorLow
+float fibMidpoint = fibAnchorLow + fibRange * 0.5
+float hystBand = fibRange * 0.02
+
+var bool fibBull = true
+if fibRange > 0
+    if close >= fibMidpoint + hystBand
+        fibBull := true
+    else if close <= fibMidpoint - hystBand
+        fibBull := false
+else
+    fibBull := true
+
+float fibBase = fibBull ? fibAnchorLow : fibAnchorHigh
+float fibDir = fibBull ? 1.0 : -1.0
+fibPrice(float ratio) =>
+    fibRange <= 0 ? na : fibBase + fibDir * fibRange * ratio
+
+float pZero = fibPrice(FIB_ZERO)
+float p236 = fibPrice(FIB_236)
+float p382 = fibPrice(FIB_382)
+float pPivot = fibPrice(FIB_PIVOT)
+float p618 = fibPrice(FIB_618)
+float p786 = fibPrice(FIB_786)
+float pOne = fibPrice(FIB_ONE)
+float pT1 = fibPrice(FIB_T1)
+float p1382 = fibPrice(FIB_W1382)
+float p150 = fibPrice(FIB_W150)
+float pT2 = fibPrice(FIB_T2)
+float p1786 = fibPrice(FIB_W1786)
+float pT3 = fibPrice(FIB_T3)
+float pT4 = fibPrice(FIB_T4)
+float pT5 = fibPrice(FIB_T5)
+
+float zoneFillUpper = math.max(p382, p618)
+float zoneFillLower = math.min(p382, p618)
+
+var line lineZero = line.new(bar_index, close, bar_index, close, color = color(na), width = 1)
+var line line236 = line.new(bar_index, close, bar_index, close, color = color(na), width = 1)
+var line line382 = line.new(bar_index, close, bar_index, close, color = color(na), width = 1)
+var line linePivot = line.new(bar_index, close, bar_index, close, color = color(na), width = 2)
+var line line618 = line.new(bar_index, close, bar_index, close, color = color(na), width = 1)
+var line line786 = line.new(bar_index, close, bar_index, close, color = color(na), width = 1)
+var line lineOne = line.new(bar_index, close, bar_index, close, color = color(na), width = 1)
+var line lineT1 = line.new(bar_index, close, bar_index, close, color = color(na), width = 2)
+var line line1382 = line.new(bar_index, close, bar_index, close, color = color(na), width = 1)
+var line line150 = line.new(bar_index, close, bar_index, close, color = color(na), width = 1)
+var line lineT2 = line.new(bar_index, close, bar_index, close, color = color(na), width = 2)
+var line line1786 = line.new(bar_index, close, bar_index, close, color = color(na), width = 1)
+var line lineT3 = line.new(bar_index, close, bar_index, close, color = color(na), width = 2)
+var line lineT4 = line.new(bar_index, close, bar_index, close, color = color(na), width = 2)
+var line lineT5 = line.new(bar_index, close, bar_index, close, color = color(na), width = 2)
+
+var box zoneBox = box.new(bar_index, close, bar_index, close, bgcolor = color(na), border_color = color(na))
+
+int fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
+int anchorLeftBar = int(math.max(0, na(anchorHighBar) or na(anchorLowBar) ? fallbackLeftBar : math.min(anchorHighBar, anchorLowBar)))
+int drawLeftBar = useConfluenceAnchorSpan ? anchorLeftBar : fallbackLeftBar
+
+drawAnchoredLine(line id, bool visible, float price, color col, int width_, int leftBar) =>
+    if visible and not na(price)
+        line.set_xy1(id, leftBar, price)
+        line.set_xy2(id, bar_index, price)
+        line.set_color(id, col)
+        line.set_width(id, width_)
+        line.set_style(id, line.style_solid)
+        line.set_extend(id, extendLevelsRight ? extend.right : extend.none)
+    else
+        line.set_color(id, color(na))
+
+drawAnchoredLine(lineZero, showFibLevelsInput, pZero, COLOR_ANCHOR, WIDTH_ANCHOR, drawLeftBar)
+drawAnchoredLine(line236, showFibLevelsInput, p236, COLOR_RETRACEMENT, WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(line382, showFibLevelsInput, p382, COLOR_RETRACEMENT_ORANGE, WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(linePivot, showFibLevelsInput, pPivot, COLOR_ANCHOR, WIDTH_PIVOT, drawLeftBar)
+drawAnchoredLine(line618, showFibLevelsInput, p618, COLOR_RETRACEMENT_ORANGE, WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(line786, showFibLevelsInput, p786, COLOR_RETRACEMENT, WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(lineOne, showFibLevelsInput, pOne, COLOR_ANCHOR, WIDTH_ANCHOR, drawLeftBar)
+drawAnchoredLine(lineT1, showFibLevelsInput, pT1, COLOR_TARGET, WIDTH_TARGET, drawLeftBar)
+drawAnchoredLine(line1382, showFibLevelsInput, p1382, COLOR_RETRACEMENT, WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(line150, showFibLevelsInput, p150, COLOR_RETRACEMENT, WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(lineT2, showFibLevelsInput, pT2, COLOR_TARGET, WIDTH_TARGET, drawLeftBar)
+drawAnchoredLine(line1786, showFibLevelsInput, p1786, COLOR_RETRACEMENT, WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(lineT3, showFibLevelsInput, pT3, COLOR_TARGET, WIDTH_TARGET, drawLeftBar)
+drawAnchoredLine(lineT4, showFibLevelsInput, pT4, COLOR_TARGET, WIDTH_TARGET, drawLeftBar)
+drawAnchoredLine(lineT5, showFibLevelsInput, pT5, COLOR_TARGET, WIDTH_TARGET, drawLeftBar)
+
+if showFibLevelsInput and showZoneFill and not na(zoneFillUpper) and not na(zoneFillLower)
+    box.set_left(zoneBox, drawLeftBar)
+    box.set_right(zoneBox, bar_index)
+    box.set_top(zoneBox, zoneFillUpper)
+    box.set_bottom(zoneBox, zoneFillLower)
+    box.set_bgcolor(zoneBox, color.new(COLOR_PIVOT, 86))
+    box.set_border_color(zoneBox, color.new(COLOR_PIVOT, 100))
+else
+    box.set_bgcolor(zoneBox, color(na))
+    box.set_border_color(zoneBox, color(na))
 
 // ============================================================================
 // PLOTS (VISIBLE)
 // ============================================================================
-plot(showTrendLinesInput ? upTrendLine : na, "Up Trend Line", color=color.new(color.lime, 0), linewidth=2)
-plot(showTrendLinesInput ? downTrendLine : na, "Down Trend Line", color=color.new(color.red, 0), linewidth=2)
+upPlot = plot(showTrendLinesInput ? upTrendLine : na, "Up Trend", color = color.new(color.lime, 0), linewidth = 2)
+dnPlot = plot(showTrendLinesInput ? downTrendLine : na, "Down Trend", color = color.new(color.red, 0), linewidth = 2)
+stMidPlot = plot(showStHighlightInput ? ohlc4 : na, "ST Mid", style = plot.style_circles, linewidth = 1, color = color.new(color.white, 100))
 
-plotshape(showSignalShapesInput and strongBuy, "Strong Buy Shape", style=shape.triangleup, location=location.belowbar, color=color.new(color.lime, 0), size=size.tiny, text="BUY")
-plotshape(showSignalShapesInput and strongSell, "Strong Sell Shape", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0), size=size.tiny, text="SELL")
+fill(stMidPlot, upPlot, title = "UpTrend Highlighter", color = showStHighlightInput and upTrend ? color.new(color.green, 90) : color.new(color.white, 100))
+fill(stMidPlot, dnPlot, title = "DownTrend Highlighter", color = showStHighlightInput and downTrend ? color.new(color.red, 90) : color.new(color.white, 100))
+
+plotshape(showSignalShapesInput and upTrendBegins ? upTrendLine : na, "UpTrend Begins", style = shape.circle, location = location.absolute, color = color.new(color.lime, 0), size = size.tiny)
+plotshape(showSignalShapesInput and upTrendBegins ? upTrendLine : na, "Buy", style = shape.labelup, location = location.absolute, color = color.new(color.lime, 0), textcolor = color.white, size = size.tiny, text = "Buy")
+
+plotshape(showSignalShapesInput and downTrendBegins ? downTrendLine : na, "DownTrend Begins", style = shape.circle, location = location.absolute, color = color.new(color.red, 0), size = size.tiny)
+plotshape(showSignalShapesInput and downTrendBegins ? downTrendLine : na, "Sell", style = shape.labeldown, location = location.absolute, color = color.new(color.red, 0), textcolor = color.white, size = size.tiny, text = "Sell")
+
+plotshape(showStrongSignalsInput and strongBuy, "Strong Buy Shape", style = shape.triangleup, location = location.belowbar, color = color.new(color.lime, 0), size = size.tiny, text = "BUY")
+plotshape(showStrongSignalsInput and strongSell, "Strong Sell Shape", style = shape.triangledown, location = location.abovebar, color = color.new(color.red, 0), size = size.tiny, text = "SELL")
+
+// ============================================================================
+// ALERTS (global scope)
+// ============================================================================
+alertcondition(upTrendBegins, "SuperTrend Buy", "SuperTrend Buy")
+alertcondition(downTrendBegins, "SuperTrend Sell", "SuperTrend Sell")
+alertcondition(strongBuy, "Strong Buy", "Strong Buy")
+alertcondition(strongSell, "Strong Sell", "Strong Sell")
 
 // ============================================================================
 // LAYOUT EXPORT FIELDS (HIDDEN)
-// These titles match the CSV layout columns.
 // ============================================================================
-plot(boolToFloat(strongBuy), "STRONG BUY", display=display.none)
-plot(boolToFloat(strongSell), "STRONG SELL", display=display.none)
-plot(boolToFloat(exhaustionBull), "Exhaustion Bull", display=display.none)
-plot(boolToFloat(exhaustionBear), "Exhaustion Bear", display=display.none)
-plot(upTrendLine, "Up Trend", display=display.none)
-plot(upTrendBegins ? close : na, "UpTrend Begins", display=display.none)
-plot(buyPrice, "Buy", display=display.none)
-plot(downTrendLine, "Down Trend", display=display.none)
-plot(downTrendBegins ? close : na, "DownTrend Begins", display=display.none)
-plot(sellPrice, "Sell", display=display.none)
-plot(vfBull, "VF Bull", display=display.none)
-plot(vfBear, "VF Bear", display=display.none)
-plot(vfBase, "VF Base", display=display.none)
-plot(nfeOscillator, "NFE Oscillator", display=display.none)
-plot(signalLine, "Signal Line", display=display.none)
-plot(bullCross ? signalLine : na, "Bull Cross", display=display.none)
-plot(bearCross ? signalLine : na, "Bear Cross", display=display.none)
-plot(obLevelInput, "OB Level", display=display.none)
-plot(midLevelInput, "Midline", display=display.none)
-plot(osLevelInput, "OS Level", display=display.none)
-plot(confluence, "Confluence", display=display.none)
-plot(rsiKnn, "RSI KNN", display=display.none)
-plot(50.0, "50 Level", display=display.none)
+plot(boolToFloat(strongBuy), "STRONG BUY", display = display.none)
+plot(boolToFloat(strongSell), "STRONG SELL", display = display.none)
+plot(boolToFloat(exhaustionBull), "Exhaustion Bull", display = display.none)
+plot(boolToFloat(exhaustionBear), "Exhaustion Bear", display = display.none)
 
-// ============================================================================
-// TABLE (FULL LAYOUT LIVE READOUT)
-// ============================================================================
-if showLayoutTableInput
-    var table layoutTable = table.new(position.top_right, 2, 18, bgcolor=color.new(color.black, 80), border_width=1)
-    table.cell(layoutTable, 0, 0, "Warbird Layout", text_color=color.white, bgcolor=color.new(color.blue, 0))
-    table.cell(layoutTable, 1, 0, "Value", text_color=color.white, bgcolor=color.new(color.blue, 0))
+plot(upTrendLine, "Up Trend", display = display.none)
+plot(upTrendBegins ? upTrendLine : na, "UpTrend Begins", display = display.none)
+plot(buyPrice, "Buy", display = display.none)
+plot(downTrendLine, "Down Trend", display = display.none)
+plot(downTrendBegins ? downTrendLine : na, "DownTrend Begins", display = display.none)
+plot(sellPrice, "Sell", display = display.none)
 
-    table.cell(layoutTable, 0, 1, "STRONG BUY", text_color=color.silver)
-    table.cell(layoutTable, 1, 1, str.tostring(boolToFloat(strongBuy), "#"))
-    table.cell(layoutTable, 0, 2, "STRONG SELL", text_color=color.silver)
-    table.cell(layoutTable, 1, 2, str.tostring(boolToFloat(strongSell), "#"))
-    table.cell(layoutTable, 0, 3, "Exhaustion Bull", text_color=color.silver)
-    table.cell(layoutTable, 1, 3, str.tostring(boolToFloat(exhaustionBull), "#"))
-    table.cell(layoutTable, 0, 4, "Exhaustion Bear", text_color=color.silver)
-    table.cell(layoutTable, 1, 4, str.tostring(boolToFloat(exhaustionBear), "#"))
-    table.cell(layoutTable, 0, 5, "Up Trend", text_color=color.silver)
-    table.cell(layoutTable, 1, 5, str.tostring(upTrendLine, format.mintick))
-    table.cell(layoutTable, 0, 6, "Down Trend", text_color=color.silver)
-    table.cell(layoutTable, 1, 6, str.tostring(downTrendLine, format.mintick))
-    table.cell(layoutTable, 0, 7, "VF Bull / Bear / Base", text_color=color.silver)
-    table.cell(layoutTable, 1, 7, str.tostring(vfBull, "#.00") + " / " + str.tostring(vfBear, "#.00") + " / " + str.tostring(vfBase, "#.00"))
-    table.cell(layoutTable, 0, 8, "NFE / Signal", text_color=color.silver)
-    table.cell(layoutTable, 1, 8, str.tostring(nfeOscillator, "#.00") + " / " + str.tostring(signalLine, "#.00"))
-    table.cell(layoutTable, 0, 9, "Bull / Bear Cross", text_color=color.silver)
-    table.cell(layoutTable, 1, 9, str.tostring(boolToFloat(bullCross), "#") + " / " + str.tostring(boolToFloat(bearCross), "#"))
-    table.cell(layoutTable, 0, 10, "Confluence", text_color=color.silver)
-    table.cell(layoutTable, 1, 10, str.tostring(confluence, "#.00"))
-    table.cell(layoutTable, 0, 11, "RSI KNN", text_color=color.silver)
-    table.cell(layoutTable, 1, 11, str.tostring(rsiKnn, "#.00"))
-    table.cell(layoutTable, 0, 12, "OB / Mid / OS", text_color=color.silver)
-    table.cell(layoutTable, 1, 12, str.tostring(obLevelInput, "#") + " / " + str.tostring(midLevelInput, "#") + " / " + str.tostring(osLevelInput, "#"))
-    table.cell(layoutTable, 0, 13, "Buy Price", text_color=color.silver)
-    table.cell(layoutTable, 1, 13, str.tostring(buyPrice, format.mintick))
-    table.cell(layoutTable, 0, 14, "Sell Price", text_color=color.silver)
-    table.cell(layoutTable, 1, 14, str.tostring(sellPrice, format.mintick))
-    table.cell(layoutTable, 0, 15, "UpTrend Begins", text_color=color.silver)
-    table.cell(layoutTable, 1, 15, str.tostring(boolToFloat(upTrendBegins), "#"))
-    table.cell(layoutTable, 0, 16, "DownTrend Begins", text_color=color.silver)
-    table.cell(layoutTable, 1, 16, str.tostring(boolToFloat(downTrendBegins), "#"))
-    table.cell(layoutTable, 0, 17, "50 Level", text_color=color.silver)
-    table.cell(layoutTable, 1, 17, "50")
+plot(vfBull, "VF Bull", display = display.none)
+plot(vfBear, "VF Bear", display = display.none)
+plot(vfBase, "VF Base", display = display.none)
+plot(nfeOscillator, "NFE Oscillator", display = display.none)
+plot(signalLine, "Signal Line", display = display.none)
+plot(bullCross ? signalLine : na, "Bull Cross", display = display.none)
+plot(bearCross ? signalLine : na, "Bear Cross", display = display.none)
+plot(obLevelInput, "OB Level", display = display.none)
+plot(midLevelInput, "Midline", display = display.none)
+plot(osLevelInput, "OS Level", display = display.none)
+plot(confluence, "Confluence", display = display.none)
+plot(rsiKnn, "RSI KNN", display = display.none)
+plot(50.0, "50 Level", display = display.none)
+
+plot(p236, "p236", display = display.none)
+plot(pPivot, "pPivot", display = display.none)
+plot(p618, "p618", display = display.none)
+plot(pOne, "pOne", display = display.none)
+plot(pT1, "pT1", display = display.none)
+plot(pT2, "pT2", display = display.none)
+plot(pT3, "pT3", display = display.none)
+plot(pT4, "pT4", display = display.none)
+plot(pT5, "pT5", display = display.none)
