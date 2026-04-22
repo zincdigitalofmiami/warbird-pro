@@ -49,8 +49,7 @@
 
   <key>WatchPaths</key>
   <array>
-    <string>/Volumes/Satechi Hub/warbird-pro/data/optuna</string>
-    <string>/Volumes/Satechi Hub/warbird-pro/data/sats_ps_optuna</string>
+    <string>/Volumes/Satechi Hub/warbird-pro/scripts/optuna/workspaces</string>
   </array>
 </dict>
 </plist>

@@ -7,7 +7,7 @@ Card-based local dashboard for multi-indicator and multi-strategy Optuna studies
 
 What it does:
 1) Reads indicator/strategy registry from `scripts/optuna/indicator_registry.json`
-2) Ensures folder scaffolding under `data/optuna/<indicator_key>/`
+2) Ensures folder scaffolding under `scripts/optuna/workspaces/<indicator_key>/`
 3) Reads study metrics from each `study.db`
 4) Surfaces profile wiring and top-N export readiness per lane
 5) Shows AutoGluon/Optuna stack health (including AutoGluon 1.5)
@@ -41,21 +41,19 @@ from urllib.parse import urlparse
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = Path(__file__).resolve().with_name("indicator_registry.json")
-OPTUNA_ROOT = REPO_ROOT / "data" / "optuna"
-LEGACY_SATS_DIR = REPO_ROOT / "data" / "sats_ps_optuna"
-MODEL_ROOT = OPTUNA_ROOT / "warbird_model"
 LOG_ROOT = Path("/tmp/warbird-optuna-hub")
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8090
 DEFAULT_CHILD_PORT_START = 8100
 REFRESH_SECONDS = 15
-LEGACY_KEY = "sats_ps"
 
 # Ensure dotted profile modules like "scripts.optuna.<name>" can resolve when
 # this script is launched via absolute file path.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.optuna.paths import WORKSPACES_ROOT, experiments_dir, workspace_dir
 
 
 @dataclass(frozen=True)
@@ -140,7 +138,7 @@ def load_registry(path: Path) -> list[IndicatorSpec]:
 
         default_study_name = str(row.get("default_study_name", "")).strip()
         if not default_study_name:
-            default_study_name = "sats_2025_wr_pf" if key == LEGACY_KEY else f"{key}_wr_pf"
+            default_study_name = "sats_2025_wr_pf" if key == "sats_ps" else f"{key}_wr_pf"
 
         specs.append(
             IndicatorSpec(
@@ -161,37 +159,19 @@ def load_registry(path: Path) -> list[IndicatorSpec]:
 
 
 def resolve_indicator_dir(spec: IndicatorSpec) -> Path:
-    if spec.storage_mode == "legacy" or spec.key == LEGACY_KEY:
-        return LEGACY_SATS_DIR
-    return OPTUNA_ROOT / spec.key
-
-
-def resolve_model_folder(spec: IndicatorSpec) -> Path:
-    safe_surface = spec.surface_type.strip().lower().replace(" ", "_") or "indicator"
-    safe_category = spec.category.strip().lower().replace(" ", "_") or "uncategorized"
-    return MODEL_ROOT / safe_surface / safe_category / spec.key
+    return workspace_dir(spec.key)
 
 
 def ensure_layout(specs: list[IndicatorSpec]) -> None:
-    OPTUNA_ROOT.mkdir(parents=True, exist_ok=True)
-    LEGACY_SATS_DIR.mkdir(parents=True, exist_ok=True)
-    MODEL_ROOT.mkdir(parents=True, exist_ok=True)
+    WORKSPACES_ROOT.mkdir(parents=True, exist_ok=True)
 
     for spec in specs:
         indicator_dir = resolve_indicator_dir(spec)
         indicator_dir.mkdir(parents=True, exist_ok=True)
-        keep_file = indicator_dir / ".gitkeep"
-        if not keep_file.exists():
-            keep_file.write_text("")
-
-        model_dir = resolve_model_folder(spec)
-        model_dir.mkdir(parents=True, exist_ok=True)
-        model_keep = model_dir / ".gitkeep"
-        if not model_keep.exists():
-            model_keep.write_text("")
-        model_readme = model_dir / "README.md"
-        canonical_study_dir = resolve_indicator_dir(spec)
-        model_readme.write_text(
+        exp_dir = experiments_dir(spec.key)
+        exp_dir.mkdir(parents=True, exist_ok=True)
+        workspace_readme = indicator_dir / "README.md"
+        workspace_readme.write_text(
             "\n".join(
                 [
                     f"# {spec.name}",
@@ -199,9 +179,10 @@ def ensure_layout(specs: list[IndicatorSpec]) -> None:
                     f"- key: `{spec.key}`",
                     f"- surface: `{spec.surface_type}`",
                     f"- category: `{spec.category}`",
-                    f"- canonical study dir: `{canonical_study_dir}`",
-                    f"- canonical study db: `{canonical_study_dir / 'study.db'}`",
-                    f"- top-N export: `{canonical_study_dir / spec.topn_filename}`",
+                    f"- workspace dir: `{indicator_dir}`",
+                    f"- canonical study db: `{indicator_dir / 'study.db'}`",
+                    f"- top-N export: `{indicator_dir / spec.topn_filename}`",
+                    f"- experiments dir: `{exp_dir}`",
                     "",
                     "Run template:",
                     "```bash",
@@ -211,21 +192,6 @@ def ensure_layout(specs: list[IndicatorSpec]) -> None:
                 ]
             )
         )
-
-    model_index = MODEL_ROOT / "README.md"
-    rows = [
-        "# Warbird Model Optuna Tree",
-        "",
-        "Organized model folders by surface and category. Canonical study DBs remain under `data/optuna/<key>/study.db` (or `data/sats_ps_optuna` for SATS legacy).",
-        "",
-        "| Surface | Category | Key | Model Folder | Study Folder |",
-        "|---|---|---|---|---|",
-    ]
-    for spec in sorted(specs, key=lambda x: (x.surface_type, x.category, x.key)):
-        rows.append(
-            f"| {spec.surface_type} | {spec.category} | {spec.key} | `{resolve_model_folder(spec)}` | `{resolve_indicator_dir(spec)}` |"
-        )
-    model_index.write_text("\n".join(rows) + "\n")
 
 
 def detect_stack_health() -> dict[str, Any]:
@@ -327,7 +293,7 @@ def load_topn_stats(path: Path) -> dict[str, Any]:
 
 def build_run_command(spec: IndicatorSpec) -> str:
     parts = [
-        "python scripts/sats/sats_optuna.py",
+        "python scripts/optuna/runner.py",
         f"--indicator-key {spec.key}",
     ]
     if spec.profile_builtin:
@@ -597,7 +563,7 @@ class HubState:
         cards: list[dict[str, Any]] = []
         for spec in self.specs:
             indicator_dir = resolve_indicator_dir(spec)
-            model_dir = resolve_model_folder(spec)
+            exp_dir = experiments_dir(spec.key)
             db_path = indicator_dir / "study.db"
             topn_path = indicator_dir / spec.topn_filename
 
@@ -614,7 +580,7 @@ class HubState:
                 "pine_file": spec.pine_file,
                 "notes": spec.notes,
                 "indicator_dir": str(indicator_dir),
-                "model_dir": str(model_dir),
+                "experiments_dir": str(exp_dir),
                 "db_path": str(db_path),
                 "db_exists": stats["exists"],
                 "study_count": stats["study_count"],
@@ -772,8 +738,8 @@ def render_html(snapshot: dict[str, Any]) -> str:
             f"<span class='chip {profile_class}'>{_h(card['profile_label'])}</span>"
             "</div>"
             f"<div class='path'><span>Pine:</span> {_h(card['pine_file'])}</div>"
-            f"<div class='path'><span>Folder:</span> {_h(card['indicator_dir'])}</div>"
-            f"<div class='path'><span>Model Folder:</span> {_h(card['model_dir'])}</div>"
+            f"<div class='path'><span>Workspace:</span> {_h(card['indicator_dir'])}</div>"
+            f"<div class='path'><span>Experiments:</span> {_h(card['experiments_dir'])}</div>"
             f"<div class='path'><span>DB:</span> {_h(card['db_path'])}</div>"
             f"<div class='path'><span>Top-N:</span> {_h(card['topn_path'])}</div>"
             f"{notes_html}"
@@ -1212,7 +1178,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--print-layout",
         action="store_true",
-        help="Print indicator -> folder mapping and continue",
+        help="Print indicator -> folder mapping and exit",
     )
     return parser.parse_args()
 
@@ -1222,10 +1188,10 @@ def print_layout(specs: list[IndicatorSpec]) -> None:
     print("=" * 44)
     for spec in sorted(specs, key=lambda x: (x.category, x.surface_type, x.name)):
         indicator_dir = resolve_indicator_dir(spec)
-        model_dir = resolve_model_folder(spec)
+        exp_dir = experiments_dir(spec.key)
         db_path = indicator_dir / "study.db"
         print(
-            f"{spec.key:28} {spec.surface_type:10} study={indicator_dir} model={model_dir} "
+            f"{spec.key:28} {spec.surface_type:10} workspace={indicator_dir} experiments={exp_dir} "
             f"(db: {db_path.name}, study_name: {spec.default_study_name})"
         )
 
@@ -1238,6 +1204,7 @@ def main() -> None:
 
     if args.print_layout:
         print_layout(specs)
+        return
 
     if args.init_folders_only:
         print("Indicator folders initialized.")
@@ -1279,9 +1246,7 @@ def main() -> None:
     print(f"  Snapshot API:     http://{args.host}:{args.port}/api/snapshot")
     print(f"  Registry:         {REGISTRY_PATH}")
     print(f"  Child UIs:        {'enabled' if spawn_children else 'disabled'}")
-    print(f"  Optuna root:      {OPTUNA_ROOT}")
-    print(f"  Model root:       {MODEL_ROOT}")
-    print(f"  Legacy SATS root: {LEGACY_SATS_DIR}")
+    print(f"  Workspace root:   {WORKSPACES_ROOT}")
     sys.stdout.flush()
 
     try:

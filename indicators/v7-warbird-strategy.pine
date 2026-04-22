@@ -32,7 +32,7 @@
 // Footprint (chart):    request.footprint()              = 1 call
 // TOTAL:                                                 = 6 request.* paths
 //
-// PLOT BUDGET: 50 plot + 2 plotshape = 52/64 (12 headroom)
+// PLOT BUDGET: 55 plot + 2 plotshape = 57/64 (7 headroom)
 //@version=6
 strategy("Warbird v7 Strategy", shorttitle="WB7 Strat", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100, pyramiding=0, process_orders_on_close=false, use_bar_magnifier=true, slippage=1, default_qty_type=strategy.fixed, default_qty_value=1, initial_capital=50000, currency=currency.USD, commission_type=strategy.commission.cash_per_contract, commission_value=1.00)
 import TradingView/ZigZag/7 as zigzag
@@ -172,6 +172,13 @@ bool enableDebugLogs = input.bool(false, "Enable Debug Logs", group=groupDebug, 
 bool showFootprintAudit = input.bool(false, "Show Footprint Audit Table", group=groupDebug, tooltip="Displays current-bar footprint diagnostics plus the earliest loaded bar where TradingView returned footprint data.")
 bool disableProjectedHtfTrades = input.bool(true, "Disable Trading On Projected HTF Ladder", group=groupDebug,
   tooltip="When a lower-timeframe chart projects a higher-timeframe fib ladder, keep it visual-only by default. Native 15m and native 1H backtests remain trustworthy; projected HTF ladder backtests do not.")
+
+string groupMomentum   = "Momentum Oscillators"
+int vfLenInput         = input.int(20, "VF Window", minval=5, maxval=100, group=groupMomentum)
+float vfFlowWeight     = input.float(25.0, "VF Candle Weight", minval=5.0, maxval=60.0, step=1.0, group=groupMomentum)
+float vfVolWeight      = input.float(10.0, "VF Volume Weight", minval=1.0, maxval=30.0, step=1.0, group=groupMomentum)
+int nfeLenInput        = input.int(14, "NFE Length", minval=5, maxval=100, group=groupMomentum)
+int rsiKnnWindow       = input.int(20, "RSI KNN Window", minval=5, maxval=100, group=groupMomentum)
 
 yesNo(bool value) =>
     value ? "YES" : "NO"
@@ -700,6 +707,16 @@ f_ema_dir(float emaVal) =>
 
 f_ema_dist_pct(float emaVal) =>
     emaVal != 0 ? (close - emaVal) / emaVal * 100.0 : 0.0
+
+f_rsi_knn(float src, int window) =>
+    float sumW = 0.0
+    float sumV = 0.0
+    for i = 1 to window
+        float d = math.abs(src - src[i])
+        float w = 1.0 / (d + 0.001)
+        sumW += w
+        sumV += src[i] * w
+    sumW > 0 ? sumV / sumW : src
 
 // NYSE Advance-Decline issues (daily breadth): leading exhaustion signal for MES
 // Rising MES + falling AD = breadth divergence (exhaustion). Falling MES + rising AD = accumulation.
@@ -1343,6 +1360,20 @@ float ema50DistPct = f_ema_dist_pct(ema50)
 float ema200DistPct = f_ema_dist_pct(ema200)
 
 //=====================
+// MOMENTUM OSCILLATORS (VF + NFE + RSI KNN)
+// Mirrors the indicator export surface so v7 parity stays intact.
+//=====================
+float _vfBodyNorm  = barRange > syminfo.mintick ? (close - open) / barRange : 0.0
+float _vfVolMean   = ta.sma(volume, vfLenInput)
+float _vfVolStd    = ta.stdev(volume, vfLenInput)
+float _vfVolZ      = _vfVolStd > 0 ? (volume - _vfVolMean) / _vfVolStd : 0.0
+float mlVfBull     = math.max(0.0, math.min(100.0, 50.0 + _vfBodyNorm * vfFlowWeight + _vfVolZ * vfVolWeight))
+float mlVfBear     = math.max(0.0, math.min(100.0, 50.0 - _vfBodyNorm * vfFlowWeight - _vfVolZ * vfVolWeight))
+float mlNfe        = ta.ema(ta.rsi(close, nfeLenInput), 3)
+float mlRsiKnn     = f_rsi_knn(rsi14, rsiKnnWindow)
+float mlConfluence = math.max(0.0, math.min(100.0, (mlNfe + (mlVfBull - mlVfBear + 100.0) * 0.5 + mlRsiKnn) / 3.0))
+
+//=====================
 // AG FEATURE EXPORT (Pine-exclusive hidden plots — display=display.none)
 // AG OWNS (server-side computable — not emitted here):
 //   TA Core Pack, EMA dist_pct, RVOL, exhaustion_score, range_expansion, efficiency,
@@ -1429,8 +1460,13 @@ plot(float(vwapCode), "ml_vwap_code", display=display.none, editable=false)
 
 // ── MACRO CONTEXT ──
 plot(adSlopeNorm, "ml_adline_slope", display=display.none, editable=false)
+plot(mlVfBull,     "ml_vf_bull",     display=display.none, editable=false)
+plot(mlVfBear,     "ml_vf_bear",     display=display.none, editable=false)
+plot(mlNfe,        "ml_nfe",         display=display.none, editable=false)
+plot(mlRsiKnn,     "ml_rsi_knn",     display=display.none, editable=false)
+plot(mlConfluence, "ml_confluence",  display=display.none, editable=false)
 
-// ── PLOT BUDGET: 50 plot + 2 plotshape = 52/64 (12 headroom) ──
+// ── PLOT BUDGET: 55 plot + 2 plotshape = 57/64 (7 headroom) ──
 
 //=====================
 // STRATEGY EXECUTION

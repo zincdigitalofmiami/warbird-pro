@@ -8,7 +8,7 @@ TradingView CSV export.  Fully standalone — no shared strategy code.
 Architecture
 ------------
 1. load_data()
-   - Reads data/optuna/v7_warbird_institutional/export.csv (TV CSV export)
+   - Reads scripts/optuna/workspaces/v7_warbird_institutional/export.csv (TV CSV export)
    - Merges with data/mes_15m.parquet for OHLCV ground truth
    - Precomputes ATR(14), EMA(100), DMI(14) for filter/simulation use
 
@@ -43,6 +43,7 @@ run_backtest(df, params, start_date) -> dict
 from __future__ import annotations
 
 import warnings
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -51,8 +52,13 @@ import pandas as pd
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
-REPO_ROOT  = Path(__file__).parents[2]
-OPTUNA_DIR = REPO_ROOT / "data" / "optuna" / "v7_warbird_institutional"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.optuna.paths import workspace_dir
+
+OPTUNA_DIR = workspace_dir("v7_warbird_institutional")
 CSV_PATH   = OPTUNA_DIR / "export.csv"
 OHLCV_PATH = REPO_ROOT / "data" / "mes_15m.parquet"
 
@@ -721,7 +727,7 @@ def load_data() -> pd.DataFrame:
     1. Open TradingView Desktop
     2. Load indicators/v7-warbird-institutional.pine on MES1! 15m chart
     3. Pine Editor → Export CSV (or Script → Export Data to CSV)
-    4. Save to: data/optuna/v7_warbird_institutional/export.csv
+    4. Save to: scripts/optuna/workspaces/v7_warbird_institutional/export.csv
     """
     if not CSV_PATH.exists():
         raise FileNotFoundError(

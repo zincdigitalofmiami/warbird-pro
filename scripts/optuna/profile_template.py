@@ -3,7 +3,7 @@
 Optuna profile adapter template for non-SATS indicators/strategies.
 
 Use with:
-  python scripts/sats/sats_optuna.py \
+  python scripts/optuna/runner.py \
     --indicator-key <key> \
     --profile-module scripts.optuna.my_profile \
     --study-name <key>_wr_pf

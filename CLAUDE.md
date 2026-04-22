@@ -41,7 +41,7 @@ Phase execution order:
 - All Databento calls use `.c.0` continuous front-month contracts with `stype_in=continuous`. No manual contract-roll logic.
 - Live core retention floor is `2020-01-01T00:00:00Z`.
 - `indicators/v7-warbird-institutional.pine` is the active Pine work surface. Compiles clean, TV-validated. Output budget: 51/64 (46 plot + 2 plotshape + 3 alertcondition, 13 headroom). 4 `request.security()` calls + 1 `request.footprint()` call (live, implemented). Budget verified 2026-04-13.
-- `indicators/v7-warbird-strategy.pine` is the AG training data generator. Compiles clean. Output budget: 52/64 (50 plot + 2 plotshape, 12 headroom). Commission floor at $1.00/side. `use_bar_magnifier=true`, `slippage=1` pinned in `strategy()`. Budget verified 2026-04-13. Dead HyperWave oscillator + energy computation blocks removed 2026-04-13 (were live in v6, orphaned in v7). Raw footprint numeric exports added 2026-04-13: `ml_exh_fp_delta`, `ml_exh_trigger_row_delta`, `ml_exh_extreme_vol_ratio`, `ml_exh_stacked_imbalance_count` — AG cannot compute these server-side (TV-exclusive API). First-run contract keeps all `ml_exh_*` / `ml_cont_*` diamond-path fields out of the canonical predictor and production SHAP; they are tuning-only unless explicitly reopened.
+- `indicators/v7-warbird-strategy.pine` is the AG training data generator. Compiles clean. Output budget: 52/64 (50 plot + 2 plotshape, 12 headroom). Commission floor at $1.00/side. `use_bar_magnifier=true`, `slippage=1` pinned in `strategy()`. Budget verified 2026-04-13. Dead HyperWave oscillator + energy computation blocks removed 2026-04-13 (were live in v6, orphaned in v7).
 - v7 parity guard (`scripts/guards/check-indicator-strategy-parity.sh`) updated for v7: ml_* parity, budget caps, coupled input defaults, strategy execution primitives, pinned TV defaults.
 - `indicators/v8-warbird-live.pine` — SATS v1.9.0 verbatim, code-frozen. presetInput="Custom". calcScoreBreakdown/calcSignalScore hoisted unconditionally (Pine v6 CW10003/CW10004). pine-facade + TV smart_compile clean. Commit cd5cbd5 (2026-04-17).
 - `indicators/v8-warbird-prescreen.pine` — strategy() wrapper on v8-warbird-live.pine, code-frozen. 5 surgical changes only: strategy() declaration, entry/exit in confirmedBuy/confirmedSell blocks, barstate.islast removed from dashboard+watermark gates. pine-facade + TV smart_compile clean. delta=12 lines vs live (8-20 tolerance). Commit cd5cbd5 (2026-04-17). Slice 2b complete.
@@ -50,7 +50,7 @@ Phase execution order:
 - Security advisor: 0 code warnings.
 - Pine Script v6 capability set for the active indicator path is confirmed:
   enums, strict boolean logic, dynamic requests, dynamic loops, `request.footprint()`,
-  and `polyline` are available for the exhaustion/hold architecture.
+  and `polyline` are available.
 - 2026-04-14 contract delta: the MES 15m fib setup remains the parent object,
   but execution is reopening as a subordinate `5m` / `15m` trigger layer keyed
   back to the same parent setup. `5m` provides execution context only; the
@@ -95,8 +95,7 @@ Phase execution order:
 - Cloud serving promotion: blocked on Phases 1-5 (Phase 6)
 - `artifacts/` directory: now active for AG split/baseline runs. `artifacts/shap/` still not created.
 - `data/` directory for raw Databento archives: not yet organized per v5
-- Exhaustion diamond v2: designed, not yet implemented. Full spec in Phase 0.5.
-  Requires budget audit + explicit approval before touching `v7-warbird-institutional.pine`.
+- Exhaustion diamond: ABANDONED 2026-04-21. Never worked. Do not implement anywhere.
 - Behavioral indicator modules from loss-driver review: designed, not yet implemented.
 - `indicator-capture` Edge Function: not yet built.
 - `indicator_snapshots_15m`: not yet created (cloud or local).

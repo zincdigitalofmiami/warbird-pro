@@ -6,9 +6,9 @@ Optuna TPE replaces the 6-stage grid sweep (`sats_sweep.py`) for ongoing
 SATS v1.9.0 parameter optimization. The backtest engine is `backtesting.py`
 wrapping the same indicator math as the original `simulate_sats()`.
 
-**Ranking policy:** `win_rate` first, `PF` second (tie-break).  
-Optuna objective value is `win_rate`; `PF` is stored as trial metadata and used
-for deterministic leaderboard ordering.
+**Ranking policy:** runner-configurable.  
+`scripts/optuna/runner.py` defaults to `dsr_composite` and still exports
+leaderboards `win_rate` first, `PF` second.
 
 **Seeded from:** grid-sweep champion (PF=1.1748, 1307 trades, atrLen=15,
 erLen=16, adaptStrength=1.0, useTqi=OFF, multSmooth=OFF, slAtrMult=2.5).
@@ -25,10 +25,10 @@ source .venv/bin/activate
 python scripts/sats/sats_backtest.py
 
 # Smoke test (3 trials)
-python scripts/sats/sats_optuna.py --n-trials 3 --study-name smoke
+python scripts/optuna/runner.py --n-trials 3 --study-name smoke
 
 # Full run (resume-safe)
-python scripts/sats/sats_optuna.py --n-trials 300 --study-name sats_2025_wr_pf --resume
+python scripts/optuna/runner.py --n-trials 300 --study-name sats_2025_wr_pf --resume
 ```
 
 ---
@@ -39,7 +39,7 @@ Before trusting any Optuna winner, confirm the backtesting.py port matches
 the validated sim within tolerance:
 
 ```bash
-python scripts/sats/sats_backtest.py --config data/sats_ps_sweep/champion.json
+python scripts/sats/sats_backtest.py --config scripts/optuna/workspaces/sats_ps/champion.json
 ```
 
 Expected output:
@@ -81,8 +81,8 @@ The hub renders one card per indicator key from:
 - `scripts/optuna/indicator_registry.json`
 
 Each card points to:
-- the indicator folder (`data/optuna/<indicator_key>/` or legacy `data/sats_ps_optuna/`)
-- the organized model folder (`data/optuna/warbird_model/<surface>/<category>/<key>/`)
+- the indicator workspace (`scripts/optuna/workspaces/<indicator_key>/`)
+- that workspace's `experiments/` folder for extra named studies
 - the current `study.db` status
 - a per-indicator `optuna-dashboard` child UI (when `study.db` exists)
 
@@ -119,10 +119,45 @@ launchctl load   ~/Library/LaunchAgents/com.warbird.optuna-dashboard.plist
 
 ### VS Code Extension
 
-1. Open the Optuna Dashboard panel in the VS Code sidebar.
-2. Point it at `data/sats_ps_optuna/study.db` (absolute path).
-3. For additional indicator/strategy studies, use folder-wise DBs under
-   `data/optuna/<indicator_key>/study.db`.
+The Optuna VS Code extension is **file-driven**. It does not expose a workspace
+setting for a default study path.
+
+Workspace wiring now lives in `.vscode/`:
+
+- `.vscode/OPTUNA_WORKSPACE.md` gives one-click VS Code Simple Browser links for:
+  - `http://127.0.0.1:8090/`
+  - `http://127.0.0.1:8080/dashboard/`
+- `.vscode/extensions.json` recommends the required Optuna/Python extensions
+- `.vscode/settings.json` pins the repo interpreter to `.venv/bin/python`
+- `.vscode/tasks.json` adds:
+  - `Optuna: Doctor`
+  - `Optuna: Print Study Layout`
+- `.vscode/launch.json` adds **optional sidecar** launch configs on isolated
+  ports (`8180`, `8181`, `8182`, `8190`, `8200+`) for ad-hoc debugging without
+  touching the already-running live services on `8080`, `8090`, and `8100+`
+
+Primary live services:
+
+- Hub: `http://127.0.0.1:8090/`
+- Shared dashboard: `http://127.0.0.1:8080/dashboard/`
+
+Open inside VS Code:
+
+1. Open `.vscode/OPTUNA_WORKSPACE.md` and use the Simple Browser links for the
+   live hub/shared dashboard when you want the web UI embedded in VS Code.
+2. In Explorer, right-click any `study.db` file.
+3. Select **Open in Optuna Dashboard**.
+4. Common study DBs:
+   - `scripts/optuna/workspaces/sats_ps/study.db`
+   - `scripts/optuna/workspaces/warbird_pro_sniper/study.db`
+   - `scripts/optuna/workspaces/v7_warbird_institutional/study.db`
+5. For additional studies, open any other `scripts/optuna/workspaces/**/study.db` file the same way.
+
+Workspace helpers:
+
+- Run `Terminal -> Run Task -> Optuna: Doctor` to verify extension/binaries/DBs/services
+- Run the optional sidecar launch configs only when you want an isolated
+  `optuna-dashboard` process without touching the persistent machine services
 
 ---
 
@@ -134,7 +169,7 @@ create study → seed champion → run trials → inspect → export top-5 → T
 
 ### 1. Create and run
 ```bash
-python scripts/sats/sats_optuna.py \
+python scripts/optuna/runner.py \
   --n-trials 300 \
   --study-name sats_2025_wr_pf \
   --start 2025-01-01
@@ -142,7 +177,7 @@ python scripts/sats/sats_optuna.py \
 
 ### 2. Resume (add more trials)
 ```bash
-python scripts/sats/sats_optuna.py \
+python scripts/optuna/runner.py \
   --n-trials 200 \
   --study-name sats_2025_wr_pf \
   --resume
@@ -150,7 +185,7 @@ python scripts/sats/sats_optuna.py \
 
 ### 3. Non-SATS strategy profile (same dashboard contract)
 ```bash
-python scripts/sats/sats_optuna.py \
+python scripts/optuna/runner.py \
   --indicator-key wb7 \
   --profile-module scripts.optuna.my_wb7_profile \
   --study-name wb7_wr_pf \
@@ -165,19 +200,19 @@ Reference adapter template:
 import optuna
 study = optuna.load_study(
     study_name='sats_2025_wr_pf',
-    storage='sqlite:///data/sats_ps_optuna/study.db'
+    storage='sqlite:///scripts/optuna/workspaces/sats_ps/study.db'
 )
 df = study.trials_dataframe()
 print(df.nlargest(10, 'value')[['number','value','user_attrs_win_rate','user_attrs_pf']])
 ```
 
 ### 5. Export top-5 for TV validation
-Top-5 configs are written automatically to `data/sats_ps_optuna/top5.json`
+Top-5 configs are written automatically to `scripts/optuna/workspaces/sats_ps/top5.json`
 at the end of each run. To re-export manually:
 ```python
-from scripts.sats.sats_optuna import export_top_n
+from scripts.optuna.runner import export_top_n
 from pathlib import Path
-export_top_n(study, optuna_dir=Path("data/sats_ps_optuna"), n=5)
+export_top_n(study, optuna_dir=Path("scripts/optuna/workspaces/sats_ps"), n=5)
 ```
 
 ---
@@ -210,10 +245,11 @@ For each top-N config:
 | Path | Purpose |
 |------|---------|
 | `scripts/sats/sats_backtest.py` | SATSStrategy + run_sats_bt() + parity CLI |
-| `scripts/sats/sats_optuna.py` | Optuna study wrapper + CLI (WR-first, PF-second) |
+| `scripts/optuna/runner.py` | Shared Optuna study wrapper + CLI |
+| `scripts/optuna/README.md` | Canonical Optuna workspace contract |
 | `scripts/optuna/profile_template.py` | Adapter contract for non-SATS strategies |
 | `scripts/sats/optuna-dashboard.plist` | launchd agent template |
-| `data/sats_ps_optuna/study.db` | Legacy SATS SQLite study DB (kept for existing dashboard links) |
-| `data/sats_ps_optuna/top5.json` | SATS top-N export (legacy path) |
-| `data/optuna/<indicator_key>/study.db` | Folder-wise study DB layout for additional indicators/strategies |
-| `data/sats_ps_sweep/champion.json` | Grid-sweep champion seed |
+| `scripts/optuna/workspaces/sats_ps/study.db` | Canonical SATS SQLite study DB |
+| `scripts/optuna/workspaces/sats_ps/top5.json` | SATS top-N export |
+| `scripts/optuna/workspaces/<indicator_key>/study.db` | Canonical per-indicator study DB layout |
+| `scripts/optuna/workspaces/sats_ps/champion.json` | SATS champion seed |

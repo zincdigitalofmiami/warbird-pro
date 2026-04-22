@@ -21,7 +21,7 @@
 // Footprint (chart):    request.footprint()              = 1 call
 // TOTAL:                                                 = 5 request.* paths
 //
-// PLOT BUDGET: 51 plot + 2 plotshape + 3 alertcondition = 56/64 (8 headroom); 9 label.new slots (var+entry) — outside 64-slot counter
+// PLOT BUDGET: 55 plot + 2 plotshape + 3 alertcondition = 60/64 (4 headroom); 9 label.new slots (var+entry) — outside 64-slot counter
 // TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed.
 // Momentum Oscillators (5 plots: ml_vf_bull, ml_vf_bear, ml_nfe, ml_rsi_knn, ml_confluence) added 2026-04-20.
 //@version=6
@@ -110,6 +110,8 @@ string stopFamilyId = input.string("ATR_1_0", "Fallback Stop Family", options=["
   tooltip="Local fallback stop family for the indicator overlay and hidden stop export. Use this until the AG packet runtime can publish a live stop-family decision back to TradingView.")
 float continuationHoldStopAtrMult = input.float(1.0, "Tier 1 Hold Stop ATR", minval=1.0, maxval=4.0, step=0.25, group=groupStops,
   tooltip="When a same-direction Tier 1 continuation signal fires during an active trade, temporarily widen the stop to entry +/- ATR x this multiplier for the configured hold bars.")
+float maxEntryStopAtr = input.float(3.0, "Max Setup Stop ATR", minval=0.75, maxval=10.0, step=0.25, group=groupStops,
+  tooltip="Reject setup triggers whose structural stop is too wide versus ATR. Keeps the live surface from arming on blown-out ladders.")
 
 string groupFootprint = "Footprint Exhaustion"
 int footprintTicksPerRow = input.int(4, "Footprint Ticks Per Row", minval=1, group=groupFootprint)
@@ -129,6 +131,44 @@ string groupViz = "Visuals"
 int targetLookbackBars = input.int(40, "Target Line Lookback Bars", minval=5, maxval=500, group=groupViz)
 bool extendLevelsRight = input.bool(true, "Extend Levels Right", group=groupViz)
 bool useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window", group=groupViz)
+bool showEma9Input = input.bool(true, "Show EMA 9", inline="ema9", group=groupViz)
+color ema9ColorInput = input.color(#FFFFFF, "", inline="ema9", group=groupViz)
+int ema9WidthInput = input.int(2, "", minval=1, maxval=5, inline="ema9", group=groupViz)
+bool showEma21Input = input.bool(true, "Show EMA 21", inline="ema21", group=groupViz)
+color ema21ColorInput = input.color(#26A69A, "", inline="ema21", group=groupViz)
+int ema21WidthInput = input.int(2, "", minval=1, maxval=5, inline="ema21", group=groupViz)
+bool showEma50Input = input.bool(true, "Show EMA 50", inline="ema50", group=groupViz)
+color ema50ColorInput = input.color(#FFFFFF, "", inline="ema50", group=groupViz)
+int ema50WidthInput = input.int(2, "", minval=1, maxval=5, inline="ema50", group=groupViz)
+bool showVwapInput = input.bool(true, "Show VWAP", inline="vwap", group=groupViz)
+color vwapColorInput = input.color(#FF2D7A, "", inline="vwap", group=groupViz)
+int vwapWidthInput = input.int(2, "", minval=1, maxval=5, inline="vwap", group=groupViz)
+string fibLineStyleInput = input.string("Solid", "Fib Line Style", options=["Solid", "Dashed", "Dotted"], group=groupViz)
+color fibAnchorColorInput = input.color(COLOR_ANCHOR, "Anchor Fib", inline="fib_anchor", group=groupViz)
+int fibAnchorWidthInput = input.int(WIDTH_ANCHOR, "", minval=1, maxval=5, inline="fib_anchor", group=groupViz)
+color fibStopColorInput = input.color(COLOR_STOP, "Stop / Neg .236", inline="fib_stop", group=groupViz)
+int fibStopWidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_stop", group=groupViz)
+color fibRetracementColorInput = input.color(COLOR_RETRACEMENT, ".236 / .786 / Waypoints", inline="fib_retrace", group=groupViz)
+int fibRetracementWidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_retrace", group=groupViz)
+color fibRetracementAccentColorInput = input.color(COLOR_RETRACEMENT_ORANGE, ".382 / .618", inline="fib_accent", group=groupViz)
+int fibRetracementAccentWidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_accent", group=groupViz)
+color fibPivotColorInput = input.color(COLOR_PIVOT, "Pivot Zone", inline="fib_pivot", group=groupViz)
+int fibPivotWidthInput = input.int(WIDTH_PIVOT, "", minval=1, maxval=5, inline="fib_pivot", group=groupViz)
+color fibTargetColorInput = input.color(COLOR_TARGET, "Targets", inline="fib_target", group=groupViz)
+int fibTargetWidthInput = input.int(WIDTH_TARGET, "", minval=1, maxval=5, inline="fib_target", group=groupViz)
+bool showTradeLabelsInput = input.bool(true, "Show Entry / SL / Target Labels", group=groupViz)
+int tradeLabelOffsetBarsInput = input.int(1, "Trade Label Offset (bars)", minval=0, maxval=20, group=groupViz)
+string tradeLabelSizeInput = input.string("Small", "Trade Label Size", options=["Tiny", "Small", "Normal", "Large"], group=groupViz)
+color tradeLabelTextColorInput = input.color(color.white, "Trade Label Text", inline="label_text", group=groupViz)
+int tradeLabelBgTransparencyInput = input.int(80, "BG Alpha", minval=0, maxval=100, inline="label_text", group=groupViz)
+color entryLabelColorInput = input.color(color.gray, "Entry Label", inline="label_levels", group=groupViz)
+color stopLabelColorInput = input.color(COLOR_STOP, "SL Label", inline="label_levels", group=groupViz)
+color targetLabelColorInput = input.color(COLOR_TARGET, "Target Label", inline="label_levels", group=groupViz)
+bool showSetupDiamondsInput = input.bool(true, "Show Setup Exhaustion Diamonds", group=groupViz)
+color bullishDiamondColorInput = input.color(COLOR_TARGET, "Bull Diamond", inline="diamond", group=groupViz)
+color bearishDiamondColorInput = input.color(COLOR_STOP, "Bear Diamond", inline="diamond", group=groupViz)
+int exhaustionDiamondOffsetTicksInput = input.int(4, "Diamond Offset (ticks)", minval=0, maxval=40, group=groupViz)
+int zoneFillTransparencyInput = input.int(86, "Zone Fill Alpha", minval=0, maxval=100, group=groupViz)
 
 string groupDebug = "Debug Diagnostics"
 bool enableDebugLogs = input.bool(false, "Enable Debug Logs", group=groupDebug, tooltip="Temporary state tracing for regime/probability diagnostics.")
@@ -139,6 +179,12 @@ float vfFlowWeight     = input.float(25.0, "VF Candle Weight", minval=5.0, maxva
 float vfVolWeight      = input.float(10.0, "VF Volume Weight", minval=1.0, maxval=30.0, step=1.0, group=groupMomentum)
 int nfeLenInput        = input.int(14, "NFE Length", minval=5, maxval=100, group=groupMomentum)
 int rsiKnnWindow       = input.int(20, "RSI KNN Window", minval=5, maxval=100, group=groupMomentum)
+
+f_line_style(string styleName) =>
+    styleName == "Dashed" ? line.style_dashed : styleName == "Dotted" ? line.style_dotted : line.style_solid
+
+f_label_size(string sizeName) =>
+    sizeName == "Tiny" ? size.tiny : sizeName == "Normal" ? size.normal : sizeName == "Large" ? size.large : size.small
 
 //=====================
 // REGIME DETECTION (from session-checkpoint research: ADX/ER/VIX-vol)
@@ -174,6 +220,10 @@ float atrPct = close != 0 ? atrRaw / close * 100.0 : 0.0
 // TA CORE PACK (15-metric feature set for ML training capture)
 // Deterministic, point-in-time safe, no lookahead, no external dependencies.
 //=====================
+float ema9 = ta.ema(close, 9)
+float ema21 = ta.ema(close, 21)
+float ema50 = ta.ema(close, 50)
+float ema200 = ta.ema(close, 200)
 float ema100 = ta.ema(close, 100)
 [_macdFast, _macdSlow, macdHist] = ta.macd(close, 12, 26, 9)
 float rsi14 = ta.rsi(close, 14)
@@ -461,6 +511,8 @@ float pT3     = fibPrice(FIB_T3)
 float pT4     = fibPrice(FIB_T4)
 float pT5     = fibPrice(FIB_T5)
 
+float entryZoneUpper = math.max(pPivot, p618)
+float entryZoneLower = math.min(pPivot, p618)
 float zoneUpper = math.max(p618, p786)
 float zoneLower = math.min(p618, p786)
 
@@ -908,13 +960,30 @@ float tp5Level   = pT5
 // Stop geometry is exported for AG and diagnostics, but not used as a live Pine gate.
 float slDistPts = math.abs(entryLevel - slLevel)
 float slDistAtr = atr14 > 0 ? slDistPts / atr14 : 0.0
-// Entry triggers: accept event + fib confirmation stack (PowerDrill §6.1)
-// No more naked accept entries. Every trade must be confirmed by volume + candle/wick/sweep.
-bool entryLongTrigger  = acceptEvent and dir == 1 and not ladderInvalidated and longConfirmed
-bool entryShortTrigger = acceptEvent and dir == -1 and not ladderInvalidated and not bullishTrendBlocksShorts and shortConfirmed
+bool trendBiasLong = ema9 > ema21 and close >= ema50 and close >= vwapVal
+bool trendBiasShort = ema9 < ema21 and close <= ema50 and close <= vwapVal
+bool entryZoneTouched = not na(entryZoneUpper) and not na(entryZoneLower) and high >= entryZoneLower and low <= entryZoneUpper
+bool entryZoneRejectBullLive = not na(entryZoneLower) and low < entryZoneLower and close >= entryZoneLower and bullishCandle
+bool entryZoneRejectBearLive = not na(entryZoneUpper) and high > entryZoneUpper and close <= entryZoneUpper and bearishCandle
+bool footprintLongTrigger = fpAvailable and fpDeltaBullish and (pocNearLow or mlExhAbsorption or mlExhZeroPrint or stackedBuyImbalance)
+bool footprintShortTrigger = fpAvailable and fpDeltaBearish and (pocNearHigh or mlExhAbsorption or mlExhZeroPrint or stackedSellImbalance)
+bool sweepLongTrigger = entryZoneTouched and liqSweepBull
+bool sweepShortTrigger = entryZoneTouched and liqSweepBear
+bool atrRiskAcceptable = not na(slLevel) and atr14 > 0 and slDistPts >= atr14 * 0.618 and slDistAtr <= maxEntryStopAtr
+bool setupContextLong = dir == 1 and trendBiasLong and entryZoneTouched and atrRiskAcceptable
+bool setupContextShort = dir == -1 and trendBiasShort and entryZoneTouched and atrRiskAcceptable
+bool setupContextActive = setupContextLong or setupContextShort
+bool longTriggerCore = setupContextLong and (footprintLongTrigger or sweepLongTrigger or entryZoneRejectBullLive)
+bool shortTriggerCore = setupContextShort and (footprintShortTrigger or sweepShortTrigger or entryZoneRejectBearLive)
+bool longTriggerEvent = longTriggerCore and (oneShotEvent ? not longTriggerCore[1] : true)
+bool shortTriggerEvent = shortTriggerCore and (oneShotEvent ? not shortTriggerCore[1] : true)
+bool bullishSetupDiamond = showSetupDiamondsInput and longTriggerEvent
+bool bearishSetupDiamond = showSetupDiamondsInput and shortTriggerEvent
+bool entryLongTrigger = longTriggerEvent and not ladderInvalidated
+bool entryShortTrigger = shortTriggerEvent and not ladderInvalidated and not bullishTrendBlocksShorts
 
 if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or entryLongTrigger or entryShortTrigger)
-    log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} longTrig={5} shortTrig={6} shortGate={7} fpCount={8}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, entryLongTrigger, entryShortTrigger, bullishTrendBlocksShorts, footprintEvidenceCount))
+    log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} longTrig={5} shortTrig={6} shortGate={7} fpCount={8} setupCtx={9}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, entryLongTrigger, entryShortTrigger, bullishTrendBlocksShorts, footprintEvidenceCount, setupContextActive))
 
 if confirmed
     if exhaustionSignalDir != 0
@@ -924,7 +993,7 @@ if confirmed
             lastTier1ExhBar := bar_index
             lastTier1ExhDir := exhaustionSignalDir
 
-    if tradeState == TRADE_NONE and pivotNearZone and not cooldownActive and not ladderInvalidated
+    if tradeState == TRADE_NONE and setupContextActive and not cooldownActive and not ladderInvalidated
         tradeState := TRADE_SETUP
         setupBar := bar_index
 
@@ -1028,10 +1097,14 @@ float activeStopPrice = tradeInFlightNow ? (
          : slPrice
 ) : na
 float mlExhBarsSinceTrigger = not na(lastExhTriggerBar) ? float(bar_index - lastExhTriggerBar) : na
-bool showBearishExhaustion = bearishExhaustion
-bool showBullishExhaustion = bullishExhaustion
-color bearishExhaustionColor = mlExhConfidenceTier == 1 ? COLOR_STOP : color.new(COLOR_STOP, 35)
-color bullishExhaustionColor = mlExhConfidenceTier == 1 ? COLOR_TARGET : color.new(COLOR_TARGET, 35)
+bool showBearishExhaustion = bearishSetupDiamond
+bool showBullishExhaustion = bullishSetupDiamond
+color bearishExhaustionColor = bearishDiamondColorInput
+color bullishExhaustionColor = bullishDiamondColorInput
+fibLineStyle = f_line_style(fibLineStyleInput)
+tradeLabelSize = f_label_size(tradeLabelSizeInput)
+float bearishDiamondPrice = high + syminfo.mintick * exhaustionDiamondOffsetTicksInput
+float bullishDiamondPrice = low - syminfo.mintick * exhaustionDiamondOffsetTicksInput
 
 // Contrarian reversal setup: CHoCH fires opposite to last completed trade direction
 // within 10 bars of exit. Flags mean-reversion opportunity after TP2 tag or SL stop-out.
@@ -1041,6 +1114,7 @@ bool contrChoch = barsSinceExit > 0 and barsSinceExit <= 10 and (
     (lastExitDir == -1 and chochBull))
 
 bool tradeVisible = tradeState == TRADE_SETUP or tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
+bool showTradeLevels = showTradeLabelsInput and isValid and (setupContextActive or tradeVisible)
 // The institutional chart surface now relies only on the canonical fib ladder.
 // Trade projection labels/lines were removed because they drifted from the live
 // fib state and created fake, sticky entry cues on the chart.
@@ -1085,66 +1159,127 @@ drawAnchoredLine(line id, bool visible, float price, color col, int width_, int 
         line.set_xy2(id, bar_index, price)
         line.set_color(id, col)
         line.set_width(id, width_)
-        line.set_style(id, line.style_solid)
+        line.set_style(id, fibLineStyle)
         line.set_extend(id, extendLevelsRight ? extend.right : extend.none)
     else
         line.set_color(id, color(na))
 
-drawAnchoredLine(lineZero,  true, pZero,  COLOR_ANCHOR,             WIDTH_ANCHOR,      drawLeftBar)
-drawAnchoredLine(lineNeg236, true, pNeg236, COLOR_STOP,             WIDTH_RETRACEMENT, drawLeftBar)
-drawAnchoredLine(line236,   true, p236,   COLOR_RETRACEMENT,         WIDTH_RETRACEMENT, drawLeftBar)
-drawAnchoredLine(line382,   true, p382,   COLOR_RETRACEMENT_ORANGE,  WIDTH_RETRACEMENT, drawLeftBar)
-drawAnchoredLine(linePivot, true, pPivot, COLOR_ANCHOR,              WIDTH_PIVOT,       drawLeftBar)
-drawAnchoredLine(line618,   true, p618,   COLOR_RETRACEMENT_ORANGE,  WIDTH_RETRACEMENT, drawLeftBar)
-drawAnchoredLine(line786,   true, p786,   COLOR_RETRACEMENT,         WIDTH_RETRACEMENT, drawLeftBar)
-drawAnchoredLine(lineOne,   true, pOne,   COLOR_ANCHOR,              WIDTH_ANCHOR,      drawLeftBar)
-drawAnchoredLine(lineT1,    true, pT1,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
-drawAnchoredLine(line1382,  true, p1382,  COLOR_RETRACEMENT,         WIDTH_RETRACEMENT, drawLeftBar)
-drawAnchoredLine(line150,   true, p150,   COLOR_RETRACEMENT,         WIDTH_RETRACEMENT, drawLeftBar)
-drawAnchoredLine(lineT2,    true, pT2,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
-drawAnchoredLine(line1786,  true, p1786,  COLOR_RETRACEMENT,         WIDTH_RETRACEMENT, drawLeftBar)
-drawAnchoredLine(lineT3,    true, pT3,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
-drawAnchoredLine(lineT4,    true, pT4,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
-drawAnchoredLine(lineT5,    true, pT5,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
+drawAnchoredLine(lineZero,  true, pZero,  fibAnchorColorInput,             fibAnchorWidthInput,             drawLeftBar)
+drawAnchoredLine(lineNeg236, true, pNeg236, fibStopColorInput,             fibStopWidthInput,               drawLeftBar)
+drawAnchoredLine(line236,   true, p236,   fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
+drawAnchoredLine(line382,   true, p382,   fibRetracementAccentColorInput,  fibRetracementAccentWidthInput,  drawLeftBar)
+drawAnchoredLine(linePivot, true, pPivot, fibPivotColorInput,              fibPivotWidthInput,              drawLeftBar)
+drawAnchoredLine(line618,   true, p618,   fibRetracementAccentColorInput,  fibRetracementAccentWidthInput,  drawLeftBar)
+drawAnchoredLine(line786,   true, p786,   fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
+drawAnchoredLine(lineOne,   true, pOne,   fibAnchorColorInput,             fibAnchorWidthInput,             drawLeftBar)
+drawAnchoredLine(lineT1,    true, pT1,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
+drawAnchoredLine(line1382,  true, p1382,  fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
+drawAnchoredLine(line150,   true, p150,   fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
+drawAnchoredLine(lineT2,    true, pT2,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
+drawAnchoredLine(line1786,  true, p1786,  fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
+drawAnchoredLine(lineT3,    true, pT3,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
+drawAnchoredLine(lineT4,    true, pT4,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
+drawAnchoredLine(lineT5,    true, pT5,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
 
-if barstate.islast and isValid and not na(pT1)
-    label.set_xy(_lblEntry, bar_index + 1, entryLevel)
+if barstate.islast and showTradeLevels and not na(pT1)
+    label.set_xy(_lblEntry, bar_index + tradeLabelOffsetBarsInput, entryLevel)
     label.set_text(_lblEntry, "ENTRY " + str.tostring(entryLevel, format.mintick))
-    label.set_xy(_lblSl, bar_index + 1, slLevel)
+    label.set_color(_lblEntry, color.new(entryLabelColorInput, tradeLabelBgTransparencyInput))
+    label.set_textcolor(_lblEntry, tradeLabelTextColorInput)
+    label.set_size(_lblEntry, tradeLabelSize)
+    label.set_xy(_lblSl, bar_index + tradeLabelOffsetBarsInput, slLevel)
     label.set_text(_lblSl, "SL " + str.tostring(slLevel, format.mintick))
-    label.set_xy(_lblT1, bar_index + 1, pT1)
+    label.set_color(_lblSl, color.new(stopLabelColorInput, tradeLabelBgTransparencyInput))
+    label.set_textcolor(_lblSl, tradeLabelTextColorInput)
+    label.set_size(_lblSl, tradeLabelSize)
+    label.set_xy(_lblT1, bar_index + tradeLabelOffsetBarsInput, pT1)
     label.set_text(_lblT1, "T1 " + str.tostring(pT1, format.mintick))
-    label.set_xy(_lblT2, bar_index + 1, pT2)
+    label.set_color(_lblT1, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
+    label.set_textcolor(_lblT1, tradeLabelTextColorInput)
+    label.set_size(_lblT1, tradeLabelSize)
+    label.set_xy(_lblT2, bar_index + tradeLabelOffsetBarsInput, pT2)
     label.set_text(_lblT2, "T2 " + str.tostring(pT2, format.mintick))
-    label.set_xy(_lblT3, bar_index + 1, pT3)
+    label.set_color(_lblT2, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
+    label.set_textcolor(_lblT2, tradeLabelTextColorInput)
+    label.set_size(_lblT2, tradeLabelSize)
+    label.set_xy(_lblT3, bar_index + tradeLabelOffsetBarsInput, pT3)
     label.set_text(_lblT3, "T3 " + str.tostring(pT3, format.mintick))
-    label.set_xy(_lblT4, bar_index + 1, pT4)
+    label.set_color(_lblT3, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
+    label.set_textcolor(_lblT3, tradeLabelTextColorInput)
+    label.set_size(_lblT3, tradeLabelSize)
+    label.set_xy(_lblT4, bar_index + tradeLabelOffsetBarsInput, pT4)
     label.set_text(_lblT4, "T4 " + str.tostring(pT4, format.mintick))
-    label.set_xy(_lblT5, bar_index + 1, pT5)
+    label.set_color(_lblT4, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
+    label.set_textcolor(_lblT4, tradeLabelTextColorInput)
+    label.set_size(_lblT4, tradeLabelSize)
+    label.set_xy(_lblT5, bar_index + tradeLabelOffsetBarsInput, pT5)
     label.set_text(_lblT5, "T5 " + str.tostring(pT5, format.mintick))
+    label.set_color(_lblT5, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
+    label.set_textcolor(_lblT5, tradeLabelTextColorInput)
+    label.set_size(_lblT5, tradeLabelSize)
+else if barstate.islast
+    label.set_text(_lblEntry, "")
+    label.set_text(_lblSl, "")
+    label.set_text(_lblT1, "")
+    label.set_text(_lblT2, "")
+    label.set_text(_lblT3, "")
+    label.set_text(_lblT4, "")
+    label.set_text(_lblT5, "")
+    label.set_color(_lblEntry, color(na))
+    label.set_color(_lblSl, color(na))
+    label.set_color(_lblT1, color(na))
+    label.set_color(_lblT2, color(na))
+    label.set_color(_lblT3, color(na))
+    label.set_color(_lblT4, color(na))
+    label.set_color(_lblT5, color(na))
 
 if entryLongTrigger
-    label.new(bar_index, entryLevel, "▲", style=label.style_label_up, color=color.new(COLOR_TARGET, 20), textcolor=color.white, size=size.small, force_overlay=true)
+    label.new(bar_index, entryLevel, "▲", style=label.style_label_up, color=color.new(bullishDiamondColorInput, 20), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
 if entryShortTrigger
-    label.new(bar_index, entryLevel, "▼", style=label.style_label_down, color=color.new(COLOR_STOP, 20), textcolor=color.white, size=size.small, force_overlay=true)
+    label.new(bar_index, entryLevel, "▼", style=label.style_label_down, color=color.new(bearishDiamondColorInput, 20), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
 
-plotshape(showBearishExhaustion, "Bearish Exhaustion", shape.diamond, location.abovebar, bearishExhaustionColor, 0, "", color.white, true, size.small, force_overlay=true)
-plotshape(showBullishExhaustion, "Bullish Exhaustion", shape.diamond, location.belowbar, bullishExhaustionColor, 0, "", color.white, true, size.small, force_overlay=true)
+plotshape(
+    series=showBearishExhaustion ? bearishDiamondPrice : na,
+    title="Bearish Exhaustion Trigger",
+    style=shape.diamond,
+    location=location.absolute,
+    color=bearishExhaustionColor,
+    offset=0,
+    text="",
+    textcolor=tradeLabelTextColorInput,
+    editable=true,
+    size=size.normal,
+    force_overlay=true
+)
+plotshape(
+    series=showBullishExhaustion ? bullishDiamondPrice : na,
+    title="Bullish Exhaustion Trigger",
+    style=shape.diamond,
+    location=location.absolute,
+    color=bullishExhaustionColor,
+    offset=0,
+    text="",
+    textcolor=tradeLabelTextColorInput,
+    editable=true,
+    size=size.normal,
+    force_overlay=true
+)
 
 if not na(zoneFillUpper) and not na(zoneFillLower)
     box.set_left(zoneBox, drawLeftBar)
     box.set_right(zoneBox, bar_index)
     box.set_top(zoneBox, zoneFillUpper)
     box.set_bottom(zoneBox, zoneFillLower)
-    box.set_bgcolor(zoneBox, color.new(COLOR_PIVOT, 86))
-    box.set_border_color(zoneBox, color.new(COLOR_PIVOT, 100))
+    box.set_bgcolor(zoneBox, color.new(fibPivotColorInput, zoneFillTransparencyInput))
+    box.set_border_color(zoneBox, color.new(fibPivotColorInput, 100))
 else
     box.set_bgcolor(zoneBox, color(na))
     box.set_border_color(zoneBox, color(na))
+plot(showEma9Input ? ema9 : na, "EMA 9", ema9ColorInput, ema9WidthInput)
+plot(showEma21Input ? ema21 : na, "EMA 21", ema21ColorInput, ema21WidthInput)
+plot(showEma50Input ? ema50 : na, "EMA 50", ema50ColorInput, ema50WidthInput)
+plot(showVwapInput ? vwapVal : na, "VWAP", vwapColorInput, vwapWidthInput)
 
-float ema21 = ta.ema(close, 21)
-float ema50 = ta.ema(close, 50)
-float ema200 = ta.ema(close, 200)
 int ema21Dir = f_ema_dir(ema21)
 int ema50Dir = f_ema_dir(ema50)
 int ema200Dir = f_ema_dir(ema200)

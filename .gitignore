@@ -95,11 +95,16 @@ indicators/harnesses/
 artifacts/
 
 # Optuna study DB and run artifacts (resume-safe, but not tracked in git)
-data/sats_ps_optuna/study.db
-data/sats_ps_optuna/study.db-shm
-data/sats_ps_optuna/study.db-wal
-data/sats_ps_optuna/study.db.bak*
-data/sats_ps_optuna/top*.json
+scripts/optuna/workspaces/*
+!scripts/optuna/workspaces/sats_ps/
+scripts/optuna/workspaces/sats_ps/*
+!scripts/optuna/workspaces/sats_ps/champion.json
+!scripts/optuna/workspaces/sats_ps/grid_sweep/
+scripts/optuna/workspaces/sats_ps/grid_sweep/*
+!scripts/optuna/workspaces/sats_ps/grid_sweep/all_trials.csv
+!scripts/optuna/workspaces/sats_ps/grid_sweep/input_template.json
+scripts/optuna/archive/
+data/sats_ps_optuna/
 data/optuna/
 
 # Screenshot artifacts (research/debugging — not source)

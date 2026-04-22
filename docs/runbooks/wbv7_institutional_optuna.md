@@ -2,7 +2,7 @@
 
 **Indicator:** `indicators/v7-warbird-institutional.pine`
 **Profile:** `scripts/optuna/v7_warbird_institutional_profile.py`
-**Study DB:** `data/optuna/v7_warbird_institutional/study.db`
+**Study DB:** `scripts/optuna/workspaces/v7_warbird_institutional/study.db`
 **Symbol/TF:** MES1! 15m
 **Data floor:** 2020-01-01
 
@@ -21,7 +21,7 @@ indicator version.
    Strategy Tester → Export if you have a strategy version).
 3. Save the file to:
    ```
-   data/optuna/v7_warbird_institutional/export.csv
+   scripts/optuna/workspaces/v7_warbird_institutional/export.csv
    ```
 4. Verify the file has columns including `time`, `open`, `high`, `low`,
    `close`, `volume`, `trade_state`, `ml_last_exit_outcome`, `fib_range`,
@@ -61,7 +61,6 @@ python3 scripts/optuna/runner.py \
   --indicator-key v7_warbird_institutional \
   --profile-module scripts.optuna.v7_warbird_institutional_profile \
   --study-name v7_warbird_institutional_wr_pf \
-  --db data/optuna/warbird.db \
   --n-trials 200 \
   --start 2020-01-01
 ```
@@ -76,7 +75,6 @@ python3 scripts/optuna/runner.py \
   --indicator-key v7_warbird_institutional \
   --profile-module scripts.optuna.v7_warbird_institutional_profile \
   --study-name v7_warbird_institutional_wr_pf \
-  --db data/optuna/warbird.db \
   --n-trials 100 \
   --start 2020-01-01 \
   --resume
@@ -84,14 +82,14 @@ python3 scripts/optuna/runner.py \
 
 ### View top-5 results
 
-After the run, `data/optuna/v7_warbird_institutional/top5.json` is written
+After the run, `scripts/optuna/workspaces/v7_warbird_institutional/top5.json` is written
 automatically.  To view:
 
 ```bash
 python3 -c "
 import json
 from pathlib import Path
-top5 = json.loads(Path('data/optuna/v7_warbird_institutional/top5.json').read_text())
+top5 = json.loads(Path('scripts/optuna/workspaces/v7_warbird_institutional/top5.json').read_text())
 for t in top5:
     print(f'#{t[\"rank\"]}  score={t[\"objective_score\"]:.4f}  '
           f'WR={t[\"win_rate\"]:.2%}  PF={t[\"pf\"]:.4f}  trades={t[\"trades\"]}')
@@ -101,8 +99,9 @@ for t in top5:
 
 ### Dashboard
 
-All studies share `data/optuna/warbird.db`.  The persistent agent at port 8080 serves
-this DB automatically — no separate launch needed.
+The persistent agent at port 8080 now points at the SATS canonical workspace.
+For this study, open the v7 workspace DB in the VS Code Optuna Dashboard
+extension or launch the dedicated sidecar on port 8182.
 
 Open: http://localhost:8080/dashboard/
 
@@ -243,8 +242,8 @@ sanity checks (run `--start 2025-01-01` as OOS verification):
 | `scripts/optuna/v7_warbird_institutional_profile.py` | Optuna profile (this study) |
 | `scripts/optuna/runner.py` | Shared Optuna runner |
 | `scripts/optuna/indicator_registry.json` | Registry entry for v7_warbird_institutional |
-| `data/optuna/v7_warbird_institutional/study.db` | SQLite study DB |
-| `data/optuna/v7_warbird_institutional/export.csv` | TV CSV export (manual, one-time) |
-| `data/optuna/v7_warbird_institutional/top5.json` | Auto-written after each run |
+| `scripts/optuna/workspaces/v7_warbird_institutional/study.db` | SQLite study DB |
+| `scripts/optuna/workspaces/v7_warbird_institutional/export.csv` | TV CSV export (manual, one-time) |
+| `scripts/optuna/workspaces/v7_warbird_institutional/top5.json` | Auto-written after each run |
 | `indicators/v7-warbird-institutional.pine` | Source indicator (DO NOT EDIT without approval) |
 | `docs/contracts/ag_local_training_schema.md` | AG feature contract |

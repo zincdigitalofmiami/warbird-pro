@@ -1,0 +1,832 @@
+// This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Kirk / ZINC Digital
+// Warbird Fib Sniper — canonical Warbird fib engine + exact-line continuation trigger
+// Built from the Warbird Fibs Only engine: ZigZag anchors + midpoint hysteresis + canonical Prime Extensions.
+//
+// Core rules:
+// - 0.000 = impulse origin
+// - 1.000 = impulse extreme / structure checkpoint, NOT a target
+// - >1.000 = Prime Extension targets in impulse direction
+// - Bull fib: .618 above .500
+// - Bear fib: .618 below .500
+// - Pullbacks move from 1.000 down toward 0.000
+// - The exact pullback line is the deepest canonical pullback line touched before continuation
+//
+//@version=6
+indicator("Warbird Fib Sniper", shorttitle="WB Fib Sniper", overlay=true, max_lines_count=500, max_boxes_count=100, max_labels_count=500, max_bars_back=5000)
+import TradingView/ZigZag/7 as zigzag
+
+//=====================
+// GROUPS / VERSION
+//=====================
+string INDICATOR_VERSION = "v0.2.0-live-grid"
+string GRP_PROFILE = "Profile"
+string GRP_FIB_ENGINE = "Fibonacci Engine"
+string GRP_TRIGGER = "Exact Pullback Trigger"
+string GRP_ALPHA = "Alpha Snapshot"
+string GRP_RISK = "Prime Targets / Risk"
+string GRP_VISUAL = "Visuals"
+string GRP_DASH = "Dashboard"
+string GRP_ALERT = "Alerts"
+
+//=====================
+// CANONICAL FIB LEVELS
+//=====================
+float FIB_ZERO  = 0.0
+float FIB_236   = 0.236
+float FIB_382   = 0.382
+float FIB_PIVOT = 0.5
+float FIB_618   = 0.618
+float FIB_786   = 0.786
+float FIB_ONE   = 1.0
+float FIB_T1    = 1.236
+float FIB_W1382 = 1.382
+float FIB_W150  = 1.5
+float FIB_T2    = 1.618
+float FIB_W1786 = 1.786
+float FIB_T3    = 2.0
+float FIB_T4    = 2.236
+float FIB_T5    = 2.618
+
+// Colors from Warbird fib engine
+color COLOR_ANCHOR             = #FFFFFF
+color COLOR_RETRACEMENT        = #808080
+color COLOR_RETRACEMENT_ORANGE = #E65100
+color COLOR_PIVOT              = #FF9800
+color COLOR_TARGET             = #4CAF50
+color COLOR_ENTRY              = #2979FF
+color COLOR_SL                 = #FF1744
+color COLOR_LONG               = #00E676
+color COLOR_SHORT              = #FF5252
+color COLOR_MUTED              = color.new(#9E9E9E, 0)
+
+int WIDTH_ANCHOR      = 1
+int WIDTH_RETRACEMENT = 1
+int WIDTH_PIVOT       = 2
+int WIDTH_TARGET      = 2
+
+//=====================
+// PROFILE
+//=====================
+string profileInput = input.string("Balanced", "Profile", options=["Aggressive", "Balanced", "Conservative", "Custom"], group=GRP_PROFILE,
+  tooltip="Aggressive = more signals / shallower pullbacks. Balanced = medium. Conservative = fewer / deeper pullbacks and stricter alpha. Custom exposes manual settings.")
+
+//=====================
+// FIBONACCI ENGINE SETTINGS
+//=====================
+bool autoTuneZZ = input.bool(true, "Auto-tune ZigZag by Timeframe", group=GRP_FIB_ENGINE,
+  tooltip="ON: 4H+ uses Deviation=4/Depth=20, 1H uses Deviation=3.5/Depth=15, 15m and below uses Deviation=3/Depth=10. Turn OFF to set values manually.")
+float fibDeviationManual = input.float(3.0, "ZigZag Deviation (manual)", minval=0.5, maxval=10.0, step=0.5, group=GRP_FIB_ENGINE)
+int fibDepthManual = input.int(10, "ZigZag Depth (manual)", minval=2, maxval=50, group=GRP_FIB_ENGINE)
+float hystBandPctInput = input.float(0.02, "Midpoint Hysteresis % of Fib Range", minval=0.0, maxval=0.10, step=0.005, group=GRP_FIB_ENGINE,
+  tooltip="Keeps fib orientation stable. Default 0.02 = 2% band around midpoint.")
+
+int _tfSec = timeframe.in_seconds()
+float fibDeviation = autoTuneZZ ? (_tfSec >= 14400 ? 4.0 : _tfSec >= 3600 ? 3.5 : 3.0) : fibDeviationManual
+int fibDepth = autoTuneZZ ? (_tfSec >= 14400 ? 20 : _tfSec >= 3600 ? 15 : 10) : fibDepthManual
+
+//=====================
+// TRIGGER SETTINGS
+//=====================
+string customPullbackLineInput = input.string("0.618", "Custom Pullback Line", options=["0.786", "0.618", "0.500", "0.382", "0.236"], group=GRP_TRIGGER,
+  tooltip="Only used when Profile = Custom. Profiles use allowed line sets.")
+string customInteractionInput = input.string("Wick Pierce Reclaim", "Custom Interaction", options=["Touch", "Wick Pierce", "Wick Pierce Reclaim", "Close Hold", "Close Reclaim"], group=GRP_TRIGGER)
+int toleranceTicksInput = input.int(1, "Line Touch Tolerance (ticks)", minval=0, maxval=20, group=GRP_TRIGGER)
+int maxBarsArmedInput = input.int(8, "Max Bars Armed", minval=1, maxval=100, group=GRP_TRIGGER,
+  tooltip="How long a line touch can stay armed waiting for the chosen reclaim/hold condition.")
+
+//=====================
+// ALPHA SETTINGS
+//=====================
+string customAlphaGateInput = input.string("Two of Three", "Custom Alpha Gate", options=["None", "Volume Only", "Delta Only", "RSI Only", "One of Three", "Two of Three", "Three of Three", "Sweep Plus One", "NFE/KNN Plus One"], group=GRP_ALPHA,
+  tooltip="Only used when Profile = Custom. Profiles resolve their own default gates.")
+int volumeLenInput = input.int(20, "Volume SMA Length", minval=5, maxval=100, group=GRP_ALPHA)
+float volumeMultInput = input.float(1.20, "Volume Multiplier", minval=0.5, maxval=5.0, step=0.05, group=GRP_ALPHA)
+float deltaThresholdInput = input.float(0.15, "Delta Proxy Threshold", minval=0.0, maxval=2.0, step=0.05, group=GRP_ALPHA,
+  tooltip="OHLCV delta proxy threshold: ((close-open)/(high-low)) * volume_ratio. Positive for longs, negative for shorts.")
+int rsiLenInput = input.int(14, "RSI Length", minval=5, maxval=50, group=GRP_ALPHA)
+float rsiOBInput = input.float(70.0, "RSI Overbought", minval=50.0, maxval=95.0, step=1.0, group=GRP_ALPHA)
+float rsiOSInput = input.float(30.0, "RSI Oversold", minval=5.0, maxval=50.0, step=1.0, group=GRP_ALPHA)
+int sweepLenInput = input.int(10, "Liquidity Sweep Lookback", minval=3, maxval=50, group=GRP_ALPHA)
+bool useNfeKnnInput = input.bool(true, "Use NFE/KNN Layer", group=GRP_ALPHA)
+int nfeLenInput = input.int(14, "NFE Length", minval=5, maxval=50, group=GRP_ALPHA)
+int rsiKnnWindowInput = input.int(20, "RSI KNN Window", minval=5, maxval=50, group=GRP_ALPHA)
+string customHtfModeInput = input.string("Require", "Custom HTF Mode", options=["Ignore", "Soft", "Require"], group=GRP_ALPHA,
+  tooltip="Only used when Profile = Custom. Soft shows context but does not block entries.")
+string htfInput = input.timeframe("60", "HTF Bias Timeframe", group=GRP_ALPHA)
+int htfFastLenInput = input.int(9, "HTF EMA Fast", minval=3, maxval=50, group=GRP_ALPHA)
+int htfSlowLenInput = input.int(21, "HTF EMA Slow", minval=10, maxval=100, group=GRP_ALPHA)
+
+//=====================
+// PRIME TARGET / RISK SETTINGS
+//=====================
+string customTargetLadderInput = input.string("Prime Standard", "Custom Target Ladder", options=["Prime Fast", "Prime Standard", "Prime Runner", "Prime Full"], group=GRP_RISK,
+  tooltip="Only used when Profile = Custom. 1.000 is not a TP. Targets are Prime Extensions only.")
+string stopModeInput = input.string("Next Deeper Fib", "Stop Mode", options=["Next Deeper Fib", "Origin Anchor", "ATR Only"], group=GRP_RISK)
+int atrLenInput = input.int(14, "ATR Length", minval=5, maxval=100, group=GRP_RISK)
+float atrBufferInput = input.float(0.15, "ATR Buffer", minval=0.0, maxval=2.0, step=0.05, group=GRP_RISK)
+int minRiskTicksInput = input.int(8, "Minimum Risk (ticks)", minval=1, maxval=200, group=GRP_RISK)
+bool closeAtFinalTargetInput = input.bool(true, "Close Trade State At Final Target", group=GRP_RISK)
+
+//=====================
+// VISUALS
+//=====================
+int targetLookbackBars = input.int(55, "Fib Line Lookback Bars", minval=5, maxval=500, group=GRP_VISUAL)
+bool extendLevelsRight = input.bool(false, "Extend Fib Levels Right", group=GRP_VISUAL)
+bool useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window", group=GRP_VISUAL)
+bool showFibLevelsInput = input.bool(false, "Show Reference Fib Grid", group=GRP_VISUAL,
+  tooltip="Toggle ON: paints the live fib grid and right-edge price pills. Grid tracks the active ZigZag pivot and re-anchors on each confirmed swing. Engine always runs for triggers regardless of this toggle.")
+bool showZoneFill = input.bool(false, "Show .382–.618 Zone Fill", group=GRP_VISUAL)
+bool showSignalsInput = input.bool(true, "Show Signals", group=GRP_VISUAL)
+bool showTradeLinesInput = input.bool(true, "Show Entry / SL Lines", group=GRP_VISUAL)
+int labelOffsetInput = input.int(3, "Line Extension (bars)", minval=1, maxval=50, group=GRP_VISUAL)
+
+//=====================
+// DASHBOARD / ALERTS
+//=====================
+bool showDashInput = input.bool(true, "Show Dashboard", group=GRP_DASH)
+string dashPosStr = input.string("Top Right", "Dashboard Position", options=["Top Left", "Top Right", "Bottom Left", "Bottom Right"], group=GRP_DASH)
+bool webhookInput = input.bool(false, "Webhook JSON Format", group=GRP_ALERT)
+bool useAlertFunctionInput = input.bool(false, "Use dynamic alert() calls", group=GRP_ALERT,
+  tooltip="Create a TradingView alert using 'Any alert() function call' to receive dynamic JSON/text payloads.")
+
+//=====================
+// HELPERS
+//=====================
+safeDiv(float num, float den, float fallback = 0.0) =>
+    den != 0 and not na(num) and not na(den) ? num / den : fallback
+
+safeStr(float val, string fmt = "#.##") =>
+    na(val) ? "—" : str.tostring(val, fmt)
+
+f_eq(float a, float b) =>
+    not na(a) and not na(b) and math.abs(a - b) <= 0.0001
+
+f_ratio_text(float r) =>
+    na(r) ? "—" : str.tostring(r, "#.###")
+
+getDashPos(string pos) =>
+    switch pos
+        "Top Left"     => position.top_left
+        "Top Right"    => position.top_right
+        "Bottom Left"  => position.bottom_left
+        "Bottom Right" => position.bottom_right
+        => position.top_right
+
+f_ratio_from_input(string s) =>
+    switch s
+        "0.786" => FIB_786
+        "0.618" => FIB_618
+        "0.500" => FIB_PIVOT
+        "0.382" => FIB_382
+        "0.236" => FIB_236
+        => FIB_618
+
+f_profile_interaction(string profile) =>
+    switch profile
+        "Aggressive"   => "Close Hold"
+        "Balanced"     => "Wick Pierce Reclaim"
+        "Conservative" => "Close Reclaim"
+        => customInteractionInput
+
+f_profile_alpha_gate(string profile) =>
+    switch profile
+        "Aggressive"   => "One of Three"
+        "Balanced"     => "Two of Three"
+        "Conservative" => "Sweep Plus One"
+        => customAlphaGateInput
+
+f_profile_htf_mode(string profile) =>
+    switch profile
+        "Aggressive"   => "Soft"
+        "Balanced"     => "Require"
+        "Conservative" => "Require"
+        => customHtfModeInput
+
+f_profile_ladder(string profile) =>
+    switch profile
+        "Aggressive"   => "Prime Fast"
+        "Balanced"     => "Prime Standard"
+        "Conservative" => "Prime Full"
+        => customTargetLadderInput
+
+f_profile_allows_ratio(string profile, float r) =>
+    bool ok = false
+    if profile == "Aggressive"
+        ok := f_eq(r, FIB_786) or f_eq(r, FIB_618) or f_eq(r, FIB_PIVOT)
+    else if profile == "Balanced"
+        ok := f_eq(r, FIB_618) or f_eq(r, FIB_PIVOT) or f_eq(r, FIB_382)
+    else if profile == "Conservative"
+        ok := f_eq(r, FIB_PIVOT) or f_eq(r, FIB_382) or f_eq(r, FIB_236)
+    else
+        ok := f_eq(r, f_ratio_from_input(customPullbackLineInput))
+    ok
+
+f_next_deeper_ratio(float r) =>
+    float out = FIB_ZERO
+    if f_eq(r, FIB_786)
+        out := FIB_618
+    else if f_eq(r, FIB_618)
+        out := FIB_PIVOT
+    else if f_eq(r, FIB_PIVOT)
+        out := FIB_382
+    else if f_eq(r, FIB_382)
+        out := FIB_236
+    else
+        out := FIB_ZERO
+    out
+
+f_target_ratio(string ladder, int slot) =>
+    float out = na
+    if ladder == "Prime Fast"
+        out := slot == 1 ? FIB_T1 : slot == 2 ? FIB_W1382 : slot == 3 ? FIB_T2 : na
+    else if ladder == "Prime Standard"
+        out := slot == 1 ? FIB_T1 : slot == 2 ? FIB_T2 : slot == 3 ? FIB_T3 : na
+    else if ladder == "Prime Runner"
+        out := slot == 1 ? FIB_T2 : slot == 2 ? FIB_T3 : slot == 3 ? FIB_T4 : na
+    else
+        out := slot == 1 ? FIB_T1 : slot == 2 ? FIB_T2 : slot == 3 ? FIB_T3 : slot == 4 ? FIB_T4 : slot == 5 ? FIB_T5 : na
+    out
+
+f_alpha_gate_ok(string gate, bool volOk, bool deltaOk, bool rsiOk, bool sweepOk, bool nfeKnnOk) =>
+    int core = (volOk ? 1 : 0) + (deltaOk ? 1 : 0) + (rsiOk ? 1 : 0)
+    bool out = switch gate
+        "None"             => true
+        "Volume Only"      => volOk
+        "Delta Only"       => deltaOk
+        "RSI Only"         => rsiOk
+        "One of Three"     => core >= 1
+        "Two of Three"     => core >= 2
+        "Three of Three"   => core >= 3
+        "Sweep Plus One"   => sweepOk and core >= 1
+        "NFE/KNN Plus One" => nfeKnnOk and core >= 1
+        => core >= 2
+    out
+
+f_deepest_touched_ratio(float extremeRatio, float tolRatio) =>
+    float found = na
+    if not na(extremeRatio) and extremeRatio >= -tolRatio and extremeRatio <= FIB_786 + tolRatio
+        if extremeRatio <= FIB_236 + tolRatio
+            found := FIB_236
+        else if extremeRatio <= FIB_382 + tolRatio
+            found := FIB_382
+        else if extremeRatio <= FIB_PIVOT + tolRatio
+            found := FIB_PIVOT
+        else if extremeRatio <= FIB_618 + tolRatio
+            found := FIB_618
+        else if extremeRatio <= FIB_786 + tolRatio
+            found := FIB_786
+    found
+
+// Distance-weighted KNN smoother for RSI
+f_rsi_knn(float src, int window) =>
+    float sumW = 0.0
+    float sumV = 0.0
+    for i = 1 to window
+        float d = math.abs(src - src[i])
+        float w = 1.0 / (d + 0.001)
+        sumW += w
+        sumV += src[i] * w
+    sumW > 0 ? sumV / sumW : src
+
+//=====================
+// AUTO FIB ENGINE — ZigZag confirmed pivots
+//=====================
+fibZzUpdate() =>
+    var fibSettings = zigzag.Settings.new(fibDeviation, fibDepth, color(na), false, false, false, false, "Absolute", true)
+    var zigzag.ZigZag fibZZ = zigzag.newInstance(fibSettings)
+    var zigzag.Pivot lastPvt = na
+    fibSettings.devThreshold := ta.atr(10) / close * 100 * fibDeviation
+    bool newPivot = false
+    float pivotHighPrice = na
+    float pivotLowPrice = na
+    int pivotHighBar = na
+    int pivotLowBar = na
+    int swingDir = 0
+    if fibZZ.update()
+        lastPvt := fibZZ.lastPivot()
+        if not na(lastPvt)
+            newPivot := true
+            float startP = lastPvt.start.price
+            float endP = lastPvt.end.price
+            pivotHighPrice := math.max(startP, endP)
+            pivotLowPrice  := math.min(startP, endP)
+            swingDir := endP > startP ? 1 : endP < startP ? -1 : 0
+            if startP >= endP
+                pivotHighBar := lastPvt.start.index
+                pivotLowBar  := lastPvt.end.index
+            else
+                pivotHighBar := lastPvt.end.index
+                pivotLowBar  := lastPvt.start.index
+    [newPivot, pivotHighPrice, pivotLowPrice, pivotHighBar, pivotLowBar, swingDir]
+
+[zzNewPivot, zzHighPrice, zzLowPrice, zzHighBar, zzLowBar, zzSwingDir] = fibZzUpdate()
+
+var float fibAnchorHigh = na
+var float fibAnchorLow = na
+var int anchorHighBar = na
+var int anchorLowBar = na
+var int fibRevision = 0
+
+if zzNewPivot
+    fibAnchorHigh := zzHighPrice
+    fibAnchorLow  := zzLowPrice
+    anchorHighBar := zzHighBar
+    anchorLowBar  := zzLowBar
+    fibRevision += 1
+
+float fibRange = fibAnchorHigh - fibAnchorLow
+bool isValid = not na(fibAnchorHigh) and not na(fibAnchorLow) and fibRange > 0
+float fibMidpoint = isValid ? fibAnchorLow + fibRange * FIB_PIVOT : na
+float hystBand = isValid ? fibRange * hystBandPctInput : na
+
+// Midpoint hysteresis keeps fib orientation stable.
+var bool fibBull = true
+bool priorFibBull = fibBull
+if isValid
+    if close >= fibMidpoint + hystBand
+        fibBull := true
+    else if close <= fibMidpoint - hystBand
+        fibBull := false
+else
+    fibBull := true
+
+bool fibOrientationChanged = isValid and fibBull != priorFibBull
+if fibOrientationChanged
+    fibRevision += 1
+
+float fibBase = fibBull ? fibAnchorLow : fibAnchorHigh
+float fibDir = fibBull ? 1.0 : -1.0
+
+fibPrice(float ratio) =>
+    fibRange <= 0 ? na : fibBase + fibDir * fibRange * ratio
+
+fibRatio(float price) =>
+    fibRange <= 0 ? na : (price - fibBase) / (fibDir * fibRange)
+
+float pZero  = fibPrice(FIB_ZERO)
+float p236   = fibPrice(FIB_236)
+float p382   = fibPrice(FIB_382)
+float pPivot = fibPrice(FIB_PIVOT)
+float p618   = fibPrice(FIB_618)
+float p786   = fibPrice(FIB_786)
+float pOne   = fibPrice(FIB_ONE)
+float pT1    = fibPrice(FIB_T1)
+float p1382  = fibPrice(FIB_W1382)
+float p150   = fibPrice(FIB_W150)
+float pT2    = fibPrice(FIB_T2)
+float p1786  = fibPrice(FIB_W1786)
+float pT3    = fibPrice(FIB_T3)
+float pT4    = fibPrice(FIB_T4)
+float pT5    = fibPrice(FIB_T5)
+
+float zoneFillUpper = math.max(p382, p618)
+float zoneFillLower = math.min(p382, p618)
+float tolRatio = fibRange > 0 ? toleranceTicksInput * syminfo.mintick / fibRange : 0.0
+
+//=====================
+// DRAW FIB LEVELS
+//=====================
+var line lineZero  = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line line236   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line line382   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line linePivot = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line line618   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line line786   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineOne   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineT1    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line line1382  = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line line150   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineT2    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line line1786  = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineT3    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line lineT4    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line lineT5    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var box zoneBox = box.new(bar_index, close, bar_index, close, bgcolor=color(na), border_color=color(na))
+
+int fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
+int anchorLeftBar = int(math.max(0, na(anchorHighBar) or na(anchorLowBar) ? fallbackLeftBar : math.min(anchorHighBar, anchorLowBar)))
+int drawLeftBar = useConfluenceAnchorSpan ? anchorLeftBar : fallbackLeftBar
+
+drawAnchoredLine(line id, bool visible, float price, color col, int width_, int leftBar) =>
+    if visible and not na(price)
+        line.set_xy1(id, leftBar, price)
+        line.set_xy2(id, bar_index, price)
+        line.set_color(id, col)
+        line.set_width(id, width_)
+        line.set_style(id, line.style_solid)
+        line.set_extend(id, extendLevelsRight ? extend.right : extend.none)
+    else
+        line.set_color(id, color(na))
+
+bool showFib = showFibLevelsInput and isValid
+drawAnchoredLine(lineZero,  showFib, pZero,  COLOR_ANCHOR,             WIDTH_ANCHOR,      drawLeftBar)
+drawAnchoredLine(line236,   showFib, p236,   COLOR_RETRACEMENT,        WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(line382,   showFib, p382,   COLOR_RETRACEMENT_ORANGE, WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(linePivot, showFib, pPivot, COLOR_ANCHOR,             WIDTH_PIVOT,       drawLeftBar)
+drawAnchoredLine(line618,   showFib, p618,   COLOR_RETRACEMENT_ORANGE, WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(line786,   showFib, p786,   COLOR_RETRACEMENT,        WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(lineOne,   showFib, pOne,   COLOR_ANCHOR,             WIDTH_ANCHOR,      drawLeftBar)
+drawAnchoredLine(lineT1,    showFib, pT1,    COLOR_TARGET,             WIDTH_TARGET,      drawLeftBar)
+drawAnchoredLine(line1382,  showFib, p1382,  COLOR_RETRACEMENT,        WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(line150,   showFib, p150,   COLOR_RETRACEMENT,        WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(lineT2,    showFib, pT2,    COLOR_TARGET,             WIDTH_TARGET,      drawLeftBar)
+drawAnchoredLine(line1786,  showFib, p1786,  COLOR_RETRACEMENT,        WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(lineT3,    showFib, pT3,    COLOR_TARGET,             WIDTH_TARGET,      drawLeftBar)
+drawAnchoredLine(lineT4,    showFib, pT4,    COLOR_TARGET,             WIDTH_TARGET,      drawLeftBar)
+drawAnchoredLine(lineT5,    showFib, pT5,    COLOR_TARGET,             WIDTH_TARGET,      drawLeftBar)
+
+if showFib and showZoneFill and not na(zoneFillUpper) and not na(zoneFillLower)
+    box.set_left(zoneBox, drawLeftBar)
+    box.set_right(zoneBox, bar_index)
+    box.set_top(zoneBox, zoneFillUpper)
+    box.set_bottom(zoneBox, zoneFillLower)
+    box.set_bgcolor(zoneBox, color.new(COLOR_PIVOT, 86))
+    box.set_border_color(zoneBox, color.new(COLOR_PIVOT, 100))
+else
+    box.set_bgcolor(zoneBox, color(na))
+    box.set_border_color(zoneBox, color(na))
+
+//=====================
+// FIB LEVEL PRICE PILLS — right-edge labels, bound to showFibLevelsInput
+//=====================
+var label lbPillZero  = na
+var label lbPill236   = na
+var label lbPill382   = na
+var label lbPillPivot = na
+var label lbPill618   = na
+var label lbPill786   = na
+var label lbPillOne   = na
+var label lbPillT1    = na
+var label lbPillT2    = na
+var label lbPillT3    = na
+var label lbPillT4    = na
+var label lbPillT5    = na
+
+f_set_fib_pill(label idIn, float price, string ratioText, color col) =>
+    label id = idIn
+    if showFibLevelsInput and isValid and not na(price)
+        if na(id)
+            id := label.new(bar_index + 1, price, "", color=color.new(col, 80), textcolor=color.white, style=label.style_label_left, size=size.small)
+        label.set_xy(id, bar_index + 1, price)
+        label.set_text(id, ratioText + "  " + str.tostring(price, format.mintick))
+        label.set_color(id, color.new(col, 80))
+    else if not na(id)
+        label.delete(id)
+        id := na
+    id
+
+lbPillZero  := f_set_fib_pill(lbPillZero,  pZero,  "0",     COLOR_ANCHOR)
+lbPill236   := f_set_fib_pill(lbPill236,   p236,   ".236",  COLOR_RETRACEMENT)
+lbPill382   := f_set_fib_pill(lbPill382,   p382,   ".382",  COLOR_RETRACEMENT_ORANGE)
+lbPillPivot := f_set_fib_pill(lbPillPivot, pPivot, ".500",  COLOR_PIVOT)
+lbPill618   := f_set_fib_pill(lbPill618,   p618,   ".618",  COLOR_RETRACEMENT_ORANGE)
+lbPill786   := f_set_fib_pill(lbPill786,   p786,   ".786",  COLOR_RETRACEMENT)
+lbPillOne   := f_set_fib_pill(lbPillOne,   pOne,   "1.000", COLOR_ANCHOR)
+lbPillT1    := f_set_fib_pill(lbPillT1,    pT1,    "T1",    COLOR_TARGET)
+lbPillT2    := f_set_fib_pill(lbPillT2,    pT2,    "T2",    COLOR_TARGET)
+lbPillT3    := f_set_fib_pill(lbPillT3,    pT3,    "T3",    COLOR_TARGET)
+lbPillT4    := f_set_fib_pill(lbPillT4,    pT4,    "T4",    COLOR_TARGET)
+lbPillT5    := f_set_fib_pill(lbPillT5,    pT5,    "T5",    COLOR_TARGET)
+
+//=====================
+// ALPHA CALCULATIONS
+//=====================
+float atrVal = nz(ta.atr(atrLenInput), high - low)
+float rsiVal = nz(ta.rsi(close, rsiLenInput), 50.0)
+float volSma = nz(ta.sma(volume, volumeLenInput), volume)
+float volRatio = safeDiv(volume, volSma, 1.0)
+float barRange = high - low
+float deltaProxy = barRange > syminfo.mintick ? ((close - open) / barRange) * volRatio : 0.0
+
+float ictSwingHigh = ta.highest(high, sweepLenInput)[1]
+float ictSwingLow  = ta.lowest(low, sweepLenInput)[1]
+bool liqSweepBull = low < ictSwingLow and close > ictSwingLow
+bool liqSweepBear = high > ictSwingHigh and close < ictSwingHigh
+
+float mlNfe = ta.ema(ta.rsi(close, nfeLenInput), 3)
+float mlRsiKnn = f_rsi_knn(rsiVal, rsiKnnWindowInput)
+bool nfeBull = useNfeKnnInput and mlNfe > 55.0
+bool nfeBear = useNfeKnnInput and mlNfe < 45.0
+bool knnBull = useNfeKnnInput and mlRsiKnn > 55.0
+bool knnBear = useNfeKnnInput and mlRsiKnn < 45.0
+
+float htfFast = request.security(syminfo.tickerid, htfInput, ta.ema(close, htfFastLenInput)[1], barmerge.gaps_off, barmerge.lookahead_on)
+float htfSlow = request.security(syminfo.tickerid, htfInput, ta.ema(close, htfSlowLenInput)[1], barmerge.gaps_off, barmerge.lookahead_on)
+int htfBias = nz(htfFast, close) > nz(htfSlow, close) ? 1 : nz(htfFast, close) < nz(htfSlow, close) ? -1 : 0
+
+bool dirBull = fibBull
+bool volOkNow = volume > volSma * volumeMultInput and (dirBull ? close > open : close < open)
+bool deltaOkNow = dirBull ? deltaProxy >= deltaThresholdInput : deltaProxy <= -deltaThresholdInput
+bool rsiOkNow = dirBull ? (rsiVal > 50.0 and rsiVal < rsiOBInput) : (rsiVal < 50.0 and rsiVal > rsiOSInput)
+bool sweepOkNow = dirBull ? liqSweepBull : liqSweepBear
+bool nfeKnnOkNow = dirBull ? (nfeBull or knnBull) : (nfeBear or knnBear)
+
+//=====================
+// EXACT PULLBACK STATE MACHINE
+//=====================
+string resolvedInteraction = f_profile_interaction(profileInput)
+string resolvedAlphaGate = f_profile_alpha_gate(profileInput)
+string resolvedHtfMode = f_profile_htf_mode(profileInput)
+string resolvedLadder = f_profile_ladder(profileInput)
+
+float pullbackExtremePrice = fibBull ? low : high
+float pullbackExtremeRatio = fibRatio(pullbackExtremePrice)
+float closeRatio = fibRatio(close)
+float prevCloseRatio = fibRatio(close[1])
+float deepestTouchedRatio = f_deepest_touched_ratio(pullbackExtremeRatio, tolRatio)
+bool deepestAllowed = not na(deepestTouchedRatio) and f_profile_allows_ratio(profileInput, deepestTouchedRatio)
+
+var int activeFibRevision = na
+var bool setupArmed = false
+var bool setupFired = false
+var float armedRatio = na
+var float armedLinePrice = na
+var int armedBar = na
+var bool armedWickPierced = false
+var bool armedVolOk = false
+var bool armedDeltaOk = false
+var bool armedRsiOk = false
+var bool armedSweepOk = false
+var bool armedNfeKnnOk = false
+var int armedDir = 0
+
+bool fibChanged = na(activeFibRevision) or fibRevision != activeFibRevision
+if fibChanged
+    activeFibRevision := fibRevision
+    setupArmed := false
+    setupFired := false
+    armedRatio := na
+    armedLinePrice := na
+    armedBar := na
+    armedWickPierced := false
+    armedVolOk := false
+    armedDeltaOk := false
+    armedRsiOk := false
+    armedSweepOk := false
+    armedNfeKnnOk := false
+    armedDir := 0
+
+bool fibInvalidated = isValid and not na(pullbackExtremeRatio) and pullbackExtremeRatio < -tolRatio
+if fibInvalidated and not setupFired
+    setupArmed := false
+    setupFired := true
+
+bool newOrDeeperTouch = deepestAllowed and not setupFired and (not setupArmed or deepestTouchedRatio < armedRatio - tolRatio)
+if newOrDeeperTouch
+    setupArmed := true
+    armedRatio := deepestTouchedRatio
+    armedLinePrice := fibPrice(deepestTouchedRatio)
+    armedBar := bar_index
+    armedWickPierced := pullbackExtremeRatio < deepestTouchedRatio - tolRatio
+    armedVolOk := volOkNow
+    armedDeltaOk := deltaOkNow
+    armedRsiOk := rsiOkNow
+    armedSweepOk := sweepOkNow
+    armedNfeKnnOk := nfeKnnOkNow
+    armedDir := fibBull ? 1 : -1
+
+if setupArmed and not setupFired and not na(armedBar) and bar_index - armedBar > maxBarsArmedInput
+    setupArmed := false
+    armedRatio := na
+    armedLinePrice := na
+    armedBar := na
+    armedWickPierced := false
+
+bool armedAlphaOk = setupArmed and f_alpha_gate_ok(resolvedAlphaGate, armedVolOk, armedDeltaOk, armedRsiOk, armedSweepOk, armedNfeKnnOk)
+bool htfOk = resolvedHtfMode == "Require" ? (armedDir == 1 ? htfBias == 1 : armedDir == -1 ? htfBias == -1 : false) : true
+
+bool touchInteractionOk = false
+if setupArmed and not setupFired and not na(armedRatio)
+    touchInteractionOk := switch resolvedInteraction
+        "Touch"                => true
+        "Wick Pierce"          => armedWickPierced
+        "Wick Pierce Reclaim"  => armedWickPierced and closeRatio > armedRatio + tolRatio
+        "Close Hold"           => closeRatio > armedRatio + tolRatio
+        "Close Reclaim"        => prevCloseRatio < armedRatio - tolRatio and closeRatio > armedRatio + tolRatio
+        => false
+
+bool rawFibTrigger = isValid and setupArmed and not setupFired and touchInteractionOk and armedAlphaOk and htfOk
+bool confirmedFibTrigger = rawFibTrigger and barstate.isconfirmed
+bool confirmedLong = confirmedFibTrigger and armedDir == 1
+bool confirmedShort = confirmedFibTrigger and armedDir == -1
+
+//=====================
+// TRADE SNAPSHOT / PRIME TARGETS
+//=====================
+var float entryPrice = na
+var float slPrice = na
+var float tp1Price = na
+var float tp2Price = na
+var float tp3Price = na
+var float tp4Price = na
+var float tp5Price = na
+var int tradeDir = 0
+var int entryBar = na
+var bool tradeClosed = false
+var bool tp1Hit = false
+var bool tp2Hit = false
+var bool tp3Hit = false
+var bool tp4Hit = false
+var bool tp5Hit = false
+var bool slHit = false
+var float tradeFibBase = na
+var float tradeFibDir = na
+var float tradeFibRange = na
+var float tradePullbackRatio = na
+var string tradeLadder = ""
+
+tradeFibPrice(float ratio) =>
+    na(tradeFibBase) or na(tradeFibDir) or na(tradeFibRange) or na(ratio) ? na : tradeFibBase + tradeFibDir * tradeFibRange * ratio
+
+if confirmedFibTrigger
+    setupFired := true
+    entryPrice := close
+    tradeDir := armedDir
+    entryBar := bar_index
+    tradeClosed := false
+    tp1Hit := false
+    tp2Hit := false
+    tp3Hit := false
+    tp4Hit := false
+    tp5Hit := false
+    slHit := false
+    tradeFibBase := fibBase
+    tradeFibDir := fibDir
+    tradeFibRange := fibRange
+    tradePullbackRatio := armedRatio
+    tradeLadder := resolvedLadder
+
+    float stopRatio = stopModeInput == "Next Deeper Fib" ? f_next_deeper_ratio(armedRatio) : FIB_ZERO
+    float baseStop = stopModeInput == "ATR Only" ? close - tradeFibDir * atrVal : tradeFibPrice(stopRatio)
+    slPrice := stopModeInput == "Origin Anchor" ? tradeFibPrice(FIB_ZERO) - tradeFibDir * atrVal * atrBufferInput : baseStop - tradeFibDir * atrVal * atrBufferInput
+
+    float minRisk = minRiskTicksInput * syminfo.mintick
+    if math.abs(entryPrice - slPrice) < minRisk
+        slPrice := entryPrice - tradeFibDir * minRisk
+
+    tp1Price := tradeFibPrice(f_target_ratio(tradeLadder, 1))
+    tp2Price := tradeFibPrice(f_target_ratio(tradeLadder, 2))
+    tp3Price := tradeFibPrice(f_target_ratio(tradeLadder, 3))
+    tp4Price := tradeFibPrice(f_target_ratio(tradeLadder, 4))
+    tp5Price := tradeFibPrice(f_target_ratio(tradeLadder, 5))
+
+bool canCheckTrade = not tradeClosed and tradeDir != 0 and not na(entryBar) and bar_index > entryBar
+if canCheckTrade and tradeDir == 1
+    if not na(tp1Price) and high >= tp1Price
+        tp1Hit := true
+    if not na(tp2Price) and high >= tp2Price
+        tp2Hit := true
+    if not na(tp3Price) and high >= tp3Price
+        tp3Hit := true
+    if not na(tp4Price) and high >= tp4Price
+        tp4Hit := true
+    if not na(tp5Price) and high >= tp5Price
+        tp5Hit := true
+    if low <= slPrice
+        slHit := true
+        tradeClosed := true
+
+if canCheckTrade and tradeDir == -1
+    if not na(tp1Price) and low <= tp1Price
+        tp1Hit := true
+    if not na(tp2Price) and low <= tp2Price
+        tp2Hit := true
+    if not na(tp3Price) and low <= tp3Price
+        tp3Hit := true
+    if not na(tp4Price) and low <= tp4Price
+        tp4Hit := true
+    if not na(tp5Price) and low <= tp5Price
+        tp5Hit := true
+    if high >= slPrice
+        slHit := true
+        tradeClosed := true
+
+bool finalTargetHit = tp5Hit or (na(tp5Price) and tp4Hit) or (na(tp4Price) and tp3Hit)
+if closeAtFinalTargetInput and finalTargetHit
+    tradeClosed := true
+
+string tradeStatus = tradeDir == 0 ? "No Trade" : tradeClosed and slHit ? "SL Hit" : tradeClosed and finalTargetHit ? "Final TP" : tp5Hit ? "TP5 ✓" : tp4Hit ? "TP4 ✓" : tp3Hit ? "TP3 ✓" : tp2Hit ? "TP2 ✓" : tp1Hit ? "TP1 ✓" : "Active"
+
+//=====================
+// SIGNAL / TRADE VISUALS
+//=====================
+// Entry signals
+plotshape(showSignalsInput and confirmedLong,  title="WB Fib Long",  style=shape.triangleup,   location=location.belowbar, color=COLOR_LONG,   size=size.small)
+plotshape(showSignalsInput and confirmedShort, title="WB Fib Short", style=shape.triangledown, location=location.abovebar, color=COLOR_SHORT,  size=size.small)
+
+// TP / SL hit diamonds — fire on the exact bar where state flips
+bool tp1HitEdge = tp1Hit and not tp1Hit[1]
+bool tp2HitEdge = tp2Hit and not tp2Hit[1]
+bool tp3HitEdge = tp3Hit and not tp3Hit[1]
+bool tp4HitEdge = tp4Hit and not tp4Hit[1]
+bool tp5HitEdge = tp5Hit and not tp5Hit[1]
+bool slHitEdge  = slHit  and not slHit[1]
+
+plotshape(showSignalsInput and tp1HitEdge, title="TP1 Hit", style=shape.diamond, location=location.abovebar, color=color.new(COLOR_TARGET, 0), size=size.tiny)
+plotshape(showSignalsInput and tp2HitEdge, title="TP2 Hit", style=shape.diamond, location=location.abovebar, color=color.new(COLOR_TARGET, 0), size=size.tiny)
+plotshape(showSignalsInput and tp3HitEdge, title="TP3 Hit", style=shape.diamond, location=location.abovebar, color=color.new(COLOR_TARGET, 0), size=size.small)
+plotshape(showSignalsInput and tp4HitEdge, title="TP4 Hit", style=shape.diamond, location=location.abovebar, color=color.new(COLOR_TARGET, 0), size=size.small)
+plotshape(showSignalsInput and tp5HitEdge, title="TP5 Hit", style=shape.diamond, location=location.abovebar, color=color.new(COLOR_TARGET, 0), size=size.normal)
+plotshape(showSignalsInput and slHitEdge,  title="SL Hit",  style=shape.diamond, location=location.belowbar, color=color.new(COLOR_SL,     0), size=size.small)
+
+var line lineEntry = na
+var line lineSL = na
+
+if showTradeLinesInput and confirmedFibTrigger
+    if not na(lineEntry)
+        line.delete(lineEntry)
+        lineEntry := na
+    if not na(lineSL)
+        line.delete(lineSL)
+        lineSL := na
+    int lineEnd = bar_index + labelOffsetInput
+    lineEntry := line.new(bar_index, entryPrice, lineEnd, entryPrice, color=COLOR_ENTRY, width=2, style=line.style_dotted)
+    lineSL    := line.new(bar_index, slPrice,    lineEnd, slPrice,    color=COLOR_SL,    width=2, style=line.style_dotted)
+
+if showTradeLinesInput and not na(lineEntry) and not confirmedFibTrigger and not tradeClosed
+    int lineEnd = bar_index + labelOffsetInput
+    line.set_x2(lineEntry, lineEnd)
+    line.set_x2(lineSL,    lineEnd)
+
+// Remove entry/SL lines immediately on the bar the trade closes
+if tradeClosed and not tradeClosed[1]
+    if not na(lineEntry)
+        line.delete(lineEntry)
+        lineEntry := na
+    if not na(lineSL)
+        line.delete(lineSL)
+        lineSL := na
+
+//=====================
+// DASHBOARD
+//=====================
+var table dash = table.new(getDashPos(dashPosStr), 2, 13, color.new(#131722, 5), color.new(#2A2E39, 0), 1, color.new(#2A2E39, 0), 1)
+
+if showDashInput and barstate.islast
+    int row = 0
+    table.cell(dash, 0, row, "Warbird Fib Sniper", text_color=color.white, bgcolor=color.new(#2962FF, 0), text_size=size.small, text_halign=text.align_center)
+    table.merge_cells(dash, 0, row, 1, row)
+    row += 1
+
+    string fibDirStr = not isValid ? "No Fib" : fibBull ? "Bull" : "Bear"
+    color fibDirCol = fibBull ? COLOR_LONG : COLOR_SHORT
+    table.cell(dash, 0, row, "Fib Direction", text_color=COLOR_MUTED, text_size=size.small)
+    table.cell(dash, 1, row, fibDirStr, text_color=isValid ? fibDirCol : COLOR_MUTED, text_size=size.small)
+    row += 1
+
+    table.cell(dash, 0, row, "Profile", text_color=COLOR_MUTED, text_size=size.small)
+    table.cell(dash, 1, row, profileInput, text_color=color.white, text_size=size.small)
+    row += 1
+
+    string stateStr = setupFired ? "Fired" : setupArmed ? "Armed " + f_ratio_text(armedRatio) : "Waiting"
+    table.cell(dash, 0, row, "Fib State", text_color=COLOR_MUTED, text_size=size.small)
+    table.cell(dash, 1, row, stateStr, text_color=setupArmed and not setupFired ? COLOR_PIVOT : setupFired ? COLOR_LONG : COLOR_MUTED, text_size=size.small)
+    row += 1
+
+    table.cell(dash, 0, row, "Interaction", text_color=COLOR_MUTED, text_size=size.small)
+    table.cell(dash, 1, row, resolvedInteraction, text_color=color.white, text_size=size.small)
+    row += 1
+
+    table.cell(dash, 0, row, "Alpha Gate", text_color=COLOR_MUTED, text_size=size.small)
+    table.cell(dash, 1, row, resolvedAlphaGate, text_color=armedAlphaOk ? COLOR_LONG : COLOR_MUTED, text_size=size.small)
+    row += 1
+
+    string alphaStr = "V" + (armedVolOk ? "✓" : "×") + " D" + (armedDeltaOk ? "✓" : "×") + " R" + (armedRsiOk ? "✓" : "×") + " S" + (armedSweepOk ? "✓" : "×") + " NK" + (armedNfeKnnOk ? "✓" : "×")
+    table.cell(dash, 0, row, "Alpha Snapshot", text_color=COLOR_MUTED, text_size=size.small)
+    table.cell(dash, 1, row, setupArmed or setupFired ? alphaStr : "—", text_color=color.white, text_size=size.small)
+    row += 1
+
+    string htfStr = htfBias == 1 ? "Bull" : htfBias == -1 ? "Bear" : "Neutral"
+    color htfCol = htfBias == 1 ? COLOR_LONG : htfBias == -1 ? COLOR_SHORT : COLOR_MUTED
+    table.cell(dash, 0, row, "HTF", text_color=COLOR_MUTED, text_size=size.small)
+    table.cell(dash, 1, row, resolvedHtfMode + " / " + htfStr, text_color=htfCol, text_size=size.small)
+    row += 1
+
+    table.cell(dash, 0, row, "Ladder", text_color=COLOR_MUTED, text_size=size.small)
+    table.cell(dash, 1, row, resolvedLadder, text_color=color.white, text_size=size.small)
+    row += 1
+
+    table.cell(dash, 0, row, "Trade", text_color=COLOR_MUTED, text_size=size.small)
+    table.cell(dash, 1, row, tradeStatus, text_color=tradeStatus == "No Trade" ? COLOR_MUTED : str.contains(tradeStatus, "SL") ? COLOR_SHORT : COLOR_LONG, text_size=size.small)
+    row += 1
+
+    table.cell(dash, 0, row, "Vol / Delta / RSI", text_color=COLOR_MUTED, text_size=size.small)
+    table.cell(dash, 1, row, safeStr(volRatio, "#.00") + " / " + safeStr(deltaProxy, "#.00") + " / " + safeStr(rsiVal, "#.0"), text_color=color.white, text_size=size.small)
+    row += 1
+
+    table.cell(dash, 0, row, "Version", text_color=COLOR_MUTED, text_size=size.small)
+    table.cell(dash, 1, row, INDICATOR_VERSION, text_color=COLOR_MUTED, text_size=size.small)
+
+//=====================
+// ALERTS
+//=====================
+string directionText = confirmedLong ? "long" : confirmedShort ? "short" : "none"
+string plainAlert = "Warbird Fib " + directionText + " | " + syminfo.ticker + " " + timeframe.period + " | line " + f_ratio_text(tradePullbackRatio) + " | entry " + str.tostring(entryPrice, format.mintick) + " | sl " + str.tostring(slPrice, format.mintick)
+string jsonAlert = "{\"system\":\"Warbird Fib Sniper\",\"symbol\":\"" + syminfo.ticker + "\",\"timeframe\":\"" + timeframe.period + "\",\"direction\":\"" + directionText + "\",\"profile\":\"" + profileInput + "\",\"pullback_line\":" + str.tostring(tradePullbackRatio, "#.###") + ",\"entry\":" + str.tostring(entryPrice, format.mintick) + ",\"sl\":" + str.tostring(slPrice, format.mintick) + ",\"tp1\":" + str.tostring(tp1Price, format.mintick) + ",\"tp2\":" + str.tostring(tp2Price, format.mintick) + ",\"tp3\":" + str.tostring(tp3Price, format.mintick) + ",\"fib_direction\":\"" + (tradeDir == 1 ? "bull" : "bear") + "\",\"alpha_gate\":\"" + resolvedAlphaGate + "\",\"ladder\":\"" + tradeLadder + "\"}"
+
+if useAlertFunctionInput and confirmedFibTrigger
+    alert(webhookInput ? jsonAlert : plainAlert, alert.freq_once_per_bar_close)
+
+alertcondition(confirmedLong, title="Warbird Fib Long", message="Warbird Fib Long")
+alertcondition(confirmedShort, title="Warbird Fib Short", message="Warbird Fib Short")

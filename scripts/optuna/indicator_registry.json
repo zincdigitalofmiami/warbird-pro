@@ -2,14 +2,16 @@
   {
     "key": "warbird_pro_sniper",
     "name": "Warbird Pro Sniper",
-    "surface_type": "strategy",
+    "surface_type": "indicator",
     "category": "chart-core",
-    "pine_file": "indicators/v9-warbird-trading-system-layout.pine",
-    "notes": "Precision Sniper signal engine — isolated study, standalone DB",
+    "pine_file": "indicators/warbird-precision-sniper.pine",
+    "notes": "Warbird Precision Sniper v1.2.2 — EMA/RSI/MACD/ADX/VWAP confluence engine with preset system (Auto/Conservative/Default/Aggressive/Scalping/Swing/Crypto 24/7/Custom). Standalone study, isolated DB.",
     "storage_mode": "standard",
     "profile_module": "scripts.precision_sniper.precision_sniper_profile",
     "default_study_name": "warbird_pro_sniper",
-    "topn_filename": "top5.json"
+    "topn_filename": "top5.json",
+    "symbol": "MES1!",
+    "timeframe": "15"
   },
   {
     "key": "sats_ps",
@@ -17,7 +19,7 @@
     "surface_type": "strategy",
     "category": "chart-core",
     "pine_file": "indicators/v8-warbird-prescreen.pine",
-    "notes": "Legacy SATS path: data/sats_ps_optuna",
+    "notes": "Canonical SATS workspace under scripts/optuna/workspaces/sats_ps",
     "storage_mode": "legacy",
     "profile_builtin": "sats_v1",
     "default_study_name": "sats_2025_wr_pf",
@@ -100,8 +102,8 @@
     "label_column": "ml_last_exit_outcome",
     "output_budget": "56/64",
     "frozen_params": ["fibDeviationManual", "fibDepthManual", "fibThresholdFloorPct", "minFibRangeAtr", "autoTuneZZ"],
-    "tv_only_params": ["retestBars", "fibConfluenceTolPct", "footprintTicksPerRow", "footprintVaPercent", "footprintImbalancePercent", "zeroPrintVolRatio", "stackedImbalanceRows", "exhaustionZLen", "exhaustionZThreshold", "exhaustionLevelAtrTol"],
-    "notes": "Fib geometry frozen per 15m fib-owner freeze (CLAUDE.md 2026-04-14). Objective: composite 0.40xPF + 0.35xWR + 0.25xConsistency."
+    "tv_only_params": ["retestBars", "fibConfluenceTolPct", "footprintTicksPerRow", "footprintVaPercent", "footprintImbalancePercent", "zeroPrintVolRatio", "stackedImbalanceRows"],
+    "notes": "Fib geometry frozen per 15m fib-owner freeze (CLAUDE.md 2026-04-14). Objective: composite 0.40xPF + 0.35xWR + 0.25xConsistency. Exhaustion diamond abandoned 2026-04-21."
   },
   {
     "key": "v7_warbird_strategy",
@@ -174,5 +176,17 @@
     "pine_file": "indicators/warbird-oscillator-matrix.pine",
     "profile_module": "scripts.optuna.warbird_oscillator_matrix_profile",
     "default_study_name": "warbird_oscillator_matrix_wr_pf"
+  },
+  {
+    "key": "warbird_nexus_ml_rsi",
+    "name": "Warbird Nexus Machine Learning RSI",
+    "surface_type": "indicator",
+    "category": "lower-pane",
+    "pine_file": "indicators/warbird-nexus-machine-learning-rsi.pine",
+    "profile_module": "scripts.optuna.warbird_nexus_ml_rsi_profile",
+    "default_study_name": "warbird_nexus_ml_rsi_wr_pf",
+    "symbol": "MES1!",
+    "timeframe": "15",
+    "notes": "Research proxy harness on real MES 15m OHLCV parquet. Optimizes the AMF oscillator, signal, zone, confluence, and ATR exit parameters in a dedicated Optuna workspace."
   }
 ]
