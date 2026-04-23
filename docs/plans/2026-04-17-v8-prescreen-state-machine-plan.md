@@ -4,7 +4,7 @@
 
 **Goal:** Turn `indicators/v8-warbird-prescreen.pine` from a losing every-flip-is-a-trade strategy (PF 0.647, 1,706 trades) into a gated, state-machine-based wrapper that fires `strategy.entry` only when price retests the ladder ENTRY level with all quality/HTF/ADX/session/asymmetric gates aligned.
 
-**Architecture:** Keep SATS v1.9.0 engine verbatim. Add a `tradeState` enum (IDLE → FORMING → READY → TRADE_ON → EXITED/INVALIDATED/EXPIRED). Ladder is drawn at FORMING and frozen until resolution. Entry fires at TRADE_ON when a bar closes at/through ENTRY with gates still aligned. Five independently-toggleable gate layers (L1–L5) let us measure per-layer PF lift via named backtest runs R0 → R5.
+**Architecture:** Keep the locked inherited baseline engine verbatim. Add a `tradeState` enum (IDLE → FORMING → READY → TRADE_ON → EXITED/INVALIDATED/EXPIRED). Ladder is drawn at FORMING and frozen until resolution. Entry fires at TRADE_ON when a bar closes at/through ENTRY with gates still aligned. Five independently-toggleable gate layers (L1–L5) let us measure per-layer PF lift via named backtest runs R0 → R5.
 
 **Tech Stack:** Pine Script v6 (TradingView strategy), TradingView MCP for compile + backtest automation, `scripts/guards/pine-lint.sh`, `scripts/guards/check-contamination.sh`, `scripts/guards/check-indicator-strategy-parity.sh`, `npm run build`.
 
@@ -131,20 +131,20 @@ git commit -m "Fix invisible dashboard table"
 
 ---
 
-### Task 1.3: Remove 2 dead public SATS instances from TV chart
+### Task 1.3: Remove 2 dead public legacy prescreen instances from TV chart
 
 **Files:** none (chart hygiene only)
 
 **Step 1:** Use `mcp__tradingview__chart_manage_indicator` with `action: remove` and `entity_id: xgdLpj`, then again with `entity_id: JxTjPm`.
 
-**Step 2:** Call `chart_get_state`; verify only `jrwTt0` (SATS-PS) remains among SATS-family studies. Other studies (Warbird v7, Auto Fib, Nexus, etc.) stay.
+**Step 2:** Call `chart_get_state`; verify only `jrwTt0` (our legacy prescreen study) remains among the retired prescreen-family studies. Other studies (Warbird v7, Auto Fib, Nexus, etc.) stay.
 
 **Step 3:** Capture `screenshots/task1.3-clean-studies.png`.
 
 **Step 4:** No code commit — note the cleanup in `docs/plans/2026-04-17-backtest-results.md` under "Diagnostics":
 ```
 git add docs/plans/2026-04-17-backtest-results.md screenshots/task1.3-clean-studies.png
-git commit -m "Remove dead public SATS copies from TV chart"
+git commit -m "Remove dead public legacy prescreen copies from TV chart"
 ```
 
 ---

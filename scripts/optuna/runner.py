@@ -6,9 +6,9 @@ Accepts a --profile-module argument pointing to any indicator's profile.py.
 Stores studies in scripts/optuna/workspaces/<indicator_key>/study.db.
 
 Usage:
-  python scripts/optuna/runner.py --indicator-key sats_ps \
-    --profile-module scripts.sats.sats_profile \
-    --n-trials 300 --study-name sats_2025_wr_pf
+  python scripts/optuna/runner.py --indicator-key <key> \
+    --profile-module scripts.optuna.<key>_profile \
+    --n-trials 300 --study-name <key>_study
 
 Dashboard (pick any free local port, e.g. 8180):
   optuna-dashboard sqlite:///scripts/optuna/workspaces/<indicator_key>/study.db --port 8180
@@ -37,15 +37,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.optuna.paths import workspace_dir
 
-DEFAULT_INDICATOR_KEY = "sats_ps"
-DEFAULT_CHAMP_PATH = workspace_dir(DEFAULT_INDICATOR_KEY) / "champion.json"
-
 MIN_TRADES = 20  # prune configs that produce fewer trades
-SL_FLOOR = 0.618  # hard constraint from HC (WARBIRD_V8_PLAN)
-START_DATE_IS = "2025-01-01"  # IS window: Trump regime only (structural break Jan 2025)
+SL_FLOOR = 0.618  # hard constraint: structural stop floor
+START_DATE_IS = "2025-01-01"  # IS window default (Trump regime structural break Jan 2025)
 END_DATE_IS = "2026-12-31"  # IS end — OOS defined per config lock date
-DEFAULT_STUDY_NAME = "sats_2025_wr_pf"
-DEFAULT_PROFILE = "sats_v1"
 RECOMMENDED_LOCAL_DASHBOARD_PORT = 8180
 
 # Ranking policies — opt-in per --ranking-policy CLI flag.
@@ -104,30 +99,8 @@ def resolve_optuna_dir(indicator_key: str, optuna_dir: str | None) -> Path:
 def resolve_champion_path(indicator_key: str, champion_path: str | None) -> Path | None:
     if champion_path:
         return Path(champion_path)
-    if indicator_key == DEFAULT_INDICATOR_KEY:
-        return DEFAULT_CHAMP_PATH
-    return None
-
-
-def load_builtin_sats_profile() -> ProfileAdapter:
-    sys.path.insert(0, str(Path(__file__).parent))
-    from sats_sweep import BOOL_PARAMS, NUMERIC_RANGES, INT_PARAMS, CATEGORICAL_PARAMS
-    from sats_sim import load_data, INPUT_DEFAULTS
-    from sats_backtest import run_sats_bt
-
-    return ProfileAdapter(
-        name="sats_v1",
-        bool_params=list(BOOL_PARAMS),
-        numeric_ranges=dict(NUMERIC_RANGES),
-        int_params=set(INT_PARAMS),
-        categorical_params=dict(CATEGORICAL_PARAMS),
-        input_defaults=dict(INPUT_DEFAULTS),
-        load_data_fn=load_data,
-        run_backtest_fn=run_sats_bt,
-        objective_score_fn=None,
-        objective_metric_name=None,
-        conditional_params=None,
-    )
+    default = workspace_dir(indicator_key) / "champion.json"
+    return default if default.exists() else None
 
 
 def load_custom_profile(module_name: str) -> ProfileAdapter:
@@ -170,12 +143,9 @@ def load_profile_adapter(profile: str, profile_module: str | None) -> ProfileAda
     if profile_module:
         return load_custom_profile(profile_module)
 
-    if profile in {"sats_v1", "sats_ps", "sats"}:
-        return load_builtin_sats_profile()
-
     raise SystemExit(
-        "Unknown profile. Use --profile sats_v1 or pass --profile-module <python.module> "
-        "for non-SATS indicators/strategies."
+        "No profile loaded. Pass --profile-module <python.module> pointing to your indicator's "
+        "profile adapter (e.g. scripts.optuna.my_indicator_profile)."
     )
 
 
@@ -489,13 +459,13 @@ def main():
     )
     parser.add_argument(
         "--indicator-key",
-        default=DEFAULT_INDICATOR_KEY,
-        help=f"Indicator key (default: {DEFAULT_INDICATOR_KEY})",
+        required=True,
+        help="Indicator key matching the registry entry (e.g. warbird_nexus_ml_rsi)",
     )
     parser.add_argument(
         "--profile",
-        default=DEFAULT_PROFILE,
-        help=f"Built-in profile name (default: {DEFAULT_PROFILE})",
+        default=None,
+        help="Reserved for future built-in profiles. Use --profile-module instead.",
     )
     parser.add_argument(
         "--profile-module",
@@ -508,7 +478,7 @@ def main():
     parser.add_argument(
         "--study-name",
         default=None,
-        help=f"Study name in SQLite DB (default: {DEFAULT_STUDY_NAME})",
+        help="Study name in SQLite DB (default: <indicator_key>_study)",
     )
     parser.add_argument(
         "--resume",
@@ -560,8 +530,7 @@ def main():
     args = parser.parse_args()
 
     profile = load_profile_adapter(args.profile, args.profile_module)
-    default_study_name = DEFAULT_STUDY_NAME if args.indicator_key == DEFAULT_INDICATOR_KEY else f"{args.indicator_key}_wr_pf"
-    study_name = args.study_name or default_study_name
+    study_name = args.study_name or f"{args.indicator_key}_study"
     optuna_dir = resolve_optuna_dir(args.indicator_key, args.optuna_dir)
     optuna_dir.mkdir(parents=True, exist_ok=True)
     db_path = Path(args.db) if args.db else (optuna_dir / "study.db")

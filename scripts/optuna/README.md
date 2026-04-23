@@ -38,4 +38,4 @@ Rules:
 - The workspace root holds the canonical study DB for that indicator key.
 - Additional named studies stay inside `experiments/` for that same indicator.
 - Shared mixed-indicator SQLite DBs are retired. Historical mixed DBs belong in `archive/`.
-- `data/optuna/` and `data/sats_ps_optuna/` are deprecated and should stay empty.
+- Legacy `data/*optuna*` directories are deprecated and should stay empty.

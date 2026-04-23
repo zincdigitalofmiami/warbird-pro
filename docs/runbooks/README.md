@@ -16,3 +16,5 @@ Future operational procedures should be added here instead of being spread acros
 
 - `docs/runbooks/strategy_tuning.md`
   - local parameter-search harness for TradingView strategy settings before AG training
+- `docs/runbooks/optuna_legacy_strategy_tuning.md`
+  - archived note for the retired single-lane Optuna workflow

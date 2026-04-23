@@ -183,7 +183,6 @@ def main() -> None:
     print("- right-click any study.db file in Explorer and run `Open in Optuna Dashboard`")
     print("- optional Run and Debug sidecars:")
     print("  `Optuna: Optional Sidecar Hub (8190)`")
-    print("  `Optuna: Optional Sidecar SATS Dashboard (8180)`")
     print("  `Optuna: Optional Sidecar V7 Institutional Dashboard (8182)`")
     print("- tasks:")
     print("  `Optuna: Doctor`")

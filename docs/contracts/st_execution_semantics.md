@@ -5,7 +5,7 @@ Any discrepancy between Pine and Python behavior is a bug, not ambiguity.
 
 ## Scope Split
 
-- Pine v8 skeleton is SATS-derived for live rendering and operator state.
+- Pine v8 skeleton is legacy-derived for live rendering and operator state.
 - Python computes training-only features from OHLCV (`in_ote_zone`, `structure_event`) and labels outcomes.
 - This resolver is the single execution-order contract both must follow.
 

@@ -16,9 +16,9 @@ This v8 lane locks a deterministic SuperTrend + TQI workflow with strict Pine↔
 
 ## Architecture Summary
 
-### Pine Skeleton (SATS)
+### Pine Skeleton (Locked Baseline)
 
-**Base framework: SATS (Self-Aware Trend System) [WillyAlgoTrader] — verbatim Pine skeleton for Phase 1 live surface.**
+**Base framework: locked inherited baseline [WillyAlgoTrader] — verbatim Pine skeleton for Phase 1 live surface.**
 
 No blocks are adopted from Precision Sniper, Fibonacci Structure Engine, or Smart Money Engine in Phase 1.
 Those three remain reference-only until post-SHAP contract revision and Kirk approval.
@@ -75,12 +75,12 @@ All four indicators are open-source on TradingView.
 
 | Indicator | Role in v8 |
 |---|---|
-| Self-Aware Trend System (SATS) | Base framework — Pine v8 skeleton (verbatim) |
+| Locked inherited baseline | Base framework — Pine v8 skeleton (verbatim) |
 | Precision Sniper | Reference only — TP/SL state machine pattern |
 | Fibonacci Structure Engine | Reference only — fib anchor lifecycle pattern |
 | Smart Money Engine | Reference only — OB/FVG/BOS/CHoCH pattern |
 
-Phase 1 uses SATS verbatim skeleton only. The other three are not code donors until SHAP proves need.
+Phase 1 uses the locked inherited baseline skeleton only. The other three are not code donors until SHAP proves need.
 
 ---
 
@@ -89,7 +89,7 @@ Phase 1 uses SATS verbatim skeleton only. The other three are not code donors un
 1. 15m is the parent timeframe. SuperTrend flip on confirmed 15m bar close only.
 2. Features freeze at signal bar close. No lookahead of any kind.
 3. Walk-forward splits only. One-session embargo minimum. No shuffle. No fit on full dataset.
-4. Pine v8 indicator framework is SATS verbatim skeleton. No other code donors in Phase 1.
+4. Pine v8 indicator framework is the locked inherited baseline skeleton. No other code donors in Phase 1.
 5. AG feature set is 12 indicator-derived features from `mes_15m` OHLCV + timestamp in Python.
    `in_ote_zone` and `structure_event` are Python-side features, not Pine plot exports.
 6. Cloud never receives `st_signals`, `st_outcomes`, raw features, raw labels, or raw SHAP.
@@ -258,7 +258,7 @@ CREATE TABLE st_prescreen_ledger (
 **Owner:** CDP tuner sweep, Codex ledger insert, Claude review, Kirk approve
 
 **Pine prescreen (v8-warbird-prescreen.pine): COMPLETE — 2026-04-18**
-- SATS v1.9.0 verbatim base + strategy wrapper (strategy() declaration,
+- Locked inherited baseline + strategy wrapper (strategy() declaration,
   entry/exit execution block, barstate.islast removed from dashboard+watermark gates).
   TV smart_compile clean, pine-facade clean, delta=19 lines vs live (within 8-20 tolerance).
   Commit bcb4d92 (entry execution fix). **File is now CODE-FROZEN (Hard Constraint 13).**
@@ -381,7 +381,7 @@ AG output per regime must surface ranked SL options (rank 1/2/3).
 **What:** `indicators/v8-warbird-live.pine` live indicator
 
 Components:
-- SATS verbatim skeleton
+- Locked inherited baseline skeleton
 - TQI dashboard state and regime readout
 - AG recommendation slot
 - MES guardrails (RTH opening suppressor, 0.25 tick awareness)
@@ -433,7 +433,7 @@ Minimum appearance controls:
 ```text
 local_warehouse/migrations/018_st_training_schema.sql      <- Slice 1
 scripts/ag/populate_st_configs.py                          <- Slice 2
-indicators/v8-warbird-prescreen.pine                       <- Slice 2b (SATS verbatim + strategy() declarations)
+indicators/v8-warbird-prescreen.pine                       <- Slice 2b (locked inherited baseline + strategy() declarations)
 scripts/ag/run_st_prescreen.py                             <- Slice 2b (CDP sweep + ledger insert)
 scripts/ag/extract_st_signals.py                           <- Slice 3
 scripts/ag/label_st_outcomes.py                            <- Slice 4

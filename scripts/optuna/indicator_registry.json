@@ -1,17 +1,5 @@
 [
   {
-    "key": "sats_ps",
-    "name": "SATS Prescreen",
-    "surface_type": "strategy",
-    "category": "chart-core",
-    "pine_file": "indicators/v8-warbird-prescreen.pine",
-    "notes": "Canonical SATS workspace under scripts/optuna/workspaces/sats_ps",
-    "storage_mode": "legacy",
-    "profile_builtin": "sats_v1",
-    "default_study_name": "sats_2025_wr_pf",
-    "topn_filename": "top5.json"
-  },
-  {
     "key": "wb7",
     "name": "WB7 Institutional",
     "surface_type": "indicator",
@@ -64,15 +52,6 @@
     "pine_file": "indicators/v8-warbird-prescreen.pine",
     "profile_module": "scripts.optuna.v8_warbird_prescreen_profile",
     "default_study_name": "v8_warbird_prescreen_wr_pf"
-  },
-  {
-    "key": "v8_sats_fib_gate",
-    "name": "SATS Fib Gate (v8)",
-    "surface_type": "strategy",
-    "category": "chart-core",
-    "pine_file": "indicators/v8-sats-fib-gate.pine",
-    "profile_module": "scripts.optuna.v8_sats_fib_gate_profile",
-    "default_study_name": "v8_sats_fib_gate_wr_pf"
   },
   {
     "key": "v7_warbird_institutional",

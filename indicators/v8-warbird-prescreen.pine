@@ -7,7 +7,7 @@
 
 strategy(
      title                 = "Self-Aware Trend System [Warbird Prescreen]",
-     shorttitle            = "SATS-PS",
+     shorttitle            = "WBPS",
      overlay               = true,
      max_lines_count       = 500,
      max_labels_count      = 500,

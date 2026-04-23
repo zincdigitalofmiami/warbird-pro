@@ -3,17 +3,17 @@
 **Date:** 2026-04-17
 **Status:** Design approved by Kirk. Awaiting implementation plan (writing-plans).
 **Authors:** Kirk + Claude (brainstorming skill)
-**Supersedes:** The "enter on every SATS flip" wrapper committed at [4a96e92](https://github.com/zincdigitalofmiami/warbird-pro/commit/4a96e92).
+**Supersedes:** The "enter on every baseline flip" wrapper committed at [4a96e92](https://github.com/zincdigitalofmiami/warbird-pro/commit/4a96e92).
 
 ---
 
 ## 1. Problem statement
 
-Current `indicators/v8-warbird-prescreen.pine` fires `strategy.entry` on every SATS SuperTrend flip (`confirmedBuy` / `confirmedSell`). On MES 15m 2020–2024: **1,706 trades, PF 0.647, WR 33.4%, net −$9,833**.
+Current `indicators/v8-warbird-prescreen.pine` fires `strategy.entry` on every baseline SuperTrend flip (`confirmedBuy` / `confirmedSell`). On MES 15m 2020–2024: **1,706 trades, PF 0.647, WR 33.4%, net −$9,833**.
 
 Three observed issues:
 
-1. **Every flip is a trade.** The SATS scoring system (ARP 0–102 + TQI 0–1) computes a quality score, and `minScoreInput = input.int(60, ..., "Min Signal Score (display only)")` exists in the source, but the gate is literally labeled "display only" and never consulted by `strategy.entry`. No filter. No HTF agreement. No ADX. No session filter.
+1. **Every flip is a trade.** The inherited baseline scoring system (ARP 0–102 + TQI 0–1) computes a quality score, and `minScoreInput = input.int(60, ..., "Min Signal Score (display only)")` exists in the source, but the gate is literally labeled "display only" and never consulted by `strategy.entry`. No filter. No HTF agreement. No ADX. No session filter.
 2. **SuperTrend line drifts on scroll.** `strategy(max_bars_back = 5000)` caps ATR warmup. When the visible window exceeds ~52 calendar days (15m ≈ 5000 bars), Pine re-seeds ST from a different anchor, shifting the plotted line and historical flip points.
 3. **Ladder (ENTRY/SL/TP1-3) moves with new flips.** Every new flip overwrites `tradeEntry/tradeSl/tradeTp1-3`, and the drawing block deletes and re-creates the lines at the new levels. Visual effect: TP3 "chases the high".
 
@@ -23,7 +23,7 @@ Plus a semantic flaw: the existing labels call raw flips `▲ BUY` / `▼ SELL` 
 
 ## 2. Design principles
 
-- Keep SATS v1.9.0 engine verbatim (SuperTrend + ARP + TQI computations). Only change **how signals are consumed**.
+- Keep the locked inherited baseline engine verbatim (SuperTrend + ARP + TQI computations). Only change **how signals are consumed**.
 - Explicit state machine from regime-flip → setup → entry → exit. No implicit state.
 - Every filter is a toggleable input so we can measure per-layer lift via named backtest runs.
 - Ladder is anchored at flip and does not move until the setup exits or is invalidated.
@@ -59,7 +59,7 @@ Plus a semantic flaw: the existing labels call raw flips `▲ BUY` / `▼ SELL` 
 
 All gates are `input.bool`, toggleable independently for backtest isolation.
 
-### L1 — Quality (SATS-native, already computed)
+### L1 — Quality (baseline-native, already computed)
 
 - `useQualityGate = input.bool(true)`
 - **ARP score:** require `signalScore >= minScoreInput` (activate existing input; remove "display only" from its title). Defaults: longs 60, shorts 70.
@@ -112,11 +112,11 @@ strategy.exit("TP3", from_entry = entryId, qty_percent = 30, stop = tradeSl, lim
 - SL is shared across all three legs (all three `strategy.exit` calls pass the same `stop = tradeSl`).
 - Realized partials are tagged per leg.
 - On opposite ST flip while in TRADE_ON: call `strategy.close(entryId, comment = "opp_flip")` (hard close at market).
-- On `timeoutBarsInput` bars from entry without TP3: `strategy.close(entryId, comment = "timeout")`. Default 100 (SATS author's recommendation).
+- On `timeoutBarsInput` bars from entry without TP3: `strategy.close(entryId, comment = "timeout")`. Default 100 (legacy author recommendation).
 
 ### Stop policy
 
-- Keep SATS structural ATR SL verbatim. **No hard dollar cap.** (Per Kirk's rule: "I don't care how wide the SL is if it's a winning trade.")
+- Keep the baseline structural ATR SL verbatim. **No hard dollar cap.** (Per Kirk's rule: "I don't care how wide the SL is if it's a winning trade.")
 - The realized loss cap question stays deferred — may revisit after R1–R5 results.
 
 ### TP mode
@@ -137,7 +137,7 @@ strategy.exit("TP3", from_entry = entryId, qty_percent = 30, stop = tradeSl, lim
 
 4. **Pine warnings (7)** — lift `calcVolumeZ`, `calcSignalScore`, `calcScoreBreakdown` out of ternary/nested scopes into named local vars at the top of their blocks (warnings at L402, L595, L596, L650, L684). The two `barstate.islast` warnings (L931, L1052) are informational — acknowledge by design or move the logic out of `barstate.islast` branches if not needed in realtime.
 
-5. **Chart hygiene** — remove the two dead public SATS instances on the TradingView chart (`xgdLpj`, `JxTjPm`). Keep only our PS strategy (`jrwTt0`).
+5. **Chart hygiene** — remove the two dead public legacy prescreen instances on the TradingView chart (`xgdLpj`, `JxTjPm`). Keep only our PS strategy (`jrwTt0`).
 
 ---
 
@@ -154,7 +154,7 @@ Baseline conditions:
 |---|---|---|---|
 | **R0** | none | off (entry on flip, current behavior) | reproduce baseline PF 0.647 |
 | **R0b** | none | **on** (wait-for-retest only, no quality gates) | isolate pure semantic-fix lift |
-| **R1** | L1 only | on | SATS's own quality gate's standalone lift |
+| **R1** | L1 only | on | baseline quality gate's standalone lift |
 | **R2** | L1 + L2 | on | HTF trend filter incremental lift |
 | **R3** | L1 + L2 + L3 | on | ADX incremental lift |
 | **R4** | L1 + L2 + L3 + L4 | on | session filter lift |
@@ -163,7 +163,7 @@ Baseline conditions:
 **Kill switches:**
 
 - If R0b alone hits PF ≥ 1.2: the entire gate stack may be unnecessary. Ship the state-machine fix and revisit gates empirically.
-- If R1 alone hits PF ≥ 1.5: the SATS scoring system is doing the work; L2–L5 are optional polish.
+- If R1 alone hits PF ≥ 1.5: the inherited baseline scoring system is doing the work; L2–L5 are optional polish.
 - If R5 lands PF < 1.5: fall back to **Approach C (long-only)** variant and re-run R5 with shorts disabled.
 
 ---
@@ -186,9 +186,9 @@ Baseline conditions:
 
 ## 9. Out of scope for this design
 
-- **480 × 2,592 CDP grid sweep (S2b plan):** deferred pending R1–R5 results. If the SATS scoring gate alone delivers edge, the grid is solving a solved problem.
+- **480 × 2,592 CDP grid sweep (S2b plan):** deferred pending R1–R5 results. If the baseline scoring gate alone delivers edge, the grid is solving a solved problem.
 - **AG training (Phase 4–5):** continues independently. This design produces a stronger candidate stream for AG to learn from.
-- **`v8-warbird-live.pine` (companion indicator):** stays SATS-verbatim. Not touched in this design. Only `v8-warbird-prescreen.pine` changes.
+- **`v8-warbird-live.pine` (companion indicator):** stays baseline-verbatim. Not touched in this design. Only `v8-warbird-prescreen.pine` changes.
 - **Hard dollar loss cap:** deferred. May revisit after R1–R5 if realized loss distributions warrant it.
 - **Dynamic TP mode:** kept as an input but defaults to off (Fixed). Can be A/B tested post-R5.
 

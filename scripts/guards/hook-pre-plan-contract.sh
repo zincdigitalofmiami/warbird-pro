@@ -1,9 +1,9 @@
 #!/bin/bash
 # PreToolUse hook: surface active-plan Hard Constraints before Pine or training edits.
 #
-# Motivation: in the 2026-04-17 SATS-PS session, verbal requests contradicted
-# WARBIRD_V8_PLAN.md Hard Constraint #1 ("SuperTrend flip on confirmed 15m bar close
-# only"). Hand-rolled fib logic landed and took ~2 hrs to unwind. This hook injects
+# Motivation: verbal requests have contradicted WARBIRD_V8_PLAN.md hard constraints
+# before (e.g. "SuperTrend flip on confirmed 15m bar close only"). Hand-rolled logic
+# landed and took ~2 hrs to unwind. This hook injects
 # the Hard Constraints into additionalContext before any edit on governed surfaces,
 # so the constraints are visible in real time — not post-mortem.
 #

@@ -22,16 +22,16 @@ All runs on CME_MINI:MES1! 15m, **Strategy Tester Deep Backtesting range Jan 1 2
 - **TV input-id mapping** (counting `input.*()` calls from top of file, skipping `__chart_bgcolor`/`__profile`): `in_65=showDashInput`, `in_66=showTqiBreakdownInput`, `in_67=showBreakdownInput`, `in_68=showPerfInput`, `in_69=dashPosStr`.
 - **Live values on `jrwTt0`** via `mcp__tradingview__data_get_indicator`: `in_65=true`, `in_66=true`, `in_67=true`, `in_68=true`, `in_69="Bottom Right"`. All dashboard toggles are ON.
 - **Render gate at line 931** (`if showDashInput and barstate.islast`) is satisfied.
-- **`mcp__tradingview__data_get_pine_tables` (no filter)** returns 2 tables from the SATS-PS study — a 34-row dashboard (Preset | Crypto 24/7, TQI | .28, Signal | —, Regime | Mixed / High Vol, Performance | 85/100, Win Rate | 80.0%, Avg R | +1.40R, Streak W/L | W:5/11 L:0/3, ... through ST Break | 16.0) plus the 1-row watermark table. The dashboard `table.new()` at line 932 and all `table.cell()` calls at lines 934-1046 are firing.
+- **`mcp__tradingview__data_get_pine_tables` (no filter)** returns 2 tables from the legacy v8 prescreen study — a 34-row dashboard (Preset | Crypto 24/7, TQI | .28, Signal | —, Regime | Mixed / High Vol, Performance | 85/100, Win Rate | 80.0%, Avg R | +1.40R, Streak W/L | W:5/11 L:0/3, ... through ST Break | 16.0) plus the 1-row watermark table. The dashboard `table.new()` at line 932 and all `table.cell()` calls at lines 934-1046 are firing.
 - **Visual confirmation**: screenshot `/Users/zincdigital/tradingview-mcp/screenshots/v8-prescreen-dashboard-check.png` shows the table rendered in the bottom-right corner of the chart with all sections (main stats, TQI Components, Performance, last-signal breakdown) visible.
-- **Why earlier filter returned 0**: the initial `data_get_pine_tables` call used `study_filter="SATS"`, which matches against the study's display name (`"Self-Aware Trend System [WillyAlgoTrader] — Prescreen"`) — no "SATS" substring. `study_filter="Self-Aware"` or no filter at all works.
+- **Why earlier filter returned 0**: the initial filtered `data_get_pine_tables` call used an outdated study-name token. The live study display name did not match that token, while `study_filter` omitted or aligned to the displayed title worked correctly.
 - **Action for Phase 1.2**: none required. The "invisible table" premise was incorrect. If Kirk still perceives a rendering issue, it is a position/theme/overlap problem with other on-chart studies (e.g. `Nexus Fusion Engine ML` dashboard may overlap), not a code-path failure. Phase 1.2 can either be skipped or repurposed to relocate the dashboard (`dashPosStr`) if a conflict is observed live.
 
 ## Runs
 
 | Run | Gates | Trades | PF | WR | Net P&L | Max DD | Commit |
 |-----|-------|--------|----|----|---------|--------|--------|
-| R0  | none (raw SATS flip = every trade), 6.3y | 7924 | 0.914 | 33.34% | -$25,327.75 | $29,468.50 | 4a96e92 |
+| R0  | none (raw baseline flip = every trade), 6.3y | 7924 | 0.914 | 33.34% | -$25,327.75 | $29,468.50 | 4a96e92 |
 
 ## Per-direction baseline (R0 breakdown, for L5 calibration)
 

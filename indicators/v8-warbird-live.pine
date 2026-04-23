@@ -7,7 +7,7 @@
 
 indicator(
      title              = "Self-Aware Trend System [WillyAlgoTrader]",
-     shorttitle         = "SATS",
+     shorttitle         = "WBL",
      overlay            = true,
      max_lines_count    = 500,
      max_labels_count   = 500,

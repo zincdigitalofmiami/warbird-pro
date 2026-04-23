@@ -1,5 +1,5 @@
 #!/bin/bash
-# Check v8 parity between SATS live indicator and SATS-PS prescreen strategy.
+# Check v8 parity between the live indicator (WBL) and the prescreen strategy (WBPS).
 #
 # Contract (per Kirk, 2026-04-17): prescreen must be live verbatim PLUS
 # minimal strategy() wrapper ONLY. No hand-rolled signal logic, no invented

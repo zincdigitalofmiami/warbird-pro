@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Optuna profile adapter template for non-SATS indicators/strategies.
+Optuna profile adapter template for Pine indicators / strategies.
 
 Use with:
   python scripts/optuna/runner.py \

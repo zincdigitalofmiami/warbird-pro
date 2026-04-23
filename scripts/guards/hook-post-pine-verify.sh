@@ -41,10 +41,13 @@ case "$fp" in
 esac
 
 # TV Desktop compile reminder for strategy() files — pine-facade misses CE10244
-# Per memory/feedback_pine_strategy_tv_compile_required.md
+# ADVISORY ONLY — not a block. Only act on this if:
+#   (a) the change is FUNCTIONAL (logic, not a display label or comment), AND
+#   (b) Kirk has explicitly authorized TV use this session (CDP confirmed up via tv_health_check)
+# If CDP is unavailable, DO NOT call tv_launch. Skip TV verification and say so.
 if head -25 "$fp" 2>/dev/null | grep -q '^strategy('; then
   jq -cn --arg fp "$fp" \
-    '{hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:("REQUIRED NEXT STEP: " + $fp + " is a strategy() script. pine-facade passed but misses CE10244. Before claiming complete, run via TradingView MCP:\n  1. mcp__tradingview__pine_set_source (with full file contents)\n  2. mcp__tradingview__pine_smart_compile\n  3. mcp__tradingview__pine_get_errors\nCE10244 will only be caught here, not by pine-facade or pine-lint.")}}'
+    '{hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:("ADVISORY (not a block): " + $fp + " is a strategy() script. pine-facade misses CE10244. IF this was a functional change AND TV CDP is confirmed up: run pine_smart_compile via MCP. If display-only change (shorttitle/comment) or CDP unavailable: pine-facade success is sufficient — skip TV and proceed.")}}'
 fi
 
 exit 0
