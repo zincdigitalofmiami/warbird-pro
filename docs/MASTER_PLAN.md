@@ -76,9 +76,9 @@
 
 ## 2026-04-22 Execution Checkpoint — Optuna Operator Surface
 
-- Verified local Optuna entrypoint is now canonical on `http://localhost:8090`.
-  `http://localhost:8080` remains loopback-only compatibility redirect and is
-  no longer a standalone shared dashboard surface.
+- Verified local Optuna entrypoint is canonical on `http://localhost:8090`.
+  The legacy `http://localhost:8080` compatibility redirect and its launchd
+  agent were retired on 2026-04-23; 8090 is now the sole operator surface.
 - The hub now treats the real on-disk workspace set under
   `scripts/optuna/workspaces/` as authoritative for visible lanes. It no longer
   auto-creates empty workspace folders from registry intent.
@@ -91,7 +91,6 @@
   Verified live workspaces on disk are `v7_warbird_institutional` and
   `warbird_nexus_ml_rsi`.
 - Browser verification completed against the live hub:
-  - `localhost:8080` redirects to `localhost:8090`
   - filter state persists across refresh
   - sort state persists across refresh
   - both surviving study UIs launch on demand

@@ -16,6 +16,7 @@ import shutil
 import socket
 import subprocess
 import sys
+from collections.abc import Sequence
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -31,8 +32,16 @@ from scripts.optuna.paths import WORKSPACES_ROOT, study_db_path
 REGISTRY_PATH = REPO_ROOT / "scripts" / "optuna" / "indicator_registry.json"
 
 PERSISTENT_ENDPOINTS: list[tuple[str, str]] = [
-    ("hub-compat", "http://localhost:8080/"),
     ("hub", "http://localhost:8090/api/snapshot"),
+]
+
+WORKTREE_PATHS: list[str] = [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "docs/MASTER_PLAN.md",
+    "docs/runbooks/wbv7_institutional_optuna.md",
+    "docs/runbooks/optuna_legacy_strategy_tuning.md",
+    "scripts/optuna",
 ]
 
 VSCODE_PORTS: list[tuple[str, int]] = [
@@ -95,6 +104,22 @@ def print_section(title: str) -> None:
     print("-" * len(title))
 
 
+def git_status_lines(paths: Sequence[str]) -> list[str]:
+    try:
+        result = subprocess.run(
+            ["git", "status", "--short", "--untracked-files=all", "--", *paths],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+    except Exception:
+        return ["git status unavailable"]
+
+    lines = [line.rstrip() for line in result.stdout.splitlines() if line.strip()]
+    return lines or ["clean"]
+
+
 def main() -> None:
     print("VS Code Optuna workspace doctor")
     print(f"workspace: {REPO_ROOT}")
@@ -109,9 +134,15 @@ def main() -> None:
     print(f"- code CLI: {code_bin or 'missing'}")
     print(
         "- optuna extension: "
-        + (f"optuna.optuna-dashboard@{extension_version}" if extension_version else "missing")
+        + (
+            f"optuna.optuna-dashboard@{extension_version}"
+            if extension_version
+            else "missing"
+        )
     )
-    print(f"- python interpreter: {python_bin} [{'ok' if python_bin.exists() else 'missing'}]")
+    print(
+        f"- python interpreter: {python_bin} [{'ok' if python_bin.exists() else 'missing'}]"
+    )
     print(
         f"- optuna-dashboard bin: {optuna_dashboard_bin} "
         f"[{'ok' if optuna_dashboard_bin.exists() else 'missing'}]"
@@ -127,7 +158,9 @@ def main() -> None:
             active_specs.append((str(spec.get("key", "")), db_path))
 
     all_db_paths = sorted(WORKSPACES_ROOT.glob("**/study.db"))
-    extra_db_paths = [path for path in all_db_paths if path.resolve() not in registry_db_paths]
+    extra_db_paths = [
+        path for path in all_db_paths if path.resolve() not in registry_db_paths
+    ]
 
     print_section("Study DBs")
     if active_specs:
@@ -153,7 +186,9 @@ def main() -> None:
     hub_ok, _ = http_ok("http://localhost:8090/api/snapshot")
     if hub_ok:
         try:
-            with urllib.request.urlopen("http://localhost:8090/api/snapshot", timeout=2) as response:
+            with urllib.request.urlopen(
+                "http://localhost:8090/api/snapshot", timeout=2
+            ) as response:
                 snapshot = json.loads(response.read().decode("utf-8"))
         except Exception:
             snapshot = {}
@@ -162,12 +197,19 @@ def main() -> None:
         child_cards = [
             card
             for card in cards
-            if isinstance(card, dict) and card.get("db_exists") and card.get("dashboard_url")
+            if isinstance(card, dict)
+            and card.get("db_exists")
+            and card.get("dashboard_url")
         ]
         if child_cards:
             print("- hub child dashboards")
             for card in child_cards:
                 print(f"  {card.get('key')}: {card.get('dashboard_url')}")
+    print()
+
+    print_section("Worktree Truth")
+    for line in git_status_lines(WORKTREE_PATHS):
+        print(f"- {line}")
     print()
 
     print_section("VS Code Sidecar Ports")
@@ -178,9 +220,12 @@ def main() -> None:
 
     print_section("Usage")
     print("- primary live hub: http://localhost:8090/")
-    print("- 8080 compatibility alias: http://localhost:8080/")
+    print("- current-runtime-only health: `python scripts/optuna/runtime_health.py`")
+    print("- stale log cleanup: `python scripts/optuna/prune_runtime_logs.py --apply`")
     print("- open `.vscode/OPTUNA_WORKSPACE.md` for one-click Simple Browser links")
-    print("- right-click any study.db file in Explorer and run `Open in Optuna Dashboard`")
+    print(
+        "- right-click any study.db file in Explorer and run `Open in Optuna Dashboard`"
+    )
     print("- optional Run and Debug sidecars:")
     print("  `Optuna: Optional Sidecar Hub (8190)`")
     print("  `Optuna: Optional Sidecar V7 Institutional Dashboard (8182)`")

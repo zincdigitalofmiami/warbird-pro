@@ -63,9 +63,8 @@ Phase execution order:
   Pine alert at `barstate.isconfirmed` -> Supabase Edge Function (`indicator-capture`)
   -> cloud relay table `indicator_snapshots_15m` -> nightly local sync to `warbird`.
   Recurring manual TV export is removed after one-time seed ingest.
-- Local Optuna operator surface hardened on 2026-04-22:
-  - canonical hub: `http://localhost:8090/`
-  - `http://localhost:8080/` is compatibility redirect only
+- Local Optuna operator surface hardened on 2026-04-22, 8080 compat redirect retired 2026-04-23:
+  - canonical hub: `http://localhost:8090/` (sole surface)
   - the hub renders only real workspace directories under `scripts/optuna/workspaces/`
   - child study dashboards lazy-launch on demand
   - filter/sort state survives refresh
