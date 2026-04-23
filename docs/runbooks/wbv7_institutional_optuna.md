@@ -99,11 +99,13 @@ for t in top5:
 
 ### Dashboard
 
-The persistent agent at port 8080 now points at the SATS canonical workspace.
-For this study, open the v7 workspace DB in the VS Code Optuna Dashboard
-extension or launch the dedicated sidecar on port 8182.
+Port `8080` is now only a compatibility alias that redirects to the live
+multi-study hub on `8090`. For this study, open the v7 workspace DB in the VS
+Code Optuna Dashboard extension or launch the dedicated sidecar on port `8182`.
 
-Open: http://localhost:8080/dashboard/
+Open:
+- `http://localhost:8090/`
+- `http://localhost:8080/` (redirects to the hub)
 
 ---
 

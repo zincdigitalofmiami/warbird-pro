@@ -1,19 +1,5 @@
 [
   {
-    "key": "warbird_pro_sniper",
-    "name": "Warbird Pro Sniper",
-    "surface_type": "indicator",
-    "category": "chart-core",
-    "pine_file": "indicators/warbird-precision-sniper.pine",
-    "notes": "Warbird Precision Sniper v1.2.2 — EMA/RSI/MACD/ADX/VWAP confluence engine with preset system (Auto/Conservative/Default/Aggressive/Scalping/Swing/Crypto 24/7/Custom). Standalone study, isolated DB.",
-    "storage_mode": "standard",
-    "profile_module": "scripts.precision_sniper.precision_sniper_profile",
-    "default_study_name": "warbird_pro_sniper",
-    "topn_filename": "top5.json",
-    "symbol": "MES1!",
-    "timeframe": "15"
-  },
-  {
     "key": "sats_ps",
     "name": "SATS Prescreen",
     "surface_type": "strategy",

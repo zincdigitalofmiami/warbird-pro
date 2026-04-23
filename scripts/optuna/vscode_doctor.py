@@ -31,8 +31,8 @@ from scripts.optuna.paths import WORKSPACES_ROOT, study_db_path
 REGISTRY_PATH = REPO_ROOT / "scripts" / "optuna" / "indicator_registry.json"
 
 PERSISTENT_ENDPOINTS: list[tuple[str, str]] = [
-    ("shared-dashboard", "http://127.0.0.1:8080/dashboard/"),
-    ("hub", "http://127.0.0.1:8090/api/snapshot"),
+    ("hub-compat", "http://localhost:8080/"),
+    ("hub", "http://localhost:8090/api/snapshot"),
 ]
 
 VSCODE_PORTS: list[tuple[str, int]] = [
@@ -150,10 +150,10 @@ def main() -> None:
         ok, detail = http_ok(url)
         print(f"- {label}: {url} [{'up' if ok else 'down'}: {detail}]")
 
-    hub_ok, _ = http_ok("http://127.0.0.1:8090/api/snapshot")
+    hub_ok, _ = http_ok("http://localhost:8090/api/snapshot")
     if hub_ok:
         try:
-            with urllib.request.urlopen("http://127.0.0.1:8090/api/snapshot", timeout=2) as response:
+            with urllib.request.urlopen("http://localhost:8090/api/snapshot", timeout=2) as response:
                 snapshot = json.loads(response.read().decode("utf-8"))
         except Exception:
             snapshot = {}
@@ -172,19 +172,18 @@ def main() -> None:
 
     print_section("VS Code Sidecar Ports")
     for label, port in VSCODE_PORTS:
-        status = "busy" if port_open("127.0.0.1", port) else "free"
-        print(f"- {label}: 127.0.0.1:{port} [{status}]")
+        status = "busy" if port_open("localhost", port) else "free"
+        print(f"- {label}: localhost:{port} [{status}]")
     print()
 
     print_section("Usage")
-    print("- primary live hub: http://127.0.0.1:8090/")
-    print("- primary shared dashboard: http://127.0.0.1:8080/dashboard/")
+    print("- primary live hub: http://localhost:8090/")
+    print("- 8080 compatibility alias: http://localhost:8080/")
     print("- open `.vscode/OPTUNA_WORKSPACE.md` for one-click Simple Browser links")
     print("- right-click any study.db file in Explorer and run `Open in Optuna Dashboard`")
     print("- optional Run and Debug sidecars:")
     print("  `Optuna: Optional Sidecar Hub (8190)`")
     print("  `Optuna: Optional Sidecar SATS Dashboard (8180)`")
-    print("  `Optuna: Optional Sidecar Warbird Pro Sniper Dashboard (8181)`")
     print("  `Optuna: Optional Sidecar V7 Institutional Dashboard (8182)`")
     print("- tasks:")
     print("  `Optuna: Doctor`")

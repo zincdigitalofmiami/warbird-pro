@@ -62,6 +62,7 @@ Use this root `AGENTS.md` as the workspace instruction surface. `.github/copilot
 - Pine is the canonical live signal surface; the dashboard mirrors stored engine state and is not a separate decision engine.
 - The local `warbird` database on PG17 (`127.0.0.1:5432`) is the canonical warehouse truth. It owns the full data zoo: market history, AG lineage tables, the canonical training view, features, labels, SHAP artifacts, and all non-serving data.
 - Supabase (`qhwgrzqjcdtdqppvhhme`) is the reduced cloud serving database for frontend, TradingView/indicator support, packet distribution, curated SHAP/admin reports, and other explicitly plan-approved published surfaces. It must not become a mirror of local.
+- The local Optuna operator surface is canonical on `http://localhost:8090`; `http://localhost:8080` is a compatibility redirect only. Treat on-disk directories under `scripts/optuna/workspaces/` as the source of truth for live lanes. Registry entries without a real workspace directory are not active, and child study dashboards launch on demand.
 - `rabid_raccoon` is a bootstrap-only legacy input on the same PG instance. After the one-time bootstrap into `warbird`, it is reference-only and must not be treated as canonical again.
 - Canonical AG contract is **four canonical local AG tables and one canonical training view.** No version suffixes are allowed on canonical names.
 - Exact local AG schema authority: `docs/contracts/ag_local_training_schema.md`.

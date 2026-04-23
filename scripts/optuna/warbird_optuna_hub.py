@@ -7,11 +7,11 @@ Card-based local dashboard for multi-indicator and multi-strategy Optuna studies
 
 What it does:
 1) Reads indicator/strategy registry from `scripts/optuna/indicator_registry.json`
-2) Ensures folder scaffolding under `scripts/optuna/workspaces/<indicator_key>/`
+2) Ensures the Optuna workspace root exists
 3) Reads study metrics from each `study.db`
 4) Surfaces profile wiring and top-N export readiness per lane
 5) Shows AutoGluon/Optuna stack health (including AutoGluon 1.5)
-6) Optionally launches one `optuna-dashboard` child process per detected DB
+6) Optionally launches one `optuna-dashboard` child process on demand per detected DB
 7) Serves a slick operator UI at http://<host>:<port>
 
 No training is executed by this script.
@@ -43,7 +43,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = Path(__file__).resolve().with_name("indicator_registry.json")
 LOG_ROOT = Path("/tmp/warbird-optuna-hub")
 
-DEFAULT_HOST = "127.0.0.1"
+DEFAULT_HOST = "localhost"
 DEFAULT_PORT = 8090
 DEFAULT_CHILD_PORT_START = 8100
 REFRESH_SECONDS = 15
@@ -113,6 +113,12 @@ def _h(value: Any) -> str:
     return html.escape("" if value is None else str(value))
 
 
+def _display_host(host: str) -> str:
+    if host in {"127.0.0.1", "::1", "localhost"}:
+        return "localhost"
+    return host
+
+
 def _load_json(path: Path) -> Any:
     return json.loads(path.read_text())
 
@@ -163,35 +169,8 @@ def resolve_indicator_dir(spec: IndicatorSpec) -> Path:
 
 
 def ensure_layout(specs: list[IndicatorSpec]) -> None:
+    _ = specs
     WORKSPACES_ROOT.mkdir(parents=True, exist_ok=True)
-
-    for spec in specs:
-        indicator_dir = resolve_indicator_dir(spec)
-        indicator_dir.mkdir(parents=True, exist_ok=True)
-        exp_dir = experiments_dir(spec.key)
-        exp_dir.mkdir(parents=True, exist_ok=True)
-        workspace_readme = indicator_dir / "README.md"
-        workspace_readme.write_text(
-            "\n".join(
-                [
-                    f"# {spec.name}",
-                    "",
-                    f"- key: `{spec.key}`",
-                    f"- surface: `{spec.surface_type}`",
-                    f"- category: `{spec.category}`",
-                    f"- workspace dir: `{indicator_dir}`",
-                    f"- canonical study db: `{indicator_dir / 'study.db'}`",
-                    f"- top-N export: `{indicator_dir / spec.topn_filename}`",
-                    f"- experiments dir: `{exp_dir}`",
-                    "",
-                    "Run template:",
-                    "```bash",
-                    build_run_command(spec),
-                    "```",
-                    "",
-                ]
-            )
-        )
 
 
 def detect_stack_health() -> dict[str, Any]:
@@ -207,6 +186,24 @@ def detect_stack_health() -> dict[str, Any]:
     versions["python"] = sys.version.split()[0]
     optuna_v = _version("optuna")
     optuna_dash_v = _version("optuna-dashboard")
+    if optuna_dash_v is None:
+        dash_bin = REPO_ROOT / ".venv" / "bin" / "optuna-dashboard"
+        if not dash_bin.exists():
+            resolved_dash_bin = shutil.which("optuna-dashboard")
+            dash_bin = Path(resolved_dash_bin) if resolved_dash_bin else Path()
+        if dash_bin.exists():
+            try:
+                result = subprocess.run(
+                    [str(dash_bin), "--version"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                    cwd=str(REPO_ROOT),
+                )
+                optuna_dash_v = (result.stdout or result.stderr).strip() or "available"
+            except Exception:
+                optuna_dash_v = "available"
     ag_v = _version("autogluon.tabular")
 
     versions["optuna"] = optuna_v or "not-installed"
@@ -242,7 +239,10 @@ def assess_profile_wiring(spec: IndicatorSpec) -> dict[str, str]:
             "label": f"Built-in profile: {spec.profile_builtin}",
         }
     if spec.profile_module:
-        found = importlib.util.find_spec(spec.profile_module)
+        try:
+            found = importlib.util.find_spec(spec.profile_module)
+        except ModuleNotFoundError:
+            found = None
         if found is None:
             return {
                 "status": "missing",
@@ -495,27 +495,17 @@ class ChildManager:
                 except Exception:
                     pass
 
-    def sync(self, cards: list[dict[str, Any]]) -> None:
-        ordered_keys = [c["key"] for c in sorted(cards, key=lambda x: x["key"]) if c["db_exists"]]
-        desired_keys = set(ordered_keys)
-
-        for key in list(self.children.keys()):
-            if key not in desired_keys:
-                self._stop_child(key)
-
-        for card in cards:
-            key = card["key"]
-            if not card["db_exists"]:
-                continue
-            if (
-                key in self.children
-                and self.children[key].process is not None
-                and self.children[key].process.poll() is None
-            ):
-                continue
-            port = self._desired_port(ordered_keys, key)
-            runtime = self._start_child(key=key, db_path=Path(card["db_path"]), port=port)
-            self.children[key] = runtime
+    def ensure_child(self, ordered_keys: list[str], key: str, db_path: Path) -> ChildRuntime:
+        runtime = self.children.get(key)
+        if runtime is not None and runtime.process is not None and runtime.process.poll() is None:
+            runtime.err = None
+            return runtime
+        if runtime is not None:
+            self._stop_child(key)
+        port = self._desired_port(ordered_keys, key)
+        runtime = self._start_child(key=key, db_path=db_path, port=port)
+        self.children[key] = runtime
+        return runtime
 
     def shutdown(self) -> None:
         for key in list(self.children.keys()):
@@ -527,7 +517,7 @@ class ChildManager:
             return None
         if runtime.process.poll() is not None:
             return None
-        return f"http://{self.host}:{runtime.port}"
+        return f"http://{_display_host(self.host)}:{runtime.port}"
 
     def card_error(self, key: str) -> str | None:
         runtime = self.children.get(key)
@@ -563,6 +553,8 @@ class HubState:
         cards: list[dict[str, Any]] = []
         for spec in self.specs:
             indicator_dir = resolve_indicator_dir(spec)
+            if not indicator_dir.exists():
+                continue
             exp_dir = experiments_dir(spec.key)
             db_path = indicator_dir / "study.db"
             topn_path = indicator_dir / spec.topn_filename
@@ -604,16 +596,17 @@ class HubState:
                 "run_command": run_cmd,
                 "dashboard_url": None,
                 "dashboard_error": None,
+                "dashboard_running": False,
             }
             cards.append(card)
 
         cards.sort(key=lambda c: (c["category"], c["surface_type"], c["name"]))
 
         if self.spawn_children and self.child_manager is not None:
-            self.child_manager.sync(cards)
             for card in cards:
                 card["dashboard_url"] = self.child_manager.card_link(card["key"])
                 card["dashboard_error"] = self.child_manager.card_error(card["key"])
+                card["dashboard_running"] = card["dashboard_url"] is not None
 
         total_indicators = len(cards)
         total_strategies = sum(1 for c in cards if c["surface_type"] == "strategy")
@@ -658,6 +651,7 @@ class HubState:
             "running_now": running_now,
             "best_overall": best_overall,
             "stack_health": self.stack_health,
+            "child_dashboards_enabled": self.spawn_children,
             "cards": cards,
         }
 
@@ -677,7 +671,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
     ag_badge_text = "AutoGluon 1.5 READY" if stack["availability"]["autogluon_1_5"] else "AutoGluon 1.5 MISSING"
 
     cards_html: list[str] = []
-    for card in snapshot["cards"]:
+    for idx, card in enumerate(snapshot["cards"]):
         best_block = "<div class='muted'>No completed trials</div>"
         if card["best"] is not None:
             b = card["best"]
@@ -714,6 +708,11 @@ def render_html(snapshot: dict[str, Any]) -> str:
                 f"<a class='btn' href='{_h(card['dashboard_url'])}' target='_blank' rel='noreferrer'>"
                 "Open Study UI</a>"
             )
+        elif card["db_exists"] and snapshot["child_dashboards_enabled"]:
+            link_html = (
+                f"<a class='btn' href='/open-study/{_h(card['key'])}' target='_blank' rel='noreferrer'>"
+                "Launch Study UI</a>"
+            )
         elif card["db_exists"]:
             link_html = "<span class='btn disabled'>Dashboard Offline</span>"
 
@@ -728,9 +727,34 @@ def render_html(snapshot: dict[str, Any]) -> str:
             dash_error_html = f"<div class='warning'>{_h(card['dashboard_error'])}</div>"
 
         notes_html = f"<div class='path'><span>Notes:</span> {_h(card['notes'])}</div>" if card["notes"] else ""
+        best_wr = _safe_float(card["best"]["win_rate"], -1.0) if card["best"] is not None else -1.0
+        best_pf = _safe_float(card["best"]["pf"], -1.0) if card["best"] is not None else -1.0
+        best_trades = _safe_int(card["best"]["trades"], 0) if card["best"] is not None else 0
+        best_max_dd = _safe_float(card["best"]["max_dd"], 1e18) if card["best"] is not None else 1e18
+        topn_ready = 1 if card["topn_exists"] and card["topn_count"] > 0 else 0
+        profile_ready = 1 if card["profile_status"] == "ready" else 0
+        db_ready = 1 if card["db_exists"] else 0
 
         cards_html.append(
-            f"<article class='card' data-surface='{_h(card['surface_type'])}' data-category='{_h(card['category'])}'>"
+            f"<article class='card' "
+            f"data-default-order='{idx}' "
+            f"data-key='{_h(card['key'])}' "
+            f"data-name='{_h(card['name'])}' "
+            f"data-surface='{_h(card['surface_type'])}' "
+            f"data-category='{_h(card['category'])}' "
+            f"data-trials='{_safe_int(card['trial_count'])}' "
+            f"data-complete='{_safe_int(card['complete_count'])}' "
+            f"data-running='{_safe_int(card['running_count'])}' "
+            f"data-fail='{_safe_int(card['fail_count'])}' "
+            f"data-db-ready='{db_ready}' "
+            f"data-profile-ready='{profile_ready}' "
+            f"data-topn-ready='{topn_ready}' "
+            f"data-best-win-rate='{best_wr}' "
+            f"data-best-pf='{best_pf}' "
+            f"data-best-trades='{best_trades}' "
+            f"data-best-max-dd='{best_max_dd}' "
+            f"data-last-complete='{_h(card['last_complete'] or '')}' "
+            f"data-has-best='{1 if card['best'] is not None else 0}'>"
             f"<header><h3>{_h(card['name'])}</h3><span class='badge'>{_h(card['key'])}</span></header>"
             "<div class='meta-line'>"
             f"<span class='chip surface'>{_h(card['surface_type'])}</span>"
@@ -768,7 +792,6 @@ def render_html(snapshot: dict[str, Any]) -> str:
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="refresh" content="{REFRESH_SECONDS}" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Warbird Optuna Hub</title>
   <style>
@@ -857,6 +880,19 @@ def render_html(snapshot: dict[str, Any]) -> str:
       margin-bottom: 12px;
       align-items: center;
     }}
+    .toolbar-group {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }}
+    .toolbar-spacer {{
+      flex: 1 1 auto;
+    }}
+    .toolbar-label {{
+      color: var(--muted);
+      font-size: 11px;
+    }}
     .filter-btn {{
       font-size: 11px;
       border: 1px solid #244670;
@@ -870,6 +906,15 @@ def render_html(snapshot: dict[str, Any]) -> str:
       border-color: #0891b2;
       background: #083344;
       color: #cffafe;
+    }}
+    .sort-select {{
+      font-size: 11px;
+      border: 1px solid #244670;
+      background: #0b203f;
+      color: #dbeafe;
+      border-radius: 8px;
+      padding: 5px 10px;
+      min-width: 140px;
     }}
     .grid {{
       display: grid;
@@ -1044,7 +1089,8 @@ def render_html(snapshot: dict[str, Any]) -> str:
         <h1>Warbird Optuna Hub</h1>
         <div class="meta">Unified dashboard for all indicators + strategies with AutoGluon 1.5 readiness checks.</div>
         <div class="meta">Generated: {_h(snapshot['generated_at'])}</div>
-        <div class="best">{best_text}</div>
+        <div class="meta" id="scope-label">Viewing: All Lanes</div>
+        <div class="best" id="best-text">{best_text}</div>
         <div class="stack">
           <span class="stack-badge {ag_badge_class}">{ag_badge_text}</span>
           Python {_h(stack['versions']['python'])} |
@@ -1054,21 +1100,37 @@ def render_html(snapshot: dict[str, Any]) -> str:
         </div>
         <div class="meta">{_h(stack['note'])}</div>
       </div>
-      <div class="kpi"><div class="label">Lanes</div><div class="value">{_safe_int(snapshot['total_indicators'])}</div></div>
-      <div class="kpi"><div class="label">Strategies</div><div class="value">{_safe_int(snapshot['total_strategies'])}</div></div>
-      <div class="kpi"><div class="label">Profiles Wired</div><div class="value">{_safe_int(snapshot['profile_ready'])}</div></div>
-      <div class="kpi"><div class="label">DB Ready</div><div class="value">{_safe_int(snapshot['active_studies'])}</div></div>
-      <div class="kpi"><div class="label">Top-N Ready</div><div class="value">{_safe_int(snapshot['topn_ready'])}</div></div>
-      <div class="kpi"><div class="label">Completed</div><div class="value">{_safe_int(snapshot['total_completed'])}</div></div>
+      <div class="kpi"><div class="label">Lanes</div><div class="value" id="kpi-lanes">{_safe_int(snapshot['total_indicators'])}</div></div>
+      <div class="kpi"><div class="label">Strategies</div><div class="value" id="kpi-strategies">{_safe_int(snapshot['total_strategies'])}</div></div>
+      <div class="kpi"><div class="label">Profiles Wired</div><div class="value" id="kpi-profiles">{_safe_int(snapshot['profile_ready'])}</div></div>
+      <div class="kpi"><div class="label">DB Ready</div><div class="value" id="kpi-db-ready">{_safe_int(snapshot['active_studies'])}</div></div>
+      <div class="kpi"><div class="label">Top-N Ready</div><div class="value" id="kpi-topn-ready">{_safe_int(snapshot['topn_ready'])}</div></div>
+      <div class="kpi"><div class="label">Completed</div><div class="value" id="kpi-completed">{_safe_int(snapshot['total_completed'])}</div></div>
     </section>
 
     <section class="toolbar">
-      <button class="filter-btn active" data-filter="all">All</button>
-      <button class="filter-btn" data-filter="indicator">Indicators</button>
-      <button class="filter-btn" data-filter="strategy">Strategies</button>
-      <button class="filter-btn" data-filter="lower-pane">Lower Pane</button>
-      <button class="filter-btn" data-filter="chart-core">Chart Core</button>
-      <button class="filter-btn" data-filter="legacy">Legacy</button>
+      <div class="toolbar-group">
+        <button class="filter-btn active" data-filter="all">All</button>
+        <button class="filter-btn" data-filter="indicator">Indicators</button>
+        <button class="filter-btn" data-filter="strategy">Strategies</button>
+        <button class="filter-btn" data-filter="lower-pane">Lower Pane</button>
+        <button class="filter-btn" data-filter="chart-core">Chart Core</button>
+        <button class="filter-btn" data-filter="legacy">Legacy</button>
+      </div>
+      <div class="toolbar-spacer"></div>
+      <div class="toolbar-group">
+        <label class="toolbar-label" for="sort-field">Sort</label>
+        <select id="sort-field" class="sort-select">
+          <option value="default">Default</option>
+          <option value="name">Name</option>
+          <option value="complete">Completed</option>
+          <option value="trials">Trials</option>
+          <option value="win_rate">Best WR</option>
+          <option value="pf">Best PF</option>
+          <option value="last_complete">Last Complete</option>
+        </select>
+        <button class="filter-btn" id="sort-dir" data-dir="desc">Desc</button>
+      </div>
     </section>
 
     <section class="grid" id="card-grid">
@@ -1079,18 +1141,231 @@ def render_html(snapshot: dict[str, Any]) -> str:
     (function() {{
       const buttons = Array.from(document.querySelectorAll('.filter-btn'));
       const cards = Array.from(document.querySelectorAll('.card'));
-      function applyFilter(filter) {{
-        cards.forEach((card) => {{
-          const surface = card.getAttribute('data-surface');
-          const category = card.getAttribute('data-category');
-          const visible = filter === 'all' || filter === surface || filter === category;
-          card.style.display = visible ? '' : 'none';
-        }});
-        buttons.forEach((btn) => btn.classList.toggle('active', btn.dataset.filter === filter));
+      const filterButtons = buttons.filter((btn) => !!btn.dataset.filter);
+      const grid = document.getElementById('card-grid');
+      const sortField = document.getElementById('sort-field');
+      const sortDirBtn = document.getElementById('sort-dir');
+      const scopeLabel = document.getElementById('scope-label');
+      const bestText = document.getElementById('best-text');
+      const kpiLanes = document.getElementById('kpi-lanes');
+      const kpiStrategies = document.getElementById('kpi-strategies');
+      const kpiProfiles = document.getElementById('kpi-profiles');
+      const kpiDbReady = document.getElementById('kpi-db-ready');
+      const kpiTopnReady = document.getElementById('kpi-topn-ready');
+      const kpiCompleted = document.getElementById('kpi-completed');
+      const params = new URLSearchParams(window.location.search);
+      const allowedFilters = new Set(['all', ...filterButtons.map((btn) => btn.dataset.filter)]);
+      const allowedSorts = new Set(['default', 'name', 'complete', 'trials', 'win_rate', 'pf', 'last_complete']);
+      const labels = {{
+        all: 'All Lanes',
+        indicator: 'Indicators',
+        strategy: 'Strategies',
+        'lower-pane': 'Lower Pane',
+        'chart-core': 'Chart Core',
+        legacy: 'Legacy',
+      }};
+      const state = {{
+        filter: allowedFilters.has(params.get('filter')) ? params.get('filter') : 'all',
+        sort: allowedSorts.has(params.get('sort')) ? params.get('sort') : 'default',
+        dir: params.get('dir') === 'asc' ? 'asc' : 'desc',
+      }};
+      const refreshMs = {REFRESH_SECONDS} * 1000;
+
+      function numberAttr(card, name, fallback) {{
+        const raw = card.getAttribute(name);
+        const value = Number(raw);
+        return Number.isFinite(value) ? value : fallback;
       }}
-      buttons.forEach((btn) => {{
-        btn.addEventListener('click', () => applyFilter(btn.dataset.filter));
+
+      function stringAttr(card, name) {{
+        return card.getAttribute(name) || '';
+      }}
+
+      function isVisible(card, filter) {{
+        const surface = stringAttr(card, 'data-surface');
+        const category = stringAttr(card, 'data-category');
+        return filter === 'all' || filter === surface || filter === category;
+      }}
+
+      function updateUrl() {{
+        const next = new URLSearchParams(window.location.search);
+        if (state.filter === 'all') {{
+          next.delete('filter');
+        }} else {{
+          next.set('filter', state.filter);
+        }}
+        if (state.sort === 'default') {{
+          next.delete('sort');
+        }} else {{
+          next.set('sort', state.sort);
+        }}
+        if (state.dir === 'desc' && state.sort === 'default') {{
+          next.delete('dir');
+        }} else {{
+          next.set('dir', state.dir);
+        }}
+        const query = next.toString();
+        const nextUrl = window.location.pathname + (query ? '?' + query : '');
+        window.history.replaceState({{}}, '', nextUrl);
+      }}
+
+      function compareCards(left, right) {{
+        if (state.sort === 'default') {{
+          return numberAttr(left, 'data-default-order', 0) - numberAttr(right, 'data-default-order', 0);
+        }}
+
+        let leftValue;
+        let rightValue;
+        switch (state.sort) {{
+          case 'name':
+            leftValue = stringAttr(left, 'data-name').toLowerCase();
+            rightValue = stringAttr(right, 'data-name').toLowerCase();
+            break;
+          case 'complete':
+            leftValue = numberAttr(left, 'data-complete', 0);
+            rightValue = numberAttr(right, 'data-complete', 0);
+            break;
+          case 'trials':
+            leftValue = numberAttr(left, 'data-trials', 0);
+            rightValue = numberAttr(right, 'data-trials', 0);
+            break;
+          case 'win_rate':
+            leftValue = numberAttr(left, 'data-best-win-rate', -1);
+            rightValue = numberAttr(right, 'data-best-win-rate', -1);
+            break;
+          case 'pf':
+            leftValue = numberAttr(left, 'data-best-pf', -1);
+            rightValue = numberAttr(right, 'data-best-pf', -1);
+            break;
+          case 'last_complete':
+            leftValue = stringAttr(left, 'data-last-complete');
+            rightValue = stringAttr(right, 'data-last-complete');
+            break;
+          default:
+            leftValue = numberAttr(left, 'data-default-order', 0);
+            rightValue = numberAttr(right, 'data-default-order', 0);
+            break;
+        }}
+
+        let cmp = 0;
+        if (typeof leftValue === 'string') {{
+          cmp = leftValue.localeCompare(rightValue);
+        }} else {{
+          cmp = leftValue === rightValue ? 0 : (leftValue < rightValue ? -1 : 1);
+        }}
+        if (cmp === 0) {{
+          const fallbackLeft = numberAttr(left, 'data-default-order', 0);
+          const fallbackRight = numberAttr(right, 'data-default-order', 0);
+          cmp = fallbackLeft - fallbackRight;
+        }}
+        return state.dir === 'asc' ? cmp : -cmp;
+      }}
+
+      function updateSummary(visibleCards) {{
+        const scopeText = labels[state.filter] || state.filter;
+        scopeLabel.textContent = `Viewing: ${{scopeText}}`;
+
+        kpiLanes.textContent = String(visibleCards.length);
+        kpiStrategies.textContent = String(visibleCards.filter((card) => stringAttr(card, 'data-surface') === 'strategy').length);
+        kpiProfiles.textContent = String(visibleCards.reduce((sum, card) => sum + numberAttr(card, 'data-profile-ready', 0), 0));
+        kpiDbReady.textContent = String(visibleCards.reduce((sum, card) => sum + numberAttr(card, 'data-db-ready', 0), 0));
+        kpiTopnReady.textContent = String(visibleCards.reduce((sum, card) => sum + numberAttr(card, 'data-topn-ready', 0), 0));
+        kpiCompleted.textContent = String(visibleCards.reduce((sum, card) => sum + numberAttr(card, 'data-complete', 0), 0));
+
+        let bestCard = null;
+        let bestRank = null;
+        visibleCards.forEach((card) => {{
+          if (numberAttr(card, 'data-has-best', 0) !== 1) {{
+            return;
+          }}
+          const rank = [
+            numberAttr(card, 'data-best-win-rate', -1),
+            numberAttr(card, 'data-best-pf', -1),
+            -numberAttr(card, 'data-best-max-dd', Number.POSITIVE_INFINITY),
+            numberAttr(card, 'data-best-trades', 0),
+          ];
+          if (bestRank === null) {{
+            bestRank = rank;
+            bestCard = card;
+            return;
+          }}
+          for (let i = 0; i < rank.length; i += 1) {{
+            if (rank[i] === bestRank[i]) {{
+              continue;
+            }}
+            if (rank[i] > bestRank[i]) {{
+              bestRank = rank;
+              bestCard = card;
+            }}
+            return;
+          }}
+        }});
+
+        if (!bestCard) {{
+          bestText.textContent = visibleCards.length === 0 ? 'No lanes in current view' : 'No completed trials in current view';
+          return;
+        }}
+
+        const bestName = stringAttr(bestCard, 'data-name');
+        const bestKey = stringAttr(bestCard, 'data-key');
+        const winRate = numberAttr(bestCard, 'data-best-win-rate', 0) * 100;
+        const pf = numberAttr(bestCard, 'data-best-pf', 0);
+        const trades = numberAttr(bestCard, 'data-best-trades', 0);
+        bestText.textContent = `${{bestName}} (${{bestKey}}) WR ${{winRate.toFixed(2)}}% | PF ${{pf.toFixed(3)}} | Trades ${{trades}}`;
+      }}
+
+      function applyState() {{
+        sortField.value = state.sort;
+        sortDirBtn.disabled = state.sort === 'default';
+        sortDirBtn.dataset.dir = state.sort === 'default' ? 'default' : state.dir;
+        sortDirBtn.textContent = state.sort === 'default' ? 'Default' : (state.dir === 'asc' ? 'Asc' : 'Desc');
+
+        const ordered = [...cards].sort(compareCards);
+        ordered.forEach((card) => grid.appendChild(card));
+
+        const visibleCards = [];
+        cards.forEach((card) => {{
+          const visible = isVisible(card, state.filter);
+          card.style.display = visible ? '' : 'none';
+          if (visible) {{
+            visibleCards.push(card);
+          }}
+        }});
+
+        filterButtons.forEach((btn) => {{
+          btn.classList.toggle('active', btn.dataset.filter === state.filter);
+        }});
+        updateSummary(visibleCards);
+      }}
+
+      filterButtons.forEach((btn) => {{
+        btn.addEventListener('click', () => {{
+          state.filter = btn.dataset.filter;
+          updateUrl();
+          applyState();
+        }});
       }});
+
+      sortField.addEventListener('change', () => {{
+        state.sort = sortField.value;
+        updateUrl();
+        applyState();
+      }});
+
+      sortDirBtn.addEventListener('click', () => {{
+        if (state.sort === 'default') {{
+          return;
+        }}
+        state.dir = state.dir === 'asc' ? 'desc' : 'asc';
+        updateUrl();
+        applyState();
+      }});
+
+      applyState();
+
+      window.setTimeout(() => {{
+        window.location.reload();
+      }}, refreshMs);
     }})();
   </script>
 </body>
@@ -1124,6 +1399,11 @@ def _build_handler(state: HubState):
             parsed = urlparse(self.path)
             snap = state.snapshot()
 
+            if parsed.path == "/favicon.ico":
+                self.send_response(204)
+                self.end_headers()
+                return
+
             if parsed.path in {"/", "/index.html"}:
                 payload = render_html(snap).encode("utf-8")
                 self.send_response(200)
@@ -1140,6 +1420,39 @@ def _build_handler(state: HubState):
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
+                return
+
+            if parsed.path.startswith("/open-study/"):
+                key = parsed.path.removeprefix("/open-study/").strip("/")
+                if not key:
+                    self.send_error(404, "Missing workspace key")
+                    return
+                if not state.spawn_children or state.child_manager is None:
+                    self.send_error(409, "Child dashboards are disabled for this hub instance")
+                    return
+
+                ordered_keys = [c["key"] for c in sorted(snap["cards"], key=lambda x: x["key"]) if c["db_exists"]]
+                card = next((c for c in snap["cards"] if c["key"] == key), None)
+                if card is None:
+                    self.send_error(404, f"Unknown workspace key: {key}")
+                    return
+                if not card["db_exists"]:
+                    self.send_error(409, f"No study database found for workspace: {key}")
+                    return
+
+                runtime = state.child_manager.ensure_child(
+                    ordered_keys=ordered_keys,
+                    key=key,
+                    db_path=Path(card["db_path"]),
+                )
+                link = state.child_manager.card_link(key)
+                if runtime.err or link is None:
+                    self.send_error(503, state.child_manager.card_error(key) or f"Failed to launch dashboard for {key}")
+                    return
+
+                self.send_response(302)
+                self.send_header("Location", link)
+                self.end_headers()
                 return
 
             self.send_error(404, "Not found")
@@ -1173,7 +1486,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--init-folders-only",
         action="store_true",
-        help="Create indicator folders and exit",
+        help="Ensure the workspace root exists and exit",
     )
     parser.add_argument(
         "--print-layout",
@@ -1242,8 +1555,8 @@ def main() -> None:
     signal.signal(signal.SIGINT, _shutdown)
 
     print("Warbird Optuna Hub running")
-    print(f"  Hub URL:          http://{args.host}:{args.port}")
-    print(f"  Snapshot API:     http://{args.host}:{args.port}/api/snapshot")
+    print(f"  Hub URL:          http://{_display_host(args.host)}:{args.port}")
+    print(f"  Snapshot API:     http://{_display_host(args.host)}:{args.port}/api/snapshot")
     print(f"  Registry:         {REGISTRY_PATH}")
     print(f"  Child UIs:        {'enabled' if spawn_children else 'disabled'}")
     print(f"  Workspace root:   {WORKSPACES_ROOT}")

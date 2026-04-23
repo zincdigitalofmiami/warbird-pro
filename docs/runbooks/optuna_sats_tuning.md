@@ -74,8 +74,8 @@ python scripts/optuna/warbird_optuna_hub.py --print-layout
 ```
 
 Hub UI:
-- `http://127.0.0.1:8090`
-- JSON snapshot API: `http://127.0.0.1:8090/api/snapshot`
+- `http://localhost:8090`
+- JSON snapshot API: `http://localhost:8090/api/snapshot`
 
 The hub renders one card per indicator key from:
 - `scripts/optuna/indicator_registry.json`
@@ -100,16 +100,17 @@ launchctl load ~/Library/LaunchAgents/com.warbird.optuna-hub.plist
 
 ### Machine Service (persistent)
 
-Install launchd agent (one-time):
+Install the 8080 compatibility alias agent (one-time):
 ```bash
-cp "/Volumes/Satechi Hub/warbird-pro/scripts/sats/optuna-dashboard.plist" \
+cp "/Volumes/Satechi Hub/warbird-pro/scripts/optuna/warbird-optuna-compat-8080.plist" \
    ~/Library/LaunchAgents/com.warbird.optuna-dashboard.plist
 launchctl load ~/Library/LaunchAgents/com.warbird.optuna-dashboard.plist
 ```
 
-Dashboard runs at **http://localhost:8080** and restarts automatically on reboot.
+`8080` is a loopback-only compatibility alias that redirects old bookmarks to
+the live hub on **http://localhost:8090**.
 
-Logs: `/tmp/optuna-dashboard.log`, `/tmp/optuna-dashboard.err`
+Logs: `/tmp/warbird-optuna-compat.log`, `/tmp/warbird-optuna-compat.err`
 
 Stop/start:
 ```bash
@@ -125,8 +126,8 @@ setting for a default study path.
 Workspace wiring now lives in `.vscode/`:
 
 - `.vscode/OPTUNA_WORKSPACE.md` gives one-click VS Code Simple Browser links for:
-  - `http://127.0.0.1:8090/`
-  - `http://127.0.0.1:8080/dashboard/`
+  - `http://localhost:8090/`
+  - `http://localhost:8080/`
 - `.vscode/extensions.json` recommends the required Optuna/Python extensions
 - `.vscode/settings.json` pins the repo interpreter to `.venv/bin/python`
 - `.vscode/tasks.json` adds:
@@ -134,22 +135,21 @@ Workspace wiring now lives in `.vscode/`:
   - `Optuna: Print Study Layout`
 - `.vscode/launch.json` adds **optional sidecar** launch configs on isolated
   ports (`8180`, `8181`, `8182`, `8190`, `8200+`) for ad-hoc debugging without
-  touching the already-running live services on `8080`, `8090`, and `8100+`
+  touching the already-running `8080` alias, `8090` hub, and `8100+` children
 
 Primary live services:
 
-- Hub: `http://127.0.0.1:8090/`
-- Shared dashboard: `http://127.0.0.1:8080/dashboard/`
+- Hub: `http://localhost:8090/`
+- 8080 compatibility alias: `http://localhost:8080/`
 
 Open inside VS Code:
 
 1. Open `.vscode/OPTUNA_WORKSPACE.md` and use the Simple Browser links for the
-   live hub/shared dashboard when you want the web UI embedded in VS Code.
+   live hub / 8080 alias when you want the web UI embedded in VS Code.
 2. In Explorer, right-click any `study.db` file.
 3. Select **Open in Optuna Dashboard**.
 4. Common study DBs:
    - `scripts/optuna/workspaces/sats_ps/study.db`
-   - `scripts/optuna/workspaces/warbird_pro_sniper/study.db`
    - `scripts/optuna/workspaces/v7_warbird_institutional/study.db`
 5. For additional studies, open any other `scripts/optuna/workspaces/**/study.db` file the same way.
 
@@ -248,7 +248,7 @@ For each top-N config:
 | `scripts/optuna/runner.py` | Shared Optuna study wrapper + CLI |
 | `scripts/optuna/README.md` | Canonical Optuna workspace contract |
 | `scripts/optuna/profile_template.py` | Adapter contract for non-SATS strategies |
-| `scripts/sats/optuna-dashboard.plist` | launchd agent template |
+| `scripts/optuna/warbird-optuna-compat-8080.plist` | launchd agent template for the 8080 compatibility alias |
 | `scripts/optuna/workspaces/sats_ps/study.db` | Canonical SATS SQLite study DB |
 | `scripts/optuna/workspaces/sats_ps/top5.json` | SATS top-N export |
 | `scripts/optuna/workspaces/<indicator_key>/study.db` | Canonical per-indicator study DB layout |

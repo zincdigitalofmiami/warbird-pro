@@ -6,16 +6,12 @@ Accepts a --profile-module argument pointing to any indicator's profile.py.
 Stores studies in scripts/optuna/workspaces/<indicator_key>/study.db.
 
 Usage:
-  python scripts/optuna/runner.py --indicator-key warbird_pro_sniper \
-    --profile-module scripts.precision_sniper.precision_sniper_profile \
-    --n-trials 2000 --n-jobs 2 --resume --start 2025-01-01
-
   python scripts/optuna/runner.py --indicator-key sats_ps \
     --profile-module scripts.sats.sats_profile \
     --n-trials 300 --study-name sats_2025_wr_pf
 
-Dashboard:
-  optuna-dashboard sqlite:///scripts/optuna/workspaces/<indicator_key>/study.db --port 8080
+Dashboard (pick any free local port, e.g. 8180):
+  optuna-dashboard sqlite:///scripts/optuna/workspaces/<indicator_key>/study.db --port 8180
 """
 
 import sys
@@ -50,6 +46,7 @@ START_DATE_IS = "2025-01-01"  # IS window: Trump regime only (structural break J
 END_DATE_IS = "2026-12-31"  # IS end — OOS defined per config lock date
 DEFAULT_STUDY_NAME = "sats_2025_wr_pf"
 DEFAULT_PROFILE = "sats_v1"
+RECOMMENDED_LOCAL_DASHBOARD_PORT = 8180
 
 # Ranking policies — opt-in per --ranking-policy CLI flag.
 # win_rate_first_pf_second: legacy default, preserved for backward compat.
@@ -649,7 +646,10 @@ def main():
     if args.min_wr > 0:
         export_top_n(study, optuna_dir=optuna_dir, n=args.top_n, min_wr=args.min_wr)
 
-    print(f"\nDashboard: optuna-dashboard sqlite:///{db_path} --port 8080")
+    print(
+        f"\nDashboard: optuna-dashboard sqlite:///{db_path} "
+        f"--port {RECOMMENDED_LOCAL_DASHBOARD_PORT}"
+    )
 
 
 if __name__ == "__main__":

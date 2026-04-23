@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Warbird Optuna 8080 compatibility alias.
+
+  Install:
+    cp "/Volumes/Satechi Hub/warbird-pro/scripts/optuna/warbird-optuna-compat-8080.plist" \
+       ~/Library/LaunchAgents/com.warbird.optuna-dashboard.plist
+    launchctl load ~/Library/LaunchAgents/com.warbird.optuna-dashboard.plist
+
+  Open:
+    http://localhost:8080
+    Old /dashboard bookmarks are redirected to the live hub at http://localhost:8090
+
+  Manage:
+    launchctl unload ~/Library/LaunchAgents/com.warbird.optuna-dashboard.plist
+    launchctl load   ~/Library/LaunchAgents/com.warbird.optuna-dashboard.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.warbird.optuna-dashboard</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Volumes/Satechi Hub/warbird-pro/.venv/bin/python3.12</string>
+    <string>/Volumes/Satechi Hub/warbird-pro/scripts/optuna/warbird_optuna_compat_redirect.py</string>
+    <string>--listen-host</string>
+    <string>localhost</string>
+    <string>--listen-port</string>
+    <string>8080</string>
+    <string>--target-host</string>
+    <string>localhost</string>
+    <string>--target-port</string>
+    <string>8090</string>
+  </array>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>WorkingDirectory</key>
+  <string>/Volumes/Satechi Hub/warbird-pro</string>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/warbird-optuna-compat.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/warbird-optuna-compat.err</string>
+
+  <key>WatchPaths</key>
+  <array>
+    <string>/Volumes/Satechi Hub/warbird-pro/scripts/optuna</string>
+  </array>
+</dict>
+</plist>

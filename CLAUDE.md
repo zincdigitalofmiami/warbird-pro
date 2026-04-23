@@ -63,6 +63,13 @@ Phase execution order:
   Pine alert at `barstate.isconfirmed` -> Supabase Edge Function (`indicator-capture`)
   -> cloud relay table `indicator_snapshots_15m` -> nightly local sync to `warbird`.
   Recurring manual TV export is removed after one-time seed ingest.
+- Local Optuna operator surface hardened on 2026-04-22:
+  - canonical hub: `http://localhost:8090/`
+  - `http://localhost:8080/` is compatibility redirect only
+  - the hub renders only real workspace directories under `scripts/optuna/workspaces/`
+  - child study dashboards lazy-launch on demand
+  - filter/sort state survives refresh
+  - browser-verified live workspaces: `v7_warbird_institutional`, `warbird_nexus_ml_rsi`
 - Backtesting upgrade path is locked:
   Deep Backtesting + Bar Magnifier + walk-forward with embargo + realistic friction floors.
 - Trade loss-driver review is complete and mapped to indicator modules

@@ -4,6 +4,7 @@ import nextTypescript from "eslint-config-next/typescript";
 const eslintConfig = [
   {
     ignores: [
+      ".venv/**",
       ".tradingview-mcp/**",
       ".playwright-mcp/**",
       ".kilo/**",

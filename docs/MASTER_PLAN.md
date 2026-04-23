@@ -74,6 +74,30 @@
   are removed after one-time historical seed ingest.
 - Phase 0 complete — `ag_local_training_schema.md` landed at commit 92ea751.
 
+## 2026-04-22 Execution Checkpoint — Optuna Operator Surface
+
+- Verified local Optuna entrypoint is now canonical on `http://localhost:8090`.
+  `http://localhost:8080` remains loopback-only compatibility redirect and is
+  no longer a standalone shared dashboard surface.
+- The hub now treats the real on-disk workspace set under
+  `scripts/optuna/workspaces/` as authoritative for visible lanes. It no longer
+  auto-creates empty workspace folders from registry intent.
+- Child `optuna-dashboard` processes are lazy-launched through
+  `/open-study/<key>` instead of pre-spawned on every hub load, which removes
+  the prior idle scientific-Python bloat pattern from the default operator path.
+- Auto-refresh now reloads the current URL instead of the original response URL,
+  so filter and sort state persist across refresh windows.
+- `warbird_pro_sniper` is retired from the active local Optuna surface.
+  Verified live workspaces on disk are `v7_warbird_institutional` and
+  `warbird_nexus_ml_rsi`.
+- Browser verification completed against the live hub:
+  - `localhost:8080` redirects to `localhost:8090`
+  - filter state persists across refresh
+  - sort state persists across refresh
+  - both surviving study UIs launch on demand
+- This checkpoint is operator-surface hardening only. It does not change the
+  canonical MES/AG contract or the active Phase 4 / Phase 5 blockers.
+
 ## Phase 0: Authority Rewrite Order
 
 - Rewrite order is fixed:
