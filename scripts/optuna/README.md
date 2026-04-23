@@ -10,6 +10,10 @@ Canonical Optuna state now lives under `scripts/optuna/`, not `data/optuna/`.
   Card dashboard and child `optuna-dashboard` launcher.
 - `vscode_doctor.py`
   VS Code extension and sidecar diagnostics.
+- `runtime_health.py`
+  One-command current-runtime-only pass/fail probe for the live hub + child APIs.
+- `prune_runtime_logs.py`
+  Archives stale child logs under `/tmp/warbird-optuna-hub/` without touching active lanes.
 - `indicator_registry.json`
   Registry of supported Optuna lanes.
 - `workspaces/<indicator_key>/`
@@ -39,3 +43,9 @@ Rules:
 - Additional named studies stay inside `experiments/` for that same indicator.
 - Shared mixed-indicator SQLite DBs are retired. Historical mixed DBs belong in `archive/`.
 - Legacy `data/*optuna*` directories are deprecated and should stay empty.
+
+## Current Runtime Ops
+
+- Current-runtime-only health: `python scripts/optuna/runtime_health.py`
+- Stale child-log archive (dry run): `python scripts/optuna/prune_runtime_logs.py`
+- Stale child-log archive (apply): `python scripts/optuna/prune_runtime_logs.py --apply`
