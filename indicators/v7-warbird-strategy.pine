@@ -92,18 +92,18 @@ float FIB_T3    = 2.0
 float FIB_T4    = 2.236
 float FIB_T5    = 2.618
 
-// Colors (from lib/colors.ts)
+// Colors (TradingView settings defaults)
 color COLOR_ANCHOR             = #FFFFFF    // white — 0, .5, 1 levels
 color COLOR_RETRACEMENT        = #808080    // mid-gray — .236, .786, waypoints
-color COLOR_RETRACEMENT_ORANGE = #E65100    // dark orange — .382, .618
-color COLOR_PIVOT              = #FF9800    // bright orange — zone fill only
-color COLOR_TARGET             = #4CAF50    // green — TARGET 1, 2, 3
-color COLOR_STOP               = #FF1744    // red — stop loss
+color COLOR_RETRACEMENT_ACCENT = #B83B55    // rose — .382, .618
+color COLOR_PIVOT              = #B0B0B0    // gray — pivot zone fill only
+color COLOR_TARGET             = #006064    // teal — targets
+color COLOR_STOP               = #CB3F3B    // red — stop loss / negative extension
 
-// Widths (from FibLinesPrimitive.ts:49-60)
+// Widths (TradingView settings defaults)
 int WIDTH_ANCHOR      = 1
 int WIDTH_RETRACEMENT = 1
-int WIDTH_PIVOT       = 2
+int WIDTH_PIVOT       = 3
 int WIDTH_TARGET      = 2
 
 //=====================
@@ -120,8 +120,12 @@ float shortTrendGateAdx = input.float(10.0, "Short Gate ADX Floor", minval=5.0, 
   tooltip="Minimum ADX required before the bullish-trend short gate activates.")
 
 string groupStops = "Stop Logic"
-string stopFamilyId = input.string("ATR_1_0", "Fallback Stop Family", options=["FIB_NEG_0236", "FIB_NEG_0382", "ATR_1_0", "ATR_1_5", "ATR_STRUCTURE_1_25", "FIB_0236_ATR_COMPRESS_0_50"], group=groupStops,
-  tooltip="Local fallback stop family for strategy backtests until the AG packet runtime can publish a live stop-family decision back to TradingView.")
+string optEntryLevelInput = input.string("0.618", "Execution Anchor", options=["0.500", "0.618", "0.786"], group=groupStops,
+  tooltip="Optuna-tuned execution line. The same fib ratio is used in both directions via fibPrice().")
+float optStopAtrMult = input.float(1.5, "ATR Stop Multiplier", minval=1.0, maxval=3.5, step=0.1, group=groupStops,
+  tooltip="Single-family ATR stop. This replaces all stop-family branching and continuation widening.")
+float optMaxRiskAtr = input.float(3.0, "Max Setup Stop ATR", minval=2.5, maxval=4.5, step=0.25, group=groupStops,
+  tooltip="Reject setup triggers whose ATR stop is too wide versus current volatility.")
 float continuationHoldStopAtrMult = input.float(1.0, "Tier 1 Hold Stop ATR", minval=1.0, maxval=4.0, step=0.25, group=groupStops,
   tooltip="When a same-direction Tier 1 continuation signal fires during an active trade, temporarily widen the stop to entry +/- ATR x this multiplier for the configured hold bars.")
 
@@ -155,7 +159,8 @@ int exhaustionZLen = input.int(10, "Exhaustion Z Length", minval=10, maxval=100,
 float exhaustionZThreshold = input.float(2.0, "Exhaustion Z Threshold", minval=1.0, maxval=5.0, step=0.1, group=groupFootprint)
 float exhaustionLevelAtrTol = input.float(0.10, "Extension ATR Tolerance", minval=0.01, maxval=0.50, step=0.01, group=groupFootprint)
 float zeroPrintVolRatio = input.float(0.10, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
-int stackedImbalanceRows = input.int(3, "Extreme Rows To Inspect", minval=1, maxval=10, group=groupFootprint)
+int optImbalanceRows = input.int(2, "Imbalance Rows", minval=1, maxval=3, group=groupFootprint,
+  tooltip="Minimum consecutive extreme rows with same-side imbalance required for a live entry trigger.")
 int continuationHoldBars = input.int(3, "Tier 1 Hold Bars", minval=0, maxval=20, group=groupFootprint)
 
 
@@ -599,13 +604,16 @@ float fibRange = fibAnchorHigh - fibAnchorLow
 float minFibRange = minFibRangeAtr * atr14
 bool isValid = not na(fibAnchorHigh) and not na(fibAnchorLow) and fibRange >= minFibRange
 
-// Structural direction follows anchor seniority. The grid only flips when
-// a new anchor relationship is confirmed, not when price chops around a midpoint.
+float fibMidpoint = fibAnchorLow + fibRange * 0.5
+float fibHystBand = fibRange * 0.02
+
+// Price hysteresis keeps the visual ladder responsive without flipping on every
+// midpoint tick. This matches the working fib-only Warbird surface.
 var bool fibBull = true
 if isValid
-    if anchorHighTime > anchorLowTime
+    if close >= fibMidpoint + fibHystBand
         fibBull := true
-    else if anchorLowTime > anchorHighTime
+    else if close <= fibMidpoint - fibHystBand
         fibBull := false
 else
     fibBull := true
@@ -886,7 +894,7 @@ int stackedSellCount = 0
 if mlExhFootprintAvailable
     array<volume_row> footprintRows = footprint.rows(reqFootprint)
     int rowCount = array.size(footprintRows)
-    int rowsToInspect = math.min(stackedImbalanceRows, rowCount)
+    int rowsToInspect = math.min(optImbalanceRows, rowCount)
     if rowsToInspect > 0
         for offset = 0 to rowsToInspect - 1
             volume_row topRow = array.get(footprintRows, rowCount - 1 - offset)
@@ -1018,14 +1026,16 @@ stopFamilyLevel(string familyId, float entryPx, float atrVal) =>
             raw := fibBull ? math.max(fibAnchorLow - 0.5 * safeAtr, fibExt0236) - syminfo.mintick : math.min(fibAnchorHigh + 0.5 * safeAtr, fibExt0236) + syminfo.mintick
         roundToTick(raw)
 
-int stopFamilyCode = stopFamilyId == "FIB_NEG_0236" ? 1 : stopFamilyId == "FIB_NEG_0382" ? 2 : stopFamilyId == "ATR_1_0" ? 3 : stopFamilyId == "ATR_1_5" ? 4 : stopFamilyId == "ATR_STRUCTURE_1_25" ? 5 : 6
+float optEntryRatio = optEntryLevelInput == "0.500" ? FIB_PIVOT : optEntryLevelInput == "0.786" ? FIB_786 : FIB_618
+int stopFamilyCode = 3  // ATR-only contract retained for downstream export compatibility.
 int configuredRunnerTargetTier = fastRunnerTargetId == "TP3" ? 3 : 2
 
 // Entry level = the fib level price is closest to (actual interaction point)
 float baseEntryLevel = fibLevelTouched == 618 ? p618 : fibLevelTouched == 382 ? p382 : fibLevelTouched == 500 ? pPivot : fibLevelTouched == 786 ? p786 : fibLevelTouched == 236 ? p236 : fibLevelTouched == 100 ? pOne : close
 bool scalpEntryContext = useFootprintScalpEntries and (scalpLongReady or scalpShortReady)
-float entryLevel = scalpEntryContext and executionFibValid ? executionFibPivot : baseEntryLevel
-float slLevel    = stopFamilyLevel(stopFamilyId, entryLevel, atr14)
+float configuredEntryLevel = fibPrice(optEntryRatio)
+float entryLevel = scalpEntryContext and executionFibValid ? executionFibPivot : not na(configuredEntryLevel) ? configuredEntryLevel : baseEntryLevel
+float slLevel    = not isValid or na(entryLevel) ? na : roundToTick(fibBull ? entryLevel - atr14 * optStopAtrMult : entryLevel + atr14 * optStopAtrMult)
 float tp1Level   = pT1
 float tp2Level   = pT2
 float tp3Level   = pT3
@@ -1040,6 +1050,7 @@ bool htfWallShortOk = not useHtfStructureFilter or na(htfShortWallPrice) or entr
 // Stop geometry is exported for AG and diagnostics, but not used as a live Pine gate.
 float slDistPts = math.abs(entryLevel - slLevel)
 float slDistAtr = atr14 > 0 ? slDistPts / atr14 : 0.0
+bool atrRiskAcceptable = not na(slLevel) and atr14 > 0 and slDistAtr <= optMaxRiskAtr
 
 // --- CANDIDATE DIAGNOSTICS ---
 // Touch/archetype fields remain exported for AG and review, but live strategy
@@ -1054,8 +1065,8 @@ bool priceAtFibLevel = isValid and confirmed and (
     math.abs(close - pOne) <= fibTouchTol)
 bool validArchetype = setupArchetypeCode == 1 or setupArchetypeCode == 2 or setupArchetypeCode == 3 or setupArchetypeCode == 5
 bool candidateSetup = priceAtFibLevel and validArchetype
-bool entryLongTrigger  = ((acceptEvent and longConfirmed) or scalpLongReady) and dir == 1 and not ladderInvalidated and htfWallLongOk and not projectedHtfTradesSuppressed
-bool entryShortTrigger = ((acceptEvent and shortConfirmed) or scalpShortReady) and dir == -1 and not ladderInvalidated and not bullishTrendBlocksShorts and htfWallShortOk and not projectedHtfTradesSuppressed
+bool entryLongTrigger  = ((acceptEvent and longConfirmed) or scalpLongReady) and dir == 1 and atrRiskAcceptable and not ladderInvalidated and htfWallLongOk and not projectedHtfTradesSuppressed
+bool entryShortTrigger = ((acceptEvent and shortConfirmed) or scalpShortReady) and dir == -1 and atrRiskAcceptable and not ladderInvalidated and not bullishTrendBlocksShorts and htfWallShortOk and not projectedHtfTradesSuppressed
 
 if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or entryLongTrigger or entryShortTrigger)
     log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} longTrig={5} shortTrig={6} shortGate={7} fpCount={8} htfLong={9} htfShort={10} wallLong={11} wallShort={12}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, entryLongTrigger, entryShortTrigger, bullishTrendBlocksShorts, footprintEvidenceCount, htfTrendLongOk, htfTrendShortOk, htfWallLongOk, htfWallShortOk))
@@ -1101,7 +1112,7 @@ if confirmed
     if mlExhFootprintAvailable and tradeInFlight and tradeDir != 0
         array<volume_row> fpRowsCont = footprint.rows(reqFootprint)
         int rowCntCont = array.size(fpRowsCont)
-        int rowsChk = math.min(stackedImbalanceRows, rowCntCont)
+        int rowsChk = math.min(optImbalanceRows, rowCntCont)
         if rowsChk > 0
             if tradeDir == 1
                 for ri = 0 to rowsChk - 1
@@ -1317,11 +1328,11 @@ drawAnchoredLine(line id, bool visible, float price, color col, int width_, int 
         line.set_color(id, color(na))
 
 drawAnchoredLine(lineZero,  true, pZero,  COLOR_ANCHOR,             WIDTH_ANCHOR,      drawLeftBar)
-drawAnchoredLine(lineNeg236, true, pNeg236, COLOR_STOP,             WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(lineNeg236, false, pNeg236, COLOR_STOP,            WIDTH_RETRACEMENT, drawLeftBar)
 drawAnchoredLine(line236,   true, p236,   COLOR_RETRACEMENT,         WIDTH_RETRACEMENT, drawLeftBar)
-drawAnchoredLine(line382,   true, p382,   COLOR_RETRACEMENT_ORANGE,  WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(line382,   true, p382,   COLOR_RETRACEMENT_ACCENT,  WIDTH_RETRACEMENT, drawLeftBar)
 drawAnchoredLine(linePivot, true, pPivot, COLOR_ANCHOR,              WIDTH_PIVOT,       drawLeftBar)
-drawAnchoredLine(line618,   true, p618,   COLOR_RETRACEMENT_ORANGE,  WIDTH_RETRACEMENT, drawLeftBar)
+drawAnchoredLine(line618,   true, p618,   COLOR_RETRACEMENT_ACCENT,  WIDTH_RETRACEMENT, drawLeftBar)
 drawAnchoredLine(line786,   true, p786,   COLOR_RETRACEMENT,         WIDTH_RETRACEMENT, drawLeftBar)
 drawAnchoredLine(lineOne,   true, pOne,   COLOR_ANCHOR,              WIDTH_ANCHOR,      drawLeftBar)
 drawAnchoredLine(lineT1,    true, pT1,    COLOR_TARGET,              WIDTH_TARGET,      drawLeftBar)
@@ -1341,7 +1352,7 @@ if not na(zoneFillUpper) and not na(zoneFillLower)
     box.set_right(zoneBox, bar_index)
     box.set_top(zoneBox, zoneFillUpper)
     box.set_bottom(zoneBox, zoneFillLower)
-    box.set_bgcolor(zoneBox, color.new(COLOR_PIVOT, 86))
+    box.set_bgcolor(zoneBox, color.new(COLOR_PIVOT, 80))
     box.set_border_color(zoneBox, color.new(COLOR_PIVOT, 100))
 else
     box.set_bgcolor(zoneBox, color(na))

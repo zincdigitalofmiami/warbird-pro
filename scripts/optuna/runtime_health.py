@@ -7,12 +7,13 @@ import json
 import socket
 import sqlite3
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -20,6 +21,8 @@ HUB_URL = "http://localhost:8090"
 SNAPSHOT_URL = f"{HUB_URL}/api/snapshot"
 LEGACY_PORT = 8080
 TIMEOUT_SECONDS = 3
+CHILD_START_TIMEOUT_SECONDS = 8
+CHILD_START_POLL_SECONDS = 0.2
 
 
 @dataclass
@@ -40,6 +43,43 @@ def _port_open(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.25)
         return sock.connect_ex((host, port)) == 0
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _open_study_url(key: str) -> str:
+    encoded_key = quote(key, safe="")
+    request = urllib.request.Request(f"{HUB_URL}/open-study/{encoded_key}", method="GET")
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        with opener.open(request, timeout=TIMEOUT_SECONDS) as response:
+            location = response.headers.get("Location") or response.geturl()
+            if not location:
+                raise RuntimeError(f"{key} launch response did not include a location")
+            return urljoin(HUB_URL, location)
+    except urllib.error.HTTPError as exc:
+        if exc.code not in {301, 302, 303, 307, 308}:
+            raise
+        location = exc.headers.get("Location")
+        if not location:
+            raise RuntimeError(f"{key} launch redirect did not include a location")
+        return urljoin(HUB_URL, location)
+
+
+def _wait_for_dashboard(url: str) -> bool:
+    parsed = urlparse(url)
+    if not parsed.hostname or not parsed.port:
+        return False
+
+    deadline = time.monotonic() + CHILD_START_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if _port_open(parsed.hostname, parsed.port):
+            return True
+        time.sleep(CHILD_START_POLL_SECONDS)
+    return False
 
 
 def _sqlite_counts(db_path: Path) -> dict[str, int]:
@@ -79,6 +119,10 @@ def _study_id(studies_payload: dict[str, Any]) -> int | None:
         return None
     study_id = first.get("study_id")
     return int(study_id) if isinstance(study_id, int) else None
+
+
+def _text(value: Any) -> str:
+    return value.strip() if isinstance(value, str) else ""
 
 
 def run() -> int:
@@ -132,20 +176,44 @@ def run() -> int:
         card for card in cards if isinstance(card, dict) and card.get("db_exists")
     ]
     for card in active_cards:
-        key = str(card.get("key", "")).strip() or "unknown"
-        dashboard_url = str(card.get("dashboard_url", "")).strip()
-        db_path = Path(str(card.get("db_path", "")).strip())
+        key = _text(card.get("key")) or "unknown"
+        dashboard_url = _text(card.get("dashboard_url"))
+        db_path = Path(_text(card.get("db_path")))
 
         if not dashboard_url:
-            checks.append(
-                CheckResult(False, f"{key} dashboard route", "missing dashboard_url")
-            )
-            failures.append(f"{key} missing dashboard_url")
-            continue
+            try:
+                dashboard_url = _open_study_url(key)
+                checks.append(
+                    CheckResult(
+                        True,
+                        f"{key} dashboard launch",
+                        f"launched {dashboard_url}",
+                    )
+                )
+            except Exception as exc:
+                checks.append(
+                    CheckResult(False, f"{key} dashboard launch", str(exc))
+                )
+                failures.append(f"{key} dashboard launch failed")
+                continue
 
         parsed = urlparse(dashboard_url)
         port = parsed.port
-        port_ok = bool(parsed.hostname and port and _port_open(parsed.hostname, port))
+        port_ok = bool(
+            parsed.hostname
+            and port
+            and (_port_open(parsed.hostname, port) or _wait_for_dashboard(dashboard_url))
+        )
+        if not port_ok:
+            try:
+                relaunched_url = _open_study_url(key)
+                if relaunched_url:
+                    dashboard_url = relaunched_url
+                    parsed = urlparse(dashboard_url)
+                    port = parsed.port
+                    port_ok = _wait_for_dashboard(dashboard_url)
+            except Exception:
+                port_ok = False
         checks.append(
             CheckResult(
                 port_ok,

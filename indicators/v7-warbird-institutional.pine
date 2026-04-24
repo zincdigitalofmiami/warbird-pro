@@ -21,7 +21,7 @@
 // Footprint (chart):    request.footprint()              = 1 call
 // TOTAL:                                                 = 5 request.* paths
 //
-// PLOT BUDGET: 55 plot + 2 plotshape + 3 alertcondition = 60/64 (4 headroom); 9 label.new slots (var+entry) — outside 64-slot counter
+// PLOT BUDGET: 55 plot + 3 alertcondition = 58/64 (6 headroom); 9 label.new slots (var+entry) — outside 64-slot counter
 // TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed.
 // Momentum Oscillators (5 plots: ml_vf_bull, ml_vf_bear, ml_nfe, ml_rsi_knn, ml_confluence) added 2026-04-20.
 //@version=6
@@ -78,18 +78,19 @@ float FIB_T3    = 2.0
 float FIB_T4    = 2.236
 float FIB_T5    = 2.618
 
-// Colors (from lib/colors.ts)
+// Colors (TradingView settings defaults)
 color COLOR_ANCHOR             = #FFFFFF    // white — 0, .5, 1 levels
 color COLOR_RETRACEMENT        = #808080    // mid-gray — .236, .786, waypoints
-color COLOR_RETRACEMENT_ORANGE = #E65100    // dark orange — .382, .618
-color COLOR_PIVOT              = #FF9800    // bright orange — zone fill only
-color COLOR_TARGET             = #4CAF50    // green — TARGET 1, 2, 3
-color COLOR_STOP               = #FF1744    // red — stop loss
+color COLOR_RETRACEMENT_ACCENT = #B83B55    // rose — .382, .618
+color COLOR_PIVOT              = #B0B0B0    // gray — pivot zone fill only
+color COLOR_TARGET             = #006064    // teal — targets
+color COLOR_STOP               = #CB3F3B    // red — stop loss / negative extension
+color COLOR_ENTRY_LABEL        = #6D6E78    // gray — entry label
 
-// Widths (from FibLinesPrimitive.ts:49-60)
+// Widths (TradingView settings defaults)
 int WIDTH_ANCHOR      = 1
 int WIDTH_RETRACEMENT = 1
-int WIDTH_PIVOT       = 2
+int WIDTH_PIVOT       = 3
 int WIDTH_TARGET      = 2
 
 //=====================
@@ -106,12 +107,12 @@ float shortTrendGateAdx = input.float(10.0, "Short Gate ADX Floor", minval=5.0, 
   tooltip="Minimum ADX required before the bullish-trend short gate activates.")
 
 string groupStops = "Stop Logic"
-string stopFamilyId = input.string("ATR_1_0", "Fallback Stop Family", options=["FIB_NEG_0236", "FIB_NEG_0382", "ATR_1_0", "ATR_1_5", "ATR_STRUCTURE_1_25", "FIB_0236_ATR_COMPRESS_0_50"], group=groupStops,
-  tooltip="Local fallback stop family for the indicator overlay and hidden stop export. Use this until the AG packet runtime can publish a live stop-family decision back to TradingView.")
-float continuationHoldStopAtrMult = input.float(1.0, "Tier 1 Hold Stop ATR", minval=1.0, maxval=4.0, step=0.25, group=groupStops,
-  tooltip="When a same-direction Tier 1 continuation signal fires during an active trade, temporarily widen the stop to entry +/- ATR x this multiplier for the configured hold bars.")
-float maxEntryStopAtr = input.float(3.0, "Max Setup Stop ATR", minval=0.75, maxval=10.0, step=0.25, group=groupStops,
-  tooltip="Reject setup triggers whose structural stop is too wide versus ATR. Keeps the live surface from arming on blown-out ladders.")
+string optEntryLevelInput = input.string("0.618", "Execution Anchor", options=["0.500", "0.618", "0.786"], group=groupStops,
+  tooltip="Optuna-tuned execution line. The same fib ratio is used in both directions via fibPrice().")
+float optStopAtrMult = input.float(1.5, "ATR Stop Multiplier", minval=1.0, maxval=3.5, step=0.1, group=groupStops,
+  tooltip="Single-family ATR stop. This replaces all stop-family branching and continuation widening.")
+float optMaxRiskAtr = input.float(3.0, "Max Setup Stop ATR", minval=2.5, maxval=4.5, step=0.25, group=groupStops,
+  tooltip="Reject setup triggers whose ATR stop is too wide versus current volatility.")
 
 string groupFootprint = "Footprint Exhaustion"
 int footprintTicksPerRow = input.int(4, "Footprint Ticks Per Row", minval=1, group=groupFootprint)
@@ -121,8 +122,8 @@ int exhaustionZLen = input.int(10, "Exhaustion Z Length", minval=10, maxval=100,
 float exhaustionZThreshold = input.float(2.0, "Exhaustion Z Threshold", minval=1.0, maxval=5.0, step=0.1, group=groupFootprint)
 float exhaustionLevelAtrTol = input.float(0.10, "Extension ATR Tolerance", minval=0.01, maxval=0.50, step=0.01, group=groupFootprint)
 float zeroPrintVolRatio = input.float(0.10, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
-int stackedImbalanceRows = input.int(3, "Extreme Rows To Inspect", minval=1, maxval=10, group=groupFootprint)
-int continuationHoldBars = input.int(3, "Tier 1 Hold Bars", minval=1, maxval=20, group=groupFootprint)
+int optImbalanceRows = input.int(2, "Imbalance Rows", minval=1, maxval=3, group=groupFootprint,
+  tooltip="Minimum consecutive extreme rows with same-side imbalance required for a live entry trigger.")
 
 //=====================
 // VISUALS (colors/widths locked to spec — see constants above)
@@ -146,29 +147,26 @@ int vwapWidthInput = input.int(2, "", minval=1, maxval=5, inline="vwap", group=g
 string fibLineStyleInput = input.string("Solid", "Fib Line Style", options=["Solid", "Dashed", "Dotted"], group=groupViz)
 color fibAnchorColorInput = input.color(COLOR_ANCHOR, "Anchor Fib", inline="fib_anchor", group=groupViz)
 int fibAnchorWidthInput = input.int(WIDTH_ANCHOR, "", minval=1, maxval=5, inline="fib_anchor", group=groupViz)
-color fibStopColorInput = input.color(COLOR_STOP, "Stop / Neg .236", inline="fib_stop", group=groupViz)
+color fibStopColorInput = input.color(COLOR_STOP, "Neg .236", inline="fib_stop", group=groupViz)
 int fibStopWidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_stop", group=groupViz)
 color fibRetracementColorInput = input.color(COLOR_RETRACEMENT, ".236 / .786 / Waypoints", inline="fib_retrace", group=groupViz)
 int fibRetracementWidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_retrace", group=groupViz)
-color fibRetracementAccentColorInput = input.color(COLOR_RETRACEMENT_ORANGE, ".382 / .618", inline="fib_accent", group=groupViz)
+color fibRetracementAccentColorInput = input.color(COLOR_RETRACEMENT_ACCENT, ".382 / .618", inline="fib_accent", group=groupViz)
 int fibRetracementAccentWidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_accent", group=groupViz)
 color fibPivotColorInput = input.color(COLOR_PIVOT, "Pivot Zone", inline="fib_pivot", group=groupViz)
 int fibPivotWidthInput = input.int(WIDTH_PIVOT, "", minval=1, maxval=5, inline="fib_pivot", group=groupViz)
-color fibTargetColorInput = input.color(COLOR_TARGET, "Targets", inline="fib_target", group=groupViz)
+color fibTargetColorInput = input.color(color.new(COLOR_TARGET, 50), "Targets", inline="fib_target", group=groupViz)
 int fibTargetWidthInput = input.int(WIDTH_TARGET, "", minval=1, maxval=5, inline="fib_target", group=groupViz)
+bool showFibLevelLabelsInput = input.bool(true, "Show Fib Level Labels", group=groupViz)
 bool showTradeLabelsInput = input.bool(true, "Show Entry / SL / Target Labels", group=groupViz)
-int tradeLabelOffsetBarsInput = input.int(1, "Trade Label Offset (bars)", minval=0, maxval=20, group=groupViz)
-string tradeLabelSizeInput = input.string("Small", "Trade Label Size", options=["Tiny", "Small", "Normal", "Large"], group=groupViz)
+int tradeLabelOffsetBarsInput = input.int(10, "Trade Label Offset (bars)", minval=0, maxval=20, group=groupViz)
+string tradeLabelSizeInput = input.string("Normal", "Trade Label Size", options=["Tiny", "Small", "Normal", "Large"], group=groupViz)
 color tradeLabelTextColorInput = input.color(color.white, "Trade Label Text", inline="label_text", group=groupViz)
-int tradeLabelBgTransparencyInput = input.int(80, "BG Alpha", minval=0, maxval=100, inline="label_text", group=groupViz)
-color entryLabelColorInput = input.color(color.gray, "Entry Label", inline="label_levels", group=groupViz)
+int tradeLabelBgTransparencyInput = input.int(60, "BG Alpha", minval=0, maxval=100, inline="label_text", group=groupViz)
+color entryLabelColorInput = input.color(COLOR_ENTRY_LABEL, "Entry Label", inline="label_levels", group=groupViz)
 color stopLabelColorInput = input.color(COLOR_STOP, "SL Label", inline="label_levels", group=groupViz)
-color targetLabelColorInput = input.color(COLOR_TARGET, "Target Label", inline="label_levels", group=groupViz)
-bool showSetupDiamondsInput = input.bool(true, "Show Setup Exhaustion Diamonds", group=groupViz)
-color bullishDiamondColorInput = input.color(COLOR_TARGET, "Bull Diamond", inline="diamond", group=groupViz)
-color bearishDiamondColorInput = input.color(COLOR_STOP, "Bear Diamond", inline="diamond", group=groupViz)
-int exhaustionDiamondOffsetTicksInput = input.int(4, "Diamond Offset (ticks)", minval=0, maxval=40, group=groupViz)
-int zoneFillTransparencyInput = input.int(86, "Zone Fill Alpha", minval=0, maxval=100, group=groupViz)
+color targetLabelColorInput = input.color(color.new(COLOR_TARGET, 50), "Target Label", inline="label_levels", group=groupViz)
+int zoneFillTransparencyInput = input.int(80, "Zone Fill Alpha", minval=0, maxval=100, group=groupViz)
 
 string groupDebug = "Debug Diagnostics"
 bool enableDebugLogs = input.bool(false, "Enable Debug Logs", group=groupDebug, tooltip="Temporary state tracing for regime/probability diagnostics.")
@@ -478,13 +476,16 @@ float fibRange = fibAnchorHigh - fibAnchorLow
 float minFibRange = minFibRangeAtr * atr14
 bool isValid = not na(fibAnchorHigh) and not na(fibAnchorLow) and fibRange >= minFibRange
 
-// Structural direction follows anchor seniority. The grid only flips when
-// a new anchor relationship is confirmed, not when price chops around a midpoint.
+float fibMidpoint = fibAnchorLow + fibRange * 0.5
+float fibHystBand = fibRange * 0.02
+
+// Price hysteresis keeps the visual ladder responsive without flipping on every
+// midpoint tick. This matches the working fib-only Warbird surface.
 var bool fibBull = true
 if isValid
-    if anchorHighBar > anchorLowBar
+    if close >= fibMidpoint + fibHystBand
         fibBull := true
-    else if anchorLowBar > anchorHighBar
+    else if close <= fibMidpoint - fibHystBand
         fibBull := false
 else
     fibBull := true
@@ -511,8 +512,8 @@ float pT3     = fibPrice(FIB_T3)
 float pT4     = fibPrice(FIB_T4)
 float pT5     = fibPrice(FIB_T5)
 
-float entryZoneUpper = math.max(pPivot, p618)
-float entryZoneLower = math.min(pPivot, p618)
+float entryZoneUpper = math.max(pPivot, p786)
+float entryZoneLower = math.min(pPivot, p786)
 float zoneUpper = math.max(p618, p786)
 float zoneLower = math.min(p618, p786)
 
@@ -791,7 +792,7 @@ float exhaustionStd = ta.stdev(close, exhaustionZLen)
 float mlExhZScore = exhaustionStd > 0 ? (exhaustionProbePrice - exhaustionMean) / exhaustionStd : 0.0
 bool mlExhZExtreme = math.abs(mlExhZScore) >= exhaustionZThreshold
 
-// Footprint row-level evidence (ML exports + diamond enrichment)
+// Footprint row-level evidence (hidden export enrichment)
 volume_row triggerRow = fpAvailable and not na(exhaustionTriggerPrice) ? footprint.get_row_by_price(reqFootprint, exhaustionTriggerPrice) : na
 volume_row extremeRow = fpAvailable ? footprint.get_row_by_price(reqFootprint, close > open ? high : low) : na
 float triggerRowDelta = not na(triggerRow) ? volume_row.delta(triggerRow) : na
@@ -813,11 +814,11 @@ bool isSwingHighBar = high >= ta.highest(high, 10)
 bool isSwingLowBar = low <= ta.lowest(low, 10)
 
 // ── COOLDOWN: 8 bars (2 hours on 15m) ──────────────────────────────────
-var int lastBearDiamondBar = na
-var int lastBullDiamondBar = na
+var int lastBearExhTriggerBar = na
+var int lastBullExhTriggerBar = na
 int exhCooldown = 8
-bool bearCooldownOk = na(lastBearDiamondBar) or bar_index - lastBearDiamondBar >= exhCooldown
-bool bullCooldownOk = na(lastBullDiamondBar) or bar_index - lastBullDiamondBar >= exhCooldown
+bool bearCooldownOk = na(lastBearExhTriggerBar) or bar_index - lastBearExhTriggerBar >= exhCooldown
+bool bullCooldownOk = na(lastBullExhTriggerBar) or bar_index - lastBullExhTriggerBar >= exhCooldown
 
 int hourEt = hour(time, "America/New_York")
 bool mlExhSessionValid = hourEt != 17
@@ -841,7 +842,7 @@ int stackedSellCount = 0
 if fpAvailable
     array<volume_row> fpRows = footprint.rows(reqFootprint)
     int fpRowCount = array.size(fpRows)
-    int rowsCheck = math.min(stackedImbalanceRows, fpRowCount)
+    int rowsCheck = math.min(optImbalanceRows, fpRowCount)
     if rowsCheck > 0
         for ri = 0 to rowsCheck - 1
             volume_row topR = array.get(fpRows, fpRowCount - 1 - ri)
@@ -850,10 +851,10 @@ if fpAvailable
             volume_row botR = array.get(fpRows, ri)
             if volume_row.has_sell_imbalance(botR)
                 stackedSellCount += 1
-bool stackedBuyImbalance = stackedBuyCount >= 2    // aggressive buying at highs
-bool stackedSellImbalance = stackedSellCount >= 2  // aggressive selling at lows
+bool stackedBuyImbalance = stackedBuyCount >= optImbalanceRows
+bool stackedSellImbalance = stackedSellCount >= optImbalanceRows
 
-// ── DIAMOND TRIGGER ─────────────────────────────────────────────────────
+// ── EXHAUSTION TELEMETRY ────────────────────────────────────────────────
 // THREE REQUIREMENTS, all mandatory:
 //   1. PROVEN candlestick pattern (backtester validated on MES 15m)
 //   2. FOOTPRINT DELTA confirms direction (buyers/sellers won the bar)
@@ -874,9 +875,9 @@ int mlExhConfidenceTier = bullishExhaustion or bearishExhaustion ? 1 : 0
 int exhaustionSignalDir = bearishExhaustion ? -1 : bullishExhaustion ? 1 : 0
 
 if confirmed and bearishExhaustion
-    lastBearDiamondBar := bar_index
+    lastBearExhTriggerBar := bar_index
 if confirmed and bullishExhaustion
-    lastBullDiamondBar := bar_index
+    lastBullExhTriggerBar := bar_index
 
 //=====================
 // TRADE STATE MACHINE (setup -> active -> TP progress -> final resolution)
@@ -914,8 +915,6 @@ var int lastExhTriggerBar = na
 var int lastExhTriggerDir = 0
 var int lastTier1ExhBar = na
 var int lastTier1ExhDir = 0
-var int lastContTriggerBar = na
-var int lastContTriggerDir = 0
 var int mlContConfidenceTier = 0
 int cooldownLen = 8 // bars to wait after exit (8 × 15m = 2h minimum; 4 was too short — consecutive entries corrupt AG samples)
 int barsSinceExit = not na(lastExitBar) ? bar_index - lastExitBar : 999
@@ -924,33 +923,13 @@ bool cooldownActive = barsSinceExit < cooldownLen
 roundToTick(float price) =>
     na(price) ? na : math.round(price / syminfo.mintick) * syminfo.mintick
 
-stopFamilyLevel(string familyId, float entryPx, float atrVal) =>
-    if not isValid or na(entryPx)
-        na
-    else
-        float safeAtr = math.max(atrVal, syminfo.mintick)
-        float fibExt0236 = fibBull ? fibAnchorLow - fibRange * FIB_236 : fibAnchorHigh + fibRange * FIB_236
-        float raw = na
-        if familyId == "FIB_NEG_0236"
-            raw := fibBull ? fibExt0236 - syminfo.mintick : fibExt0236 + syminfo.mintick
-        else if familyId == "FIB_NEG_0382"
-            raw := fibBull ? fibAnchorLow - fibRange * FIB_382 - syminfo.mintick : fibAnchorHigh + fibRange * FIB_382 + syminfo.mintick
-        else if familyId == "ATR_1_0"
-            raw := fibBull ? entryPx - safeAtr : entryPx + safeAtr
-        else if familyId == "ATR_1_5"
-            raw := fibBull ? entryPx - 1.5 * safeAtr : entryPx + 1.5 * safeAtr
-        else if familyId == "ATR_STRUCTURE_1_25"
-            raw := fibBull ? math.max(fibAnchorLow - syminfo.mintick, entryPx - 1.25 * safeAtr) : math.min(fibAnchorHigh + syminfo.mintick, entryPx + 1.25 * safeAtr)
-        else
-            raw := fibBull ? math.max(fibAnchorLow - 0.5 * safeAtr, fibExt0236) - syminfo.mintick : math.min(fibAnchorHigh + 0.5 * safeAtr, fibExt0236) + syminfo.mintick
-        roundToTick(raw)
-
-int stopFamilyCode = stopFamilyId == "FIB_NEG_0236" ? 1 : stopFamilyId == "FIB_NEG_0382" ? 2 : stopFamilyId == "ATR_1_0" ? 3 : stopFamilyId == "ATR_1_5" ? 4 : stopFamilyId == "ATR_STRUCTURE_1_25" ? 5 : 6
+float optEntryRatio = optEntryLevelInput == "0.500" ? FIB_PIVOT : optEntryLevelInput == "0.786" ? FIB_786 : FIB_618
+int stopFamilyCode = 3  // ATR-only contract retained for downstream export compatibility.
 
 // entryLevel stays on the fib-defined execution line. The indicator overlay should follow that line,
 // not the accept-bar close, so the visual remains anchored to the actual setup logic.
-float entryLevel = fibBull ? p618 : p382
-float slLevel    = stopFamilyLevel(stopFamilyId, entryLevel, atr14)
+float entryLevel = fibPrice(optEntryRatio)
+float slLevel    = not isValid or na(entryLevel) ? na : roundToTick(fibBull ? entryLevel - atr14 * optStopAtrMult : entryLevel + atr14 * optStopAtrMult)
 float tp1Level   = pT1
 float tp2Level   = pT2
 float tp3Level   = pT3
@@ -963,22 +942,18 @@ float slDistAtr = atr14 > 0 ? slDistPts / atr14 : 0.0
 bool trendBiasLong = ema9 > ema21 and close >= ema50 and close >= vwapVal
 bool trendBiasShort = ema9 < ema21 and close <= ema50 and close <= vwapVal
 bool entryZoneTouched = not na(entryZoneUpper) and not na(entryZoneLower) and high >= entryZoneLower and low <= entryZoneUpper
-bool entryZoneRejectBullLive = not na(entryZoneLower) and low < entryZoneLower and close >= entryZoneLower and bullishCandle
-bool entryZoneRejectBearLive = not na(entryZoneUpper) and high > entryZoneUpper and close <= entryZoneUpper and bearishCandle
-bool footprintLongTrigger = fpAvailable and fpDeltaBullish and (pocNearLow or mlExhAbsorption or mlExhZeroPrint or stackedBuyImbalance)
-bool footprintShortTrigger = fpAvailable and fpDeltaBearish and (pocNearHigh or mlExhAbsorption or mlExhZeroPrint or stackedSellImbalance)
-bool sweepLongTrigger = entryZoneTouched and liqSweepBull
-bool sweepShortTrigger = entryZoneTouched and liqSweepBear
-bool atrRiskAcceptable = not na(slLevel) and atr14 > 0 and slDistPts >= atr14 * 0.618 and slDistAtr <= maxEntryStopAtr
+bool entryAnchorBullTrigger = confirmed and not na(entryLevel) and low <= entryLevel and close >= entryLevel
+bool entryAnchorBearTrigger = confirmed and not na(entryLevel) and high >= entryLevel and close <= entryLevel
+bool footprintLongTrigger = fpAvailable and fpDeltaBullish and stackedBuyImbalance
+bool footprintShortTrigger = fpAvailable and fpDeltaBearish and stackedSellImbalance
+bool atrRiskAcceptable = not na(slLevel) and atr14 > 0 and slDistAtr <= optMaxRiskAtr
 bool setupContextLong = dir == 1 and trendBiasLong and entryZoneTouched and atrRiskAcceptable
 bool setupContextShort = dir == -1 and trendBiasShort and entryZoneTouched and atrRiskAcceptable
 bool setupContextActive = setupContextLong or setupContextShort
-bool longTriggerCore = setupContextLong and (footprintLongTrigger or sweepLongTrigger or entryZoneRejectBullLive)
-bool shortTriggerCore = setupContextShort and (footprintShortTrigger or sweepShortTrigger or entryZoneRejectBearLive)
+bool longTriggerCore = setupContextLong and entryAnchorBullTrigger and footprintLongTrigger
+bool shortTriggerCore = setupContextShort and entryAnchorBearTrigger and footprintShortTrigger
 bool longTriggerEvent = longTriggerCore and (oneShotEvent ? not longTriggerCore[1] : true)
 bool shortTriggerEvent = shortTriggerCore and (oneShotEvent ? not shortTriggerCore[1] : true)
-bool bullishSetupDiamond = showSetupDiamondsInput and longTriggerEvent
-bool bearishSetupDiamond = showSetupDiamondsInput and shortTriggerEvent
 bool entryLongTrigger = longTriggerEvent and not ladderInvalidated
 bool entryShortTrigger = shortTriggerEvent and not ladderInvalidated and not bullishTrendBlocksShorts
 
@@ -1013,40 +988,34 @@ if confirmed
 
     bool tradeInFlight = tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
 
-    // ── CONTINUATION EVIDENCE (same-direction absorption during active trade) ──
-    // Separate from reversal exhaustion path. Evaluated against tradeDir, not exh dir.
-    int contStackedSameDirCount = 0
-    if mlExhFootprintAvailable and tradeInFlight and tradeDir != 0
-        array<volume_row> fpRowsCont = footprint.rows(reqFootprint)
-        int rowCntCont = array.size(fpRowsCont)
-        int rowsChk = math.min(stackedImbalanceRows, rowCntCont)
-        if rowsChk > 0
-            if tradeDir == 1
-                for ri = 0 to rowsChk - 1
-                    volume_row rw = array.get(fpRowsCont, rowCntCont - 1 - ri)
-                    if volume_row.has_buy_imbalance(rw)
-                        contStackedSameDirCount += 1
-            else
-                for ri = 0 to rowsChk - 1
-                    volume_row rw = array.get(fpRowsCont, ri)
-                    if volume_row.has_sell_imbalance(rw)
-                        contStackedSameDirCount += 1
-    bool contDeltaAligned = tradeInFlight and mlExhFootprintAvailable and not na(footprintDelta) and (tradeDir == 1 ? footprintDelta >= 0 : footprintDelta <= 0)
-    bool contImbalanceAligned = contStackedSameDirCount >= 2
-    bool continuationTier1Fired = mlExhSessionValid and mlExhFootprintAvailable and tradeInFlight and contDeltaAligned and contImbalanceAligned
-    bool continuationTier2Fired = mlExhSessionValid and not mlExhFootprintAvailable and tradeInFlight
-    mlContConfidenceTier := continuationTier1Fired ? 1 : continuationTier2Fired ? 2 : 0
-    if continuationTier1Fired
-        lastContTriggerBar := bar_index
-        lastContTriggerDir := tradeDir
+    float activeTradeStopPrice = tradeInFlight ? slPrice : na
+    // Ratchet stop with realized target progress. The stop only tightens: never widens risk.
+    if tradeInFlight and not na(slPrice) and not na(entryPrice)
+        if tradeDir == 1
+            float longRatchet = slPrice
+            if highestTargetHit >= 1
+                longRatchet := math.max(longRatchet, roundToTick(entryPrice))
+            if highestTargetHit >= 2 and not na(tp1Price)
+                longRatchet := math.max(longRatchet, tp1Price)
+            if highestTargetHit >= 3 and not na(tp2Price)
+                longRatchet := math.max(longRatchet, tp2Price)
+            if highestTargetHit >= 4 and not na(tp3Price)
+                longRatchet := math.max(longRatchet, tp3Price)
+            activeTradeStopPrice := longRatchet
+        else if tradeDir == -1
+            float shortRatchet = slPrice
+            if highestTargetHit >= 1
+                shortRatchet := math.min(shortRatchet, roundToTick(entryPrice))
+            if highestTargetHit >= 2 and not na(tp1Price)
+                shortRatchet := math.min(shortRatchet, tp1Price)
+            if highestTargetHit >= 3 and not na(tp2Price)
+                shortRatchet := math.min(shortRatchet, tp2Price)
+            if highestTargetHit >= 4 and not na(tp3Price)
+                shortRatchet := math.min(shortRatchet, tp3Price)
+            activeTradeStopPrice := shortRatchet
 
-    bool continuationHoldActiveLocal = tradeInFlight and not na(lastContTriggerBar) and bar_index - lastContTriggerBar <= continuationHoldBars and lastContTriggerDir == tradeDir
-    float holdEmergencyStopPriceLocal = not na(entryPrice) and not na(entryAtr) and tradeDir != 0 ? roundToTick(tradeDir == 1 ? entryPrice - entryAtr * continuationHoldStopAtrMult : entryPrice + entryAtr * continuationHoldStopAtrMult) : na
-    float activeTradeStopPrice = tradeInFlight ? (
-         continuationHoldActiveLocal and not na(holdEmergencyStopPriceLocal)
-             ? (tradeDir == 1 ? math.min(slPrice, holdEmergencyStopPriceLocal) : math.max(slPrice, holdEmergencyStopPriceLocal))
-             : slPrice
-    ) : na
+    if tradeInFlight and not na(activeTradeStopPrice)
+        slPrice := activeTradeStopPrice
 
     bool canResolveTrade = tradeInFlight and not na(entryBar) and bar_index > entryBar
     if canResolveTrade
@@ -1089,22 +1058,10 @@ if confirmed
         highestTargetHit := 0
 
 bool tradeInFlightNow = tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
-bool continuationHoldActive = tradeInFlightNow and not na(lastContTriggerBar) and bar_index - lastContTriggerBar <= continuationHoldBars and lastContTriggerDir == tradeDir
-float holdEmergencyStopPrice = not na(entryPrice) and not na(entryAtr) and tradeDir != 0 ? roundToTick(tradeDir == 1 ? entryPrice - entryAtr * continuationHoldStopAtrMult : entryPrice + entryAtr * continuationHoldStopAtrMult) : na
-float activeStopPrice = tradeInFlightNow ? (
-     continuationHoldActive and not na(holdEmergencyStopPrice)
-         ? (tradeDir == 1 ? math.min(slPrice, holdEmergencyStopPrice) : math.max(slPrice, holdEmergencyStopPrice))
-         : slPrice
-) : na
+float activeStopPrice = tradeInFlightNow ? slPrice : na
 float mlExhBarsSinceTrigger = not na(lastExhTriggerBar) ? float(bar_index - lastExhTriggerBar) : na
-bool showBearishExhaustion = bearishSetupDiamond
-bool showBullishExhaustion = bullishSetupDiamond
-color bearishExhaustionColor = bearishDiamondColorInput
-color bullishExhaustionColor = bullishDiamondColorInput
 fibLineStyle = f_line_style(fibLineStyleInput)
 tradeLabelSize = f_label_size(tradeLabelSizeInput)
-float bearishDiamondPrice = high + syminfo.mintick * exhaustionDiamondOffsetTicksInput
-float bullishDiamondPrice = low - syminfo.mintick * exhaustionDiamondOffsetTicksInput
 
 // Contrarian reversal setup: CHoCH fires opposite to last completed trade direction
 // within 10 bars of exit. Flags mean-reversion opportunity after TP2 tag or SL stop-out.
@@ -1138,6 +1095,7 @@ var line line1786  = line.new(bar_index, close, bar_index, close, color=color(na
 var line lineT3    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 var line lineT4    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 var line lineT5    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line lineActiveSl = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 
 var box zoneBox = box.new(bar_index, close, bar_index, close, bgcolor=color(na), border_color=color(na))
 
@@ -1148,6 +1106,22 @@ var label _lblT2    = label.new(bar_index, close, "", style=label.style_label_le
 var label _lblT3    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_TARGET, 20),  size=size.small)
 var label _lblT4    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_TARGET, 20),  size=size.small)
 var label _lblT5    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_TARGET, 20),  size=size.small)
+var label _fibLblZero = na
+var label _fibLblNeg236 = na
+var label _fibLbl236 = na
+var label _fibLbl382 = na
+var label _fibLblPivot = na
+var label _fibLbl618 = na
+var label _fibLbl786 = na
+var label _fibLblOne = na
+var label _fibLblT1 = na
+var label _fibLbl1382 = na
+var label _fibLbl150 = na
+var label _fibLblT2 = na
+var label _fibLbl1786 = na
+var label _fibLblT3 = na
+var label _fibLblT4 = na
+var label _fibLblT5 = na
 
 int fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
 int anchorLeftBar = int(math.max(0, na(anchorHighBar) or na(anchorLowBar) ? fallbackLeftBar : math.min(anchorHighBar, anchorLowBar)))
@@ -1155,20 +1129,38 @@ int drawLeftBar = useConfluenceAnchorSpan ? anchorLeftBar : fallbackLeftBar
 
 drawAnchoredLine(line id, bool visible, float price, color col, int width_, int leftBar) =>
     if visible and not na(price)
+        int rightBar = extendLevelsRight ? bar_index + tradeLabelOffsetBarsInput : bar_index
         line.set_xy1(id, leftBar, price)
-        line.set_xy2(id, bar_index, price)
+        line.set_xy2(id, rightBar, price)
         line.set_color(id, col)
         line.set_width(id, width_)
         line.set_style(id, fibLineStyle)
-        line.set_extend(id, extendLevelsRight ? extend.right : extend.none)
+        line.set_extend(id, extend.none)
     else
         line.set_color(id, color(na))
 
+setFibLevelLabel(label idIn, bool visible, float price, string text, color col) =>
+    label id = idIn
+    if visible and isValid and not na(price)
+        int labelX = bar_index + tradeLabelOffsetBarsInput
+        string labelText = text + "  " + str.tostring(price, format.mintick)
+        if na(id)
+            id := label.new(labelX, price, labelText, style=label.style_label_left, color=color.new(color.black, tradeLabelBgTransparencyInput), textcolor=col, size=tradeLabelSize)
+        label.set_xy(id, labelX, price)
+        label.set_text(id, labelText)
+        label.set_color(id, color.new(color.black, tradeLabelBgTransparencyInput))
+        label.set_textcolor(id, col)
+        label.set_size(id, tradeLabelSize)
+    else if not na(id)
+        label.delete(id)
+        id := na
+    id
+
 drawAnchoredLine(lineZero,  true, pZero,  fibAnchorColorInput,             fibAnchorWidthInput,             drawLeftBar)
-drawAnchoredLine(lineNeg236, true, pNeg236, fibStopColorInput,             fibStopWidthInput,               drawLeftBar)
+drawAnchoredLine(lineNeg236, false, pNeg236, fibStopColorInput,            fibStopWidthInput,               drawLeftBar)
 drawAnchoredLine(line236,   true, p236,   fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
 drawAnchoredLine(line382,   true, p382,   fibRetracementAccentColorInput,  fibRetracementAccentWidthInput,  drawLeftBar)
-drawAnchoredLine(linePivot, true, pPivot, fibPivotColorInput,              fibPivotWidthInput,              drawLeftBar)
+drawAnchoredLine(linePivot, true, pPivot, fibAnchorColorInput,             fibPivotWidthInput,              drawLeftBar)
 drawAnchoredLine(line618,   true, p618,   fibRetracementAccentColorInput,  fibRetracementAccentWidthInput,  drawLeftBar)
 drawAnchoredLine(line786,   true, p786,   fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
 drawAnchoredLine(lineOne,   true, pOne,   fibAnchorColorInput,             fibAnchorWidthInput,             drawLeftBar)
@@ -1181,14 +1173,37 @@ drawAnchoredLine(lineT3,    true, pT3,    fibTargetColorInput,             fibTa
 drawAnchoredLine(lineT4,    true, pT4,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
 drawAnchoredLine(lineT5,    true, pT5,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
 
+float slVisualLevel = tradeInFlightNow ? activeStopPrice : tradeState == TRADE_SETUP ? slLevel : na
+int slLeftBar = not na(entryBar) ? entryBar : drawLeftBar
+drawAnchoredLine(lineActiveSl, showTradeLevels and not na(slVisualLevel), slVisualLevel, stopLabelColorInput, fibStopWidthInput + 1, slLeftBar)
+
+if barstate.islast
+    _fibLblZero := setFibLevelLabel(_fibLblZero, showFibLevelLabelsInput, pZero, "0", fibAnchorColorInput)
+    _fibLblNeg236 := setFibLevelLabel(_fibLblNeg236, false, pNeg236, "-.236", fibStopColorInput)
+    _fibLbl236 := setFibLevelLabel(_fibLbl236, showFibLevelLabelsInput, p236, ".236", fibRetracementColorInput)
+    _fibLbl382 := setFibLevelLabel(_fibLbl382, showFibLevelLabelsInput, p382, ".382", fibRetracementAccentColorInput)
+    _fibLblPivot := setFibLevelLabel(_fibLblPivot, showFibLevelLabelsInput, pPivot, ".500", fibAnchorColorInput)
+    _fibLbl618 := setFibLevelLabel(_fibLbl618, showFibLevelLabelsInput, p618, ".618", fibRetracementAccentColorInput)
+    _fibLbl786 := setFibLevelLabel(_fibLbl786, showFibLevelLabelsInput, p786, ".786", fibRetracementColorInput)
+    _fibLblOne := setFibLevelLabel(_fibLblOne, showFibLevelLabelsInput, pOne, "1.000", fibAnchorColorInput)
+    _fibLblT1 := setFibLevelLabel(_fibLblT1, showFibLevelLabelsInput, pT1, "T1", fibTargetColorInput)
+    _fibLbl1382 := setFibLevelLabel(_fibLbl1382, showFibLevelLabelsInput, p1382, "1.382", fibRetracementColorInput)
+    _fibLbl150 := setFibLevelLabel(_fibLbl150, showFibLevelLabelsInput, p150, "1.500", fibRetracementColorInput)
+    _fibLblT2 := setFibLevelLabel(_fibLblT2, showFibLevelLabelsInput, pT2, "T2", fibTargetColorInput)
+    _fibLbl1786 := setFibLevelLabel(_fibLbl1786, showFibLevelLabelsInput, p1786, "1.786", fibRetracementColorInput)
+    _fibLblT3 := setFibLevelLabel(_fibLblT3, showFibLevelLabelsInput, pT3, "T3", fibTargetColorInput)
+    _fibLblT4 := setFibLevelLabel(_fibLblT4, showFibLevelLabelsInput, pT4, "T4", fibTargetColorInput)
+    _fibLblT5 := setFibLevelLabel(_fibLblT5, showFibLevelLabelsInput, pT5, "T5", fibTargetColorInput)
+
 if barstate.islast and showTradeLevels and not na(pT1)
+    float slLabelLevel = tradeInFlightNow ? activeStopPrice : slLevel
     label.set_xy(_lblEntry, bar_index + tradeLabelOffsetBarsInput, entryLevel)
     label.set_text(_lblEntry, "ENTRY " + str.tostring(entryLevel, format.mintick))
     label.set_color(_lblEntry, color.new(entryLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblEntry, tradeLabelTextColorInput)
     label.set_size(_lblEntry, tradeLabelSize)
-    label.set_xy(_lblSl, bar_index + tradeLabelOffsetBarsInput, slLevel)
-    label.set_text(_lblSl, "SL " + str.tostring(slLevel, format.mintick))
+    label.set_xy(_lblSl, bar_index + tradeLabelOffsetBarsInput, slLabelLevel)
+    label.set_text(_lblSl, "SL " + str.tostring(slLabelLevel, format.mintick))
     label.set_color(_lblSl, color.new(stopLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblSl, tradeLabelTextColorInput)
     label.set_size(_lblSl, tradeLabelSize)
@@ -1234,36 +1249,9 @@ else if barstate.islast
     label.set_color(_lblT5, color(na))
 
 if entryLongTrigger
-    label.new(bar_index, entryLevel, "▲", style=label.style_label_up, color=color.new(bullishDiamondColorInput, 20), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
+    label.new(bar_index, entryLevel, "▲", style=label.style_label_up, color=color.new(targetLabelColorInput, 20), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
 if entryShortTrigger
-    label.new(bar_index, entryLevel, "▼", style=label.style_label_down, color=color.new(bearishDiamondColorInput, 20), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
-
-plotshape(
-    series=showBearishExhaustion ? bearishDiamondPrice : na,
-    title="Bearish Exhaustion Trigger",
-    style=shape.diamond,
-    location=location.absolute,
-    color=bearishExhaustionColor,
-    offset=0,
-    text="",
-    textcolor=tradeLabelTextColorInput,
-    editable=true,
-    size=size.normal,
-    force_overlay=true
-)
-plotshape(
-    series=showBullishExhaustion ? bullishDiamondPrice : na,
-    title="Bullish Exhaustion Trigger",
-    style=shape.diamond,
-    location=location.absolute,
-    color=bullishExhaustionColor,
-    offset=0,
-    text="",
-    textcolor=tradeLabelTextColorInput,
-    editable=true,
-    size=size.normal,
-    force_overlay=true
-)
+    label.new(bar_index, entryLevel, "▼", style=label.style_label_down, color=color.new(stopLabelColorInput, 20), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
 
 if not na(zoneFillUpper) and not na(zoneFillLower)
     box.set_left(zoneBox, drawLeftBar)
@@ -1365,7 +1353,7 @@ plot(mlExhFootprintAvailable ? 1.0 : 0.0, "ml_exh_footprint_available", display=
 plot(mlExhSessionValid ? 1.0 : 0.0, "ml_exh_session_valid", display=display.none, editable=false)
 plot(mlExhBarsSinceTrigger, "ml_exh_bars_since_trigger", display=display.none, editable=false)
 plot(float(mlContConfidenceTier), "ml_cont_confidence_tier", display=display.none, editable=false)
-plot(not na(lastContTriggerBar) ? float(bar_index - lastContTriggerBar) : na, "ml_cont_bars_since_trigger", display=display.none, editable=false)
+plot(float(na), "ml_cont_bars_since_trigger", display=display.none, editable=false)
 plot(mlExhConfidenceTier > 0 and tradeInFlightNow and exhaustionSignalDir != tradeDir ? 1.0 : 0.0, "ml_reversal_warning_in_trade", display=display.none, editable=false)
 
 // ── STRUCTURE / ICT ──
@@ -1394,7 +1382,7 @@ plot(mlNfe,        "ml_nfe",         display=display.none, editable=false)
 plot(mlRsiKnn,     "ml_rsi_knn",     display=display.none, editable=false)
 plot(mlConfluence, "ml_confluence",  display=display.none, editable=false)
 
-// ── PLOT BUDGET: 51 plot + 2 plotshape + 3 alertcondition = 56/64 (8 headroom) ──
+// ── PLOT BUDGET: 55 plot + 3 alertcondition = 58/64 (6 headroom) ──
 
 //=====================
 // ALERTS

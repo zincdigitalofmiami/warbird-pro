@@ -150,11 +150,11 @@ check_input_default 'footprintImbalancePercent = input.float\([0-9.]+' 'footprin
 check_input_default 'exhaustionZLen = input.int\([0-9]+' 'exhaustionZLen'
 check_input_default 'exhaustionZThreshold = input.float\([0-9.]+' 'exhaustionZThreshold'
 check_input_default 'zeroPrintVolRatio = input.float\([0-9.]+' 'zeroPrintVolRatio'
-check_input_default 'stackedImbalanceRows = input.int\([0-9]+' 'stackedImbalanceRows'
-check_input_default 'continuationHoldBars = input.int\([0-9]+' 'continuationHoldBars'
-check_input_default 'continuationHoldStopAtrMult = input.float\([0-9.]+' 'continuationHoldStopAtrMult'
+check_input_default 'optImbalanceRows = input.int\([0-9]+' 'optImbalanceRows'
+check_input_default 'optEntryLevelInput = input.string\("[^"]+", "Execution Anchor"' 'optEntryLevelInput_default'
+check_input_default 'optStopAtrMult = input.float\([0-9.]+' 'optStopAtrMult'
+check_input_default 'optMaxRiskAtr = input.float\([0-9.]+' 'optMaxRiskAtr'
 check_input_default 'shortTrendGateAdx = input.float\([0-9.]+' 'shortTrendGateAdx'
-check_input_default 'stopFamilyId = input.string\("[^"]+", "Fallback Stop Family"' 'stopFamilyId_default'
 
 # ── 5. Strategy execution primitives ──
 for required in \
