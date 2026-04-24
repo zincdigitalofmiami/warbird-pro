@@ -22,11 +22,11 @@
 // Footprint (chart):    request.footprint()              = 1 call
 // TOTAL:                                                 = 6 request.* paths
 //
-// PLOT BUDGET: 46 plot + 2 alertcondition = 48/64 (16 headroom); label.new slots are outside 64-slot counter
+// PLOT BUDGET: 53 plot + 2 alertcondition = 55/64 (9 headroom); label.new slots are outside 64-slot counter
 // TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed.
 // Momentum Oscillators (5 plots: ml_vf_bull, ml_vf_bear, ml_nfe, ml_rsi_knn, ml_confluence) added 2026-04-20.
 //@version=6
-strategy("Warbird Pro Optuna Backtest", shorttitle="WB Opt BT", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100, pyramiding=0, process_orders_on_close=false, use_bar_magnifier=true, slippage=1, default_qty_type=strategy.fixed, default_qty_value=3, initial_capital=50000, currency=currency.USD, commission_type=strategy.commission.cash_per_contract, commission_value=1.00)
+strategy("Warbird Pro Optuna Backtest", shorttitle="WB Opt BT", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100, pyramiding=0, process_orders_on_close=false, use_bar_magnifier=true, fill_orders_on_standard_ohlc=true, slippage=1, default_qty_type=strategy.fixed, default_qty_value=3, initial_capital=50000, currency=currency.USD, commission_type=strategy.commission.cash_per_contract, commission_value=1.00)
 import TradingView/ZigZag/7 as zigzag
 
 const int DRAW_HISTORY_BARS = 5000
@@ -135,6 +135,8 @@ int cooldownBarsInput = input.int(0, "Post-Exit Cooldown Bars", minval=0, maxval
 int setupExpiryMinutesInput = input.int(180, "Setup Expiry Minutes", minval=15, maxval=720, step=15, group=groupExecution)
 bool useMicroValueReclaimInput = input.bool(true, "Use 5m Value-Reclaim Trigger", group=groupExecution,
   tooltip="Adds a subordinate footprint POC/value reclaim trigger while keeping the parent fib direction and risk gates intact.")
+bool backtestFibAnchorOnlyInput = input.bool(true, "Backtest Fib Anchor Hits Directly", group=groupExecution,
+  tooltip="ON makes Strategy Tester entries fire from the selected fib execution anchor hit/reclaim. This is the Optuna line-hit backtest path and bypasses footprint/context gates.")
 bool enableTvAlertsInput = input.bool(false, "Enable TV Alert Conditions", group=groupExecution,
   tooltip="OFF keeps this script as Strategy Tester only. Turn ON only if you deliberately want TradingView alerts from this strategy.")
 
@@ -146,6 +148,8 @@ float exhaustionLevelAtrTol = input.float(0.10, "Extension ATR Tolerance", minva
 float zeroPrintVolRatio = input.float(0.10, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
 int optImbalanceRows = input.int(2, "Imbalance Rows", minval=1, maxval=3, group=groupFootprint,
   tooltip="Minimum consecutive extreme rows with same-side imbalance required for a live entry trigger.")
+bool requireFootprintForBacktestInput = input.bool(false, "Require Footprint For Backtest Entries", group=groupFootprint,
+  tooltip="OFF lets the strategy backtest selected 5m fib-anchor/reclaim entries when TradingView does not provide request.footprint() history. If footprint data is available, entries still require footprint confirmation.")
 
 //=====================
 // VISUALS (colors/widths locked to spec — see constants above)
@@ -180,15 +184,13 @@ int fibPivotWidthInput = input.int(WIDTH_PIVOT, "", minval=1, maxval=5, inline="
 color fibTargetColorInput = input.color(color.new(COLOR_TARGET, 50), "Targets", inline="fib_target", group=groupViz)
 int fibTargetWidthInput = input.int(WIDTH_TARGET, "", minval=1, maxval=5, inline="fib_target", group=groupViz)
 bool showFibLevelLabelsInput = input.bool(false, "Show Fib Level Labels", group=groupViz)
-bool showTradeLabelsInput = input.bool(true, "Show Entry / SL / Target Labels", group=groupViz)
-bool showEntryMarkersInput = input.bool(false, "Show Entry Arrow Markers", group=groupViz,
-  tooltip="OFF avoids redundant lower-chart entry arrows while Strategy Tester order markers still show fills.")
+bool showTradeLabelsInput = input.bool(false, "Show Strategy Trade Labels", group=groupViz)
 int tradeLabelOffsetBarsInput = input.int(10, "Trade Label Offset (bars)", minval=0, maxval=20, group=groupViz)
 string tradeLabelSizeInput = input.string("Normal", "Trade Label Size", options=["Tiny", "Small", "Normal", "Large"], group=groupViz)
 color tradeLabelTextColorInput = input.color(color.white, "Trade Label Text", inline="label_text", group=groupViz)
 int tradeLabelBgTransparencyInput = input.int(60, "BG Alpha", minval=0, maxval=100, inline="label_text", group=groupViz)
 color entryLabelColorInput = input.color(COLOR_ENTRY_LABEL, "Entry Label", inline="label_levels", group=groupViz)
-color stopLabelColorInput = input.color(COLOR_STOP, "SL Label", inline="label_levels", group=groupViz)
+color stopLabelColorInput = input.color(COLOR_STOP, "Stop Label", inline="label_levels", group=groupViz)
 color targetLabelColorInput = input.color(color.new(COLOR_TARGET, 50), "Target Label", inline="label_levels", group=groupViz)
 int zoneFillTransparencyInput = input.int(80, "Zone Fill Alpha", minval=0, maxval=100, group=groupViz)
 
@@ -981,13 +983,19 @@ float slDistPts = math.abs(entryLevel - slLevel)
 float slDistAtr = atr14 > 0 ? slDistPts / atr14 : 0.0
 bool trendBiasLong = ema9 > ema21 and close >= ema50 and close >= vwapVal
 bool trendBiasShort = ema9 < ema21 and close <= ema50 and close <= vwapVal
+// 5m execution gates on the selected fib anchor/reclaim, not on a broad .500-.786 zone touch.
 bool entryZoneTouched = not na(entryZoneUpper) and not na(entryZoneLower) and high >= entryZoneLower and low <= entryZoneUpper
+bool entryAnchorBullTrigger = confirmed and not na(entryLevel) and low <= entryLevel and close >= entryLevel
+bool entryAnchorBearTrigger = confirmed and not na(entryLevel) and high >= entryLevel and close <= entryLevel
 bool entryZoneRejectBullLive = not na(entryZoneLower) and low < entryZoneLower and close >= entryZoneLower and bullishCandle
 bool entryZoneRejectBearLive = not na(entryZoneUpper) and high > entryZoneUpper and close <= entryZoneUpper and bearishCandle
 float localBreakHigh = ta.highest(high, 6)[1]
 float localBreakLow = ta.lowest(low, 6)[1]
 bool footprintLongTrigger = fpAvailable and fpDeltaBullish and (pocNearLow or mlExhAbsorption or mlExhZeroPrint or stackedBuyImbalance)
 bool footprintShortTrigger = fpAvailable and fpDeltaBearish and (pocNearHigh or mlExhAbsorption or mlExhZeroPrint or stackedSellImbalance)
+bool footprintBacktestFallback = not fpAvailable and not requireFootprintForBacktestInput
+bool footprintLongGate = footprintLongTrigger or footprintBacktestFallback
+bool footprintShortGate = footprintShortTrigger or footprintBacktestFallback
 bool sweepLongTrigger = entryZoneTouched and liqSweepBull
 bool sweepShortTrigger = entryZoneTouched and liqSweepBear
 bool atrRiskAcceptable = not na(slLevel) and atr14 > 0 and slDistAtr <= optMaxRiskAtr
@@ -995,19 +1003,35 @@ bool microTrendLong = trendBiasLong or (ema9 >= ema21 and vwapCode >= 0)
 bool microTrendShort = trendBiasShort or (ema9 <= ema21 and vwapCode <= 0)
 bool footprintValueReclaimLong = useMicroValueReclaimInput and footprintLongTrigger and not na(pocPrice) and close >= pocPrice and (low <= pocPrice or close > localBreakHigh or vwapCode >= 0)
 bool footprintValueReclaimShort = useMicroValueReclaimInput and footprintShortTrigger and not na(pocPrice) and close <= pocPrice and (high >= pocPrice or close < localBreakLow or vwapCode <= 0)
-bool setupContextLong = dir == 1 and microTrendLong and atrRiskAcceptable and (entryZoneTouched or footprintValueReclaimLong)
-bool setupContextShort = dir == -1 and microTrendShort and atrRiskAcceptable and (entryZoneTouched or footprintValueReclaimShort)
+bool longTargetRoom = not na(tp1Level) and close < tp1Level
+bool shortTargetRoom = not na(tp1Level) and close > tp1Level
+bool fibAnchorSetupLong = entryAnchorBullTrigger or footprintValueReclaimLong
+bool fibAnchorSetupShort = entryAnchorBearTrigger or footprintValueReclaimShort
+bool footprintEntryLong = footprintLongGate and longTargetRoom and fibAnchorSetupLong
+bool footprintEntryShort = footprintShortGate and shortTargetRoom and fibAnchorSetupShort
+bool setupContextLong = dir == 1 and microTrendLong and atrRiskAcceptable and fibAnchorSetupLong
+bool setupContextShort = dir == -1 and microTrendShort and atrRiskAcceptable and fibAnchorSetupShort
 bool setupContextActive = setupContextLong or setupContextShort
-bool longTriggerCore = setupContextLong and (footprintLongTrigger or sweepLongTrigger or entryZoneRejectBullLive or footprintValueReclaimLong)
-bool shortTriggerCore = setupContextShort and (footprintShortTrigger or sweepShortTrigger or entryZoneRejectBearLive or footprintValueReclaimShort)
+bool longTriggerCore = setupContextLong and footprintEntryLong
+bool shortTriggerCore = setupContextShort and footprintEntryShort
 bool longTriggerEvent = longTriggerCore and (oneShotEvent ? not longTriggerCore[1] : true)
 bool shortTriggerEvent = shortTriggerCore and (oneShotEvent ? not shortTriggerCore[1] : true)
-bool entryLongTrigger = longTriggerEvent and not ladderInvalidated
-bool entryShortTrigger = shortTriggerEvent and not ladderInvalidated and not bullishTrendBlocksShorts
+bool directBacktestLongEvent = dir == 1 and entryAnchorBullTrigger
+bool directBacktestShortEvent = dir == -1 and entryAnchorBearTrigger
+bool directBacktestLongTrigger = backtestFibAnchorOnlyInput and atrRiskAcceptable and directBacktestLongEvent and (oneShotEvent ? not directBacktestLongEvent[1] : true)
+bool directBacktestShortTrigger = backtestFibAnchorOnlyInput and atrRiskAcceptable and directBacktestShortEvent and (oneShotEvent ? not directBacktestShortEvent[1] : true)
+bool entryLongTrigger = backtestFibAnchorOnlyInput ? directBacktestLongTrigger : (longTriggerEvent and not ladderInvalidated)
+bool entryShortTrigger = backtestFibAnchorOnlyInput ? directBacktestShortTrigger : (shortTriggerEvent and not ladderInvalidated and not bullishTrendBlocksShorts)
+bool setupSeedActive = backtestFibAnchorOnlyInput ? (directBacktestLongTrigger or directBacktestShortTrigger) : setupContextActive
+bool setupLadderAllowed = backtestFibAnchorOnlyInput or not ladderInvalidated
 
 if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or entryLongTrigger or entryShortTrigger)
     log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} longTrig={5} shortTrig={6} shortGate={7} fpCount={8} setupCtx={9}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, entryLongTrigger, entryShortTrigger, bullishTrendBlocksShorts, footprintEvidenceCount, setupContextActive))
 
+if enableDebugLogs and confirmed and setupContextActive
+    log.info(str.format("WBDBG_GATE bar={0} dir={1} fpAvail={2} fpFallback={3} fpL={4} fpS={5} fpGateL={6} fpGateS={7} anchorL={8} anchorS={9} reclaimL={10} reclaimS={11} roomL={12} roomS={13} longCore={14} shortCore={15}", bar_index, dir, fpAvailable, footprintBacktestFallback, footprintLongTrigger, footprintShortTrigger, footprintLongGate, footprintShortGate, entryAnchorBullTrigger, entryAnchorBearTrigger, footprintValueReclaimLong, footprintValueReclaimShort, longTargetRoom, shortTargetRoom, longTriggerCore, shortTriggerCore))
+
+bool tradeSetupWasActive = tradeState == TRADE_SETUP
 if confirmed
     if exhaustionSignalDir != 0
         lastExhTriggerBar := bar_index
@@ -1016,7 +1040,7 @@ if confirmed
             lastTier1ExhBar := bar_index
             lastTier1ExhDir := exhaustionSignalDir
 
-    if tradeState == TRADE_NONE and setupContextActive and not cooldownActive and not ladderInvalidated
+    if tradeState == TRADE_NONE and setupSeedActive and not cooldownActive and setupLadderAllowed
         tradeState := TRADE_SETUP
         setupBar := bar_index
 
@@ -1104,46 +1128,53 @@ if confirmed
         entryBar := na
         highestTargetHit := 0
 
+bool tradeSetupEndedNow = tradeSetupWasActive and tradeState != TRADE_SETUP
 bool tradeInFlightNow = tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
 float activeStopPrice = tradeInFlightNow ? slPrice : na
 
-float backtestTargetPrice = na
+float backtestRunnerTargetPrice = na
 if tradeInFlightNow
     if tradeDir == 1
-        backtestTargetPrice := highestTargetHit >= 4 ? tp5Price : highestTargetHit >= 3 ? tp4Price : highestTargetHit >= 2 ? tp3Price : highestTargetHit >= 1 ? tp2Price : tp1Price
+        backtestRunnerTargetPrice := tp5Price
     else if tradeDir == -1
-        backtestTargetPrice := highestTargetHit >= 4 ? tp5Price : highestTargetHit >= 3 ? tp4Price : highestTargetHit >= 2 ? tp3Price : highestTargetHit >= 1 ? tp2Price : tp1Price
+        backtestRunnerTargetPrice := tp5Price
 
 // Fire TradingView Strategy Tester orders exactly on state-machine activation edges.
 // No broker/webhook automation is defined here.
+bool setupLevelsValid = not na(slLevel) and not na(tp1Level) and not na(tp2Level) and not na(tp3Level) and not na(tp4Level) and not na(tp5Level)
+bool activeTradeLevelsValid = tradeInFlightNow and not na(activeStopPrice) and not na(tp1Price) and not na(tp2Price) and not na(tp3Price) and not na(tp4Price) and not na(tp5Price)
+bool levelsValid = setupLevelsValid or activeTradeLevelsValid
+bool canTradeBar = levelsValid and confirmed
+float strategyStop = not na(activeStopPrice) ? activeStopPrice : slLevel
+bool exitOrdersArmed = tradeInFlightNow and not na(entryBar) and bar_index > entryBar
 bool strategyLongArm = confirmed and tradeState == TRADE_ACTIVE and entryBar == bar_index and tradeDir == 1
 bool strategyShortArm = confirmed and tradeState == TRADE_ACTIVE and entryBar == bar_index and tradeDir == -1
 
-if strategyLongArm and strategy.position_size <= 0
+if strategyLongArm and canTradeBar and strategy.position_size <= 0
     strategy.entry("Long", strategy.long, comment="WB_LONG")
 
-if strategyShortArm and strategy.position_size >= 0
+if strategyShortArm and canTradeBar and strategy.position_size >= 0
     strategy.entry("Short", strategy.short, comment="WB_SHORT")
 
-if strategy.position_size > 0 and not na(activeStopPrice)
+if (strategy.position_size > 0 or strategyLongArm) and canTradeBar and exitOrdersArmed and not na(strategyStop)
     // 3-lot training profile:
     //   lot 1 -> TP1
     //   lot 2 -> TP2
-    //   lot 3 -> runner (dynamic ladder target)
+    //   lot 3 -> runner (TP5, with the state machine ratcheting the stop as TP1-TP4 print)
     if not na(tp1Price)
-        strategy.exit("Long TP1", "Long", stop=activeStopPrice, limit=tp1Price, qty=1)
+        strategy.exit("Long TP1", "Long", stop=strategyStop, limit=tp1Price, qty=1)
     if not na(tp2Price)
-        strategy.exit("Long TP2", "Long", stop=activeStopPrice, limit=tp2Price, qty=1)
-    if not na(backtestTargetPrice)
-        strategy.exit("Long Runner", "Long", stop=activeStopPrice, limit=backtestTargetPrice, qty=1)
+        strategy.exit("Long TP2", "Long", stop=strategyStop, limit=tp2Price, qty=1)
+    if not na(backtestRunnerTargetPrice)
+        strategy.exit("Long Runner", "Long", stop=strategyStop, limit=backtestRunnerTargetPrice, qty=1)
 
-if strategy.position_size < 0 and not na(activeStopPrice)
+if (strategy.position_size < 0 or strategyShortArm) and canTradeBar and exitOrdersArmed and not na(strategyStop)
     if not na(tp1Price)
-        strategy.exit("Short TP1", "Short", stop=activeStopPrice, limit=tp1Price, qty=1)
+        strategy.exit("Short TP1", "Short", stop=strategyStop, limit=tp1Price, qty=1)
     if not na(tp2Price)
-        strategy.exit("Short TP2", "Short", stop=activeStopPrice, limit=tp2Price, qty=1)
-    if not na(backtestTargetPrice)
-        strategy.exit("Short Runner", "Short", stop=activeStopPrice, limit=backtestTargetPrice, qty=1)
+        strategy.exit("Short TP2", "Short", stop=strategyStop, limit=tp2Price, qty=1)
+    if not na(backtestRunnerTargetPrice)
+        strategy.exit("Short Runner", "Short", stop=strategyStop, limit=backtestRunnerTargetPrice, qty=1)
 
 if not tradeInFlightNow and strategy.position_size != 0
     strategy.close_all(comment="WB_STATE_SYNC")
@@ -1162,12 +1193,21 @@ fibLineStyle = f_line_style(fibLineStyleInput)
 tradeLabelSize = f_label_size(tradeLabelSizeInput)
 
 bool tradeVisible = tradeState == TRADE_SETUP or tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
-bool tradeSetupVisible = tradeState == TRADE_SETUP and not na(setupBar) and not na(slLevel)
-bool tradeProjectionVisible = tradeSetupVisible or (tradeInFlightNow and not na(entryPrice))
-bool showTradeLevels = showTradeLabelsInput and tradeInFlightNow and not na(entryPrice)
+bool tradeSetupVisible = tradeState == TRADE_SETUP and not na(setupBar) and not na(entryLevel) and not na(slLevel) and not na(tp1Level) and not na(tp2Level) and not na(tp3Level) and not na(tp4Level) and not na(tp5Level)
+bool strategyPositionVisible = strategy.position_size != 0
+bool tradeActiveVisible = tradeInFlightNow and strategyPositionVisible and not na(entryPrice) and not na(activeStopPrice) and not na(tp1Price) and not na(tp2Price) and not na(tp3Price) and not na(tp4Price) and not na(tp5Price)
+bool tradeProjectionVisible = tradeActiveVisible
+bool showTradeLevels = showTradeLabelsInput and tradeProjectionVisible
+float tradeLabelEntryPrice = tradeActiveVisible ? entryPrice : na
+float tradeLabelSlPrice = tradeActiveVisible ? activeStopPrice : na
+float tradeLabelTp1Price = tradeActiveVisible ? tp1Price : na
+float tradeLabelTp2Price = tradeActiveVisible ? tp2Price : na
+float tradeLabelTp3Price = tradeActiveVisible ? tp3Price : na
+float tradeLabelTp4Price = tradeActiveVisible ? tp4Price : na
+float tradeLabelTp5Price = tradeActiveVisible ? tp5Price : na
 // The institutional chart surface now relies only on the canonical fib ladder.
-// Trade labels use the locked trade snapshot after activation. The ATR stop line
-// is limited to setup/active state and starts at setupBar/entryBar.
+// Trade labels appear only after footprint-backed entry gates activate a trade.
+// Pending fib/setup state does not draw projected trade labels.
 
 //=====================
 // DRAW ALL FIB LEVELS
@@ -1188,17 +1228,16 @@ var line line1786  = line.new(bar_index, close, bar_index, close, color=color(na
 var line lineT3    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 var line lineT4    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 var line lineT5    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
-var line lineActiveSl = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 
 var box zoneBox = box.new(bar_index, close, bar_index, close, bgcolor=color(na), border_color=color(na))
 
-var label _lblEntry = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(color.white, 20), size=size.small)
-var label _lblSl    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_STOP, 20),   size=size.small)
-var label _lblT1    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_TARGET, 20),  size=size.small)
-var label _lblT2    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_TARGET, 20),  size=size.small)
-var label _lblT3    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_TARGET, 20),  size=size.small)
-var label _lblT4    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_TARGET, 20),  size=size.small)
-var label _lblT5    = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(COLOR_TARGET, 20),  size=size.small)
+var label _lblEntry = na
+var label _lblSl    = na
+var label _lblT1    = na
+var label _lblT2    = na
+var label _lblT3    = na
+var label _lblT4    = na
+var label _lblT5    = na
 var label _fibLblZero = na
 var label _fibLblNeg236 = na
 var label _fibLbl236 = na
@@ -1215,6 +1254,29 @@ var label _fibLbl1786 = na
 var label _fibLblT3 = na
 var label _fibLblT4 = na
 var label _fibLblT5 = na
+
+if tradeSetupEndedNow or not showTradeLevels
+    if not na(_lblEntry)
+        label.delete(_lblEntry)
+        _lblEntry := na
+    if not na(_lblSl)
+        label.delete(_lblSl)
+        _lblSl := na
+    if not na(_lblT1)
+        label.delete(_lblT1)
+        _lblT1 := na
+    if not na(_lblT2)
+        label.delete(_lblT2)
+        _lblT2 := na
+    if not na(_lblT3)
+        label.delete(_lblT3)
+        _lblT3 := na
+    if not na(_lblT4)
+        label.delete(_lblT4)
+        _lblT4 := na
+    if not na(_lblT5)
+        label.delete(_lblT5)
+        _lblT5 := na
 
 int fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
 int anchorLeftBar = int(math.max(0, na(anchorHighBar) or na(anchorLowBar) ? fallbackLeftBar : math.min(anchorHighBar, anchorLowBar)))
@@ -1266,10 +1328,6 @@ drawAnchoredLine(lineT3,    true, pT3,    fibTargetColorInput,             fibTa
 drawAnchoredLine(lineT4,    true, pT4,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
 drawAnchoredLine(lineT5,    true, pT5,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
 
-float slVisualLevel = tradeInFlightNow ? activeStopPrice : tradeState == TRADE_SETUP ? slLevel : na
-int slLeftBar = tradeInFlightNow and not na(entryBar) ? entryBar : tradeState == TRADE_SETUP and not na(setupBar) ? setupBar : bar_index
-drawAnchoredLine(lineActiveSl, tradeProjectionVisible and not na(slVisualLevel), slVisualLevel, stopLabelColorInput, fibStopWidthInput, slLeftBar)
-
 if barstate.islast
     _fibLblZero := setFibLevelLabel(_fibLblZero, showFibLevelLabelsInput, pZero, "0", fibAnchorColorInput)
     _fibLblNeg236 := setFibLevelLabel(_fibLblNeg236, false, pNeg236, "-.236", fibStopColorInput)
@@ -1279,72 +1337,60 @@ if barstate.islast
     _fibLbl618 := setFibLevelLabel(_fibLbl618, showFibLevelLabelsInput, p618, ".618", fibRetracementAccentColorInput)
     _fibLbl786 := setFibLevelLabel(_fibLbl786, showFibLevelLabelsInput, p786, ".786", fibRetracementColorInput)
     _fibLblOne := setFibLevelLabel(_fibLblOne, showFibLevelLabelsInput, pOne, "1.000", fibAnchorColorInput)
-    _fibLblT1 := setFibLevelLabel(_fibLblT1, showFibLevelLabelsInput, pT1, "T1", fibTargetColorInput)
+    _fibLblT1 := setFibLevelLabel(_fibLblT1, showFibLevelLabelsInput, pT1, "TP1", fibTargetColorInput)
     _fibLbl1382 := setFibLevelLabel(_fibLbl1382, showFibLevelLabelsInput, p1382, "1.382", fibRetracementColorInput)
     _fibLbl150 := setFibLevelLabel(_fibLbl150, showFibLevelLabelsInput, p150, "1.500", fibRetracementColorInput)
-    _fibLblT2 := setFibLevelLabel(_fibLblT2, showFibLevelLabelsInput, pT2, "T2", fibTargetColorInput)
+    _fibLblT2 := setFibLevelLabel(_fibLblT2, showFibLevelLabelsInput, pT2, "TP2", fibTargetColorInput)
     _fibLbl1786 := setFibLevelLabel(_fibLbl1786, showFibLevelLabelsInput, p1786, "1.786", fibRetracementColorInput)
-    _fibLblT3 := setFibLevelLabel(_fibLblT3, showFibLevelLabelsInput, pT3, "T3", fibTargetColorInput)
-    _fibLblT4 := setFibLevelLabel(_fibLblT4, showFibLevelLabelsInput, pT4, "T4", fibTargetColorInput)
-    _fibLblT5 := setFibLevelLabel(_fibLblT5, showFibLevelLabelsInput, pT5, "T5", fibTargetColorInput)
+    _fibLblT3 := setFibLevelLabel(_fibLblT3, showFibLevelLabelsInput, pT3, "TP3", fibTargetColorInput)
+    _fibLblT4 := setFibLevelLabel(_fibLblT4, showFibLevelLabelsInput, pT4, "TP4", fibTargetColorInput)
+    _fibLblT5 := setFibLevelLabel(_fibLblT5, showFibLevelLabelsInput, pT5, "TP5", fibTargetColorInput)
 
-if barstate.islast and showTradeLevels and not na(activeStopPrice) and not na(tp1Price) and not na(tp2Price) and not na(tp3Price) and not na(tp4Price) and not na(tp5Price)
-    float slLabelLevel = activeStopPrice
-    label.set_xy(_lblEntry, bar_index + tradeLabelOffsetBarsInput, entryPrice)
-    label.set_text(_lblEntry, "ENTRY " + str.tostring(entryPrice, format.mintick))
+if showTradeLevels and na(_lblEntry) and not na(tradeLabelEntryPrice) and not na(tradeLabelSlPrice) and not na(tradeLabelTp1Price) and not na(tradeLabelTp2Price) and not na(tradeLabelTp3Price) and not na(tradeLabelTp4Price) and not na(tradeLabelTp5Price)
+    _lblEntry := label.new(bar_index + tradeLabelOffsetBarsInput, tradeLabelEntryPrice, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
+    _lblSl := label.new(bar_index + tradeLabelOffsetBarsInput, tradeLabelSlPrice, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
+    _lblT1 := label.new(bar_index + tradeLabelOffsetBarsInput, tradeLabelTp1Price, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
+    _lblT2 := label.new(bar_index + tradeLabelOffsetBarsInput, tradeLabelTp2Price, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
+    _lblT3 := label.new(bar_index + tradeLabelOffsetBarsInput, tradeLabelTp3Price, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
+    _lblT4 := label.new(bar_index + tradeLabelOffsetBarsInput, tradeLabelTp4Price, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
+    _lblT5 := label.new(bar_index + tradeLabelOffsetBarsInput, tradeLabelTp5Price, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
+
+if showTradeLevels and not na(_lblEntry) and not na(_lblSl) and not na(_lblT1) and not na(_lblT2) and not na(_lblT3) and not na(_lblT4) and not na(_lblT5) and not na(tradeLabelEntryPrice) and not na(tradeLabelSlPrice) and not na(tradeLabelTp1Price) and not na(tradeLabelTp2Price) and not na(tradeLabelTp3Price) and not na(tradeLabelTp4Price) and not na(tradeLabelTp5Price)
+    label.set_xy(_lblEntry, bar_index + tradeLabelOffsetBarsInput, tradeLabelEntryPrice)
+    label.set_text(_lblEntry, "ENTRY " + str.tostring(tradeLabelEntryPrice, format.mintick))
     label.set_color(_lblEntry, color.new(entryLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblEntry, tradeLabelTextColorInput)
     label.set_size(_lblEntry, tradeLabelSize)
-    label.set_xy(_lblSl, bar_index + tradeLabelOffsetBarsInput, slLabelLevel)
-    label.set_text(_lblSl, "SL " + str.tostring(slLabelLevel, format.mintick))
+    label.set_xy(_lblSl, bar_index + tradeLabelOffsetBarsInput, tradeLabelSlPrice)
+    label.set_text(_lblSl, "STOP " + str.tostring(tradeLabelSlPrice, format.mintick))
     label.set_color(_lblSl, color.new(stopLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblSl, tradeLabelTextColorInput)
     label.set_size(_lblSl, tradeLabelSize)
-    label.set_xy(_lblT1, bar_index + tradeLabelOffsetBarsInput, tp1Price)
-    label.set_text(_lblT1, "T1 " + str.tostring(tp1Price, format.mintick))
+    label.set_xy(_lblT1, bar_index + tradeLabelOffsetBarsInput, tradeLabelTp1Price)
+    label.set_text(_lblT1, "TP1 " + str.tostring(tradeLabelTp1Price, format.mintick))
     label.set_color(_lblT1, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT1, tradeLabelTextColorInput)
     label.set_size(_lblT1, tradeLabelSize)
-    label.set_xy(_lblT2, bar_index + tradeLabelOffsetBarsInput, tp2Price)
-    label.set_text(_lblT2, "T2 " + str.tostring(tp2Price, format.mintick))
+    label.set_xy(_lblT2, bar_index + tradeLabelOffsetBarsInput, tradeLabelTp2Price)
+    label.set_text(_lblT2, "TP2 " + str.tostring(tradeLabelTp2Price, format.mintick))
     label.set_color(_lblT2, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT2, tradeLabelTextColorInput)
     label.set_size(_lblT2, tradeLabelSize)
-    label.set_xy(_lblT3, bar_index + tradeLabelOffsetBarsInput, tp3Price)
-    label.set_text(_lblT3, "T3 " + str.tostring(tp3Price, format.mintick))
+    label.set_xy(_lblT3, bar_index + tradeLabelOffsetBarsInput, tradeLabelTp3Price)
+    label.set_text(_lblT3, "TP3 " + str.tostring(tradeLabelTp3Price, format.mintick))
     label.set_color(_lblT3, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT3, tradeLabelTextColorInput)
     label.set_size(_lblT3, tradeLabelSize)
-    label.set_xy(_lblT4, bar_index + tradeLabelOffsetBarsInput, tp4Price)
-    label.set_text(_lblT4, "T4 " + str.tostring(tp4Price, format.mintick))
+    label.set_xy(_lblT4, bar_index + tradeLabelOffsetBarsInput, tradeLabelTp4Price)
+    label.set_text(_lblT4, "TP4 " + str.tostring(tradeLabelTp4Price, format.mintick))
     label.set_color(_lblT4, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT4, tradeLabelTextColorInput)
     label.set_size(_lblT4, tradeLabelSize)
-    label.set_xy(_lblT5, bar_index + tradeLabelOffsetBarsInput, tp5Price)
-    label.set_text(_lblT5, "T5 " + str.tostring(tp5Price, format.mintick))
+    label.set_xy(_lblT5, bar_index + tradeLabelOffsetBarsInput, tradeLabelTp5Price)
+    label.set_text(_lblT5, "TP5 " + str.tostring(tradeLabelTp5Price, format.mintick))
     label.set_color(_lblT5, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT5, tradeLabelTextColorInput)
     label.set_size(_lblT5, tradeLabelSize)
-else if barstate.islast
-    label.set_text(_lblEntry, "")
-    label.set_text(_lblSl, "")
-    label.set_text(_lblT1, "")
-    label.set_text(_lblT2, "")
-    label.set_text(_lblT3, "")
-    label.set_text(_lblT4, "")
-    label.set_text(_lblT5, "")
-    label.set_color(_lblEntry, color(na))
-    label.set_color(_lblSl, color(na))
-    label.set_color(_lblT1, color(na))
-    label.set_color(_lblT2, color(na))
-    label.set_color(_lblT3, color(na))
-    label.set_color(_lblT4, color(na))
-    label.set_color(_lblT5, color(na))
-
-if showEntryMarkersInput and strategyLongArm
-    label.new(bar_index, entryLevel, "▲", style=label.style_label_up, color=color.new(targetLabelColorInput, 20), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
-if showEntryMarkersInput and strategyShortArm
-    label.new(bar_index, entryLevel, "▼", style=label.style_label_down, color=color.new(stopLabelColorInput, 20), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
 
 if not na(zoneFillUpper) and not na(zoneFillLower)
     box.set_left(zoneBox, drawLeftBar)
@@ -1417,6 +1463,13 @@ plot(tradeVisible and tradeState != TRADE_SETUP and not na(entryBar) ? float(bar
 plot(cooldownActive ? 1.0 : 0.0, "ml_cooldown_active", display=display.none, editable=false)
 plot(math.min(float(barsSinceExit), 999.0), "ml_bars_since_exit", display=display.none, editable=false)
 plot(slDistAtr, "ml_sl_dist_atr", display=display.none, editable=false)
+plot(setupContextActive ? 1.0 : 0.0, "ml_setup_context_active", display=display.none, editable=false)
+plot(footprintEntryLong ? 1.0 : 0.0, "ml_footprint_entry_long", display=display.none, editable=false)
+plot(footprintEntryShort ? 1.0 : 0.0, "ml_footprint_entry_short", display=display.none, editable=false)
+plot(entryLongTrigger ? 1.0 : 0.0, "ml_entry_long_trigger", display=display.none, editable=false)
+plot(entryShortTrigger ? 1.0 : 0.0, "ml_entry_short_trigger", display=display.none, editable=false)
+plot(strategyLongArm ? 1.0 : 0.0, "ml_strategy_long_arm", display=display.none, editable=false)
+plot(strategyShortArm ? 1.0 : 0.0, "ml_strategy_short_arm", display=display.none, editable=false)
 
 // ── TURNOVER ──
 plot(turnoverContractsBar, "ml_turnover_contracts_bar", display=display.none, editable=false)
@@ -1458,7 +1511,7 @@ plot(0.0, "ml_reversal_warning_in_trade", display=display.none, editable=false)
 // ── BACKTEST VARIANT NOTE ──
 // Removed non-essential hidden export plots (ICT/session/macro/momentum) to stay under
 // TradingView's true 64-slot output budget in strategy mode.
-// ── PLOT BUDGET (EST.): 46 plot + 2 alertcondition = 48/64 ──
+// ── PLOT BUDGET (EST.): 53 plot + 2 alertcondition = 55/64 ──
 
 //=====================
 // ALERTS
