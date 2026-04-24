@@ -157,10 +157,8 @@ color fibPivotColorInput = input.color(COLOR_PIVOT, "Pivot Zone", inline="fib_pi
 int fibPivotWidthInput = input.int(WIDTH_PIVOT, "", minval=1, maxval=5, inline="fib_pivot", group=groupViz)
 color fibTargetColorInput = input.color(color.new(COLOR_TARGET, 50), "Targets", inline="fib_target", group=groupViz)
 int fibTargetWidthInput = input.int(WIDTH_TARGET, "", minval=1, maxval=5, inline="fib_target", group=groupViz)
-bool showFibLevelLabelsInput = input.bool(true, "Show Fib Level Labels", group=groupViz)
+bool showFibLevelLabelsInput = input.bool(false, "Show Fib Level Labels", group=groupViz)
 bool showTradeLabelsInput = input.bool(true, "Show Entry / SL / Target Labels", group=groupViz)
-bool showSlProjectionLineInput = input.bool(true, "Show SL Projection Line", group=groupViz,
-  tooltip="ON draws the ATR SL line only after a trade activates. OFF keeps labels/settings without the horizontal stop line.")
 int tradeLabelOffsetBarsInput = input.int(10, "Trade Label Offset (bars)", minval=0, maxval=20, group=groupViz)
 string tradeLabelSizeInput = input.string("Normal", "Trade Label Size", options=["Tiny", "Small", "Normal", "Large"], group=groupViz)
 color tradeLabelTextColorInput = input.color(color.white, "Trade Label Text", inline="label_text", group=groupViz)
@@ -1073,11 +1071,12 @@ bool contrChoch = barsSinceExit > 0 and barsSinceExit <= 10 and (
     (lastExitDir == -1 and chochBull))
 
 bool tradeVisible = tradeState == TRADE_SETUP or tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
-bool tradeProjectionVisible = tradeInFlightNow and not na(entryPrice)
-bool showTradeLevels = showTradeLabelsInput and tradeProjectionVisible
+bool tradeSetupVisible = tradeState == TRADE_SETUP and not na(setupBar) and not na(slLevel)
+bool tradeProjectionVisible = tradeSetupVisible or (tradeInFlightNow and not na(entryPrice))
+bool showTradeLevels = showTradeLabelsInput and tradeInFlightNow and not na(entryPrice)
 // The institutional chart surface now relies only on the canonical fib ladder.
-// Trade projection labels/lines were removed because they drifted from the live
-// fib state and created fake, sticky entry cues on the chart.
+// Trade labels use the locked trade snapshot after activation. The ATR stop line
+// is limited to setup/active state and starts at setupBar/entryBar.
 
 //=====================
 // DRAW ALL FIB LEVELS
@@ -1176,9 +1175,9 @@ drawAnchoredLine(lineT3,    true, pT3,    fibTargetColorInput,             fibTa
 drawAnchoredLine(lineT4,    true, pT4,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
 drawAnchoredLine(lineT5,    true, pT5,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
 
-float slVisualLevel = tradeInFlightNow ? activeStopPrice : na
-int slLeftBar = not na(entryBar) ? entryBar : drawLeftBar
-drawAnchoredLine(lineActiveSl, showSlProjectionLineInput and tradeProjectionVisible and not na(slVisualLevel), slVisualLevel, stopLabelColorInput, fibStopWidthInput + 1, slLeftBar)
+float slVisualLevel = tradeInFlightNow ? activeStopPrice : tradeState == TRADE_SETUP ? slLevel : na
+int slLeftBar = tradeInFlightNow and not na(entryBar) ? entryBar : tradeState == TRADE_SETUP and not na(setupBar) ? setupBar : bar_index
+drawAnchoredLine(lineActiveSl, tradeProjectionVisible and not na(slVisualLevel), slVisualLevel, stopLabelColorInput, fibStopWidthInput, slLeftBar)
 
 if barstate.islast
     _fibLblZero := setFibLevelLabel(_fibLblZero, showFibLevelLabelsInput, pZero, "0", fibAnchorColorInput)
