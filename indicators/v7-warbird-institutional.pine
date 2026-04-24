@@ -159,6 +159,8 @@ color fibTargetColorInput = input.color(color.new(COLOR_TARGET, 50), "Targets", 
 int fibTargetWidthInput = input.int(WIDTH_TARGET, "", minval=1, maxval=5, inline="fib_target", group=groupViz)
 bool showFibLevelLabelsInput = input.bool(true, "Show Fib Level Labels", group=groupViz)
 bool showTradeLabelsInput = input.bool(true, "Show Entry / SL / Target Labels", group=groupViz)
+bool showSlProjectionLineInput = input.bool(true, "Show SL Projection Line", group=groupViz,
+  tooltip="ON draws the ATR SL line only after a trade activates. OFF keeps labels/settings without the horizontal stop line.")
 int tradeLabelOffsetBarsInput = input.int(10, "Trade Label Offset (bars)", minval=0, maxval=20, group=groupViz)
 string tradeLabelSizeInput = input.string("Normal", "Trade Label Size", options=["Tiny", "Small", "Normal", "Large"], group=groupViz)
 color tradeLabelTextColorInput = input.color(color.white, "Trade Label Text", inline="label_text", group=groupViz)
@@ -1071,7 +1073,8 @@ bool contrChoch = barsSinceExit > 0 and barsSinceExit <= 10 and (
     (lastExitDir == -1 and chochBull))
 
 bool tradeVisible = tradeState == TRADE_SETUP or tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
-bool showTradeLevels = showTradeLabelsInput and isValid and (setupContextActive or tradeVisible)
+bool tradeProjectionVisible = tradeInFlightNow and not na(entryPrice)
+bool showTradeLevels = showTradeLabelsInput and tradeProjectionVisible
 // The institutional chart surface now relies only on the canonical fib ladder.
 // Trade projection labels/lines were removed because they drifted from the live
 // fib state and created fake, sticky entry cues on the chart.
@@ -1173,9 +1176,9 @@ drawAnchoredLine(lineT3,    true, pT3,    fibTargetColorInput,             fibTa
 drawAnchoredLine(lineT4,    true, pT4,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
 drawAnchoredLine(lineT5,    true, pT5,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
 
-float slVisualLevel = tradeInFlightNow ? activeStopPrice : tradeState == TRADE_SETUP ? slLevel : na
+float slVisualLevel = tradeInFlightNow ? activeStopPrice : na
 int slLeftBar = not na(entryBar) ? entryBar : drawLeftBar
-drawAnchoredLine(lineActiveSl, showTradeLevels and not na(slVisualLevel), slVisualLevel, stopLabelColorInput, fibStopWidthInput + 1, slLeftBar)
+drawAnchoredLine(lineActiveSl, showSlProjectionLineInput and tradeProjectionVisible and not na(slVisualLevel), slVisualLevel, stopLabelColorInput, fibStopWidthInput + 1, slLeftBar)
 
 if barstate.islast
     _fibLblZero := setFibLevelLabel(_fibLblZero, showFibLevelLabelsInput, pZero, "0", fibAnchorColorInput)
@@ -1195,10 +1198,10 @@ if barstate.islast
     _fibLblT4 := setFibLevelLabel(_fibLblT4, showFibLevelLabelsInput, pT4, "T4", fibTargetColorInput)
     _fibLblT5 := setFibLevelLabel(_fibLblT5, showFibLevelLabelsInput, pT5, "T5", fibTargetColorInput)
 
-if barstate.islast and showTradeLevels and not na(pT1)
-    float slLabelLevel = tradeInFlightNow ? activeStopPrice : slLevel
-    label.set_xy(_lblEntry, bar_index + tradeLabelOffsetBarsInput, entryLevel)
-    label.set_text(_lblEntry, "ENTRY " + str.tostring(entryLevel, format.mintick))
+if barstate.islast and showTradeLevels and not na(activeStopPrice) and not na(tp1Price) and not na(tp2Price) and not na(tp3Price) and not na(tp4Price) and not na(tp5Price)
+    float slLabelLevel = activeStopPrice
+    label.set_xy(_lblEntry, bar_index + tradeLabelOffsetBarsInput, entryPrice)
+    label.set_text(_lblEntry, "ENTRY " + str.tostring(entryPrice, format.mintick))
     label.set_color(_lblEntry, color.new(entryLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblEntry, tradeLabelTextColorInput)
     label.set_size(_lblEntry, tradeLabelSize)
@@ -1207,28 +1210,28 @@ if barstate.islast and showTradeLevels and not na(pT1)
     label.set_color(_lblSl, color.new(stopLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblSl, tradeLabelTextColorInput)
     label.set_size(_lblSl, tradeLabelSize)
-    label.set_xy(_lblT1, bar_index + tradeLabelOffsetBarsInput, pT1)
-    label.set_text(_lblT1, "T1 " + str.tostring(pT1, format.mintick))
+    label.set_xy(_lblT1, bar_index + tradeLabelOffsetBarsInput, tp1Price)
+    label.set_text(_lblT1, "T1 " + str.tostring(tp1Price, format.mintick))
     label.set_color(_lblT1, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT1, tradeLabelTextColorInput)
     label.set_size(_lblT1, tradeLabelSize)
-    label.set_xy(_lblT2, bar_index + tradeLabelOffsetBarsInput, pT2)
-    label.set_text(_lblT2, "T2 " + str.tostring(pT2, format.mintick))
+    label.set_xy(_lblT2, bar_index + tradeLabelOffsetBarsInput, tp2Price)
+    label.set_text(_lblT2, "T2 " + str.tostring(tp2Price, format.mintick))
     label.set_color(_lblT2, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT2, tradeLabelTextColorInput)
     label.set_size(_lblT2, tradeLabelSize)
-    label.set_xy(_lblT3, bar_index + tradeLabelOffsetBarsInput, pT3)
-    label.set_text(_lblT3, "T3 " + str.tostring(pT3, format.mintick))
+    label.set_xy(_lblT3, bar_index + tradeLabelOffsetBarsInput, tp3Price)
+    label.set_text(_lblT3, "T3 " + str.tostring(tp3Price, format.mintick))
     label.set_color(_lblT3, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT3, tradeLabelTextColorInput)
     label.set_size(_lblT3, tradeLabelSize)
-    label.set_xy(_lblT4, bar_index + tradeLabelOffsetBarsInput, pT4)
-    label.set_text(_lblT4, "T4 " + str.tostring(pT4, format.mintick))
+    label.set_xy(_lblT4, bar_index + tradeLabelOffsetBarsInput, tp4Price)
+    label.set_text(_lblT4, "T4 " + str.tostring(tp4Price, format.mintick))
     label.set_color(_lblT4, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT4, tradeLabelTextColorInput)
     label.set_size(_lblT4, tradeLabelSize)
-    label.set_xy(_lblT5, bar_index + tradeLabelOffsetBarsInput, pT5)
-    label.set_text(_lblT5, "T5 " + str.tostring(pT5, format.mintick))
+    label.set_xy(_lblT5, bar_index + tradeLabelOffsetBarsInput, tp5Price)
+    label.set_text(_lblT5, "T5 " + str.tostring(tp5Price, format.mintick))
     label.set_color(_lblT5, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT5, tradeLabelTextColorInput)
     label.set_size(_lblT5, tradeLabelSize)
