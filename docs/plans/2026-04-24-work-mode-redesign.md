@@ -378,4 +378,13 @@ Deactivate with /done.
 | Task | Status | Checkpoint Result | Notes |
 |------|--------|------------------|-------|
 | Design doc written | ✅ | — | This file |
-| Implementation plan | 🔄 | pending | writing-plans next |
+| Implementation plan | ✅ | — | docs/plans/2026-04-24-work-mode-redesign-plan.md |
+| Tasks 1–17 (all hooks + settings.json) | ✅ | content verified | 29 hook files, settings.json wired, JSON valid |
+| Tasks 18–20 (skills + preamble) | ✅ | grep verified | 157L/112L/55L, rules 8+9 present |
+| Task 21 (smoke tests) | ✅ | 12/12 pass | all gate/trigger/auditor/danger/budget hooks live |
+
+## Workflow Improvements Surfaced
+1. **Stale checkpoint deadlock**: `session-start.sh` should reset `pending_checkpoint=false` and `edits_since_last_lint=0` on every new session start. Phase 0 of `/work` now does this explicitly.
+2. **stop-memory-audit + checkpoint gate deadlock**: `stop-memory-audit.sh` should skip its check when `pending_checkpoint=true` — the gate is already enforcing the sequence.
+3. **MCP bypass gap**: `pre-checkpoint-gate.sh` only matches "Edit"/"Write"/"Bash". MCP tools (`mcp__Desktop_Commander__write_file`) bypass it. Documented as known escape hatch in work/SKILL.md and workflow-preamble.txt Rule 9. Consider adding a dedicated `clear-checkpoint.sh` that runs through a non-blocked path.
+4. **Danger gate scans full script body**: `pre-bash-danger.sh` matches patterns in the entire bash command string, including string literals in echo statements. This is STRONGER than expected and correct — document this for test authors.
