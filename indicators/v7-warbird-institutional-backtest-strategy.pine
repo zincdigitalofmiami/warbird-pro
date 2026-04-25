@@ -1238,14 +1238,6 @@ var line line1786  = line.new(bar_index, close, bar_index, close, color=color(na
 var line lineT3    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 var line lineT4    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 var line lineT5    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
-var line lineTradeEntry = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
-var line lineActiveSl = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
-var line lineTradeT1 = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
-var line lineTradeT2 = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
-var line lineTradeT3 = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
-var line lineTradeT4 = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
-var line lineTradeT5 = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
-
 var box zoneBox = box.new(bar_index, close, bar_index, close, bgcolor=color(na), border_color=color(na))
 
 var label _lblEntry = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(color.white, 20), size=size.small)
@@ -1276,8 +1268,6 @@ int fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
 int anchorLeftBar = int(math.max(0, na(anchorHighBar) or na(anchorLowBar) ? fallbackLeftBar : math.min(anchorHighBar, anchorLowBar)))
 int drawLeftBar = useConfluenceAnchorSpan ? anchorLeftBar : fallbackLeftBar
 int tradeLabelX = bar_index + tradeLabelOffsetBarsInput
-bool tradeProjectionReady = showTradeLevels and not na(tradeLabelEntryPrice) and not na(tradeLabelSlPrice) and not na(tradeLabelTp1Price) and not na(tradeLabelTp2Price) and not na(tradeLabelTp3Price) and not na(tradeLabelTp4Price) and not na(tradeLabelTp5Price)
-var int tradeProjectionLeftBar = na
 var float tradeProjectionEntryPrice = na
 var float tradeProjectionSlPrice = na
 var float tradeProjectionTp1Price = na
@@ -1285,48 +1275,87 @@ var float tradeProjectionTp2Price = na
 var float tradeProjectionTp3Price = na
 var float tradeProjectionTp4Price = na
 var float tradeProjectionTp5Price = na
-bool tradeProjectionStarted = tradeProjectionReady and (not tradeProjectionReady[1] or na(tradeProjectionLeftBar))
-bool tradeActivatedNow = tradeActiveVisible and not tradeActiveVisible[1]
-if tradeProjectionReady
-    if tradeProjectionStarted
-        tradeProjectionLeftBar := drawLeftBar
-    if tradeProjectionStarted or tradeActivatedNow
-        tradeProjectionEntryPrice := tradeLabelEntryPrice
-        tradeProjectionSlPrice := tradeLabelSlPrice
-        tradeProjectionTp1Price := tradeLabelTp1Price
-        tradeProjectionTp2Price := tradeLabelTp2Price
-        tradeProjectionTp3Price := tradeLabelTp3Price
-        tradeProjectionTp4Price := tradeLabelTp4Price
-        tradeProjectionTp5Price := tradeLabelTp5Price
-    else if tradeActiveVisible
-        tradeProjectionSlPrice := tradeLabelSlPrice
-else
-    tradeProjectionLeftBar := na
-    tradeProjectionEntryPrice := na
-    tradeProjectionSlPrice := na
-    tradeProjectionTp1Price := na
-    tradeProjectionTp2Price := na
-    tradeProjectionTp3Price := na
-    tradeProjectionTp4Price := na
-    tradeProjectionTp5Price := na
-int tradeProjectionDrawLeftBar = not na(tradeProjectionLeftBar) ? tradeProjectionLeftBar : drawLeftBar
-color tradeEntryLineColor = optEntryLevelInput == "0.500" ? fibAnchorColorInput : optEntryLevelInput == "0.786" ? fibRetracementColorInput : fibRetracementAccentColorInput
-int tradeEntryLineWidth = optEntryLevelInput == "0.500" ? fibPivotWidthInput : optEntryLevelInput == "0.786" ? fibRetracementWidthInput : fibRetracementAccentWidthInput
+tradeProjectionEntryPrice := tradeLabelEntryPrice
+tradeProjectionSlPrice := tradeLabelSlPrice
+tradeProjectionTp1Price := tradeLabelTp1Price
+tradeProjectionTp2Price := tradeLabelTp2Price
+tradeProjectionTp3Price := tradeLabelTp3Price
+tradeProjectionTp4Price := tradeLabelTp4Price
+tradeProjectionTp5Price := tradeLabelTp5Price
+
+var float snapPZero = na
+var float snapP236 = na
+var float snapP382 = na
+var float snapPPivot = na
+var float snapP618 = na
+var float snapP786 = na
+var float snapPOne = na
+var float snapP1382 = na
+var float snapP150 = na
+var float snapP1786 = na
+var float snapPT1 = na
+var float snapPT2 = na
+var float snapPT3 = na
+var float snapPT4 = na
+var float snapPT5 = na
+var int snapDrawLeftBar = na
+bool snapCaptureEdge = tradeInFlightNow and not tradeInFlightNow[1]
+bool snapReleaseEdge = not tradeInFlightNow and tradeInFlightNow[1]
+if snapCaptureEdge
+    snapPZero := pZero
+    snapP236 := p236
+    snapP382 := p382
+    snapPPivot := pPivot
+    snapP618 := p618
+    snapP786 := p786
+    snapPOne := pOne
+    snapP1382 := p1382
+    snapP150 := p150
+    snapP1786 := p1786
+    snapPT1 := pT1
+    snapPT2 := pT2
+    snapPT3 := pT3
+    snapPT4 := pT4
+    snapPT5 := pT5
+    snapDrawLeftBar := drawLeftBar
+else if snapReleaseEdge
+    snapPZero := na
+    snapP236 := na
+    snapP382 := na
+    snapPPivot := na
+    snapP618 := na
+    snapP786 := na
+    snapPOne := na
+    snapP1382 := na
+    snapP150 := na
+    snapP1786 := na
+    snapPT1 := na
+    snapPT2 := na
+    snapPT3 := na
+    snapPT4 := na
+    snapPT5 := na
+    snapDrawLeftBar := na
+bool tradeFibFrozen = tradeInFlightNow and not na(snapPZero)
+float effectivePZero  = tradeFibFrozen ? snapPZero  : pZero
+float effectiveP236   = tradeFibFrozen ? snapP236   : p236
+float effectiveP382   = tradeFibFrozen ? snapP382   : p382
+float effectivePPivot = tradeFibFrozen ? snapPPivot : pPivot
+float effectiveP618   = tradeFibFrozen ? snapP618   : p618
+float effectiveP786   = tradeFibFrozen ? snapP786   : p786
+float effectivePOne   = tradeFibFrozen ? snapPOne   : pOne
+float effectiveP1382  = tradeFibFrozen ? snapP1382  : p1382
+float effectiveP150   = tradeFibFrozen ? snapP150   : p150
+float effectiveP1786  = tradeFibFrozen ? snapP1786  : p1786
+float effectivePT1    = tradeFibFrozen ? snapPT1    : pT1
+float effectivePT2    = tradeFibFrozen ? snapPT2    : pT2
+float effectivePT3    = tradeFibFrozen ? snapPT3    : pT3
+float effectivePT4    = tradeFibFrozen ? snapPT4    : pT4
+float effectivePT5    = tradeFibFrozen ? snapPT5    : pT5
+int effectiveDrawLeftBar = tradeFibFrozen ? snapDrawLeftBar : drawLeftBar
 
 drawAnchoredLine(line id, bool visible, float price, color col, int width_, int leftBar) =>
     if visible and not na(price)
         int rightBar = extendLevelsRight ? bar_index + tradeLabelOffsetBarsInput : bar_index
-        line.set_xy1(id, leftBar, price)
-        line.set_xy2(id, rightBar, price)
-        line.set_color(id, col)
-        line.set_width(id, width_)
-        line.set_style(id, fibLineStyle)
-        line.set_extend(id, extend.none)
-    else
-        line.set_color(id, color(na))
-
-drawTradeProjectionLine(line id, bool visible, float price, color col, int width_, int leftBar, int rightBar) =>
-    if visible and not na(price) and not na(leftBar) and not na(rightBar)
         line.set_xy1(id, leftBar, price)
         line.set_xy2(id, rightBar, price)
         line.set_color(id, col)
@@ -1353,31 +1382,24 @@ setFibLevelLabel(label idIn, bool visible, float price, string levelName, color 
         id := na
     id
 
-drawAnchoredLine(lineZero,  true, pZero,  fibAnchorColorInput,             fibAnchorWidthInput,             drawLeftBar)
+drawAnchoredLine(lineZero,  true, effectivePZero,  fibAnchorColorInput,             fibAnchorWidthInput,             effectiveDrawLeftBar)
 drawAnchoredLine(lineNeg236, false, pNeg236, fibStopColorInput,            fibStopWidthInput,               drawLeftBar)
-drawAnchoredLine(line236,   true, p236,   fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
-drawAnchoredLine(line382,   true, p382,   fibRetracementAccentColorInput,  fibRetracementAccentWidthInput,  drawLeftBar)
-drawAnchoredLine(linePivot, true, pPivot, fibAnchorColorInput,             fibPivotWidthInput,              drawLeftBar)
-drawAnchoredLine(line618,   true, p618,   fibRetracementAccentColorInput,  fibRetracementAccentWidthInput,  drawLeftBar)
-drawAnchoredLine(line786,   true, p786,   fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
-drawAnchoredLine(lineOne,   true, pOne,   fibAnchorColorInput,             fibAnchorWidthInput,             drawLeftBar)
-drawAnchoredLine(lineT1,    true, pT1,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
-drawAnchoredLine(line1382,  true, p1382,  fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
-drawAnchoredLine(line150,   true, p150,   fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
-drawAnchoredLine(lineT2,    true, pT2,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
-drawAnchoredLine(line1786,  true, p1786,  fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
-drawAnchoredLine(lineT3,    true, pT3,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
-drawAnchoredLine(lineT4,    true, pT4,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
-drawAnchoredLine(lineT5,    true, pT5,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
+drawAnchoredLine(line236,   true, effectiveP236,   fibRetracementColorInput,        fibRetracementWidthInput,        effectiveDrawLeftBar)
+drawAnchoredLine(line382,   true, effectiveP382,   fibRetracementAccentColorInput,  fibRetracementAccentWidthInput,  effectiveDrawLeftBar)
+drawAnchoredLine(linePivot, true, effectivePPivot, fibAnchorColorInput,             fibPivotWidthInput,              effectiveDrawLeftBar)
+drawAnchoredLine(line618,   true, effectiveP618,   fibRetracementAccentColorInput,  fibRetracementAccentWidthInput,  effectiveDrawLeftBar)
+drawAnchoredLine(line786,   true, effectiveP786,   fibRetracementColorInput,        fibRetracementWidthInput,        effectiveDrawLeftBar)
+drawAnchoredLine(lineOne,   true, effectivePOne,   fibAnchorColorInput,             fibAnchorWidthInput,             effectiveDrawLeftBar)
+drawAnchoredLine(lineT1,    true, effectivePT1,    fibTargetColorInput,             fibTargetWidthInput,             effectiveDrawLeftBar)
+drawAnchoredLine(line1382,  true, effectiveP1382,  fibRetracementColorInput,        fibRetracementWidthInput,        effectiveDrawLeftBar)
+drawAnchoredLine(line150,   true, effectiveP150,   fibRetracementColorInput,        fibRetracementWidthInput,        effectiveDrawLeftBar)
+drawAnchoredLine(lineT2,    true, effectivePT2,    fibTargetColorInput,             fibTargetWidthInput,             effectiveDrawLeftBar)
+drawAnchoredLine(line1786,  true, effectiveP1786,  fibRetracementColorInput,        fibRetracementWidthInput,        effectiveDrawLeftBar)
+drawAnchoredLine(lineT3,    true, effectivePT3,    fibTargetColorInput,             fibTargetWidthInput,             effectiveDrawLeftBar)
+drawAnchoredLine(lineT4,    true, effectivePT4,    fibTargetColorInput,             fibTargetWidthInput,             effectiveDrawLeftBar)
+drawAnchoredLine(lineT5,    true, effectivePT5,    fibTargetColorInput,             fibTargetWidthInput,             effectiveDrawLeftBar)
 
-float tradeSlVisualLevel = showTradeLevels ? tradeProjectionSlPrice : na
-drawTradeProjectionLine(lineTradeEntry, showTradeLevels and not na(tradeProjectionEntryPrice), tradeProjectionEntryPrice, tradeEntryLineColor, tradeEntryLineWidth, tradeProjectionDrawLeftBar, tradeLabelX)
-drawTradeProjectionLine(lineActiveSl, showSlProjectionLineInput and showTradeLevels and not na(tradeSlVisualLevel), tradeSlVisualLevel, stopLabelColorInput, fibStopWidthInput + 1, tradeProjectionDrawLeftBar, tradeLabelX)
-drawTradeProjectionLine(lineTradeT1, showTradeLevels and not na(tradeProjectionTp1Price), tradeProjectionTp1Price, fibTargetColorInput, fibTargetWidthInput, tradeProjectionDrawLeftBar, tradeLabelX)
-drawTradeProjectionLine(lineTradeT2, showTradeLevels and not na(tradeProjectionTp2Price), tradeProjectionTp2Price, fibTargetColorInput, fibTargetWidthInput, tradeProjectionDrawLeftBar, tradeLabelX)
-drawTradeProjectionLine(lineTradeT3, showTradeLevels and not na(tradeProjectionTp3Price), tradeProjectionTp3Price, fibTargetColorInput, fibTargetWidthInput, tradeProjectionDrawLeftBar, tradeLabelX)
-drawTradeProjectionLine(lineTradeT4, showTradeLevels and not na(tradeProjectionTp4Price), tradeProjectionTp4Price, fibTargetColorInput, fibTargetWidthInput, tradeProjectionDrawLeftBar, tradeLabelX)
-drawTradeProjectionLine(lineTradeT5, showTradeLevels and not na(tradeProjectionTp5Price), tradeProjectionTp5Price, fibTargetColorInput, fibTargetWidthInput, tradeProjectionDrawLeftBar, tradeLabelX)
+float tradeSlVisualLevel = tradeLabelSlPrice
 
 if barstate.islastconfirmedhistory
     _fibLblZero := setFibLevelLabel(_fibLblZero, showFibLevelLabelsInput, pZero, "0", fibAnchorColorInput)
@@ -1396,15 +1418,6 @@ if barstate.islastconfirmedhistory
     _fibLblT3 := setFibLevelLabel(_fibLblT3, showFibLevelLabelsInput, pT3, "T3", fibTargetColorInput)
     _fibLblT4 := setFibLevelLabel(_fibLblT4, showFibLevelLabelsInput, pT4, "T4", fibTargetColorInput)
     _fibLblT5 := setFibLevelLabel(_fibLblT5, showFibLevelLabelsInput, pT5, "T5", fibTargetColorInput)
-
-if showTradeLevels and na(_lblEntry) and not na(tradeProjectionEntryPrice) and not na(tradeProjectionSlPrice) and not na(tradeProjectionTp1Price) and not na(tradeProjectionTp2Price) and not na(tradeProjectionTp3Price) and not na(tradeProjectionTp4Price) and not na(tradeProjectionTp5Price)
-    _lblEntry := label.new(tradeLabelX, tradeProjectionEntryPrice, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
-    _lblSl := label.new(tradeLabelX, tradeProjectionSlPrice, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
-    _lblT1 := label.new(tradeLabelX, tradeProjectionTp1Price, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
-    _lblT2 := label.new(tradeLabelX, tradeProjectionTp2Price, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
-    _lblT3 := label.new(tradeLabelX, tradeProjectionTp3Price, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
-    _lblT4 := label.new(tradeLabelX, tradeProjectionTp4Price, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
-    _lblT5 := label.new(tradeLabelX, tradeProjectionTp5Price, "", style=label.style_label_left, color=color(na), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
 
 if barstate.islast and showTradeLevels and not na(_lblEntry) and not na(_lblSl) and not na(_lblT1) and not na(_lblT2) and not na(_lblT3) and not na(_lblT4) and not na(_lblT5) and not na(tradeProjectionEntryPrice) and not na(tradeSlVisualLevel) and not na(tradeProjectionTp1Price) and not na(tradeProjectionTp2Price) and not na(tradeProjectionTp3Price) and not na(tradeProjectionTp4Price) and not na(tradeProjectionTp5Price)
     label.set_xy(_lblEntry, tradeLabelX, tradeProjectionEntryPrice)
