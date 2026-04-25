@@ -306,7 +306,7 @@ These are explicitly excluded from the canonical AG training zoo:
 
 ## Training Skills Registry
 
-Twelve training-specific skills are mirrored across three locations so any VS Code-hosted AI (Claude Code, Kilocode, GitHub Copilot Chat, Codex, etc.) can discover and consume them. Format is `SKILL.md` with `name` + `description` YAML frontmatter.
+Thirteen training-specific skills are mirrored across three locations so any VS Code-hosted AI (Claude Code, Kilocode, GitHub Copilot Chat, Codex, etc.) can discover and consume them. Format is `SKILL.md` with `name` + `description` YAML frontmatter.
 
 **Locations (all three contain identical copies):**
 - `.claude/skills/<name>/SKILL.md` — Claude Code native (invoked via `Skill` tool)
@@ -329,6 +329,7 @@ Twelve training-specific skills are mirrored across three locations so any VS Co
 | `training-supabase-data` | Training read patterns for local warbird PG17; legacy/stale table warnings |
 | `training-tv-backtesting` | TradingView strategy-tester workflow for validating Pine strategy vs trained-model expectations |
 | `training-indicator-optimization` | Sweep indicator parameters (ZigZag Deviation/Depth/Threshold/MinFibRange) via `tv_auto_tune.py` + `tune_strategy_params.py` |
+| `optuna-optimization-specialist` | Design, launch, review, repair, and promote Warbird Optuna studies, including 5m MES Nexus indicator preset/alert optimization, through the shared `scripts/optuna` runner, canonical workspaces, 8090 hub, and IS/OOS champion gates |
 
 **Tool-specific invocation notes:**
 - **Claude Code** — use the `Skill` tool with the skill name (e.g., `Skill(skill="training-pre-audit")`).
