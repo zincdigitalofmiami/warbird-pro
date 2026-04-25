@@ -1,9 +1,34 @@
 # Plan — v7 Backtest Strategy: Single-Ladder Snapshot Fix
 
-**Date:** 2026-04-24
+**Status:** COMPLETE (closed 2026-04-25 with Kirk visual sign-off across 5M, 15M, 1H)
+**Date:** 2026-04-24 (revised 2026-04-25)
 **Working file:** `indicators/v7-warbird-institutional-backtest-strategy.pine`
 **Approved by:** Kirk (2026-04-24 — "do this, make the plan")
 **Visual contract:** Screenshot 3 (clean single-ladder reference). NO deviation by 1 pixel.
+
+---
+
+## Updates 2026-04-25
+
+Kirk pushed 4 commits since this plan was first written:
+
+| Commit | Notes |
+|---|---|
+| `5ace247` | This plan doc was committed |
+| `6b511b2` | "Pine: update Nexus and v7 backtest workflow" — the prior session's overlay diff is now in HEAD; this plan applies to the committed file, not an uncommitted diff |
+| `a4d7629` | "Optuna: add Nexus 5m signal-quality lane" |
+| `6e84030` | "Docs: register Optuna optimization skill" |
+
+**Timeframe correction:** Kirk: "We do not use a 15m, its 5m." The trading TF is 5m, fibs are on 5m, no HTF parent. The file currently defaults to `useParentFibTimeframe=true` + `fibAnchorTimeframe="15"` (5m chart, 15m parent). This is misaligned with Kirk's actual workflow. **Open question A** below decides whether this plan flips those defaults.
+
+**Iteration loop context (Kirk's own words):**
+> "we lock the fibs on a 5m, we tune everything around it to price action reaching TP's. we watch when price hits the different fib ladder levels, including SL all the way to TP5, and snapshot where all attributes are. We capture the trends and what to fix or modify. we take the report, update the indicator, backtest again, download the trades, feed to Optuna for next run."
+
+The visual fix in this plan is the prerequisite for that loop — a clean single ladder is required before fib-touch event captures and Optuna trade ingestion can be trusted. Comprehensive fib-touch event captures and the Optuna ingestion pipeline are SEPARATE plans, not in this scope.
+
+**Open questions for Kirk before Phase 3 starts:**
+- **A.** Should this plan also flip the input defaults to 5m native (`useParentFibTimeframe=false` and/or `fibAnchorTimeframe="5"`) so a fresh chart-add of the strategy comes up on Kirk's actual workflow without manual input setting? OR is that a separate follow-up plan?
+- **B.** GO confirmed for Task 1 (delete overlay), or do you want to review the snapshot mechanism more closely first?
 
 ---
 
@@ -159,11 +184,11 @@ This plan removes that overlay architecture entirely and replaces it with a **15
 
 | # | Task | Status | Specialist Tool | Result |
 |---|------|--------|-----------------|--------|
-| 2 | Write plan doc | in_progress | Read plan doc back | |
-| 3.1 | Delete overlay | pending | pine-lint.sh | |
-| 3.2 | Add snapshot + thread | pending | pine-lint.sh + pine-facade | |
-| 3.3 | Full verification | pending | 5-step chain | |
-| 3.4 | TV pixel verification | pending | visual diff vs Screenshot 3 | |
+| 1.5/2 | Memory scrub + autofib research + plan revision | completed | Read each output | 5m lock declared, research at docs/research/2026-04-25, plan Updates section landed |
+| 3.1 | Delete overlay | completed | pine-lint.sh + pine-facade | PASS, 0 errors, 1580→1523 lines (−57). Pixel contract preserved. |
+| 3.2 | Add snapshot + thread | completed | pine-lint.sh + pine-facade | PASS, 0 errors, 1523→1593 lines (+70). 16 snap vars, capture/release on tradeInFlightNow edge, 15 effectiveP* threaded into drawAnchoredLine calls. |
+| 3.3 | Full verification | completed | 5-step chain | ALL PASS: pine-facade success=True (0 err), pine-lint PASS, check-contamination PASS, check-indicator-strategy-parity PASS (42 ml_* parity OK, 7 strategy-exclusive allowlisted), npm run build EXIT 0. |
+| 3.4 | TV pixel verification | completed | Manual paste + Kirk visual sign-off | CDP unavailable, Kirk pasted manually. Verified clean on 5M, 15M, and 1H charts. Kirk verbatim: "looking very good. the 1h and 15m even looks amazing so it proves its fluid and versital. Thats a good sign." Strategy Tester equity curve at +4.71% over the visible window. Single-ladder behavior confirmed across timeframes — the snapshot architecture is structurally TF-agnostic. |
 
 ---
 
