@@ -52,8 +52,8 @@ int fibPivotRightRoomBars = input.int(4, "Pivot Right Room (parent bars)", minva
 int fibRecentLegLookbackBars = input.int(20, "Recent Leg Lookback (parent bars)", minval=5, maxval=120, group=groupFibEngine,
   tooltip="Parent bars scanned for the active major move after excluding Pivot Right Room. On the 15m parent, 20 bars is the last 5 hours.")
 float minFibRangeAtr = input.float(0.5, "Min Fib Range (ATR)", minval=0.5, maxval=10.0, step=0.1, group=groupFibEngine)
-bool useParentFibTimeframe = input.bool(true, "Use Parent Fib Timeframe", group=groupFibEngine,
-  tooltip="ON keeps the configured parent fib map while running execution on a lower chart timeframe. Default is 15m parent on a 5m execution chart.")
+bool useParentFibTimeframe = input.bool(false, "Use Parent Fib Timeframe", group=groupFibEngine,
+  tooltip="OFF (default) keeps fibs native to the chart timeframe (5m canonical, matches the live indicator). Turn ON to anchor fibs to a higher parent timeframe.")
 string fibAnchorTimeframe = input.timeframe("15", "Parent Fib Timeframe", group=groupFibEngine,
   tooltip="The parent fib owner. Use 15 for the current Warbird contract. Turn Use Parent Fib Timeframe OFF to let the chart timeframe own the fib ladder.")
 
@@ -200,6 +200,12 @@ color entryLabelColorInput = input.color(COLOR_ENTRY_LABEL, "Entry Label", inlin
 color stopLabelColorInput = input.color(COLOR_STOP, "SL Label", inline="label_levels", group=groupViz)
 color targetLabelColorInput = input.color(color.new(COLOR_TARGET, 50), "Target Label", inline="label_levels", group=groupViz)
 int zoneFillTransparencyInput = input.int(80, "Zone Fill Alpha", minval=0, maxval=100, group=groupViz)
+
+string groupBrand = "Warbird Web Watermark"
+bool showWebWatermarkInput = input.bool(true, "Show Warbird Watermark", group=groupBrand,
+  tooltip="Pine cannot render the SVG logo directly, so this uses a centered text watermark matching the web chart brand colors.")
+color webWatermarkWarbirdColorInput = input.color(color.new(#FFFFFF, 78), "Warbird", inline="wm", group=groupBrand)
+color webWatermarkProColorInput = input.color(color.new(#FF0000, 72), "Pro", inline="wm", group=groupBrand)
 
 string groupDebug = "Debug Diagnostics"
 bool enableDebugLogs = input.bool(false, "Enable Debug Logs", group=groupDebug, tooltip="Temporary state tracing for regime/probability diagnostics.")
@@ -1263,6 +1269,7 @@ var label _fibLbl1786 = na
 var label _fibLblT3 = na
 var label _fibLblT4 = na
 var label _fibLblT5 = na
+var table webWatermarkTable = table.new(position.middle_center, 2, 1, bgcolor=color.new(color.black, 100), border_color=color.new(color.black, 100), border_width=0, frame_color=color.new(color.black, 100), frame_width=0)
 
 int fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
 int anchorLeftBar = int(math.max(0, na(anchorHighBar) or na(anchorLowBar) ? fallbackLeftBar : math.min(anchorHighBar, anchorLowBar)))
@@ -1481,6 +1488,10 @@ if not na(zoneFillUpper) and not na(zoneFillLower)
 else
     box.set_bgcolor(zoneBox, color(na))
     box.set_border_color(zoneBox, color(na))
+
+if barstate.islast
+    table.cell(webWatermarkTable, 0, 0, showWebWatermarkInput ? "WARBIRD" : "", text_color=webWatermarkWarbirdColorInput, text_size=size.huge, text_halign=text.align_right, bgcolor=color.new(color.black, 100), text_formatting=text.format_bold)
+    table.cell(webWatermarkTable, 1, 0, showWebWatermarkInput ? "PRO" : "", text_color=webWatermarkProColorInput, text_size=size.huge, text_halign=text.align_left, bgcolor=color.new(color.black, 100))
 plot(showEma9Input ? ema9 : na, "EMA 9", ema9ColorInput, ema9WidthInput)
 plot(showEma21Input ? ema21 : na, "EMA 21", ema21ColorInput, ema21WidthInput)
 plot(showEma50Input ? ema50 : na, "EMA 50", ema50ColorInput, ema50WidthInput)
