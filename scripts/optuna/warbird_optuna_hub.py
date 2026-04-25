@@ -325,11 +325,12 @@ def build_run_command(spec: IndicatorSpec) -> str:
     return " \\\n  ".join(parts)
 
 
-def load_study_stats(db_path: Path) -> dict[str, Any]:
+def load_study_stats(db_path: Path, target_study_name: str) -> dict[str, Any]:
     if not db_path.exists() or db_path.stat().st_size == 0:
         return {
             "exists": False,
             "study_count": 0,
+            "target_study_exists": False,
             "trial_count": 0,
             "complete_count": 0,
             "running_count": 0,
@@ -346,11 +347,64 @@ def load_study_stats(db_path: Path) -> dict[str, Any]:
         cur = con.cursor()
 
         study_count = _safe_int(cur.execute("SELECT COUNT(*) FROM studies").fetchone()[0])
-        trial_count = _safe_int(cur.execute("SELECT COUNT(*) FROM trials").fetchone()[0])
-        complete_count = _safe_int(cur.execute("SELECT COUNT(*) FROM trials WHERE state = 'COMPLETE'").fetchone()[0])
-        running_count = _safe_int(cur.execute("SELECT COUNT(*) FROM trials WHERE state = 'RUNNING'").fetchone()[0])
-        pruned_count = _safe_int(cur.execute("SELECT COUNT(*) FROM trials WHERE state = 'PRUNED'").fetchone()[0])
-        fail_count = _safe_int(cur.execute("SELECT COUNT(*) FROM trials WHERE state = 'FAIL'").fetchone()[0])
+        target_study_exists = _safe_int(
+            cur.execute("SELECT COUNT(*) FROM studies WHERE study_name = ?", (target_study_name,)).fetchone()[0]
+        ) > 0
+        trial_count = _safe_int(
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM trials t
+                JOIN studies s ON s.study_id = t.study_id
+                WHERE s.study_name = ?
+                """,
+                (target_study_name,),
+            ).fetchone()[0]
+        )
+        complete_count = _safe_int(
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM trials t
+                JOIN studies s ON s.study_id = t.study_id
+                WHERE s.study_name = ? AND t.state = 'COMPLETE'
+                """,
+                (target_study_name,),
+            ).fetchone()[0]
+        )
+        running_count = _safe_int(
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM trials t
+                JOIN studies s ON s.study_id = t.study_id
+                WHERE s.study_name = ? AND t.state = 'RUNNING'
+                """,
+                (target_study_name,),
+            ).fetchone()[0]
+        )
+        pruned_count = _safe_int(
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM trials t
+                JOIN studies s ON s.study_id = t.study_id
+                WHERE s.study_name = ? AND t.state = 'PRUNED'
+                """,
+                (target_study_name,),
+            ).fetchone()[0]
+        )
+        fail_count = _safe_int(
+            cur.execute(
+                """
+                SELECT COUNT(*)
+                FROM trials t
+                JOIN studies s ON s.study_id = t.study_id
+                WHERE s.study_name = ? AND t.state = 'FAIL'
+                """,
+                (target_study_name,),
+            ).fetchone()[0]
+        )
 
         trial_rows = cur.execute(
             """
@@ -363,16 +417,19 @@ def load_study_stats(db_path: Path) -> dict[str, Any]:
             FROM trials t
             JOIN studies s ON s.study_id = t.study_id
             LEFT JOIN trial_values tv ON tv.trial_id = t.trial_id AND tv.objective = 0
-            WHERE t.state = 'COMPLETE'
-            """
+            WHERE t.state = 'COMPLETE' AND s.study_name = ?
+            """,
+            (target_study_name,),
         ).fetchall()
 
         attrs: dict[int, dict[str, str]] = {}
         for trial_id, key, value_json in cur.execute(
             """
-            SELECT trial_id, key, value_json
-            FROM trial_user_attributes
-            WHERE key IN (
+            SELECT tua.trial_id, tua.key, tua.value_json
+            FROM trial_user_attributes tua
+            JOIN trials t ON t.trial_id = tua.trial_id
+            JOIN studies s ON s.study_id = t.study_id
+            WHERE s.study_name = ? AND tua.key IN (
                 'win_rate', 'pf', 'trades', 'max_dd',
                 'objective_score', 'objective_metric',
                 'signal_quality_score', 'quality_events',
@@ -380,7 +437,8 @@ def load_study_stats(db_path: Path) -> dict[str, Any]:
                 'volume_flow_quality', 'fatigue_warning_quality',
                 'knn_bias_quality', 'noise_control'
             )
-            """
+            """,
+            (target_study_name,),
         ).fetchall():
             attrs.setdefault(_safe_int(trial_id), {})[str(key)] = value_json
 
@@ -431,6 +489,7 @@ def load_study_stats(db_path: Path) -> dict[str, Any]:
         return {
             "exists": True,
             "study_count": study_count,
+            "target_study_exists": target_study_exists,
             "trial_count": trial_count,
             "complete_count": complete_count,
             "running_count": running_count,
@@ -444,6 +503,7 @@ def load_study_stats(db_path: Path) -> dict[str, Any]:
         return {
             "exists": True,
             "study_count": 0,
+            "target_study_exists": False,
             "trial_count": 0,
             "complete_count": 0,
             "running_count": 0,
@@ -594,7 +654,7 @@ class HubState:
             db_path = indicator_dir / "study.db"
             topn_path = indicator_dir / spec.topn_filename
 
-            stats = load_study_stats(db_path)
+            stats = load_study_stats(db_path, spec.default_study_name)
             topn = load_topn_stats(topn_path)
             profile = self.profile_health.get(spec.key, {"status": "missing", "label": "No profile wired"})
             run_cmd = build_run_command(spec)
@@ -611,6 +671,7 @@ class HubState:
                 "db_path": str(db_path),
                 "db_exists": stats["exists"],
                 "study_count": stats["study_count"],
+                "target_study_exists": stats["target_study_exists"],
                 "trial_count": stats["trial_count"],
                 "complete_count": stats["complete_count"],
                 "running_count": stats["running_count"],
@@ -778,8 +839,11 @@ def render_html(snapshot: dict[str, Any]) -> str:
         elif card["db_exists"]:
             link_html = "<span class='btn disabled'>Dashboard Offline</span>"
 
-        db_status = "ready" if card["db_exists"] else "empty"
-        db_status_label = "Study DB detected" if card["db_exists"] else "No study.db yet"
+        db_status = "ready" if card["db_exists"] and card["target_study_exists"] else "empty"
+        db_status_label = "Active study detected" if card["target_study_exists"] else "No study.db yet"
+        if card["db_exists"] and not card["target_study_exists"]:
+            db_status = "warn"
+            db_status_label = "Study DB ready; active study not created yet"
         if card["db_error"]:
             db_status = "error"
             db_status_label = f"DB error: {card['db_error']}"
@@ -827,6 +891,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
             f"<span class='chip category'>{_h(card['category'])}</span>"
             f"<span class='chip {profile_class}'>{_h(card['profile_label'])}</span>"
             "</div>"
+            f"<div class='path'><span>Active Study:</span> {_h(card['default_study_name'])}</div>"
             f"<div class='path'><span>Pine:</span> {_h(card['pine_file'])}</div>"
             f"<div class='path'><span>Workspace:</span> {_h(card['indicator_dir'])}</div>"
             f"<div class='path'><span>Experiments:</span> {_h(card['experiments_dir'])}</div>"
@@ -1049,6 +1114,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
       border: 1px solid transparent;
     }}
     .status.ready {{ color: #86efac; border-color: #14532d; background: #052e16; }}
+    .status.warn {{ color: #fde68a; border-color: #78350f; background: #451a03; }}
     .status.empty {{ color: #fde68a; border-color: #78350f; background: #451a03; }}
     .status.error {{ color: #fecaca; border-color: #7f1d1d; background: #450a0a; }}
     .counts {{

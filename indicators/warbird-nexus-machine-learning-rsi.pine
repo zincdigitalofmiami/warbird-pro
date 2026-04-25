@@ -3,7 +3,7 @@
 // Warbird Nexus Machine Learning RSI
 // ══════════════════════════════════════════════════════════
 // Author:  Kirk Musick
-// Version: 1.2.1
+// Version: 1.2.2 — 5m-only Nexus lane
 
 indicator(
     title            = "Warbird Nexus Machine Learning RSI",
@@ -25,21 +25,20 @@ GRP_REGIME  = "🔬 Regime Detection"
 GRP_DIV     = "🔀 Divergence"
 GRP_EXHAUST = "💨 Momentum Fatigue"
 GRP_KNN     = "🧠 KNN Bias"
-GRP_HTF     = "🔭 Higher Timeframe"
 GRP_CONF    = "🎯 Confluence"
 GRP_DASH    = "📊 Dashboard"
 GRP_ALERT   = "🔔 Alerts"
 GRP_COLORS  = "🎨 Colors"
 
-INDICATOR_VERSION = "v1.2.1"
+INDICATOR_VERSION = "v1.2.2"
 
 // ══════════════════════════════════════════════════════════
 // INPUTS — Main Settings
 // ══════════════════════════════════════════════════════════
-lengthInput = input.int(14, "Engine Period", minval = 2, maxval = 200, group = GRP_MAIN,
+lengthInput = input.int(18, "Engine Period", minval = 2, maxval = 200, group = GRP_MAIN,
     tooltip = "Core lookback for the AMF engine.\n" +
               "• 8–12: responsive, more signals, suited for scalping\n" +
-              "• 14: balanced (recommended)\n" +
+              "• 18: balanced 5m Nexus starting point\n" +
               "• 20–50: smooth, fewer signals, suited for swing")
 sourceInput = input.source(close, "Source", group = GRP_MAIN,
     tooltip = "Price source for calculations.\nClose = standard | HLC3 = smoother | OHLC4 = smoothest")
@@ -58,15 +57,15 @@ presetInput = input.string("Default", "Preset",
     group = GRP_MAIN,
     tooltip = "Quick presets:\n" +
               "• Scalping: period 8, fast smoothing, tight zones\n" +
-              "• Default: period 14, balanced\n" +
+              "• Default: uses the tuned 5m input defaults\n" +
               "• Swing: period 21, relaxed zones\n" +
               "• Position: period 34, wide zones, maximum filter")
 
 // ══════════════════════════════════════════════════════════
 // INPUTS — Signal Line
 // ══════════════════════════════════════════════════════════
-sigLenInput = input.int(7, "Signal Period", minval = 1, maxval = 50, group = GRP_MAIN,
-    tooltip = "Smoothing period for the trigger line.\nKeep below Engine Period for clean crossovers.\nDefault: 7")
+sigLenInput = input.int(6, "Signal Period", minval = 1, maxval = 50, group = GRP_MAIN,
+    tooltip = "Smoothing period for the trigger line.\nKeep below Engine Period for clean crossovers.\n5m start: 6")
 sigTypeInput = input.string("EMA", "Signal Smoothing",
     options = ["EMA", "SMA", "DEMA", "WMA"],
     group = GRP_MAIN,
@@ -94,10 +93,10 @@ bearColorInput = input.color(#FF5252, "Bear", inline = "colors", group = GRP_COL
 // ══════════════════════════════════════════════════════════
 // INPUTS — Zones
 // ══════════════════════════════════════════════════════════
-obInput = input.float(80.0, "Overbought Level", minval = 55.0, maxval = 95.0, step = 1.0, group = GRP_ZONES,
-    tooltip = "Upper threshold for overbought zone.\nDefault: 80")
-osInput = input.float(20.0, "Oversold Level", minval = 5.0, maxval = 45.0, step = 1.0, group = GRP_ZONES,
-    tooltip = "Lower threshold for oversold zone.\nDefault: 20")
+obInput = input.float(75.0, "Overbought Level", minval = 55.0, maxval = 95.0, step = 1.0, group = GRP_ZONES,
+    tooltip = "Upper threshold for overbought zone.\n5m start: 75")
+osInput = input.float(25.0, "Oversold Level", minval = 5.0, maxval = 45.0, step = 1.0, group = GRP_ZONES,
+    tooltip = "Lower threshold for oversold zone.\n5m start: 25")
 obAlphaInput = input.int(20, "OB Fill Opacity", minval = 0, maxval = 100, group = GRP_ZONES,
     tooltip = "Opacity of the overbought zone fill. 0=invisible, 100=solid")
 osAlphaInput = input.int(20, "OS Fill Opacity", minval = 0, maxval = 100, group = GRP_ZONES,
@@ -134,15 +133,15 @@ divHidAlpha = input.int(70, "Hidden Div Opacity", minval = 0, maxval = 100, grou
     tooltip = "Line and label opacity for hidden divergence.\n0 = invisible | 100 = opaque")
 divLblSizeInput = input.string("Tiny", "Label Size", options = ["Tiny", "Small", "Normal"], group = GRP_DIV,
     tooltip = "Size of the D▲ D▼ H▲ H▼ divergence labels")
-divFilterInput = input.bool(false, "Structural Filter", group = GRP_DIV,
+divFilterInput = input.bool(true, "Structural Filter", group = GRP_DIV,
     tooltip = "Suppresses weak divergences where:\n• Oscillator swing < threshold\n• Price swing < % of recent range\n• Volume flow doesn't confirm direction")
-divMinOscInput = input.float(5.0, "Min Osc Swing", minval = 1.0, maxval = 25.0, step = 0.5, group = GRP_DIV,
+divMinOscInput = input.float(8.0, "Min Osc Swing", minval = 1.0, maxval = 25.0, step = 0.5, group = GRP_DIV,
     tooltip = "Minimum oscillator distance between pivot points.\nRequires Structural Filter ON.")
 divMinPctInput = input.float(0.3, "Min Price Swing %", minval = 0.05, maxval = 5.0, step = 0.05, group = GRP_DIV,
     tooltip = "Minimum price swing as % of recent range.\nRequires Structural Filter ON.")
 divVolConfInput = input.bool(true, "Require Volume Confirmation", group = GRP_DIV,
     tooltip = "Volume flow must agree with divergence direction.\nRequires Structural Filter ON.")
-divMaxAgeInput = input.int(100, "Max Pivot Age (bars)", minval = 20, maxval = 500, group = GRP_DIV,
+divMaxAgeInput = input.int(60, "Max Pivot Age (bars)", minval = 20, maxval = 500, group = GRP_DIV,
     tooltip = "Maximum distance in bars between two pivots for divergence.\nPrevents stale pivots 200+ bars ago from creating false signals.\n20 = very strict | 100 = balanced | 500 = permissive")
 
 // ══════════════════════════════════════════════════════════
@@ -150,7 +149,7 @@ divMaxAgeInput = input.int(100, "Max Pivot Age (bars)", minval = 20, maxval = 50
 // ══════════════════════════════════════════════════════════
 showFatigueInput = input.bool(true, "Show Fatigue Markers", group = GRP_EXHAUST,
     tooltip = "Detects momentum fatigue with chart markers.\n◆ Bearish Exhaustion: weakening in overbought zone\n◆ Bullish Exhaustion: strengthening in oversold zone")
-fatigueBarsInput = input.int(3, "Confirmation Bars", minval = 1, maxval = 5, group = GRP_EXHAUST,
+fatigueBarsInput = input.int(2, "Confirmation Bars", minval = 1, maxval = 5, group = GRP_EXHAUST,
     tooltip = "Consecutive bars of weakening/strengthening needed.\n1=fast, 3=balanced, 5=very strict")
 
 // ══════════════════════════════════════════════════════════
@@ -158,9 +157,9 @@ fatigueBarsInput = input.int(3, "Confirmation Bars", minval = 1, maxval = 5, gro
 // ══════════════════════════════════════════════════════════
 knnShowInput = input.bool(true, "Show KNN Panel", group = GRP_KNN,
     tooltip = "K-Nearest Neighbors directional bias panel.\nFinds similar historical patterns and votes on direction.\n\nFeatures used:\nM: momentum position | V: volume flow | E: efficiency ratio | X: signal cross state")
-knnKInput = input.int(5, "Neighbors (K)", minval = 3, maxval = 15, group = GRP_KNN,
+knnKInput = input.int(7, "Neighbors (K)", minval = 3, maxval = 15, group = GRP_KNN,
     tooltip = "Number of similar bars to vote.\n3=fast, 5=balanced, 10+=conservative")
-knnWindowInput = input.int(120, "Training Window", minval = 50, maxval = 400, step = 10, group = GRP_KNN,
+knnWindowInput = input.int(180, "Training Window", minval = 50, maxval = 400, step = 10, group = GRP_KNN,
     tooltip = "How many past bars to learn from.\n50=short memory, 120=balanced, 300+=long memory")
 knnPosInput = input.string("Bottom Right", "Panel Position",
     options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left"],
@@ -172,21 +171,13 @@ knnSizeInput = input.string("Small", "Panel Text Size",
     tooltip = "Text size inside the KNN AI panel")
 
 // ══════════════════════════════════════════════════════════
-// INPUTS — Higher Timeframe Bias
-// ══════════════════════════════════════════════════════════
-showHtfInput = input.bool(true, "Show HTF Bias", group = GRP_HTF,
-    tooltip = "Fetch oscillator value from a higher timeframe for trend confirmation.\nNon-repainting: uses previous closed HTF bar.")
-htfInput = input.timeframe("", "Higher Timeframe", group = GRP_HTF,
-    tooltip = "Higher TF for bias. Leave empty = uses current TF (no HTF filter).\nSelect a higher TF for meaningful bias:\n15min chart → use 60 | 1H chart → use 240 | 4H chart → use D")
-
-// ══════════════════════════════════════════════════════════
 // INPUTS — Confluence Meter
 // ══════════════════════════════════════════════════════════
 showConfluenceInput = input.bool(true, "Show Confluence Meter", group = GRP_CONF,
     tooltip = "Weighted composite score 0–100 from all subsystems.\nAbove 70 = strong bullish confluence\nBelow 30 = strong bearish confluence\nShown as a thin line on the oscillator pane.")
-confHighInput = input.float(70.0, "High Confluence", minval = 55.0, maxval = 90.0, group = GRP_CONF,
+confHighInput = input.float(65.0, "High Confluence", minval = 55.0, maxval = 90.0, group = GRP_CONF,
     tooltip = "Threshold above which confluence is considered strongly bullish.\nUsed for alerts and dashboard coloring.")
-confLowInput = input.float(30.0, "Low Confluence", minval = 10.0, maxval = 45.0, group = GRP_CONF,
+confLowInput = input.float(35.0, "Low Confluence", minval = 10.0, maxval = 45.0, group = GRP_CONF,
     tooltip = "Threshold below which confluence is considered strongly bearish.")
 
 // ══════════════════════════════════════════════════════════
@@ -354,7 +345,8 @@ float sigVal = nz(uSmooth(oscVal, sigLenInput, sigTypeInput), oscVal)
 // ══════════════════════════════════════════════════════════
 // VOLUME FLOW — Volatility-Normalized Volume Flow (VNVF)
 // ══════════════════════════════════════════════════════════
-bool  hasVolume  = nz(volume, 0) > 0
+bool  volumeAvailable = ta.cum(nz(volume, 0.0)) > 0.0
+float barVolume       = volumeAvailable ? nz(volume, 0.0) : 0.0
 float candleRange = high - low
 float bodySize   = math.abs(close - open)
 float bodyRatio  = safeDiv(bodySize, candleRange, 0.0)
@@ -364,10 +356,10 @@ float wickBias   = safeDiv(lowerWick - upperWick, candleRange, 0.0)
 float bodyDir    = close > open ? 1.0 : close < open ? -1.0 : 0.0
 
 float candleScore = bodyDir * bodyRatio * 0.7 + wickBias * 0.3
-float signedVol   = hasVolume ? candleScore * volume : 0.0
+float signedVol   = volumeAvailable ? candleScore * barVolume : 0.0
 float atrNorm     = nz(ta.atr(effLen), 1.0)
-float avgVol      = nz(ta.sma(volume, effLen * 2), 1.0)
-float vnvfRaw     = hasVolume ? safeDiv(signedVol, atrNorm * avgVol, 0.0) : 0.0
+float avgVol      = math.max(nz(ta.sma(barVolume, effLen * 2), barVolume), 1.0)
+float vnvfRaw     = volumeAvailable ? safeDiv(signedVol, atrNorm * avgVol, 0.0) : 0.0
 
 int   vnvfFastLen = math.max(math.round(effLen * 0.6), 2)
 int   vnvfSlowLen = math.max(math.round(effLen * 1.4), 3)
@@ -378,26 +370,21 @@ float vnvfBlend = vnvfFast * 0.6 + vnvfSlow * 0.4
 float vnvfAbsBlend = math.abs(vnvfBlend)
 float vnvfPeak = nz(ta.highest(vnvfAbsBlend, effLen * 4), vnvfAbsBlend + 0.0001)
 float vnvfPeakSafe = math.max(vnvfPeak, 0.0001)
-float vfVal = math.max(0.0, math.min(100.0, safeDiv(vnvfBlend, vnvfPeakSafe, 0.0) * 50.0 + 50.0))
+float vfRawVal = math.max(0.0, math.min(100.0, safeDiv(vnvfBlend, vnvfPeakSafe, 0.0) * 50.0 + 50.0))
+float vfVal = volumeAvailable ? vfRawVal : na
+float vfCalcVal = volumeAvailable ? vfRawVal : 50.0
 
 // ══════════════════════════════════════════════════════════
 // REGIME DETECTION — Efficiency Ratio + Composite Score
 // ══════════════════════════════════════════════════════════
 bool erTrending = erSmoothed > 0.3
-int regimeScore = (oscVal > sigVal ? 1 : 0) + (oscVal > 50.0 ? 1 : 0) + (vfVal > 50.0 ? 1 : 0) + (erTrending ? 1 : 0)
+int regimeScoreMax = volumeAvailable ? 4 : 3
+int regimeScore = (oscVal > sigVal ? 1 : 0) + (oscVal > 50.0 ? 1 : 0) + (volumeAvailable and vfCalcVal > 50.0 ? 1 : 0) + (erTrending ? 1 : 0)
 
 int regFdOb = math.max(regimeObAlpha - 20, 0)
 int regFdOs = math.max(regimeOsAlpha - 20, 0)
-color regObFill = not showRegimeInput ? na : regimeScore >= 4 ? color.new(bullColorInput, 100 - regimeObAlpha) : regimeScore == 3 ? color.new(bullColorInput, 100 - regFdOb) : na
+color regObFill = not showRegimeInput ? na : regimeScore >= regimeScoreMax ? color.new(bullColorInput, 100 - regimeObAlpha) : regimeScore == regimeScoreMax - 1 ? color.new(bullColorInput, 100 - regFdOb) : na
 color regOsFill = not showRegimeInput ? na : regimeScore == 0 ? color.new(bearColorInput, 100 - regimeOsAlpha) : regimeScore == 1 ? color.new(bearColorInput, 100 - regFdOs) : na
-
-// ══════════════════════════════════════════════════════════
-// HIGHER TIMEFRAME BIAS (non-repainting)
-// ══════════════════════════════════════════════════════════
-float htfOscVal = showHtfInput ? nz(request.security(syminfo.tickerid, htfInput, oscVal[1], barmerge.gaps_off, barmerge.lookahead_on), 50.0) : 50.0
-float htfSigVal = showHtfInput ? nz(request.security(syminfo.tickerid, htfInput, sigVal[1], barmerge.gaps_off, barmerge.lookahead_on), 50.0) : 50.0
-bool  htfBullish = htfOscVal > 50.0 and htfOscVal > htfSigVal
-bool  htfBearish = htfOscVal < 50.0 and htfOscVal < htfSigVal
 
 // ══════════════════════════════════════════════════════════
 // OSCILLATOR MOMENTUM (acceleration)
@@ -432,7 +419,7 @@ var array<float> kF4 = array.new<float>()
 var array<int>   kY  = array.new<int>()
 
 float feat1 = oscVal / 100.0
-float feat2 = vfVal / 100.0
+float feat2 = vfCalcVal / 100.0
 float feat3 = math.max(0.0, math.min(1.0, (oscVal - sigVal + 50.0) / 100.0))
 float feat4 = math.max(0.0, math.min(1.0, erSmoothed))
 
@@ -502,17 +489,15 @@ confBullVotes += oscVal > 55.0 ? 1 : 0
 confBearVotes += oscVal < 45.0 ? 1 : 0
 confBullVotes += oscVal > sigVal ? 1 : 0
 confBearVotes += oscVal < sigVal ? 1 : 0
-confBullVotes += vfVal > 55.0 ? 1 : 0
-confBearVotes += vfVal < 45.0 ? 1 : 0
+confBullVotes += volumeAvailable and vfCalcVal > 55.0 ? 1 : 0
+confBearVotes += volumeAvailable and vfCalcVal < 45.0 ? 1 : 0
 confBullVotes += erTrending and oscVal > 50.0 ? 1 : 0
 confBearVotes += erTrending and oscVal < 50.0 ? 1 : 0
 confBullVotes += knnIsBull ? 1 : 0
 confBearVotes += knnIsBear ? 1 : 0
-confBullVotes += htfBullish ? 1 : 0
-confBearVotes += htfBearish ? 1 : 0
-
 int   confNet = confBullVotes - confBearVotes
-float confRaw = (confNet + 6.0) / 12.0 * 100.0
+float confSources = volumeAvailable ? 5.0 : 4.0
+float confRaw = (confNet + confSources) / (confSources * 2.0) * 100.0
 float confVal = math.max(0.0, math.min(100.0, nz(ta.ema(confRaw, 3), 50.0)))
 
 bool confHighCross = ta.crossover(confVal, confHighInput) and isWarmedUp
@@ -625,8 +610,10 @@ float sfOscSwingLL   = not na(curLL_o) and not na(prevLL_o) ? math.abs(curLL_o -
 float sfOscSwingHH   = not na(curHH_o) and not na(prevHH_o) ? math.abs(curHH_o - prevHH_o) : 0.0
 float sfPriceSwingLL = not na(curLL_p) and not na(prevLL_p) ? math.abs(curLL_p - prevLL_p) : 0.0
 float sfPriceSwingHH = not na(curHH_p) and not na(prevHH_p) ? math.abs(curHH_p - prevHH_p) : 0.0
-bool sfPassBull = not divFilterInput or (sfOscSwingLL >= divMinOscInput and sfPriceSwingLL >= sfMinPriceAbs and (not divVolConfInput or vfVal[pivSpan] > 50.0))
-bool sfPassBear = not divFilterInput or (sfOscSwingHH >= divMinOscInput and sfPriceSwingHH >= sfMinPriceAbs and (not divVolConfInput or vfVal[pivSpan] < 50.0))
+bool sfVolPassBull = not divVolConfInput or not volumeAvailable[pivSpan] or vfCalcVal[pivSpan] > 50.0
+bool sfVolPassBear = not divVolConfInput or not volumeAvailable[pivSpan] or vfCalcVal[pivSpan] < 50.0
+bool sfPassBull = not divFilterInput or (sfOscSwingLL >= divMinOscInput and sfPriceSwingLL >= sfMinPriceAbs and sfVolPassBull)
+bool sfPassBear = not divFilterInput or (sfOscSwingHH >= divMinOscInput and sfPriceSwingHH >= sfMinPriceAbs and sfVolPassBear)
 
 color divRegBullCol = color.new(bullColorInput, 100 - divRegAlpha)
 color divRegBearCol = color.new(bearColorInput, 100 - divRegAlpha)
@@ -665,9 +652,9 @@ if not na(curLL_p)
 color obFillCol = color.new(bullColorInput, 100 - obAlphaInput)
 color osFillCol = color.new(bearColorInput, 100 - osAlphaInput)
 
-p_vfUp   = plot(showVfInput ? math.max(vfVal, 50.0) : na, "VF Bull", color.new(bullColorInput, 70), linewidth = 1)
-p_vfDown = plot(showVfInput ? math.min(vfVal, 50.0) : na, "VF Bear", color.new(bearColorInput, 70), linewidth = 1)
-p_vfBase = plot(showVfInput ? 50.0 : na, "VF Base", color = na, editable = false)
+p_vfUp   = plot(showVfInput and volumeAvailable ? math.max(vfCalcVal, 50.0) : na, "VF Bull", color.new(bullColorInput, 70), linewidth = 1)
+p_vfDown = plot(showVfInput and volumeAvailable ? math.min(vfCalcVal, 50.0) : na, "VF Bear", color.new(bearColorInput, 70), linewidth = 1)
+p_vfBase = plot(showVfInput and volumeAvailable ? 50.0 : na, "VF Base", color = na, editable = false)
 fill(p_vfUp, p_vfBase, color.new(bullColorInput, 100 - vfAlphaInput), title = "VF Bull Fill")
 fill(p_vfDown, p_vfBase, color.new(bearColorInput, 100 - vfAlphaInput), title = "VF Bear Fill")
 
@@ -712,13 +699,13 @@ string signalStr   = wCrossUp ? "Bull Cross" : wCrossDown ? "Bear Cross" : oscVa
 color  signalCol   = wCrossUp ? BULL_TEXT : wCrossDown ? BEAR_TEXT : oscVal >= effOB ? BULL_TEXT : oscVal <= effOS ? BEAR_TEXT : TEXT_COLOR
 string strengthStr = oscVal >= 70.0 or oscVal <= 30.0 ? "Strong" : oscVal >= 60.0 or oscVal <= 40.0 ? "Medium" : "Weak"
 color  strengthCol = oscVal >= 70.0 or oscVal <= 30.0 ? BULL_TEXT : oscVal >= 60.0 or oscVal <= 40.0 ? NEUTRAL_TEXT : TEXT_MUTED
-string vfStr       = not hasVolume ? "N/A" : vfVal > 60.0 ? "Inflow" : vfVal < 40.0 ? "Outflow" : "Neutral"
-color  vfCol       = not hasVolume ? TEXT_MUTED : vfVal > 60.0 ? BULL_TEXT : vfVal < 40.0 ? BEAR_TEXT : NEUTRAL_TEXT
+string vfStr       = not volumeAvailable ? "N/A" : vfCalcVal > 60.0 ? "Inflow" : vfCalcVal < 40.0 ? "Outflow" : "Neutral"
+color  vfCol       = not volumeAvailable ? TEXT_MUTED : vfCalcVal > 60.0 ? BULL_TEXT : vfCalcVal < 40.0 ? BEAR_TEXT : NEUTRAL_TEXT
 string regimeStr   = erTrending ? "Trending" : "Ranging"
 color  regimeCol   = erTrending ? BULL_TEXT : NEUTRAL_TEXT
 string knnStr      = knnIsBull ? "Bullish" : knnIsBear ? "Bearish" : "Neutral"
-string htfStr      = not showHtfInput ? "OFF" : htfBullish ? "Bullish" : htfBearish ? "Bearish" : "Neutral"
-color  htfCol      = not showHtfInput ? TEXT_MUTED : htfBullish ? BULL_TEXT : htfBearish ? BEAR_TEXT : TEXT_MUTED
+string tfModeStr   = "5m Native"
+color  tfModeCol   = TEXT_MUTED
 
 if showDashInput and barstate.islast
     var dashTable = table.new(dashPos, 2, 14, TABLE_BG, TABLE_BORDER, 1, TABLE_BORDER, 1)
@@ -734,8 +721,8 @@ if showDashInput and barstate.islast
     table.cell(dashTable, 1, 4, str.tostring(oscVal, "#.#"), text_color = trendCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
     table.cell(dashTable, 0, 5, "Momentum", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
     table.cell(dashTable, 1, 5, momStr, text_color = momCol, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 0, 6, "HTF Bias", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 1, 6, htfStr, text_color = htfCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
+    table.cell(dashTable, 0, 6, "TF Mode", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
+    table.cell(dashTable, 1, 6, tfModeStr, text_color = tfModeCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
     table.cell(dashTable, 0, 7, "Vol Flow", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
     table.cell(dashTable, 1, 7, vfStr, text_color = vfCol, text_size = size.small, bgcolor = TABLE_BG)
     table.cell(dashTable, 0, 8, "Regime", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
@@ -747,8 +734,8 @@ if showDashInput and barstate.islast
     table.cell(dashTable, 0, 11, "ER", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
     table.cell(dashTable, 1, 11, str.tostring(erSmoothed, "#.##"), text_color = regimeCol, text_size = size.small, bgcolor = TABLE_BG)
     table.cell(dashTable, 0, 12, "Score", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    string scoreStr = str.tostring(regimeScore) + "/4"
-    color scoreCol = regimeScore >= 3 ? BULL_TEXT : regimeScore <= 1 ? BEAR_TEXT : NEUTRAL_TEXT
+    string scoreStr = str.tostring(regimeScore) + "/" + str.tostring(regimeScoreMax)
+    color scoreCol = regimeScore >= regimeScoreMax - 1 ? BULL_TEXT : regimeScore <= 1 ? BEAR_TEXT : NEUTRAL_TEXT
     table.cell(dashTable, 1, 12, scoreStr, text_color = scoreCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
     table.cell(dashTable, 0, 13, "Consensus", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
     string consStr = str.tostring(confBullVotes) + "B / " + str.tostring(confBearVotes) + "S"
@@ -771,26 +758,29 @@ string tf          = timeframe.isintraday ? timeframe.period + "m" : timeframe.p
 string priceStr    = str.tostring(close, format.mintick)
 string oscStr      = str.tostring(oscVal, "#.#")
 string sigStr      = str.tostring(sigVal, "#.#")
-string vfValueStr  = str.tostring(vfVal, "#.#")
+string vfValueStr  = volumeAvailable ? str.tostring(vfCalcVal, "#.#") : "N/A"
+string vfJsonStr   = volumeAvailable ? str.tostring(vfCalcVal, "#.#") : "null"
+string vfAvailJson = volumeAvailable ? "true" : "false"
 string confValStr  = str.tostring(confVal, "#.#")
 string knnConfStr  = str.tostring(knnConf)
-string htfBiasStr  = htfBullish ? "HTF Bull" : htfBearish ? "HTF Bear" : "HTF Neutral"
+string tfModeAlertStr = "5m Native"
+bool alertReady    = barstate.isconfirmed and isWarmedUp
 
-bool aCrossUp   = ta.crossover(oscVal, sigVal) and isWarmedUp
-bool aCrossDown = ta.crossunder(oscVal, sigVal) and isWarmedUp
-bool aExitOs    = ta.crossover(oscVal, effOS) and isWarmedUp
-bool aExitOb    = ta.crossunder(oscVal, effOB) and isWarmedUp
-bool aVfIn      = ta.crossover(vfVal, 50.0) and isWarmedUp
-bool aVfOut     = ta.crossunder(vfVal, 50.0) and isWarmedUp
+bool aCrossUp   = ta.crossover(oscVal, sigVal) and alertReady
+bool aCrossDown = ta.crossunder(oscVal, sigVal) and alertReady
+bool aExitOs    = ta.crossover(oscVal, effOS) and alertReady
+bool aExitOb    = ta.crossunder(oscVal, effOB) and alertReady
+bool aVfIn      = volumeAvailable and ta.crossover(vfCalcVal, 50.0) and alertReady
+bool aVfOut     = volumeAvailable and ta.crossunder(vfCalcVal, 50.0) and alertReady
 
 bool tradeTriggerBull = alCrossInput and aCrossUp and oscVal < 50.0
 bool tradeTriggerBear = alCrossInput and aCrossDown and oscVal > 50.0
 bool exhaustionBull   = alZoneInput and aExitOs
 bool exhaustionBear   = alZoneInput and aExitOb
-bool knnAlertBull     = alKnnInput and knnFlipBull
-bool knnAlertBear     = alKnnInput and knnFlipBear
-bool fatigueAlertOb   = alFatigueInput and fatObSignal
-bool fatigueAlertOs   = alFatigueInput and fatOsSignal
+bool knnAlertBull     = alKnnInput and knnFlipBull and alertReady
+bool knnAlertBear     = alKnnInput and knnFlipBear and alertReady
+bool fatigueAlertOb   = alFatigueInput and fatObSignal and alertReady
+bool fatigueAlertOs   = alFatigueInput and fatOsSignal and alertReady
 
 alertcondition(tradeTriggerBull, "NFE Bull Trigger", "NFE Bull Trigger | {{ticker}} | {{interval}} | Close {{close}}")
 alertcondition(tradeTriggerBear, "NFE Bear Trigger", "NFE Bear Trigger | {{ticker}} | {{interval}} | Close {{close}}")
@@ -802,67 +792,81 @@ alertcondition(fatigueAlertOb, "NFE OB Fatigue", "NFE OB Fatigue | {{ticker}} | 
 alertcondition(fatigueAlertOs, "NFE OS Fatigue", "NFE OS Fatigue | {{ticker}} | {{interval}} | Close {{close}}")
 
 if tradeTriggerBull
-    string jsonMsg = '{"signal":"bull_cross","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"sig":' + sigStr + ',"conf":' + confValStr + ',"knn_conf":' + knnConfStr + '}'
+    string jsonMsg = '{"signal":"bull_cross","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"sig":' + sigStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + ',"conf":' + confValStr + ',"knn_conf":' + knnConfStr + '}'
     string textMsg = "NFE Bull Trigger | " + symbolLabel + " " + tf + " | Osc " + oscStr + " > Sig " + sigStr + " | Conf " + confValStr + " | KNN " + knnConfStr + "%"
-    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
 if tradeTriggerBear
-    string jsonMsg = '{"signal":"bear_cross","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"sig":' + sigStr + ',"conf":' + confValStr + ',"knn_conf":' + knnConfStr + '}'
+    string jsonMsg = '{"signal":"bear_cross","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"sig":' + sigStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + ',"conf":' + confValStr + ',"knn_conf":' + knnConfStr + '}'
     string textMsg = "NFE Bear Trigger | " + symbolLabel + " " + tf + " | Osc " + oscStr + " < Sig " + sigStr + " | Conf " + confValStr + " | KNN " + knnConfStr + "%"
-    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
 if exhaustionBull
-    string textMsg = "NFE Exit Oversold | " + symbolLabel + " " + tf + " | Osc " + oscStr + " | VF " + vfValueStr + " | " + htfBiasStr
-    alert(textMsg, alert.freq_once_per_bar)
+    string jsonMsg = '{"signal":"exit_oversold","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + ',"conf":' + confValStr + '}'
+    string textMsg = "NFE Exit Oversold | " + symbolLabel + " " + tf + " | Osc " + oscStr + " | VF " + vfValueStr + " | " + tfModeAlertStr
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
 if exhaustionBear
-    string textMsg = "NFE Exit Overbought | " + symbolLabel + " " + tf + " | Osc " + oscStr + " | VF " + vfValueStr + " | " + htfBiasStr
-    alert(textMsg, alert.freq_once_per_bar)
+    string jsonMsg = '{"signal":"exit_overbought","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + ',"conf":' + confValStr + '}'
+    string textMsg = "NFE Exit Overbought | " + symbolLabel + " " + tf + " | Osc " + oscStr + " | VF " + vfValueStr + " | " + tfModeAlertStr
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
-if alDivRegAlertInput and dRegBull and sfPassBull and isWarmedUp
+if alDivRegAlertInput and dRegBull and sfPassBull and alertReady
+    string jsonMsg = '{"signal":"regular_bull_div","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + '}'
     string textMsg = "NFE Regular Bull Div | " + symbolLabel + " " + tf + " | Osc " + oscStr + " | VF " + vfValueStr
-    alert(textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
-if alDivRegAlertInput and dRegBear and sfPassBear and isWarmedUp
+if alDivRegAlertInput and dRegBear and sfPassBear and alertReady
+    string jsonMsg = '{"signal":"regular_bear_div","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + '}'
     string textMsg = "NFE Regular Bear Div | " + symbolLabel + " " + tf + " | Osc " + oscStr + " | VF " + vfValueStr
-    alert(textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
-if alDivHidAlertInput and dHidBull and sfPassBull and isWarmedUp
+if alDivHidAlertInput and dHidBull and sfPassBull and alertReady
+    string jsonMsg = '{"signal":"hidden_bull_div","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + '}'
     string textMsg = "NFE Hidden Bull Div | " + symbolLabel + " " + tf + " | Osc " + oscStr + " | VF " + vfValueStr
-    alert(textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
-if alDivHidAlertInput and dHidBear and sfPassBear and isWarmedUp
+if alDivHidAlertInput and dHidBear and sfPassBear and alertReady
+    string jsonMsg = '{"signal":"hidden_bear_div","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + '}'
     string textMsg = "NFE Hidden Bear Div | " + symbolLabel + " " + tf + " | Osc " + oscStr + " | VF " + vfValueStr
-    alert(textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
 if alVolFlowInput and aVfIn
+    string jsonMsg = '{"signal":"volume_inflow","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"conf":' + confValStr + '}'
     string textMsg = "NFE Volume Inflow | " + symbolLabel + " " + tf + " | VF " + vfValueStr + " | Osc " + oscStr
-    alert(textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
 if alVolFlowInput and aVfOut
+    string jsonMsg = '{"signal":"volume_outflow","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"conf":' + confValStr + '}'
     string textMsg = "NFE Volume Outflow | " + symbolLabel + " " + tf + " | VF " + vfValueStr + " | Osc " + oscStr
-    alert(textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
 if fatigueAlertOb
+    string jsonMsg = '{"signal":"ob_fatigue","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + ',"conf":' + confValStr + ',"bars":' + str.tostring(fatigueBarsInput) + '}'
     string textMsg = "NFE OB Fatigue | " + symbolLabel + " " + tf + " | Osc " + oscStr + " | " + str.tostring(fatigueBarsInput) + " bars weakening | Conf " + confValStr
-    alert(textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
 if fatigueAlertOs
+    string jsonMsg = '{"signal":"os_fatigue","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + ',"conf":' + confValStr + ',"bars":' + str.tostring(fatigueBarsInput) + '}'
     string textMsg = "NFE OS Fatigue | " + symbolLabel + " " + tf + " | Osc " + oscStr + " | " + str.tostring(fatigueBarsInput) + " bars strengthening | Conf " + confValStr
-    alert(textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
 if knnAlertBull
+    string jsonMsg = '{"signal":"knn_bull_flip","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + ',"conf":' + confValStr + ',"knn_conf":' + knnConfStr + '}'
     string textMsg = "NFE KNN Bull Flip | " + symbolLabel + " " + tf + " | Confidence " + knnConfStr + "% | Osc " + oscStr + " | Conf " + confValStr
-    alert(textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
 if knnAlertBear
+    string jsonMsg = '{"signal":"knn_bear_flip","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + ',"conf":' + confValStr + ',"knn_conf":' + knnConfStr + '}'
     string textMsg = "NFE KNN Bear Flip | " + symbolLabel + " " + tf + " | Confidence " + knnConfStr + "% | Osc " + oscStr + " | Conf " + confValStr
-    alert(textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
-if alConfInput and confHighCross
+if alConfInput and confHighCross and alertReady
+    string jsonMsg = '{"signal":"confluence_high","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + ',"conf":' + confValStr + ',"knn_conf":' + knnConfStr + '}'
     string textMsg = "NFE Confluence High | " + symbolLabel + " " + tf + " | Score " + confValStr + " | Bullish alignment"
-    alert(textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
-if alConfInput and confLowCross
+if alConfInput and confLowCross and alertReady
+    string jsonMsg = '{"signal":"confluence_low","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + ',"conf":' + confValStr + ',"knn_conf":' + knnConfStr + '}'
     string textMsg = "NFE Confluence Low | " + symbolLabel + " " + tf + " | Score " + confValStr + " | Bearish alignment"
-    alert(textMsg, alert.freq_once_per_bar)
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
