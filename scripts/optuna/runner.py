@@ -19,6 +19,7 @@ import json
 import argparse
 import time
 import importlib
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -288,6 +289,21 @@ def make_objective(
         trial.set_user_attr("indicator_key", indicator_key)
         trial.set_user_attr("ranking_policy", ranking_policy)
         trial.set_user_attr("window_start", start_date)
+        fixed_result_keys = {
+            "trades",
+            "win_rate",
+            "pf",
+            "max_dd_abs",
+            "gross_profit",
+            "gross_loss",
+        }
+        for key, value in result.items():
+            if key in fixed_result_keys:
+                continue
+            if isinstance(value, bool | int | float | str):
+                if isinstance(value, float) and not math.isfinite(value):
+                    continue
+                trial.set_user_attr(key, value)
 
         if result["trades"] < MIN_TRADES:
             raise TrialPruned(f"min_trades:{result['trades']}<{MIN_TRADES}")
@@ -353,7 +369,7 @@ def register_study_metadata(
     objective_primary: str | None = None,
 ) -> None:
     study.set_user_attr("project", "warbird-pro")
-    study.set_user_attr("contract", "MES_15m")
+    study.set_user_attr("contract", "MES_5m" if indicator_key == "warbird_nexus_ml_rsi" else "MES_15m")
     study.set_user_attr("indicator_key", indicator_key)
     study.set_user_attr("profile", profile_name)
     study.set_user_attr("ranking_policy", ranking_policy)
@@ -418,7 +434,7 @@ def export_top_n(
     for rank, t in enumerate(trials, 1):
         wr = _safe_float(t.user_attrs.get("win_rate"), 0.0)
         pf = _safe_float(t.user_attrs.get("pf"), _safe_float(t.value, 0.0))
-        output.append({
+        row = {
             "rank": rank,
             "objective_score": round(_safe_float(t.value), 6),
             "objective_metric": t.user_attrs.get("objective_metric"),
@@ -427,7 +443,43 @@ def export_top_n(
             "trades": _safe_int(t.user_attrs.get("trades"), 0),
             "max_dd": _safe_float(t.user_attrs.get("max_dd"), 0.0),
             "params": t.params,
-        })
+        }
+        metric_keys = [
+            "signal_quality_score",
+            "primary_signal_quality",
+            "confluence_calibration",
+            "volume_flow_quality",
+            "fatigue_warning_quality",
+            "knn_bias_quality",
+            "noise_control",
+            "quality_events",
+            "primary_signal_count",
+            "primary_signal_precision",
+            "fatigue_signal_count",
+            "fatigue_signal_precision",
+            "confluence_event_count",
+            "confluence_precision",
+            "volume_flow_event_count",
+            "volume_flow_precision",
+            "knn_state_count",
+            "knn_state_precision",
+            "primary_signals_per_day",
+            "fatigue_signals_per_day",
+            "knn_flips_per_day",
+            "confluence_flips_per_day",
+            "volume_flow_flips_per_day",
+        ]
+        metrics = {}
+        for key in metric_keys:
+            if key not in t.user_attrs:
+                continue
+            value = t.user_attrs[key]
+            metrics[key] = round(value, 6) if isinstance(value, float) else value
+        if metrics:
+            row["metrics"] = metrics
+            if "quality_events" in metrics:
+                row["events"] = _safe_int(metrics["quality_events"], row["trades"])
+        output.append(row)
 
     wr_tag = f'_wr{int(min_wr*100)}' if min_wr > 0 else ''
     out_path = optuna_dir / f"top{n}{wr_tag}.json"
@@ -435,10 +487,23 @@ def export_top_n(
     label = f'WR≥{min_wr:.0%} ' if min_wr > 0 else ''
     print(f'\n{label}Top-{n} configs written to {out_path.relative_to(REPO_ROOT)} ({len(output)} qualifying)')
     for row in output:
-        print(
-            f'  #{row["rank"]}  WR={row["win_rate"]:.2%}  PF={row["pf"]:.4f}  '
-            f'trades={row["trades"]}  maxDD={row["max_dd"]:.0f}'
-        )
+        metrics = row.get("metrics", {})
+        if "signal_quality_score" in metrics:
+            print(
+                f'  #{row["rank"]}  score={metrics["signal_quality_score"]:.6f}  '
+                f'events={row.get("events", row["trades"])}  '
+                f'primary={metrics.get("primary_signal_quality", 0.0):.4f}  '
+                f'conf={metrics.get("confluence_calibration", 0.0):.4f}  '
+                f'vol={metrics.get("volume_flow_quality", 0.0):.4f}  '
+                f'fatigue={metrics.get("fatigue_warning_quality", 0.0):.4f}  '
+                f'knn={metrics.get("knn_bias_quality", 0.0):.4f}  '
+                f'noise={metrics.get("noise_control", 0.0):.4f}'
+            )
+        else:
+            print(
+                f'  #{row["rank"]}  WR={row["win_rate"]:.2%}  PF={row["pf"]:.4f}  '
+                f'trades={row["trades"]}  maxDD={row["max_dd"]:.0f}'
+            )
 
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
@@ -604,9 +669,21 @@ def main():
         wr = _safe_float(best.user_attrs.get("win_rate"), 0.0)
         pf = _safe_float(best.user_attrs.get("pf"), _safe_float(best.value, 0.0))
         trades = _safe_int(best.user_attrs.get("trades"), 0)
-        print(
-            f"\nBest trial #{best.number}: {obj_metric}={obj_score:.6f}  WR={wr:.2%}  PF={pf:.4f}  trades={trades}"
-        )
+        quality_events = _safe_int(best.user_attrs.get("quality_events"), 0)
+        if quality_events > 0:
+            print(
+                f"\nBest trial #{best.number}: {obj_metric}={obj_score:.6f}  events={quality_events}  "
+                f"primary={_safe_float(best.user_attrs.get('primary_signal_quality'), 0.0):.4f}  "
+                f"conf={_safe_float(best.user_attrs.get('confluence_calibration'), 0.0):.4f}  "
+                f"vol={_safe_float(best.user_attrs.get('volume_flow_quality'), 0.0):.4f}  "
+                f"fatigue={_safe_float(best.user_attrs.get('fatigue_warning_quality'), 0.0):.4f}  "
+                f"knn={_safe_float(best.user_attrs.get('knn_bias_quality'), 0.0):.4f}  "
+                f"noise={_safe_float(best.user_attrs.get('noise_control'), 0.0):.4f}"
+            )
+        else:
+            print(
+                f"\nBest trial #{best.number}: {obj_metric}={obj_score:.6f}  WR={wr:.2%}  PF={pf:.4f}  trades={trades}"
+            )
         print(f"  Params: {json.dumps(best.params, indent=4)}")
     else:
         print("\nNo completed trials available for ranking.")

@@ -109,6 +109,16 @@ def _parse_json_scalar(value_json: str | None, fallback: float = 0.0) -> float:
     return fallback
 
 
+def _parse_json_text(value_json: str | None, fallback: str = "") -> str:
+    if value_json is None:
+        return fallback
+    try:
+        parsed = json.loads(value_json)
+        return str(parsed)
+    except Exception:
+        return fallback
+
+
 def _h(value: Any) -> str:
     return html.escape("" if value is None else str(value))
 
@@ -260,7 +270,7 @@ def assess_profile_wiring(spec: IndicatorSpec) -> dict[str, str]:
 
 def load_topn_stats(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"exists": False, "count": 0, "best_wr": None, "best_pf": None, "error": None}
+        return {"exists": False, "count": 0, "best_wr": None, "best_pf": None, "best_score": None, "best_events": None, "error": None}
     try:
         payload = _load_json(path)
         if not isinstance(payload, list):
@@ -269,16 +279,21 @@ def load_topn_stats(path: Path) -> dict[str, Any]:
                 "count": 0,
                 "best_wr": None,
                 "best_pf": None,
+                "best_score": None,
+                "best_events": None,
                 "error": "top-N file is not a JSON list",
             }
         if len(payload) == 0:
-            return {"exists": True, "count": 0, "best_wr": None, "best_pf": None, "error": None}
+            return {"exists": True, "count": 0, "best_wr": None, "best_pf": None, "best_score": None, "best_events": None, "error": None}
         top = payload[0] if isinstance(payload[0], dict) else {}
+        top_metrics = top.get("metrics", {}) if isinstance(top.get("metrics"), dict) else {}
         return {
             "exists": True,
             "count": len(payload),
             "best_wr": _safe_float(top.get("win_rate"), 0.0) if top else None,
             "best_pf": _safe_float(top.get("pf"), 0.0) if top else None,
+            "best_score": _safe_float(top_metrics.get("signal_quality_score"), _safe_float(top.get("objective_score"), 0.0)) if top else None,
+            "best_events": _safe_int(top.get("events"), _safe_int(top_metrics.get("quality_events"), 0)) if top else None,
             "error": None,
         }
     except Exception as exc:
@@ -287,6 +302,8 @@ def load_topn_stats(path: Path) -> dict[str, Any]:
             "count": 0,
             "best_wr": None,
             "best_pf": None,
+            "best_score": None,
+            "best_events": None,
             "error": str(exc),
         }
 
@@ -355,20 +372,28 @@ def load_study_stats(db_path: Path) -> dict[str, Any]:
             """
             SELECT trial_id, key, value_json
             FROM trial_user_attributes
-            WHERE key IN ('win_rate', 'pf', 'trades', 'max_dd')
+            WHERE key IN (
+                'win_rate', 'pf', 'trades', 'max_dd',
+                'objective_score', 'objective_metric',
+                'signal_quality_score', 'quality_events',
+                'primary_signal_quality', 'confluence_calibration',
+                'volume_flow_quality', 'fatigue_warning_quality',
+                'knn_bias_quality', 'noise_control'
+            )
             """
         ).fetchall():
             attrs.setdefault(_safe_int(trial_id), {})[str(key)] = value_json
 
-        def trial_rank(row: tuple[Any, ...]) -> tuple[float, float, float, int]:
+        def trial_rank(row: tuple[Any, ...]) -> tuple[float, float, float, float, int]:
             trial_id = _safe_int(row[0])
             objective_val = _safe_float(row[4], 0.0)
             ta = attrs.get(trial_id, {})
+            objective_score = _parse_json_scalar(ta.get("objective_score"), objective_val)
             win_rate = _parse_json_scalar(ta.get("win_rate"), objective_val)
             pf = _parse_json_scalar(ta.get("pf"), 0.0)
             max_dd = _parse_json_scalar(ta.get("max_dd"), float("inf"))
             trades = int(round(_parse_json_scalar(ta.get("trades"), 0.0)))
-            return (win_rate, pf, -max_dd, trades)
+            return (objective_score, win_rate, pf, -max_dd, trades)
 
         best = None
         if trial_rows:
@@ -379,10 +404,20 @@ def load_study_stats(db_path: Path) -> dict[str, Any]:
                 "trial_number": _safe_int(best_row[1]),
                 "study_name": str(best_row[3]),
                 "objective": _safe_float(best_row[4], 0.0),
+                "objective_score": _parse_json_scalar(best_attrs.get("objective_score"), _safe_float(best_row[4], 0.0)),
+                "objective_metric": _parse_json_text(best_attrs.get("objective_metric"), ""),
                 "win_rate": _parse_json_scalar(best_attrs.get("win_rate"), _safe_float(best_row[4], 0.0)),
                 "pf": _parse_json_scalar(best_attrs.get("pf"), 0.0),
                 "trades": int(round(_parse_json_scalar(best_attrs.get("trades"), 0.0))),
                 "max_dd": _parse_json_scalar(best_attrs.get("max_dd"), 0.0),
+                "signal_quality_score": _parse_json_scalar(best_attrs.get("signal_quality_score"), 0.0),
+                "quality_events": int(round(_parse_json_scalar(best_attrs.get("quality_events"), 0.0))),
+                "primary_signal_quality": _parse_json_scalar(best_attrs.get("primary_signal_quality"), 0.0),
+                "confluence_calibration": _parse_json_scalar(best_attrs.get("confluence_calibration"), 0.0),
+                "volume_flow_quality": _parse_json_scalar(best_attrs.get("volume_flow_quality"), 0.0),
+                "fatigue_warning_quality": _parse_json_scalar(best_attrs.get("fatigue_warning_quality"), 0.0),
+                "knn_bias_quality": _parse_json_scalar(best_attrs.get("knn_bias_quality"), 0.0),
+                "noise_control": _parse_json_scalar(best_attrs.get("noise_control"), 0.0),
             }
 
         last_complete = None
@@ -589,6 +624,8 @@ class HubState:
                 "topn_count": topn["count"],
                 "topn_best_wr": topn["best_wr"],
                 "topn_best_pf": topn["best_pf"],
+                "topn_best_score": topn["best_score"],
+                "topn_best_events": topn["best_events"],
                 "topn_error": topn["error"],
                 "profile_status": profile["status"],
                 "profile_label": profile["label"],
@@ -621,17 +658,22 @@ class HubState:
             b = c["best"]
             if b is None:
                 continue
+            quality_events = _safe_int(b.get("quality_events"), 0)
             rank = (
+                _safe_float(b.get("objective_score"), _safe_float(b.get("objective"), 0.0)),
                 _safe_float(b.get("win_rate"), 0.0),
                 _safe_float(b.get("pf"), 0.0),
                 -_safe_float(b.get("max_dd"), float("inf")),
-                _safe_int(b.get("trades"), 0),
+                quality_events if quality_events > 0 else _safe_int(b.get("trades"), 0),
             )
             if best_overall is None or rank > best_overall["rank"]:
                 best_overall = {
                     "rank": rank,
                     "indicator_key": c["key"],
                     "indicator_name": c["name"],
+                    "objective_score": _safe_float(b.get("objective_score"), _safe_float(b.get("objective"), 0.0)),
+                    "objective_metric": str(b.get("objective_metric") or ""),
+                    "quality_events": quality_events,
                     "win_rate": _safe_float(b.get("win_rate"), 0.0),
                     "pf": _safe_float(b.get("pf"), 0.0),
                     "trades": _safe_int(b.get("trades"), 0),
@@ -660,11 +702,17 @@ def render_html(snapshot: dict[str, Any]) -> str:
     best = snapshot.get("best_overall")
     best_text = "No completed trials yet"
     if best:
-        best_text = (
-            f'{_h(best["indicator_name"])} ({_h(best["indicator_key"])}) '
-            f'WR {_safe_float(best["win_rate"]):.2%} | PF {_safe_float(best["pf"]):.3f} | '
-            f'Trades {_safe_int(best["trades"])}'
-        )
+        if _safe_int(best.get("quality_events"), 0) > 0:
+            best_text = (
+                f'{_h(best["indicator_name"])} ({_h(best["indicator_key"])}) '
+                f'Score {_safe_float(best["objective_score"]):.3f} | Events {_safe_int(best["quality_events"])}'
+            )
+        else:
+            best_text = (
+                f'{_h(best["indicator_name"])} ({_h(best["indicator_key"])}) '
+                f'WR {_safe_float(best["win_rate"]):.2%} | PF {_safe_float(best["pf"]):.3f} | '
+                f'Trades {_safe_int(best["trades"])}'
+            )
 
     stack = snapshot["stack_health"]
     ag_badge_class = "ok" if stack["availability"]["autogluon_1_5"] else "warn"
@@ -675,14 +723,24 @@ def render_html(snapshot: dict[str, Any]) -> str:
         best_block = "<div class='muted'>No completed trials</div>"
         if card["best"] is not None:
             b = card["best"]
-            best_block = (
-                "<div class='metrics'>"
-                f"<div><span>Best WR</span><strong>{_safe_float(b['win_rate']):.2%}</strong></div>"
-                f"<div><span>Best PF</span><strong>{_safe_float(b['pf']):.3f}</strong></div>"
-                f"<div><span>Trades</span><strong>{_safe_int(b['trades'])}</strong></div>"
-                f"<div><span>Max DD</span><strong>{_safe_float(b['max_dd']):.1f}</strong></div>"
-                "</div>"
-            )
+            if _safe_int(b.get("quality_events"), 0) > 0:
+                best_block = (
+                    "<div class='metrics'>"
+                    f"<div><span>Best Score</span><strong>{_safe_float(b['objective_score']):.3f}</strong></div>"
+                    f"<div><span>Events</span><strong>{_safe_int(b['quality_events'])}</strong></div>"
+                    f"<div><span>Primary</span><strong>{_safe_float(b['primary_signal_quality']):.3f}</strong></div>"
+                    f"<div><span>Volume</span><strong>{_safe_float(b['volume_flow_quality']):.3f}</strong></div>"
+                    "</div>"
+                )
+            else:
+                best_block = (
+                    "<div class='metrics'>"
+                    f"<div><span>Best WR</span><strong>{_safe_float(b['win_rate']):.2%}</strong></div>"
+                    f"<div><span>Best PF</span><strong>{_safe_float(b['pf']):.3f}</strong></div>"
+                    f"<div><span>Trades</span><strong>{_safe_int(b['trades'])}</strong></div>"
+                    f"<div><span>Max DD</span><strong>{_safe_float(b['max_dd']):.1f}</strong></div>"
+                    "</div>"
+                )
 
         topn_block = (
             "<div class='topn muted'>top-N export missing</div>"
@@ -690,9 +748,13 @@ def render_html(snapshot: dict[str, Any]) -> str:
             else (
                 f"<div class='topn'>top-N ready: {card['topn_count']} rows"
                 + (
+                    f" | Score {_safe_float(card['topn_best_score']):.3f} | Events {_safe_int(card['topn_best_events'])}"
+                    if card.get("topn_best_events")
+                    else (
                     f" | WR {_safe_float(card['topn_best_wr']):.2%} | PF {_safe_float(card['topn_best_pf']):.3f}"
                     if card["topn_best_wr"] is not None
                     else ""
+                    )
                 )
                 + "</div>"
             )
@@ -731,6 +793,8 @@ def render_html(snapshot: dict[str, Any]) -> str:
         best_pf = _safe_float(card["best"]["pf"], -1.0) if card["best"] is not None else -1.0
         best_trades = _safe_int(card["best"]["trades"], 0) if card["best"] is not None else 0
         best_max_dd = _safe_float(card["best"]["max_dd"], 1e18) if card["best"] is not None else 1e18
+        best_score = _safe_float(card["best"]["objective_score"], -1.0) if card["best"] is not None else -1.0
+        best_events = _safe_int(card["best"]["quality_events"], 0) if card["best"] is not None else 0
         topn_ready = 1 if card["topn_exists"] and card["topn_count"] > 0 else 0
         profile_ready = 1 if card["profile_status"] == "ready" else 0
         db_ready = 1 if card["db_exists"] else 0
@@ -753,6 +817,8 @@ def render_html(snapshot: dict[str, Any]) -> str:
             f"data-best-pf='{best_pf}' "
             f"data-best-trades='{best_trades}' "
             f"data-best-max-dd='{best_max_dd}' "
+            f"data-best-score='{best_score}' "
+            f"data-best-events='{best_events}' "
             f"data-last-complete='{_h(card['last_complete'] or '')}' "
             f"data-has-best='{1 if card['best'] is not None else 0}'>"
             f"<header><h3>{_h(card['name'])}</h3><span class='badge'>{_h(card['key'])}</span></header>"
@@ -1278,11 +1344,13 @@ def render_html(snapshot: dict[str, Any]) -> str:
           if (numberAttr(card, 'data-has-best', 0) !== 1) {{
             return;
           }}
+          const events = numberAttr(card, 'data-best-events', 0);
           const rank = [
+            numberAttr(card, 'data-best-score', -1),
             numberAttr(card, 'data-best-win-rate', -1),
             numberAttr(card, 'data-best-pf', -1),
             -numberAttr(card, 'data-best-max-dd', Number.POSITIVE_INFINITY),
-            numberAttr(card, 'data-best-trades', 0),
+            events > 0 ? events : numberAttr(card, 'data-best-trades', 0),
           ];
           if (bestRank === null) {{
             bestRank = rank;
@@ -1308,6 +1376,12 @@ def render_html(snapshot: dict[str, Any]) -> str:
 
         const bestName = stringAttr(bestCard, 'data-name');
         const bestKey = stringAttr(bestCard, 'data-key');
+        const events = numberAttr(bestCard, 'data-best-events', 0);
+        if (events > 0) {{
+          const score = numberAttr(bestCard, 'data-best-score', 0);
+          bestText.textContent = `${{bestName}} (${{bestKey}}) Score ${{score.toFixed(3)}} | Events ${{events}}`;
+          return;
+        }}
         const winRate = numberAttr(bestCard, 'data-best-win-rate', 0) * 100;
         const pf = numberAttr(bestCard, 'data-best-pf', 0);
         const trades = numberAttr(bestCard, 'data-best-trades', 0);

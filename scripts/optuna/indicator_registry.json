@@ -149,9 +149,9 @@
     "category": "lower-pane",
     "pine_file": "indicators/warbird-nexus-machine-learning-rsi.pine",
     "profile_module": "scripts.optuna.warbird_nexus_ml_rsi_profile",
-    "default_study_name": "warbird_nexus_ml_rsi_wr_pf",
+    "default_study_name": "warbird_nexus_ml_rsi_signal_quality",
     "symbol": "MES1!",
-    "timeframe": "15",
-    "notes": "Research proxy harness on real MES 15m OHLCV parquet. Optimizes the AMF oscillator, signal, zone, confluence, and ATR exit parameters in a dedicated Optuna workspace."
+    "timeframe": "5",
+    "notes": "Research proxy harness on real MES 5m OHLCV parquet. Optimizes Nexus indicator settings only: source, preset, smoothing, signal smoothing, engine period, zones, confluence thresholds, fatigue bars, KNN neighbors/window, and confirmation gates. No commissions, trade sizing, stops, targets, ATR exits, or non-5m bias gate are active in the Nexus search."
   }
 ]
