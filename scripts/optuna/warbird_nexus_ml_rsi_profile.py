@@ -28,9 +28,6 @@ if str(REPO_ROOT) not in sys.path:
 MINTICK = 0.25
 DATA_PATH = REPO_ROOT / "data" / "mes_5m.parquet"
 SOURCE_1M_PATH = REPO_ROOT / "data" / "mes_1m.parquet"
-ENTRY_RESPONSE_BARS = 5
-FAST_RESPONSE_BARS = 3
-CONTEXT_RESPONSE_BARS = 3
 
 
 BOOL_PARAMS: list[str] = [
@@ -67,6 +64,17 @@ NUMERIC_RANGES: dict[str, tuple[float, float]] = {
     "confVfBearThresholdInput": (38.0, 48.0),
     "confErThresholdInput": (0.20, 0.45),
     "confSmoothLenInput": (1.0, 8.0),
+    # Evaluation horizon (formerly hardcoded)
+    "leg_threshold_pts": (6.0, 20.0),
+    "response_bars":     (5.0, 25.0),
+    "early_bars":        (2.0, 10.0),
+    "adverse_bars":      (3.0, 15.0),
+    # Delta parameters
+    "delta_lookback":    (3.0, 20.0),
+    "delta_slope_len":   (2.0, 10.0),
+    "gasout_stall_bars": (2.0, 8.0),
+    "delta_flip_thresh": (0.05, 0.40),
+    "gasout_thresh":     (0.01, 0.20),
 }
 
 INT_PARAMS: set[str] = {
@@ -76,6 +84,12 @@ INT_PARAMS: set[str] = {
     "knnKInput",
     "knnWindowInput",
     "confSmoothLenInput",
+    "response_bars",
+    "early_bars",
+    "adverse_bars",
+    "delta_lookback",
+    "delta_slope_len",
+    "gasout_stall_bars",
 }
 
 CATEGORICAL_PARAMS: dict[str, list[Any]] = {
@@ -126,6 +140,15 @@ INPUT_DEFAULTS: dict[str, Any] = {
     "confVfBearThresholdInput": 45.0,
     "confErThresholdInput": 0.30,
     "confSmoothLenInput": 3,
+    "leg_threshold_pts": 10.0,
+    "response_bars":     12,
+    "early_bars":        4,
+    "adverse_bars":      6,
+    "delta_lookback":    10,
+    "delta_slope_len":   5,
+    "gasout_stall_bars": 3,
+    "delta_flip_thresh": 0.10,
+    "gasout_thresh":     0.05,
 }
 
 OBJECTIVE_METRIC = "nexus_5m_fast_signal_quality"
@@ -228,6 +251,32 @@ def _calc_er(src: np.ndarray, length: int) -> np.ndarray:
     direction = np.abs(src - shifted)
     volatility = _series(np.abs(np.diff(src, prepend=src[0]))).rolling(length, min_periods=1).sum().to_numpy(dtype=np.float64)
     return _safe_div(direction, volatility, 0.0)
+
+
+def _bar_delta(
+    open_: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    close: np.ndarray,
+    volume: np.ndarray,
+) -> np.ndarray:
+    body = np.abs(close - open_)
+    candle_range = np.maximum(high - low, 1e-9)
+    body_ratio = np.clip(body / candle_range, 0.0, 1.0)
+    body_dir = np.where(close > open_, 1.0, np.where(close < open_, -1.0, 0.0))
+    return body_dir * body_ratio * np.maximum(volume, 0.0)
+
+
+def _cumulative_delta(bar_delta: np.ndarray, lookback: float) -> np.ndarray:
+    lb = max(int(lookback), 1)
+    return _series(bar_delta).rolling(lb, min_periods=1).sum().to_numpy(dtype=np.float64)
+
+
+def _delta_slope(cumulative_delta: np.ndarray, slope_len: float) -> np.ndarray:
+    sl = max(int(slope_len), 1)
+    shifted = np.roll(cumulative_delta, sl)
+    shifted[:sl] = cumulative_delta[0]
+    return cumulative_delta - shifted
 
 
 def _resolve_source(frame: pd.DataFrame, source_input: str) -> np.ndarray:
@@ -537,6 +586,33 @@ def _compute_features(frame: pd.DataFrame, params: dict[str, Any]) -> pd.DataFra
     fat_ob_signal = (fat_ob_count == fatigue_bars) & warmup_mask
     fat_os_signal = (fat_os_count == fatigue_bars) & warmup_mask
 
+    # ── Footprint-style cumulative delta ────────────────────────────────────
+    _delta_lb   = max(int(params.get("delta_lookback", 10)), 1)
+    _slope_len  = max(int(params.get("delta_slope_len", 5)), 1)
+    _flip_th    = float(params.get("delta_flip_thresh", 0.10))
+    _gasout_th  = float(params.get("gasout_thresh", 0.05))
+
+    bar_dlt    = _bar_delta(core["open"], core["high"], core["low"], core["close"], core["volume"])
+    cum_dlt    = _cumulative_delta(bar_dlt, _delta_lb)
+    avg_vol_d  = _series(core["volume"]).rolling(_delta_lb, min_periods=1).mean().to_numpy(dtype=np.float64)
+    norm_cum   = np.clip(
+        _safe_div(cum_dlt, np.maximum(avg_vol_d * _delta_lb, 1.0), 0.0),
+        -1.0, 1.0,
+    )
+    dlt_slope  = _delta_slope(cum_dlt, _slope_len)
+    bar_ratio  = np.clip(
+        _safe_div(bar_dlt, np.maximum(core["volume"], 1.0), 0.0),
+        -1.0, 1.0,
+    )
+    price_pos  = _safe_div(
+        core["close"] - core["low"],
+        np.maximum(core["high"] - core["low"], 1e-9),
+        0.5,
+    )
+    delta_dir  = np.where(norm_cum > _flip_th, 1, np.where(norm_cum < -_flip_th, -1, 0)).astype(np.int8)
+    gasout_bull = (norm_cum > 0.0) & (dlt_slope < -_gasout_th)
+    gasout_bear = (norm_cum < 0.0) & (dlt_slope > _gasout_th)
+
     return pd.DataFrame(
         {
             "ts": pd.to_datetime(frame["ts"], utc=True),
@@ -564,6 +640,13 @@ def _compute_features(frame: pd.DataFrame, params: dict[str, Any]) -> pd.DataFra
             "vf_out": vf_out,
             "fat_ob_signal": fat_ob_signal,
             "fat_os_signal": fat_os_signal,
+            "norm_cum_delta": norm_cum,
+            "delta_slope":    dlt_slope,
+            "bar_delta_ratio": bar_ratio,
+            "price_position": price_pos,
+            "delta_dir":      delta_dir,
+            "gasout_bull":    gasout_bull,
+            "gasout_bear":    gasout_bear,
         }
     )
 
@@ -592,8 +675,8 @@ def _score_directional_events(
     low: np.ndarray,
     close: np.ndarray,
     atr: np.ndarray,
-    horizon_bars: int = ENTRY_RESPONSE_BARS,
-    fast_bars: int = FAST_RESPONSE_BARS,
+    horizon_bars: int = 5,
+    fast_bars: int = 3,
     favorable_atr: float = 0.75,
     adverse_atr: float = 0.75,
 ) -> dict[str, float]:
@@ -684,59 +767,62 @@ def _state_entries(state_direction: np.ndarray) -> np.ndarray:
     return entries
 
 
+def _label_setups(
+    close: np.ndarray,
+    signal_mask: np.ndarray,
+    direction: int,
+    leg_threshold_pts: float,
+    response_bars: int,
+    adverse_bars: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Returns (success_mask, failure_mask).
+    SUCCESS: price moves leg_threshold_pts in direction within response_bars.
+    FAILURE: adverse move happened first OR threshold not reached.
+    """
+    n = len(close)
+    r_bars = max(int(response_bars), 1)
+    adv_bars = max(int(adverse_bars), 1)
+    success = np.zeros(n, dtype=bool)
+    failure = np.zeros(n, dtype=bool)
+    for i in np.where(signal_mask)[0]:
+        if i + 1 >= n:
+            failure[i] = True
+            continue
+        entry = close[i]
+        hit_success = False
+        for j in range(1, min(r_bars + 1, n - i)):
+            move = (close[i + j] - entry) * direction
+            if move >= leg_threshold_pts:
+                hit_success = True
+                break
+            if j <= adv_bars and move <= -leg_threshold_pts * 0.5:
+                break
+        if hit_success:
+            success[i] = True
+        else:
+            failure[i] = True
+    return success, failure
+
+
 def _empty_quality_result() -> dict[str, Any]:
     return {
         "trades": 0,
-        "win_rate": 0.0,
-        "pf": 0.0,
-        "gross_profit": 0.0,
-        "gross_loss": 1.0,
-        "max_dd_abs": 1.0,
-        "net_profit": 0.0,
-        "signal_quality_score": 0.0,
-        "primary_signal_quality": 0.0,
-        "confluence_calibration": 0.0,
-        "volume_flow_quality": 0.0,
-        "fatigue_warning_quality": 0.0,
-        "knn_bias_quality": 0.0,
-        "noise_control": 0.0,
-        "quality_events": 0,
-        "entry_signal_count": 0,
-        "entry_signal_precision": 0.0,
-        "primary_signal_count": 0,
-        "primary_signal_precision": 0.0,
-        "primary_fast_hit_rate": 0.0,
-        "primary_avg_favorable_bars": 0.0,
-        "primary_horizon_bars": ENTRY_RESPONSE_BARS,
-        "fatigue_signal_count": 0,
-        "fatigue_signal_precision": 0.0,
-        "fatigue_fast_hit_rate": 0.0,
-        "fatigue_avg_favorable_bars": 0.0,
-        "confluence_event_count": 0,
-        "confluence_precision": 0.0,
-        "confluence_fast_hit_rate": 0.0,
-        "confluence_avg_favorable_bars": 0.0,
-        "volume_flow_event_count": 0,
-        "volume_flow_precision": 0.0,
-        "volume_flow_fast_hit_rate": 0.0,
-        "volume_flow_avg_favorable_bars": 0.0,
-        "knn_state_count": 0,
-        "knn_state_precision": 0.0,
-        "knn_fast_hit_rate": 0.0,
-        "knn_avg_favorable_bars": 0.0,
-        "primary_signals_per_day": 0.0,
-        "fatigue_signals_per_day": 0.0,
-        "knn_flips_per_day": 0.0,
-        "confluence_flips_per_day": 0.0,
-        "volume_flow_flips_per_day": 0.0,
+        "total_signals": 0,
+        "composite_score": 0.0,
+        "reversal_precision": 0.0,
+        "early_entry_quality": 0.0,
+        "gasout_accuracy": 0.5,
+        "false_avoidance": 0.0,
+        "signal_rate_score": 0.0,
     }
 
 
 def objective_score(result: dict[str, Any]) -> float:
-    quality_events = _safe_int(result.get("quality_events"), _safe_int(result.get("trades"), 0))
-    if quality_events < 20:
+    total_signals = _safe_int(result.get("total_signals"), 0)
+    if total_signals < 5:
         return 0.0
-    return _bounded(_safe_float(result.get("signal_quality_score"), 0.0))
+    return _bounded(_safe_float(result.get("composite_score"), 0.0))
 
 
 def _rollup_1m_to_5m(df: pd.DataFrame) -> pd.DataFrame:
@@ -788,16 +874,16 @@ def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> d
 
     feat = _compute_features(frame, params).reset_index(drop=True)
 
+    # ── Signal construction (same gates as before) ─────────────────────────
     use_conf = bool(params.get("useConfluenceGate", True))
-    use_vf = bool(params.get("useVolumeFlowGate", True))
+    use_vf   = bool(params.get("useVolumeFlowGate", True))
     use_zone_exit = bool(params.get("useZoneExitSignals", False))
-    use_knn = bool(params.get("useKnnGate", True))
+    use_knn  = bool(params.get("useKnnGate", True))
 
     conf_high = _safe_float(params.get("confHighInput"), 65.0)
-    conf_low = _safe_float(params.get("confLowInput"), 35.0)
+    conf_low  = _safe_float(params.get("confLowInput"), 35.0)
     vf_gate_threshold = _safe_float(params.get("vfGateThresholdInput"), 50.0)
     vf_gate_bear_threshold = 100.0 - vf_gate_threshold
-    ob_level, os_level = _effective_zones(params)
 
     osc = feat["osc"].to_numpy(dtype=np.float64)
     prev_osc = np.roll(osc, 1)
@@ -805,217 +891,124 @@ def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> d
     cross_up = feat["cross_up"].to_numpy(dtype=bool)
     cross_down = feat["cross_down"].to_numpy(dtype=bool)
 
-    primary_long = cross_up & ((osc < 50.0) | (prev_osc < 50.0))
+    primary_long  = cross_up  & ((osc < 50.0) | (prev_osc < 50.0))
     primary_short = cross_down & ((osc > 50.0) | (prev_osc > 50.0))
-    long_signal = primary_long.copy()
+    long_signal  = primary_long.copy()
     short_signal = primary_short.copy()
     if use_zone_exit:
-        long_signal |= feat["exit_os"].to_numpy(dtype=bool)
+        long_signal  |= feat["exit_os"].to_numpy(dtype=bool)
         short_signal |= feat["exit_ob"].to_numpy(dtype=bool)
 
     conf_arr = feat["conf"].to_numpy(dtype=np.float64)
-    vf_arr = feat["vf"].to_numpy(dtype=np.float64)
+    vf_arr   = feat["vf"].to_numpy(dtype=np.float64)
     if use_conf:
-        long_signal &= conf_arr >= conf_high
+        long_signal  &= conf_arr >= conf_high
         short_signal &= conf_arr <= conf_low
     if use_vf:
-        long_signal &= vf_arr >= vf_gate_threshold
+        long_signal  &= vf_arr >= vf_gate_threshold
         short_signal &= vf_arr <= vf_gate_bear_threshold
     if use_knn:
-        long_signal &= feat["knn_bull"].to_numpy(dtype=bool)
+        long_signal  &= feat["knn_bull"].to_numpy(dtype=bool)
         short_signal &= feat["knn_bear"].to_numpy(dtype=bool)
 
     warmup_mask = feat["is_warmed_up"].to_numpy(dtype=bool)
-    long_signal &= warmup_mask
-    short_signal &= warmup_mask
 
-    chosen_signal = np.zeros(len(feat), dtype=np.int8)
-    chosen_signal[long_signal & ~short_signal] = 1
-    chosen_signal[short_signal & ~long_signal] = -1
+    # ── Delta gates (new) ─────────────────────────────────────────────────
+    delta_dir = feat["delta_dir"].to_numpy(dtype=np.int8)
+    long_signal  &= warmup_mask & (delta_dir == 1)
+    short_signal &= warmup_mask & (delta_dir == -1)
 
-    high = feat["high"].to_numpy(dtype=np.float64)
-    low = feat["low"].to_numpy(dtype=np.float64)
     close = feat["close"].to_numpy(dtype=np.float64)
-    atr = feat["atr"].to_numpy(dtype=np.float64)
-    primary_stats = _score_directional_events(
-        signal_direction=chosen_signal,
-        high=high,
-        low=low,
-        close=close,
-        atr=atr,
-        horizon_bars=ENTRY_RESPONSE_BARS,
-        fast_bars=FAST_RESPONSE_BARS,
-        favorable_atr=0.50,
-        adverse_atr=0.50,
-    )
 
-    fat_ob_signal = feat["fat_ob_signal"].to_numpy(dtype=bool)
-    fat_os_signal = feat["fat_os_signal"].to_numpy(dtype=bool)
-    fatigue_direction = np.zeros(len(feat), dtype=np.int8)
-    fatigue_direction[fat_os_signal & warmup_mask] = 1
-    fatigue_direction[fat_ob_signal & warmup_mask] = -1
-    fatigue_stats = _score_directional_events(
-        signal_direction=fatigue_direction,
-        high=high,
-        low=low,
-        close=close,
-        atr=atr,
-        horizon_bars=ENTRY_RESPONSE_BARS,
-        fast_bars=FAST_RESPONSE_BARS,
-        favorable_atr=0.50,
-        adverse_atr=0.75,
-    )
+    # ── Label setups ──────────────────────────────────────────────────────
+    leg_pts    = float(params.get("leg_threshold_pts", 10.0))
+    r_bars     = max(int(params.get("response_bars", 12)), 1)
+    early      = max(int(params.get("early_bars", 4)), 1)
+    adv_bars   = max(int(params.get("adverse_bars", 6)), 1)
 
-    conf_direction = np.zeros(len(feat), dtype=np.int8)
-    conf_direction[(conf_arr >= conf_high) & warmup_mask] = 1
-    conf_direction[(conf_arr <= conf_low) & warmup_mask] = -1
-    conf_events = _state_entries(conf_direction)
-    conf_stats = _score_directional_events(
-        signal_direction=conf_events,
-        high=high,
-        low=low,
-        close=close,
-        atr=atr,
-        horizon_bars=ENTRY_RESPONSE_BARS,
-        fast_bars=FAST_RESPONSE_BARS,
-        favorable_atr=0.50,
-        adverse_atr=0.50,
-    )
+    bull_succ, bull_fail = _label_setups(close, long_signal,  +1, leg_pts, r_bars, adv_bars)
+    bear_succ, bear_fail = _label_setups(close, short_signal, -1, leg_pts, r_bars, adv_bars)
 
-    knn_direction = np.zeros(len(feat), dtype=np.int8)
-    knn_direction[feat["knn_bull"].to_numpy(dtype=bool) & warmup_mask] = 1
-    knn_direction[feat["knn_bear"].to_numpy(dtype=bool) & warmup_mask] = -1
-    knn_events = _state_entries(knn_direction)
-    knn_stats = _score_directional_events(
-        signal_direction=knn_events,
-        high=high,
-        low=low,
-        close=close,
-        atr=atr,
-        horizon_bars=CONTEXT_RESPONSE_BARS,
-        fast_bars=2,
-        favorable_atr=0.35,
-        adverse_atr=0.35,
-    )
+    total_signals = int(long_signal.sum() + short_signal.sum())
+    if total_signals < 5:
+        return _empty_quality_result()
 
-    volume_direction = np.zeros(len(feat), dtype=np.int8)
-    volume_direction[feat["vf_in"].to_numpy(dtype=bool)] = 1
-    volume_direction[feat["vf_out"].to_numpy(dtype=bool)] = -1
-    volume_stats = _score_directional_events(
-        signal_direction=volume_direction,
-        high=high,
-        low=low,
-        close=close,
-        atr=atr,
-        horizon_bars=CONTEXT_RESPONSE_BARS,
-        fast_bars=2,
-        favorable_atr=0.50,
-        adverse_atr=0.50,
-    )
+    # ── Reversal precision (0.40 weight) ──────────────────────────────────
+    total_succ = int(bull_succ.sum() + bear_succ.sum())
+    reversal_precision = total_succ / total_signals
 
-    ts_chicago = feat["ts"].dt.tz_convert("America/Chicago")
-    day_count = max(int(ts_chicago.dt.date.nunique()), 1)
-    primary_signal_count = int(primary_stats["count"])
-    fatigue_signal_count = int(fatigue_stats["count"])
-    confluence_event_count = int(conf_stats["count"])
-    volume_flow_event_count = int(volume_stats["count"])
-    knn_state_count = int(knn_stats["count"])
-    confluence_flips = int(np.count_nonzero(conf_events))
-    volume_flow_flips = int(np.count_nonzero(volume_direction))
-    knn_flips = int(np.count_nonzero(knn_events))
+    # ── Early entry quality (0.25 weight) ─────────────────────────────────
+    early_hits  = 0
+    early_total = int(bull_succ.sum() + bear_succ.sum())
+    if early_total > 0:
+        for direction, succ_mask in [(+1, bull_succ), (-1, bear_succ)]:
+            for i in np.where(succ_mask)[0]:
+                entry = close[i]
+                for j in range(1, min(early + 1, len(close) - i)):
+                    move = (close[i + j] - entry) * direction
+                    if move >= leg_pts * 0.5:
+                        early_hits += 1
+                        break
+        early_entry_quality = early_hits / early_total
+    else:
+        early_entry_quality = 0.0
 
-    primary_signals_per_day = primary_signal_count / day_count
-    fatigue_signals_per_day = fatigue_signal_count / day_count
-    confluence_flips_per_day = confluence_flips / day_count
-    volume_flow_flips_per_day = volume_flow_flips / day_count
-    knn_flips_per_day = knn_flips / day_count
+    # ── Gassing out accuracy (0.15 weight) ────────────────────────────────
+    gasout_bull = feat["gasout_bull"].to_numpy(dtype=bool)
+    gasout_bear = feat["gasout_bear"].to_numpy(dtype=bool)
+    gasout_stall = max(int(params.get("gasout_stall_bars", 3)), 1)
+    gasout_mask  = (gasout_bull | gasout_bear) & warmup_mask
+    n_gasout = int(gasout_mask.sum())
+    if n_gasout > 0:
+        gasout_correct = 0
+        for i in np.where(gasout_mask)[0]:
+            direction = +1 if gasout_bull[i] else -1
+            entry = close[i]
+            stalled = True
+            for j in range(1, min(gasout_stall + 1, len(close) - i)):
+                move = (close[i + j] - entry) * direction
+                if move >= leg_pts:
+                    stalled = False
+                    break
+            if stalled:
+                gasout_correct += 1
+        gasout_accuracy = gasout_correct / n_gasout
+    else:
+        gasout_accuracy = 0.5
 
-    primary_signal_quality = primary_stats["quality"] * _presence_score(primary_signal_count, 60.0)
-    confluence_calibration = conf_stats["quality"] * _presence_score(confluence_event_count, 80.0)
-    volume_flow_stability = _bounded(1.0 - volume_flow_flips_per_day / 18.0)
-    volume_flow_quality = (
-        0.80 * volume_stats["quality"] * _presence_score(volume_flow_event_count, 60.0)
-        + 0.20 * volume_flow_stability
-    )
-    fatigue_warning_quality = fatigue_stats["quality"] * _presence_score(fatigue_signal_count, 40.0)
-    knn_stability = _bounded(1.0 - knn_flips_per_day / 18.0)
-    knn_bias_quality = (
-        0.75 * knn_stats["quality"] * _presence_score(knn_state_count, 80.0)
-        + 0.25 * knn_stability
-    )
+    # ── False continuation avoidance (0.10 weight) ────────────────────────
+    false_avoidance = 1.0 - (int(bull_fail.sum()) + int(bear_fail.sum())) / total_signals
 
-    primary_rate_score = _rate_band_score(primary_signals_per_day, low=0.35, high=8.0, hard_high=20.0)
-    fatigue_rate_score = _rate_band_score(fatigue_signals_per_day, low=0.15, high=8.0, hard_high=20.0)
-    confluence_stability = _bounded(1.0 - confluence_flips_per_day / 12.0)
-    noise_control = (
-        0.30 * primary_rate_score
-        + 0.20 * fatigue_rate_score
-        + 0.20 * knn_stability
-        + 0.15 * confluence_stability
-        + 0.15 * volume_flow_stability
-    )
+    # ── Signal rate in target band 4–10/day on 5m (0.10 weight) ──────────
+    ts_chicago      = feat["ts"].dt.tz_convert("America/Chicago")
+    day_count       = max(int(ts_chicago.dt.date.nunique()), 1)
+    signals_per_day = total_signals / day_count
+    target_lo, target_hi = 4.0, 10.0
+    if target_lo <= signals_per_day <= target_hi:
+        signal_rate_score = 1.0
+    elif signals_per_day < target_lo:
+        signal_rate_score = max(0.0, signals_per_day / target_lo)
+    else:
+        signal_rate_score = max(0.0, 1.0 - (signals_per_day - target_hi) / target_hi)
 
-    signal_quality_score = _bounded(
-        0.30 * primary_signal_quality
-        + 0.20 * confluence_calibration
-        + 0.15 * volume_flow_quality
-        + 0.15 * fatigue_warning_quality
-        + 0.10 * knn_bias_quality
-        + 0.10 * noise_control
+    # ── Composite ─────────────────────────────────────────────────────────
+    composite = _bounded(
+        0.40 * reversal_precision
+        + 0.25 * early_entry_quality
+        + 0.15 * gasout_accuracy
+        + 0.10 * false_avoidance
+        + 0.10 * signal_rate_score
     )
-    quality_events = primary_signal_count + fatigue_signal_count + confluence_event_count + volume_flow_event_count + knn_state_count
-    quality_ratio = signal_quality_score / max(1.0 - signal_quality_score, 0.001)
 
     return {
-        "trades": quality_events,
-        "win_rate": primary_stats["precision"],
-        "pf": min(quality_ratio, 99.0),
-        "gross_profit": signal_quality_score,
-        "gross_loss": max(1.0 - signal_quality_score, 0.0),
-        "max_dd_abs": max(1.0 - noise_control, 0.0),
-        "net_profit": signal_quality_score,
-        "signal_quality_score": signal_quality_score,
-        "primary_signal_quality": primary_signal_quality,
-        "confluence_calibration": confluence_calibration,
-        "volume_flow_quality": volume_flow_quality,
-        "fatigue_warning_quality": fatigue_warning_quality,
-        "knn_bias_quality": knn_bias_quality,
-        "noise_control": noise_control,
-        "quality_events": quality_events,
-        "entry_signal_count": primary_signal_count,
-        "entry_signal_precision": primary_stats["precision"],
-        "primary_signal_count": primary_signal_count,
-        "primary_signal_precision": primary_stats["precision"],
-        "primary_mean_forward_atr": primary_stats["mean_forward_atr"],
-        "primary_favorable_hit_rate": primary_stats["favorable_hit_rate"],
-        "primary_fast_hit_rate": primary_stats["fast_hit_rate"],
-        "primary_avg_favorable_bars": primary_stats["avg_favorable_bars"],
-        "primary_adverse_first_rate": primary_stats["adverse_first_rate"],
-        "primary_horizon_bars": primary_stats["horizon_bars"],
-        "primary_fast_bars": primary_stats["fast_bars"],
-        "fatigue_signal_count": fatigue_signal_count,
-        "fatigue_signal_precision": fatigue_stats["precision"],
-        "fatigue_mean_forward_atr": fatigue_stats["mean_forward_atr"],
-        "fatigue_fast_hit_rate": fatigue_stats["fast_hit_rate"],
-        "fatigue_avg_favorable_bars": fatigue_stats["avg_favorable_bars"],
-        "confluence_event_count": confluence_event_count,
-        "confluence_precision": conf_stats["precision"],
-        "confluence_mean_forward_atr": conf_stats["mean_forward_atr"],
-        "confluence_fast_hit_rate": conf_stats["fast_hit_rate"],
-        "confluence_avg_favorable_bars": conf_stats["avg_favorable_bars"],
-        "volume_flow_event_count": volume_flow_event_count,
-        "volume_flow_precision": volume_stats["precision"],
-        "volume_flow_mean_forward_atr": volume_stats["mean_forward_atr"],
-        "volume_flow_fast_hit_rate": volume_stats["fast_hit_rate"],
-        "volume_flow_avg_favorable_bars": volume_stats["avg_favorable_bars"],
-        "knn_state_count": knn_state_count,
-        "knn_state_precision": knn_stats["precision"],
-        "knn_mean_forward_atr": knn_stats["mean_forward_atr"],
-        "knn_fast_hit_rate": knn_stats["fast_hit_rate"],
-        "knn_avg_favorable_bars": knn_stats["avg_favorable_bars"],
-        "primary_signals_per_day": primary_signals_per_day,
-        "fatigue_signals_per_day": fatigue_signals_per_day,
-        "knn_flips_per_day": knn_flips_per_day,
-        "confluence_flips_per_day": confluence_flips_per_day,
-        "volume_flow_flips_per_day": volume_flow_flips_per_day,
+        "trades":              total_signals,
+        "total_signals":       total_signals,
+        "composite_score":     composite,
+        "reversal_precision":  reversal_precision,
+        "early_entry_quality": early_entry_quality,
+        "gasout_accuracy":     gasout_accuracy,
+        "false_avoidance":     false_avoidance,
+        "signal_rate_score":   signal_rate_score,
+        "signals_per_day":     signals_per_day,
+        "leg_threshold_pts":   leg_pts,
     }
