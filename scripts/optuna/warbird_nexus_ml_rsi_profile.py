@@ -28,7 +28,9 @@ if str(REPO_ROOT) not in sys.path:
 MINTICK = 0.25
 DATA_PATH = REPO_ROOT / "data" / "mes_5m.parquet"
 SOURCE_1M_PATH = REPO_ROOT / "data" / "mes_1m.parquet"
-SIGNAL_HORIZON_BARS = 12
+ENTRY_RESPONSE_BARS = 5
+FAST_RESPONSE_BARS = 3
+CONTEXT_RESPONSE_BARS = 3
 
 
 BOOL_PARAMS: list[str] = [
@@ -39,15 +41,32 @@ BOOL_PARAMS: list[str] = [
 ]
 
 NUMERIC_RANGES: dict[str, tuple[float, float]] = {
-    "lengthInput": (8.0, 34.0),
-    "sigLenInput": (3.0, 10.0),
-    "obInput": (70.0, 85.0),
-    "osInput": (15.0, 30.0),
+    "lengthInput": (8.0, 50.0),
+    "sigLenInput": (3.0, 16.0),
+    "obInput": (60.0, 88.0),
+    "osInput": (12.0, 38.0),
     "confHighInput": (60.0, 75.0),
     "confLowInput": (25.0, 40.0),
-    "fatigueBarsInput": (1.0, 4.0),
-    "knnKInput": (3.0, 10.0),
-    "knnWindowInput": (80.0, 300.0),
+    "fatigueBarsInput": (1.0, 5.0),
+    "knnKInput": (3.0, 15.0),
+    "knnWindowInput": (50.0, 400.0),
+    "knnBullThresholdInput": (54.0, 66.0),
+    "knnBearThresholdInput": (34.0, 46.0),
+    "knnAtrLabelThresholdInput": (0.05, 0.30),
+    "knnRecencyBoostInput": (0.00, 0.25),
+    "vfBodyWeightInput": (0.45, 0.85),
+    "vfFastLenMultInput": (0.35, 0.90),
+    "vfSlowLenMultInput": (1.00, 2.20),
+    "vfFastBlendWeightInput": (0.35, 0.80),
+    "vfPeakLenMultInput": (2.0, 6.0),
+    "vfSignalThresholdInput": (50.0, 60.0),
+    "vfGateThresholdInput": (50.0, 60.0),
+    "confOscBullThresholdInput": (52.0, 62.0),
+    "confOscBearThresholdInput": (38.0, 48.0),
+    "confVfBullThresholdInput": (52.0, 62.0),
+    "confVfBearThresholdInput": (38.0, 48.0),
+    "confErThresholdInput": (0.20, 0.45),
+    "confSmoothLenInput": (1.0, 8.0),
 }
 
 INT_PARAMS: set[str] = {
@@ -56,6 +75,7 @@ INT_PARAMS: set[str] = {
     "fatigueBarsInput",
     "knnKInput",
     "knnWindowInput",
+    "confSmoothLenInput",
 }
 
 CATEGORICAL_PARAMS: dict[str, list[Any]] = {
@@ -89,9 +109,26 @@ INPUT_DEFAULTS: dict[str, Any] = {
     "fatigueBarsInput": 2,
     "knnKInput": 7,
     "knnWindowInput": 180,
+    "knnBullThresholdInput": 58.0,
+    "knnBearThresholdInput": 42.0,
+    "knnAtrLabelThresholdInput": 0.15,
+    "knnRecencyBoostInput": 0.10,
+    "vfBodyWeightInput": 0.70,
+    "vfFastLenMultInput": 0.60,
+    "vfSlowLenMultInput": 1.40,
+    "vfFastBlendWeightInput": 0.60,
+    "vfPeakLenMultInput": 4.0,
+    "vfSignalThresholdInput": 50.0,
+    "vfGateThresholdInput": 50.0,
+    "confOscBullThresholdInput": 55.0,
+    "confOscBearThresholdInput": 45.0,
+    "confVfBullThresholdInput": 55.0,
+    "confVfBearThresholdInput": 45.0,
+    "confErThresholdInput": 0.30,
+    "confSmoothLenInput": 3,
 }
 
-OBJECTIVE_METRIC = "nexus_5m_signal_quality"
+OBJECTIVE_METRIC = "nexus_5m_fast_signal_quality"
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -243,6 +280,12 @@ def _compute_core(frame: pd.DataFrame, params: dict[str, Any]) -> dict[str, np.n
     source = _resolve_source(frame, str(params.get("sourceInput", "close")))
     smooth_type = str(params.get("smoothTypeInput", "DEMA"))
     sig_type = str(params.get("sigTypeInput", "EMA"))
+    vf_body_weight = float(np.clip(_safe_float(params.get("vfBodyWeightInput"), 0.70), 0.0, 1.0))
+    vf_wick_weight = 1.0 - vf_body_weight
+    vf_fast_len_mult = max(_safe_float(params.get("vfFastLenMultInput"), 0.60), 0.10)
+    vf_slow_len_mult = max(_safe_float(params.get("vfSlowLenMultInput"), 1.40), 0.10)
+    vf_fast_blend_weight = float(np.clip(_safe_float(params.get("vfFastBlendWeightInput"), 0.60), 0.0, 1.0))
+    vf_peak_len_mult = max(_safe_float(params.get("vfPeakLenMultInput"), 4.0), 1.0)
 
     open_ = frame["open"].to_numpy(dtype=np.float64)
     high = frame["high"].to_numpy(dtype=np.float64)
@@ -292,7 +335,7 @@ def _compute_core(frame: pd.DataFrame, params: dict[str, Any]) -> dict[str, np.n
     lower_wick = np.minimum(close, open_) - low
     wick_bias = _safe_div(lower_wick - upper_wick, candle_range, 0.0)
     body_dir = np.where(close > open_, 1.0, np.where(close < open_, -1.0, 0.0))
-    candle_score = body_dir * body_ratio * 0.7 + wick_bias * 0.3
+    candle_score = body_dir * body_ratio * vf_body_weight + wick_bias * vf_wick_weight
     signed_vol = np.where(volume_available, candle_score * bar_volume, 0.0)
     avg_vol = _sma(bar_volume, eff_len * 2)
     vnvf_raw = np.where(
@@ -300,10 +343,10 @@ def _compute_core(frame: pd.DataFrame, params: dict[str, Any]) -> dict[str, np.n
         _safe_div(signed_vol, np.maximum(atr_eff, MINTICK) * np.maximum(avg_vol, 1.0), 0.0),
         0.0,
     )
-    vnvf_fast = _ema(vnvf_raw, max(int(round(eff_len * 0.6)), 2))
-    vnvf_slow = _ema(vnvf_raw, max(int(round(eff_len * 1.4)), 3))
-    vnvf_blend = vnvf_fast * 0.6 + vnvf_slow * 0.4
-    vnvf_peak = np.maximum(_rolling_high(np.abs(vnvf_blend), eff_len * 4), 0.0001)
+    vnvf_fast = _ema(vnvf_raw, max(int(round(eff_len * vf_fast_len_mult)), 2))
+    vnvf_slow = _ema(vnvf_raw, max(int(round(eff_len * vf_slow_len_mult)), 3))
+    vnvf_blend = vnvf_fast * vf_fast_blend_weight + vnvf_slow * (1.0 - vf_fast_blend_weight)
+    vnvf_peak = np.maximum(_rolling_high(np.abs(vnvf_blend), max(int(round(eff_len * vf_peak_len_mult)), 1)), 0.0001)
     vf_raw = np.clip(_safe_div(vnvf_blend, vnvf_peak, 0.0) * 50.0 + 50.0, 0.0, 100.0)
     vf = np.where(volume_available, vf_raw, 50.0)
 
@@ -334,6 +377,10 @@ def _compute_knn(
     warmup_mask: np.ndarray,
     k_neighbors: int,
     training_window: int,
+    bull_threshold: float,
+    bear_threshold: float,
+    atr_label_threshold: float,
+    recency_boost: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     feat1 = osc / 100.0
     feat2 = vf / 100.0
@@ -352,9 +399,9 @@ def _compute_knn(
         if i == 0:
             outcome = 0
         else:
-            if close[i] > close[i - 1] + atr14[i] * 0.15:
+            if close[i] > close[i - 1] + atr14[i] * atr_label_threshold:
                 outcome = 1
-            elif close[i] < close[i - 1] - atr14[i] * 0.15:
+            elif close[i] < close[i - 1] - atr14[i] * atr_label_threshold:
                 outcome = 0
             else:
                 outcome = k_label
@@ -385,7 +432,7 @@ def _compute_knn(
                 + abs(feat3[i] - kf3[j])
                 + abs(feat4[i] - kf4[j])
             )
-            recency_bonus = 1.0 + (j / float(k_size)) * 0.1
+            recency_bonus = 1.0 + (j / float(k_size)) * recency_boost
             distances[j] = d / recency_bonus
 
         order = np.argsort(distances)[:k_neighbors]
@@ -395,8 +442,8 @@ def _compute_knn(
         total_weight = float(np.sum(weights))
         knn_val[i] = _safe_float(_safe_div(bull_votes, total_weight, 0.5), 0.5) * 100.0
 
-    knn_bull = knn_val >= 58.0
-    knn_bear = knn_val <= 42.0
+    knn_bull = knn_val >= bull_threshold
+    knn_bear = knn_val <= bear_threshold
     return knn_val, knn_bull, knn_bear
 
 
@@ -418,6 +465,10 @@ def _compute_features(frame: pd.DataFrame, params: dict[str, Any]) -> pd.DataFra
 
     knn_k = max(_safe_int(params.get("knnKInput"), 7), 3)
     knn_window = max(_safe_int(params.get("knnWindowInput"), 180), 50)
+    knn_bull_threshold = _safe_float(params.get("knnBullThresholdInput"), 58.0)
+    knn_bear_threshold = _safe_float(params.get("knnBearThresholdInput"), 42.0)
+    knn_atr_label_threshold = max(_safe_float(params.get("knnAtrLabelThresholdInput"), 0.15), 0.0)
+    knn_recency_boost = max(_safe_float(params.get("knnRecencyBoostInput"), 0.10), 0.0)
     knn_val, knn_bull, knn_bear = _compute_knn(
         osc=osc,
         sig=sig,
@@ -428,17 +479,30 @@ def _compute_features(frame: pd.DataFrame, params: dict[str, Any]) -> pd.DataFra
         warmup_mask=warmup_mask,
         k_neighbors=knn_k,
         training_window=knn_window,
+        bull_threshold=knn_bull_threshold,
+        bear_threshold=knn_bear_threshold,
+        atr_label_threshold=knn_atr_label_threshold,
+        recency_boost=knn_recency_boost,
     )
 
-    er_trending = er_smoothed > 0.3
+    conf_osc_bull_threshold = _safe_float(params.get("confOscBullThresholdInput"), 55.0)
+    conf_osc_bear_threshold = _safe_float(params.get("confOscBearThresholdInput"), 45.0)
+    conf_vf_bull_threshold = _safe_float(params.get("confVfBullThresholdInput"), 55.0)
+    conf_vf_bear_threshold = _safe_float(params.get("confVfBearThresholdInput"), 45.0)
+    conf_er_threshold = _safe_float(params.get("confErThresholdInput"), 0.30)
+    conf_smooth_len = max(_safe_int(params.get("confSmoothLenInput"), 3), 1)
+    vf_signal_threshold = _safe_float(params.get("vfSignalThresholdInput"), 50.0)
+    vf_signal_bear_threshold = 100.0 - vf_signal_threshold
+
+    er_trending = er_smoothed > conf_er_threshold
     conf_bull = np.zeros(len(frame), dtype=np.int64)
     conf_bear = np.zeros(len(frame), dtype=np.int64)
-    conf_bull += (osc > 55.0).astype(np.int64)
-    conf_bear += (osc < 45.0).astype(np.int64)
+    conf_bull += (osc > conf_osc_bull_threshold).astype(np.int64)
+    conf_bear += (osc < conf_osc_bear_threshold).astype(np.int64)
     conf_bull += (osc > sig).astype(np.int64)
     conf_bear += (osc < sig).astype(np.int64)
-    conf_bull += ((vf > 55.0) & volume_available).astype(np.int64)
-    conf_bear += ((vf < 45.0) & volume_available).astype(np.int64)
+    conf_bull += ((vf > conf_vf_bull_threshold) & volume_available).astype(np.int64)
+    conf_bear += ((vf < conf_vf_bear_threshold) & volume_available).astype(np.int64)
     conf_bull += (er_trending & (osc > 50.0)).astype(np.int64)
     conf_bear += (er_trending & (osc < 50.0)).astype(np.int64)
     conf_bull += knn_bull.astype(np.int64)
@@ -446,7 +510,7 @@ def _compute_features(frame: pd.DataFrame, params: dict[str, Any]) -> pd.DataFra
     conf_net = conf_bull - conf_bear
     conf_sources = np.where(volume_available, 5.0, 4.0)
     conf_raw = (conf_net + conf_sources) / (conf_sources * 2.0) * 100.0
-    conf = np.clip(_ema(conf_raw, 3), 0.0, 100.0)
+    conf = np.clip(_ema(conf_raw, conf_smooth_len), 0.0, 100.0)
 
     prev_osc = np.roll(osc, 1)
     prev_sig = np.roll(sig, 1)
@@ -458,8 +522,8 @@ def _compute_features(frame: pd.DataFrame, params: dict[str, Any]) -> pd.DataFra
     cross_down = (osc < sig) & (prev_osc >= prev_sig) & warmup_mask
     exit_os = (osc > os_level) & (prev_osc <= os_level) & warmup_mask
     exit_ob = (osc < ob_level) & (prev_osc >= ob_level) & warmup_mask
-    vf_in = (vf > 50.0) & (prev_vf <= 50.0) & warmup_mask & volume_available
-    vf_out = (vf < 50.0) & (prev_vf >= 50.0) & warmup_mask & volume_available
+    vf_in = (vf > vf_signal_threshold) & (prev_vf <= vf_signal_threshold) & warmup_mask & volume_available
+    vf_out = (vf < vf_signal_bear_threshold) & (prev_vf >= vf_signal_bear_threshold) & warmup_mask & volume_available
 
     fatigue_ob_weak = (osc >= ob_level) & (osc < prev_osc)
     fatigue_os_str = (osc <= os_level) & (osc > prev_osc)
@@ -528,15 +592,20 @@ def _score_directional_events(
     low: np.ndarray,
     close: np.ndarray,
     atr: np.ndarray,
-    horizon_bars: int = SIGNAL_HORIZON_BARS,
+    horizon_bars: int = ENTRY_RESPONSE_BARS,
+    fast_bars: int = FAST_RESPONSE_BARS,
     favorable_atr: float = 0.75,
     adverse_atr: float = 0.75,
 ) -> dict[str, float]:
+    horizon_bars = max(int(horizon_bars), 1)
+    fast_bars = max(1, min(int(fast_bars), horizon_bars))
     count = 0
     good = 0
     favorable_hits = 0
+    fast_hits = 0
     adverse_first = 0
     forward_atr_returns: list[float] = []
+    favorable_offsets: list[int] = []
 
     for i in range(len(signal_direction) - 1):
         direction = int(signal_direction[i])
@@ -558,7 +627,11 @@ def _score_directional_events(
                     success = False
                     break
                 if high[j] >= favorable:
+                    offset = j - i
                     favorable_hits += 1
+                    favorable_offsets.append(offset)
+                    if offset <= fast_bars:
+                        fast_hits += 1
                     success = True
                     break
             else:
@@ -567,7 +640,11 @@ def _score_directional_events(
                     success = False
                     break
                 if low[j] <= favorable:
+                    offset = j - i
                     favorable_hits += 1
+                    favorable_offsets.append(offset)
+                    if offset <= fast_bars:
+                        fast_hits += 1
                     success = True
                     break
 
@@ -579,15 +656,21 @@ def _score_directional_events(
             good += 1
 
     precision = good / count if count else 0.0
+    fast_hit_rate = fast_hits / count if count else 0.0
     mean_forward_atr = float(np.mean(forward_atr_returns)) if forward_atr_returns else 0.0
+    avg_favorable_bars = float(np.mean(favorable_offsets)) if favorable_offsets else 0.0
     edge_score = _bounded(0.5 + 0.5 * np.tanh(mean_forward_atr / 0.75))
-    quality = _bounded(0.70 * precision + 0.30 * edge_score)
+    quality = _bounded(0.55 * precision + 0.25 * fast_hit_rate + 0.20 * edge_score)
     return {
         "count": float(count),
         "precision": float(precision),
         "mean_forward_atr": mean_forward_atr,
         "favorable_hit_rate": favorable_hits / count if count else 0.0,
+        "fast_hit_rate": fast_hit_rate,
+        "avg_favorable_bars": avg_favorable_bars,
         "adverse_first_rate": adverse_first / count if count else 0.0,
+        "horizon_bars": float(horizon_bars),
+        "fast_bars": float(fast_bars),
         "quality": quality,
     }
 
@@ -622,14 +705,25 @@ def _empty_quality_result() -> dict[str, Any]:
         "entry_signal_precision": 0.0,
         "primary_signal_count": 0,
         "primary_signal_precision": 0.0,
+        "primary_fast_hit_rate": 0.0,
+        "primary_avg_favorable_bars": 0.0,
+        "primary_horizon_bars": ENTRY_RESPONSE_BARS,
         "fatigue_signal_count": 0,
         "fatigue_signal_precision": 0.0,
+        "fatigue_fast_hit_rate": 0.0,
+        "fatigue_avg_favorable_bars": 0.0,
         "confluence_event_count": 0,
         "confluence_precision": 0.0,
+        "confluence_fast_hit_rate": 0.0,
+        "confluence_avg_favorable_bars": 0.0,
         "volume_flow_event_count": 0,
         "volume_flow_precision": 0.0,
+        "volume_flow_fast_hit_rate": 0.0,
+        "volume_flow_avg_favorable_bars": 0.0,
         "knn_state_count": 0,
         "knn_state_precision": 0.0,
+        "knn_fast_hit_rate": 0.0,
+        "knn_avg_favorable_bars": 0.0,
         "primary_signals_per_day": 0.0,
         "fatigue_signals_per_day": 0.0,
         "knn_flips_per_day": 0.0,
@@ -701,6 +795,8 @@ def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> d
 
     conf_high = _safe_float(params.get("confHighInput"), 65.0)
     conf_low = _safe_float(params.get("confLowInput"), 35.0)
+    vf_gate_threshold = _safe_float(params.get("vfGateThresholdInput"), 50.0)
+    vf_gate_bear_threshold = 100.0 - vf_gate_threshold
     ob_level, os_level = _effective_zones(params)
 
     osc = feat["osc"].to_numpy(dtype=np.float64)
@@ -723,8 +819,8 @@ def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> d
         long_signal &= conf_arr >= conf_high
         short_signal &= conf_arr <= conf_low
     if use_vf:
-        long_signal &= vf_arr >= 50.0
-        short_signal &= vf_arr <= 50.0
+        long_signal &= vf_arr >= vf_gate_threshold
+        short_signal &= vf_arr <= vf_gate_bear_threshold
     if use_knn:
         long_signal &= feat["knn_bull"].to_numpy(dtype=bool)
         short_signal &= feat["knn_bear"].to_numpy(dtype=bool)
@@ -747,9 +843,10 @@ def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> d
         low=low,
         close=close,
         atr=atr,
-        horizon_bars=SIGNAL_HORIZON_BARS,
-        favorable_atr=0.75,
-        adverse_atr=0.75,
+        horizon_bars=ENTRY_RESPONSE_BARS,
+        fast_bars=FAST_RESPONSE_BARS,
+        favorable_atr=0.50,
+        adverse_atr=0.50,
     )
 
     fat_ob_signal = feat["fat_ob_signal"].to_numpy(dtype=bool)
@@ -763,7 +860,8 @@ def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> d
         low=low,
         close=close,
         atr=atr,
-        horizon_bars=max(SIGNAL_HORIZON_BARS // 2, 3),
+        horizon_bars=ENTRY_RESPONSE_BARS,
+        fast_bars=FAST_RESPONSE_BARS,
         favorable_atr=0.50,
         adverse_atr=0.75,
     )
@@ -778,9 +876,10 @@ def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> d
         low=low,
         close=close,
         atr=atr,
-        horizon_bars=SIGNAL_HORIZON_BARS,
-        favorable_atr=0.75,
-        adverse_atr=0.75,
+        horizon_bars=ENTRY_RESPONSE_BARS,
+        fast_bars=FAST_RESPONSE_BARS,
+        favorable_atr=0.50,
+        adverse_atr=0.50,
     )
 
     knn_direction = np.zeros(len(feat), dtype=np.int8)
@@ -793,7 +892,8 @@ def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> d
         low=low,
         close=close,
         atr=atr,
-        horizon_bars=max(SIGNAL_HORIZON_BARS // 2, 3),
+        horizon_bars=CONTEXT_RESPONSE_BARS,
+        fast_bars=2,
         favorable_atr=0.35,
         adverse_atr=0.35,
     )
@@ -807,7 +907,8 @@ def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> d
         low=low,
         close=close,
         atr=atr,
-        horizon_bars=max(SIGNAL_HORIZON_BARS // 2, 3),
+        horizon_bars=CONTEXT_RESPONSE_BARS,
+        fast_bars=2,
         favorable_atr=0.50,
         adverse_atr=0.50,
     )
@@ -887,19 +988,31 @@ def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> d
         "primary_signal_precision": primary_stats["precision"],
         "primary_mean_forward_atr": primary_stats["mean_forward_atr"],
         "primary_favorable_hit_rate": primary_stats["favorable_hit_rate"],
+        "primary_fast_hit_rate": primary_stats["fast_hit_rate"],
+        "primary_avg_favorable_bars": primary_stats["avg_favorable_bars"],
         "primary_adverse_first_rate": primary_stats["adverse_first_rate"],
+        "primary_horizon_bars": primary_stats["horizon_bars"],
+        "primary_fast_bars": primary_stats["fast_bars"],
         "fatigue_signal_count": fatigue_signal_count,
         "fatigue_signal_precision": fatigue_stats["precision"],
         "fatigue_mean_forward_atr": fatigue_stats["mean_forward_atr"],
+        "fatigue_fast_hit_rate": fatigue_stats["fast_hit_rate"],
+        "fatigue_avg_favorable_bars": fatigue_stats["avg_favorable_bars"],
         "confluence_event_count": confluence_event_count,
         "confluence_precision": conf_stats["precision"],
         "confluence_mean_forward_atr": conf_stats["mean_forward_atr"],
+        "confluence_fast_hit_rate": conf_stats["fast_hit_rate"],
+        "confluence_avg_favorable_bars": conf_stats["avg_favorable_bars"],
         "volume_flow_event_count": volume_flow_event_count,
         "volume_flow_precision": volume_stats["precision"],
         "volume_flow_mean_forward_atr": volume_stats["mean_forward_atr"],
+        "volume_flow_fast_hit_rate": volume_stats["fast_hit_rate"],
+        "volume_flow_avg_favorable_bars": volume_stats["avg_favorable_bars"],
         "knn_state_count": knn_state_count,
         "knn_state_precision": knn_stats["precision"],
         "knn_mean_forward_atr": knn_stats["mean_forward_atr"],
+        "knn_fast_hit_rate": knn_stats["fast_hit_rate"],
+        "knn_avg_favorable_bars": knn_stats["avg_favorable_bars"],
         "primary_signals_per_day": primary_signals_per_day,
         "fatigue_signals_per_day": fatigue_signals_per_day,
         "knn_flips_per_day": knn_flips_per_day,

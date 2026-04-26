@@ -82,12 +82,18 @@ def _wait_for_dashboard(url: str) -> bool:
     return False
 
 
-def _sqlite_counts(db_path: Path) -> dict[str, int]:
+def _sqlite_counts(db_path: Path, study_name: str | None = None) -> dict[str, int]:
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         cur = con.cursor()
+        studies = cur.execute("SELECT COUNT(*) FROM studies").fetchone()[0]
+        where_clause = ""
+        params: tuple[Any, ...] = ()
+        if study_name:
+            where_clause = "WHERE study_id = (SELECT study_id FROM studies WHERE study_name = ?)"
+            params = (study_name,)
         total, complete, running, pruned, fail = cur.execute(
-            """
+            f"""
             SELECT
                 COUNT(*),
                 SUM(CASE WHEN state = 'COMPLETE' THEN 1 ELSE 0 END),
@@ -95,9 +101,10 @@ def _sqlite_counts(db_path: Path) -> dict[str, int]:
                 SUM(CASE WHEN state = 'PRUNED' THEN 1 ELSE 0 END),
                 SUM(CASE WHEN state = 'FAIL' THEN 1 ELSE 0 END)
             FROM trials
-            """
+            {where_clause}
+            """,
+            params,
         ).fetchone()
-        studies = cur.execute("SELECT COUNT(*) FROM studies").fetchone()[0]
         return {
             "study_count": int(studies or 0),
             "trial_count": int(total or 0),
@@ -110,10 +117,18 @@ def _sqlite_counts(db_path: Path) -> dict[str, int]:
         con.close()
 
 
-def _study_id(studies_payload: dict[str, Any]) -> int | None:
+def _study_id(studies_payload: dict[str, Any], target_study_name: str | None = None) -> int | None:
     summaries = studies_payload.get("study_summaries")
     if not isinstance(summaries, list) or not summaries:
         return None
+    if target_study_name:
+        for summary in summaries:
+            if not isinstance(summary, dict):
+                continue
+            if _text(summary.get("study_name")) != target_study_name:
+                continue
+            study_id = summary.get("study_id")
+            return int(study_id) if isinstance(study_id, int) else None
     first = summaries[0]
     if not isinstance(first, dict):
         return None
@@ -179,6 +194,7 @@ def run() -> int:
         key = _text(card.get("key")) or "unknown"
         dashboard_url = _text(card.get("dashboard_url"))
         db_path = Path(_text(card.get("db_path")))
+        target_study_name = _text(card.get("default_study_name"))
 
         if not dashboard_url:
             try:
@@ -230,7 +246,10 @@ def run() -> int:
             continue
 
         try:
-            sqlite_counts = _sqlite_counts(db_path)
+            sqlite_counts = _sqlite_counts(
+                db_path,
+                _text(card.get("default_study_name")),
+            )
         except Exception as exc:
             checks.append(CheckResult(False, f"{key} sqlite db", f"read failed: {exc}"))
             failures.append(f"{key} sqlite unreadable")
@@ -260,7 +279,7 @@ def run() -> int:
             studies_status, studies_payload = _fetch_json(
                 f"{dashboard_url}/api/studies"
             )
-            study_id = _study_id(studies_payload)
+            study_id = _study_id(studies_payload, target_study_name)
             if study_id is None:
                 raise RuntimeError("missing study_id from /api/studies")
             detail_status, detail_payload = _fetch_json(

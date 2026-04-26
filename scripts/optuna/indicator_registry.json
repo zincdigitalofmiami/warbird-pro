@@ -6,7 +6,7 @@
     "category": "chart-core",
     "pine_file": "indicators/v7-warbird-institutional.pine",
     "profile_module": "scripts.optuna.wb7_profile",
-    "default_study_name": "wb7_wr_pf"
+    "default_study_name": "Warbird Institutional Win Rate and Profit Factor"
   },
   {
     "key": "supertrend",
@@ -15,7 +15,7 @@
     "category": "chart-core",
     "pine_file": "indicators/v9-warbird-trading-system-layout.pine",
     "profile_module": "scripts.optuna.supertrend_profile",
-    "default_study_name": "supertrend_wr_pf"
+    "default_study_name": "SuperTrend Gate Optimization"
   },
   {
     "key": "qfp",
@@ -24,7 +24,7 @@
     "category": "chart-core",
     "pine_file": "indicators/v9-warbird-trading-system-layout.pine",
     "profile_module": "scripts.optuna.qfp_profile",
-    "default_study_name": "qfp_wr_pf"
+    "default_study_name": "QFP Signal Optimization"
   },
   {
     "key": "v9_warbird_trading_system_layout",
@@ -33,7 +33,7 @@
     "category": "chart-core",
     "pine_file": "indicators/v9-warbird-trading-system-layout.pine",
     "profile_module": "scripts.optuna.v9_warbird_trading_system_layout_profile",
-    "default_study_name": "v9_warbird_trading_system_layout_wr_pf"
+    "default_study_name": "Warbird Trading System Layout Optimization"
   },
   {
     "key": "v8_warbird_live",
@@ -42,7 +42,7 @@
     "category": "chart-core",
     "pine_file": "indicators/v8-warbird-live.pine",
     "profile_module": "scripts.optuna.v8_warbird_live_profile",
-    "default_study_name": "v8_warbird_live_wr_pf"
+    "default_study_name": "Warbird Live Signal Optimization"
   },
   {
     "key": "v8_warbird_prescreen",
@@ -51,7 +51,7 @@
     "category": "chart-core",
     "pine_file": "indicators/v8-warbird-prescreen.pine",
     "profile_module": "scripts.optuna.v8_warbird_prescreen_profile",
-    "default_study_name": "v8_warbird_prescreen_wr_pf"
+    "default_study_name": "Warbird Prescreen Strategy Optimization"
   },
   {
     "key": "v7_warbird_institutional",
@@ -60,7 +60,7 @@
     "category": "chart-core",
     "pine_file": "indicators/v7-warbird-institutional.pine",
     "profile_module": "scripts.optuna.v7_warbird_institutional_profile",
-    "default_study_name": "v7_warbird_institutional_wr_pf",
+    "default_study_name": "Warbird Institutional Signal Optimization",
     "symbol": "MES1!",
     "timeframe": "15",
     "data_floor": "2020-01-01",
@@ -77,7 +77,7 @@
     "category": "chart-core",
     "pine_file": "indicators/v7-warbird-strategy.pine",
     "profile_module": "scripts.optuna.v7_warbird_strategy_profile",
-    "default_study_name": "v7_warbird_strategy_wr_pf"
+    "default_study_name": "Warbird Strategy Optimization"
   },
   {
     "key": "v6_warbird_complete",
@@ -86,7 +86,7 @@
     "category": "legacy",
     "pine_file": "indicators/v6-warbird-complete.pine",
     "profile_module": "scripts.optuna.v6_warbird_complete_profile",
-    "default_study_name": "v6_warbird_complete_wr_pf"
+    "default_study_name": "Warbird Complete Indicator Optimization"
   },
   {
     "key": "v6_warbird_complete_strategy",
@@ -95,7 +95,7 @@
     "category": "legacy",
     "pine_file": "indicators/v6-warbird-complete-strategy.pine",
     "profile_module": "scripts.optuna.v6_warbird_complete_strategy_profile",
-    "default_study_name": "v6_warbird_complete_strategy_wr_pf"
+    "default_study_name": "Warbird Complete Strategy Optimization"
   },
   {
     "key": "v2_warbird_unified",
@@ -104,7 +104,7 @@
     "category": "legacy",
     "pine_file": "indicators/v2-warbird-unified.pine",
     "profile_module": "scripts.optuna.v2_warbird_unified_profile",
-    "default_study_name": "v2_warbird_unified_wr_pf"
+    "default_study_name": "Warbird Unified Indicator Optimization"
   },
   {
     "key": "fibs_only",
@@ -113,7 +113,7 @@
     "category": "experimental",
     "pine_file": "indicators/fibs-only.pine",
     "profile_module": "scripts.optuna.fibs_only_profile",
-    "default_study_name": "fibs_only_wr_pf"
+    "default_study_name": "Fibs Only Indicator Optimization"
   },
   {
     "key": "nfe_ml",
@@ -122,7 +122,7 @@
     "category": "lower-pane",
     "pine_file": "indicators/warbird-oscillator-matrix.pine",
     "profile_module": "scripts.optuna.nfe_ml_profile",
-    "default_study_name": "nfe_ml_wr_pf"
+    "default_study_name": "NFE ML Signal Optimization"
   },
   {
     "key": "ml_rsi_bullvision",
@@ -131,7 +131,7 @@
     "category": "lower-pane",
     "pine_file": "indicators/warbird-oscillator-matrix.pine",
     "profile_module": "scripts.optuna.ml_rsi_bullvision_profile",
-    "default_study_name": "ml_rsi_bullvision_wr_pf"
+    "default_study_name": "Machine Learning RSI Signal Optimization"
   },
   {
     "key": "warbird_oscillator_matrix",
@@ -140,7 +140,7 @@
     "category": "lower-pane",
     "pine_file": "indicators/warbird-oscillator-matrix.pine",
     "profile_module": "scripts.optuna.warbird_oscillator_matrix_profile",
-    "default_study_name": "warbird_oscillator_matrix_wr_pf"
+    "default_study_name": "Warbird Oscillator Matrix Optimization"
   },
   {
     "key": "warbird_nexus_ml_rsi",
@@ -149,7 +149,7 @@
     "category": "lower-pane",
     "pine_file": "indicators/warbird-nexus-machine-learning-rsi.pine",
     "profile_module": "scripts.optuna.warbird_nexus_ml_rsi_profile",
-    "default_study_name": "warbird_nexus_ml_rsi_volume_quality",
+    "default_study_name": "Warbird Nexus ML Fast 5m Signal Quality April 25",
     "symbol": "MES1!",
     "timeframe": "5",
     "notes": "Research proxy harness on real MES 5m OHLCV parquet with Volume Flow scored as a first-class subsystem. Optimizes Nexus indicator settings only: source, preset, smoothing, signal smoothing, engine period, zones, confluence thresholds, fatigue bars, KNN neighbors/window, volume-flow quality, and confirmation gates. No commissions, trade sizing, stops, targets, ATR exits, or non-5m bias gate are active in the Nexus search."

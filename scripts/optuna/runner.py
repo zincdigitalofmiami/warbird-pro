@@ -8,7 +8,7 @@ Stores studies in scripts/optuna/workspaces/<indicator_key>/study.db.
 Usage:
   python scripts/optuna/runner.py --indicator-key <key> \
     --profile-module scripts.optuna.<key>_profile \
-    --n-trials 300 --study-name <key>_study
+    --n-trials 300 --study-name "Purpose-Named Study Title"
 
 Dashboard (pick any free local port, e.g. 8180):
   optuna-dashboard sqlite:///scripts/optuna/workspaces/<indicator_key>/study.db --port 8180
@@ -20,6 +20,7 @@ import argparse
 import time
 import importlib
 import math
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -102,6 +103,29 @@ def resolve_champion_path(indicator_key: str, champion_path: str | None) -> Path
         return Path(champion_path)
     default = workspace_dir(indicator_key) / "champion.json"
     return default if default.exists() else None
+
+
+def default_study_title(indicator_key: str) -> str:
+    """Fallback study name for manual runner use.
+
+    Registry-driven runs should pass an explicit, purpose-named --study-name.
+    This fallback prevents accidental snake_case dashboard cards.
+    """
+    title = indicator_key.replace("_", " ")
+    title = re.sub(r"\bv\d+\b", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\bwr\b", "Win Rate", title, flags=re.IGNORECASE)
+    title = re.sub(r"\bpf\b", "Profit Factor", title, flags=re.IGNORECASE)
+    title = re.sub(r"\bml rsi\b", "ML RSI", title, flags=re.IGNORECASE)
+    title = re.sub(r"\s+", " ", title).strip()
+    acronyms = {
+        "ml": "ML",
+        "rsi": "RSI",
+        "nfe": "NFE",
+        "qfp": "QFP",
+        "mes": "MES",
+    }
+    title = " ".join(acronyms.get(token.lower(), token.capitalize()) for token in title.split())
+    return f"{title} Study" if title else "Warbird Study"
 
 
 def load_custom_profile(module_name: str) -> ProfileAdapter:
@@ -455,14 +479,28 @@ def export_top_n(
             "quality_events",
             "primary_signal_count",
             "primary_signal_precision",
+            "primary_favorable_hit_rate",
+            "primary_fast_hit_rate",
+            "primary_avg_favorable_bars",
+            "primary_adverse_first_rate",
+            "primary_horizon_bars",
+            "primary_fast_bars",
             "fatigue_signal_count",
             "fatigue_signal_precision",
+            "fatigue_fast_hit_rate",
+            "fatigue_avg_favorable_bars",
             "confluence_event_count",
             "confluence_precision",
+            "confluence_fast_hit_rate",
+            "confluence_avg_favorable_bars",
             "volume_flow_event_count",
             "volume_flow_precision",
+            "volume_flow_fast_hit_rate",
+            "volume_flow_avg_favorable_bars",
             "knn_state_count",
             "knn_state_precision",
+            "knn_fast_hit_rate",
+            "knn_avg_favorable_bars",
             "primary_signals_per_day",
             "fatigue_signals_per_day",
             "knn_flips_per_day",
@@ -543,7 +581,7 @@ def main():
     parser.add_argument(
         "--study-name",
         default=None,
-        help="Study name in SQLite DB (default: <indicator_key>_study)",
+        help="Study title in SQLite DB. Use clear words with spaces; no snake_case.",
     )
     parser.add_argument(
         "--resume",
@@ -595,7 +633,12 @@ def main():
     args = parser.parse_args()
 
     profile = load_profile_adapter(args.profile, args.profile_module)
-    study_name = args.study_name or f"{args.indicator_key}_study"
+    study_name = args.study_name or default_study_title(args.indicator_key)
+    if "_" in study_name:
+        print(
+            "WARNING: study names appear directly in Optuna Dashboard. "
+            "Use a clear title with spaces instead of snake_case."
+        )
     optuna_dir = resolve_optuna_dir(args.indicator_key, args.optuna_dir)
     optuna_dir.mkdir(parents=True, exist_ok=True)
     db_path = Path(args.db) if args.db else (optuna_dir / "study.db")

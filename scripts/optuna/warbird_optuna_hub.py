@@ -24,6 +24,8 @@ import atexit
 import html
 import importlib.util
 import json
+import re
+import shlex
 import shutil
 import signal
 import sqlite3
@@ -42,6 +44,11 @@ from urllib.parse import urlparse
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = Path(__file__).resolve().with_name("indicator_registry.json")
 LOG_ROOT = Path("/tmp/warbird-optuna-hub")
+PUBLIC_ASSETS = {
+    "/assets/chart_watermark.svg": REPO_ROOT / "public" / "chart_watermark.svg",
+    "/assets/warbird-logo.svg": REPO_ROOT / "public" / "warbird-logo.svg",
+    "/assets/warbird-icon.svg": REPO_ROOT / "public" / "warbird-icon.svg",
+}
 
 DEFAULT_HOST = "localhost"
 DEFAULT_PORT = 8090
@@ -121,6 +128,138 @@ def _parse_json_text(value_json: str | None, fallback: str = "") -> str:
 
 def _h(value: Any) -> str:
     return html.escape("" if value is None else str(value))
+
+
+def _display_indicator_name(value: Any) -> str:
+    label = str(value).replace("_", " ")
+    label = re.sub(r"\([^)]*\bv\d+\b[^)]*\)", "", label, flags=re.IGNORECASE)
+    label = re.sub(r"(?<![A-Za-z0-9])v\d+(?![A-Za-z0-9])", "", label, flags=re.IGNORECASE)
+    label = re.sub(r"\s+", " ", label).strip()
+    if label.islower():
+        acronyms = {"ml": "ML", "rsi": "RSI", "nfe": "NFE", "qfp": "QFP", "mes": "MES"}
+        label = " ".join(acronyms.get(token.lower(), token.capitalize()) for token in label.split())
+    return label or str(value)
+
+
+def _display_short_label(value: Any) -> str:
+    label = str(value).replace("_", " ").replace("-", " ")
+    label = re.sub(r"\s+", " ", label).strip()
+    if not label:
+        return ""
+    acronyms = {
+        "dema": "DEMA",
+        "dsr": "DSR",
+        "ema": "EMA",
+        "hl2": "HL2",
+        "hlc3": "HLC3",
+        "ml": "ML",
+        "nfe": "NFE",
+        "ohlc4": "OHLC4",
+        "qfp": "QFP",
+        "rsi": "RSI",
+        "mes": "MES",
+        "sma": "SMA",
+        "tema": "TEMA",
+        "vwma": "VWMA",
+        "wma": "WMA",
+    }
+    return " ".join(acronyms.get(token.lower(), token.capitalize()) for token in label.split())
+
+
+def _display_param_label(value: Any) -> str:
+    raw = str(value)
+    labels = {
+        "confHighInput": "High Confluence",
+        "confLowInput": "Low Confluence",
+        "fatigueBarsInput": "Fatigue Confirmation Bars",
+        "knnKInput": "KNN Neighbors",
+        "knnWindowInput": "KNN Training Window",
+        "presetInput": "Preset",
+        "sigLenInput": "Signal Period",
+        "sigTypeInput": "Signal Smoothing",
+        "smoothTypeInput": "Engine Smoothing",
+        "sourceInput": "Source",
+        "useConfluenceGate": "Use Confluence Gate",
+        "useKnnGate": "Use KNN Gate",
+        "useVolumeFlowGate": "Use Volume Flow Gate",
+        "useZoneExitSignals": "Use Zone Exit Signals",
+    }
+    if raw in labels:
+        return labels[raw]
+    cleaned = re.sub(r"Input$", "", raw)
+    cleaned = re.sub(r"(?<!^)([A-Z])", r" \1", cleaned)
+    cleaned = cleaned.replace("Knn", "KNN").replace("Rsi", "RSI").replace("Ml", "ML")
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _display_metric_label(value: Any) -> str:
+    raw = str(value)
+    labels = {
+        "objective_score": "Objective Score",
+        "quality_events": "Quality Events",
+        "primary_signal_quality": "Primary Signal Quality",
+        "primary_signal_precision": "Primary Signal Precision",
+        "primary_signal_count": "Primary Signal Count",
+        "primary_signals_per_day": "Primary Signals Per Day",
+        "fatigue_warning_quality": "Fatigue Warning Quality",
+        "fatigue_signal_precision": "Fatigue Signal Precision",
+        "confluence_calibration": "Confluence Calibration",
+        "knn_bias_quality": "KNN Bias Quality",
+        "noise_control": "Noise Control",
+        "win_rate": "Win Rate",
+        "pf": "Profit Factor",
+        "max_dd": "Max Drawdown",
+        "objective_metric": "Objective Metric",
+        "ranking_policy": "Ranking Policy",
+        "window_start": "Window Start",
+    }
+    if raw in labels:
+        return labels[raw]
+    cleaned = raw.replace("_", " ")
+    return _display_short_label(cleaned)
+
+
+def _display_scalar(value: Any) -> str:
+    if value is None:
+        return "n/a"
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if value.is_integer():
+            return str(int(value))
+        return f"{value:.4f}".rstrip("0").rstrip(".")
+    return str(value)
+
+
+def _parse_json_value(value_json: str | None) -> Any:
+    if value_json is None:
+        return None
+    try:
+        return json.loads(value_json)
+    except Exception:
+        return value_json
+
+
+def _display_param_value(param_value: Any, distribution_json: str | None) -> str:
+    try:
+        parsed = json.loads(distribution_json or "{}")
+    except Exception:
+        parsed = {}
+    if parsed.get("name") == "CategoricalDistribution":
+        choices = parsed.get("attributes", {}).get("choices", [])
+        idx = _safe_int(param_value, -1)
+        if 0 <= idx < len(choices):
+            choice = choices[idx]
+            return _display_short_label(choice) if isinstance(choice, str) else _display_scalar(choice)
+    return _display_scalar(_safe_float(param_value, 0.0))
+
+
+def _display_metric_value(key: str, value: Any) -> str:
+    if key in {"objective_metric", "ranking_policy"}:
+        return _display_short_label(value)
+    return _display_scalar(value)
 
 
 def _display_host(host: str) -> str:
@@ -319,7 +458,7 @@ def build_run_command(spec: IndicatorSpec) -> str:
         parts.append(f"--profile-module {spec.profile_module}")
     else:
         parts.append(f"--profile-module scripts.optuna.{spec.key}_profile")
-    parts.append(f"--study-name {spec.default_study_name}")
+    parts.append(f"--study-name {shlex.quote(spec.default_study_name)}")
     parts.append("--n-trials 300")
     parts.append("--resume")
     return " \\\n  ".join(parts)
@@ -513,6 +652,220 @@ def load_study_stats(db_path: Path, target_study_name: str) -> dict[str, Any]:
             "last_complete": None,
             "error": str(exc),
         }
+    finally:
+        if con is not None:
+            con.close()
+
+
+def _clean_study_title(study_name: str) -> str:
+    title = study_name.replace("_", " ")
+    title = re.sub(r"\bv\d+\b", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\bwr\b", "Win Rate", title, flags=re.IGNORECASE)
+    title = re.sub(r"\bpf\b", "Profit Factor", title, flags=re.IGNORECASE)
+    title = re.sub(r"\s+", " ", title).strip()
+    if not title.islower():
+        return title
+    acronyms = {
+        "ml": "ML",
+        "rsi": "RSI",
+        "nfe": "NFE",
+        "qfp": "QFP",
+        "mes": "MES",
+    }
+    return " ".join(acronyms.get(token.lower(), token.capitalize()) for token in title.split())
+
+
+def _study_purpose(study_title: str) -> str:
+    lower = study_title.lower()
+    if "baseline" in lower:
+        return "Baseline comparison run for the current indicator defaults."
+    if "volume" in lower:
+        return "Volume Flow calibration and validation on real MES volume."
+    if "signal" in lower:
+        return "Signal-quality optimization for entries, reversals, and confirmation gates."
+    if "win rate" in lower or "profit factor" in lower:
+        return "Win-rate and profit-factor optimization for the active indicator contract."
+    return "Optimization study for this indicator lane."
+
+
+def load_workspace_studies(db_path: Path) -> list[dict[str, Any]]:
+    if not db_path.exists() or db_path.stat().st_size == 0:
+        return []
+
+    con: sqlite3.Connection | None = None
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        cur = con.cursor()
+        rows = cur.execute(
+            """
+            SELECT
+                s.study_id,
+                s.study_name,
+                COALESCE(sd.direction, ''),
+                COUNT(t.trial_id),
+                SUM(CASE WHEN t.state = 'COMPLETE' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN t.state = 'RUNNING' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN t.state = 'FAIL' THEN 1 ELSE 0 END),
+                MAX(t.datetime_complete)
+            FROM studies s
+            LEFT JOIN study_directions sd ON sd.study_id = s.study_id AND sd.objective = 0
+            LEFT JOIN trials t ON t.study_id = s.study_id
+            GROUP BY s.study_id, s.study_name, sd.direction
+            ORDER BY s.study_id DESC
+            """
+        ).fetchall()
+
+        studies: list[dict[str, Any]] = []
+        for study_id, study_name, direction, trials, complete, running, fail, last_complete in rows:
+            best_score = cur.execute(
+                """
+                SELECT MAX(tv.value)
+                FROM trials t
+                JOIN trial_values tv ON tv.trial_id = t.trial_id AND tv.objective = 0
+                WHERE t.study_id = ? AND t.state = 'COMPLETE'
+                """,
+                (_safe_int(study_id),),
+            ).fetchone()[0]
+            title = _clean_study_title(str(study_name))
+            studies.append(
+                {
+                    "study_id": _safe_int(study_id),
+                    "study_name": str(study_name),
+                    "title": title,
+                    "purpose": _study_purpose(title),
+                    "direction": str(direction or "MAXIMIZE"),
+                    "trial_count": _safe_int(trials),
+                    "complete_count": _safe_int(complete),
+                    "running_count": _safe_int(running),
+                    "fail_count": _safe_int(fail),
+                    "last_complete": str(last_complete) if last_complete is not None else None,
+                    "best_score": _safe_float(best_score, 0.0) if best_score is not None else None,
+                }
+            )
+        return studies
+    except Exception:
+        return []
+    finally:
+        if con is not None:
+            con.close()
+
+
+def load_workspace_study_detail(db_path: Path, study_id: int) -> dict[str, Any] | None:
+    if not db_path.exists() or db_path.stat().st_size == 0:
+        return None
+
+    summaries = {study["study_id"]: study for study in load_workspace_studies(db_path)}
+    summary = summaries.get(study_id)
+    if summary is None:
+        return None
+
+    con: sqlite3.Connection | None = None
+    try:
+        con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        cur = con.cursor()
+        order_dir = "ASC" if str(summary["direction"]).upper() == "MINIMIZE" else "DESC"
+        trial_rows = cur.execute(
+            f"""
+            SELECT
+                t.trial_id,
+                t.number,
+                t.state,
+                t.datetime_start,
+                t.datetime_complete,
+                tv.value
+            FROM trials t
+            LEFT JOIN trial_values tv ON tv.trial_id = t.trial_id AND tv.objective = 0
+            WHERE t.study_id = ? AND t.state = 'COMPLETE'
+            ORDER BY tv.value {order_dir}, t.number ASC
+            LIMIT 12
+            """,
+            (study_id,),
+        ).fetchall()
+
+        top_trials = [
+            {
+                "trial_id": _safe_int(trial_id),
+                "number": _safe_int(number),
+                "state": str(state),
+                "started": str(started) if started is not None else None,
+                "completed": str(completed) if completed is not None else None,
+                "score": _safe_float(score, 0.0) if score is not None else None,
+            }
+            for trial_id, number, state, started, completed, score in trial_rows
+        ]
+
+        best_trial = top_trials[0] if top_trials else None
+        best_trial_id = _safe_int(best_trial["trial_id"]) if best_trial else None
+
+        params: list[dict[str, str]] = []
+        metrics: list[dict[str, str]] = []
+        if best_trial_id is not None:
+            for param_name, param_value, distribution_json in cur.execute(
+                """
+                SELECT param_name, param_value, distribution_json
+                FROM trial_params
+                WHERE trial_id = ?
+                ORDER BY param_name
+                """,
+                (best_trial_id,),
+            ).fetchall():
+                params.append(
+                    {
+                        "name": str(param_name),
+                        "label": _display_param_label(param_name),
+                        "value": _display_param_value(param_value, distribution_json),
+                    }
+                )
+
+            metric_priority = [
+                "objective_score",
+                "quality_events",
+                "primary_signal_quality",
+                "primary_signal_precision",
+                "primary_signal_count",
+                "primary_signals_per_day",
+                "fatigue_warning_quality",
+                "fatigue_signal_precision",
+                "confluence_calibration",
+                "knn_bias_quality",
+                "noise_control",
+                "win_rate",
+                "pf",
+                "max_dd",
+                "objective_metric",
+                "ranking_policy",
+                "window_start",
+            ]
+            raw_attrs = {
+                str(key): _parse_json_value(value_json)
+                for key, value_json in cur.execute(
+                    """
+                    SELECT "key", value_json
+                    FROM trial_user_attributes
+                    WHERE trial_id = ?
+                    """,
+                    (best_trial_id,),
+                ).fetchall()
+            }
+            for key in metric_priority:
+                if key in raw_attrs:
+                    metrics.append(
+                        {
+                            "name": key,
+                            "label": _display_metric_label(key),
+                            "value": _display_metric_value(key, raw_attrs[key]),
+                        }
+                    )
+
+        return {
+            **summary,
+            "best_trial": best_trial,
+            "top_trials": top_trials,
+            "params": params,
+            "metrics": metrics,
+        }
+    except Exception:
+        return None
     finally:
         if con is not None:
             con.close()
@@ -763,14 +1116,15 @@ def render_html(snapshot: dict[str, Any]) -> str:
     best = snapshot.get("best_overall")
     best_text = "No completed trials yet"
     if best:
+        best_name = _display_indicator_name(best["indicator_name"])
         if _safe_int(best.get("quality_events"), 0) > 0:
             best_text = (
-                f'{_h(best["indicator_name"])} ({_h(best["indicator_key"])}) '
+                f'{_h(best_name)} '
                 f'Score {_safe_float(best["objective_score"]):.3f} | Events {_safe_int(best["quality_events"])}'
             )
         else:
             best_text = (
-                f'{_h(best["indicator_name"])} ({_h(best["indicator_key"])}) '
+                f'{_h(best_name)} '
                 f'WR {_safe_float(best["win_rate"]):.2%} | PF {_safe_float(best["pf"]):.3f} | '
                 f'Trades {_safe_int(best["trades"])}'
             )
@@ -781,6 +1135,9 @@ def render_html(snapshot: dict[str, Any]) -> str:
 
     cards_html: list[str] = []
     for idx, card in enumerate(snapshot["cards"]):
+        display_name = _display_indicator_name(card["name"])
+        surface_label = _display_short_label(card["surface_type"])
+        category_label = _display_short_label(card["category"])
         best_block = "<div class='muted'>No completed trials</div>"
         if card["best"] is not None:
             b = card["best"]
@@ -824,20 +1181,24 @@ def render_html(snapshot: dict[str, Any]) -> str:
             topn_block = f"<div class='warning'>{_h(card['topn_error'])}</div>"
 
         profile_class = "ok" if card["profile_status"] == "ready" else "warn"
+        profile_chip_label = "Profile Ready" if card["profile_status"] == "ready" else "Profile Missing"
 
         link_html = "<span class='btn disabled'>No DB</span>"
         if card["dashboard_url"]:
             link_html = (
-                f"<a class='btn' href='{_h(card['dashboard_url'])}' target='_blank' rel='noreferrer'>"
-                "Open Study UI</a>"
+                f"<a class='btn' href='/studies/{_h(card['key'])}' target='_blank' rel='noreferrer'>"
+                "Open Studies</a>"
             )
         elif card["db_exists"] and snapshot["child_dashboards_enabled"]:
             link_html = (
-                f"<a class='btn' href='/open-study/{_h(card['key'])}' target='_blank' rel='noreferrer'>"
-                "Launch Study UI</a>"
+                f"<a class='btn' href='/studies/{_h(card['key'])}' target='_blank' rel='noreferrer'>"
+                "Open Studies</a>"
             )
         elif card["db_exists"]:
-            link_html = "<span class='btn disabled'>Dashboard Offline</span>"
+            link_html = (
+                f"<a class='btn' href='/studies/{_h(card['key'])}' target='_blank' rel='noreferrer'>"
+                "Open Studies</a>"
+            )
 
         db_status = "ready" if card["db_exists"] and card["target_study_exists"] else "empty"
         db_status_label = "Active study detected" if card["target_study_exists"] else "No study.db yet"
@@ -853,6 +1214,24 @@ def render_html(snapshot: dict[str, Any]) -> str:
             dash_error_html = f"<div class='warning'>{_h(card['dashboard_error'])}</div>"
 
         notes_html = f"<div class='path'><span>Notes:</span> {_h(card['notes'])}</div>" if card["notes"] else ""
+        operational_details = (
+            "<details class='technical'>"
+            "<summary>Operational Details</summary>"
+            f"<div class='path'><span>Workspace Key:</span> {_h(card['key'])}</div>"
+            f"<div class='path'><span>Active Study:</span> {_h(card['default_study_name'])}</div>"
+            f"<div class='path'><span>Profile:</span> {_h(card['profile_label'])}</div>"
+            f"<div class='path'><span>Pine:</span> {_h(card['pine_file'])}</div>"
+            f"<div class='path'><span>Workspace:</span> {_h(card['indicator_dir'])}</div>"
+            f"<div class='path'><span>Experiments:</span> {_h(card['experiments_dir'])}</div>"
+            f"<div class='path'><span>DB:</span> {_h(card['db_path'])}</div>"
+            f"<div class='path'><span>Top-N:</span> {_h(card['topn_path'])}</div>"
+            f"{notes_html}"
+            "<details class='cmd'>"
+            "<summary>Run Command</summary>"
+            f"<pre>{_h(card['run_command'])}</pre>"
+            "</details>"
+            "</details>"
+        )
         best_wr = _safe_float(card["best"]["win_rate"], -1.0) if card["best"] is not None else -1.0
         best_pf = _safe_float(card["best"]["pf"], -1.0) if card["best"] is not None else -1.0
         best_trades = _safe_int(card["best"]["trades"], 0) if card["best"] is not None else 0
@@ -867,7 +1246,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
             f"<article class='card' "
             f"data-default-order='{idx}' "
             f"data-key='{_h(card['key'])}' "
-            f"data-name='{_h(card['name'])}' "
+            f"data-name='{_h(display_name)}' "
             f"data-surface='{_h(card['surface_type'])}' "
             f"data-category='{_h(card['category'])}' "
             f"data-trials='{_safe_int(card['trial_count'])}' "
@@ -885,19 +1264,13 @@ def render_html(snapshot: dict[str, Any]) -> str:
             f"data-best-events='{best_events}' "
             f"data-last-complete='{_h(card['last_complete'] or '')}' "
             f"data-has-best='{1 if card['best'] is not None else 0}'>"
-            f"<header><h3>{_h(card['name'])}</h3><span class='badge'>{_h(card['key'])}</span></header>"
+            f"<header><h3>{_h(display_name)}</h3></header>"
+            f"<p class='card-purpose'>{_h(card['default_study_name'])}</p>"
             "<div class='meta-line'>"
-            f"<span class='chip surface'>{_h(card['surface_type'])}</span>"
-            f"<span class='chip category'>{_h(card['category'])}</span>"
-            f"<span class='chip {profile_class}'>{_h(card['profile_label'])}</span>"
+            f"<span class='chip surface'>{_h(surface_label)}</span>"
+            f"<span class='chip category'>{_h(category_label)}</span>"
+            f"<span class='chip {profile_class}'>{_h(profile_chip_label)}</span>"
             "</div>"
-            f"<div class='path'><span>Active Study:</span> {_h(card['default_study_name'])}</div>"
-            f"<div class='path'><span>Pine:</span> {_h(card['pine_file'])}</div>"
-            f"<div class='path'><span>Workspace:</span> {_h(card['indicator_dir'])}</div>"
-            f"<div class='path'><span>Experiments:</span> {_h(card['experiments_dir'])}</div>"
-            f"<div class='path'><span>DB:</span> {_h(card['db_path'])}</div>"
-            f"<div class='path'><span>Top-N:</span> {_h(card['topn_path'])}</div>"
-            f"{notes_html}"
             f"<div class='status {db_status}'>{_h(db_status_label)}</div>"
             "<div class='counts'>"
             f"<span>Studies {_safe_int(card['study_count'])}</span>"
@@ -910,10 +1283,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
             f"{best_block}"
             f"{topn_block}"
             f"<div class='path'><span>Last Complete:</span> {_h(card['last_complete'] or 'n/a')}</div>"
-            "<details class='cmd'>"
-            "<summary>Run Command</summary>"
-            f"<pre>{_h(card['run_command'])}</pre>"
-            "</details>"
+            f"{operational_details}"
             f"<div class='actions'>{link_html}</div>"
             f"{dash_error_html}"
             "</article>"
@@ -927,61 +1297,137 @@ def render_html(snapshot: dict[str, Any]) -> str:
   <title>Warbird Optuna Hub</title>
   <style>
     :root {{
-      --bg: #040b17;
-      --panel: #0f1a2f;
-      --panel-2: #152640;
-      --text: #d8e7ff;
-      --muted: #8ea7ca;
-      --accent: #22d3ee;
+      color-scheme: dark;
+      --bg: #000000;
+      --panel: rgba(0, 0, 0, 0.50);
+      --panel-2: rgba(18, 20, 22, 0.52);
+      --panel-strong: rgba(8, 12, 18, 0.82);
+      --text: rgba(255, 255, 255, 0.92);
+      --muted: rgba(255, 255, 255, 0.56);
+      --soft: rgba(255, 255, 255, 0.34);
+      --accent: #26c6da;
       --ok: #22c55e;
       --warn: #f59e0b;
       --bad: #ef4444;
-      --border: #22395d;
+      --border: rgba(255, 255, 255, 0.08);
+      --accent-border: rgba(38, 198, 218, 0.22);
     }}
     * {{ box-sizing: border-box; }}
+    html {{
+      background: #000;
+    }}
     body {{
       margin: 0;
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial;
-      background: radial-gradient(circle at top right, #112342 0%, var(--bg) 60%);
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 72% 16%, rgba(38, 198, 218, 0.11), transparent 32%),
+        linear-gradient(135deg, #000000 0%, #0a0a0a 50%, #111111 100%);
       color: var(--text);
     }}
+    body::before {{
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: url("/assets/chart_watermark.svg") center 92px / min(980px, 92vw) no-repeat;
+      opacity: 0.68;
+      filter: saturate(1.45) brightness(1.55) contrast(1.08);
+      mix-blend-mode: screen;
+      z-index: 0;
+    }}
+    body::after {{
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, rgba(0, 0, 0, 0.10), rgba(0, 0, 0, 0.38)),
+        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.05), transparent 36%);
+      z-index: 0;
+    }}
+    .brandbar {{
+      position: relative;
+      z-index: 1;
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 max(20px, calc((100vw - 1500px) / 2 + 16px));
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(12px);
+    }}
+    .brand {{
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      color: var(--text);
+      text-decoration: none;
+      min-width: 0;
+    }}
+    .brand img {{
+      width: 190px;
+      height: auto;
+      display: block;
+    }}
+    .brand span {{
+      color: var(--muted);
+      font-size: 13px;
+      border-left: 1px solid rgba(255, 255, 255, 0.1);
+      padding-left: 14px;
+      white-space: nowrap;
+    }}
+    .brand-meta {{
+      color: var(--soft);
+      font-size: 12px;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }}
     .wrap {{
+      position: relative;
+      z-index: 1;
       max-width: 1500px;
       margin: 0 auto;
-      padding: 18px 16px 28px;
+      padding: 28px 16px 36px;
     }}
     .top {{
       display: grid;
       grid-template-columns: 1.6fr repeat(6, minmax(130px, 1fr));
-      gap: 10px;
+      gap: 12px;
       margin-bottom: 14px;
     }}
     .summary {{
-      background: linear-gradient(160deg, #0d1d35 0%, #18345c 100%);
+      background: linear-gradient(180deg, rgba(18, 20, 22, 0.52), rgba(0, 0, 0, 0.48));
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 12px;
-      min-height: 108px;
+      border-radius: 8px;
+      padding: 20px;
+      min-height: 148px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(5px) saturate(1.04);
+      -webkit-backdrop-filter: blur(5px) saturate(1.04);
     }}
     .summary h1 {{
-      margin: 0 0 5px;
-      font-size: 20px;
-      letter-spacing: 0.2px;
+      margin: 0 0 8px;
+      color: #fff;
+      font-size: clamp(28px, 3vw, 44px);
+      letter-spacing: 0;
+      line-height: 1.08;
     }}
     .meta {{
       color: var(--muted);
-      font-size: 12px;
+      font-size: 13px;
       line-height: 1.35;
     }}
     .best {{
-      margin-top: 8px;
-      color: #67e8f9;
+      margin-top: 12px;
+      color: rgba(38, 198, 218, 0.95);
       font-size: 13px;
     }}
     .stack {{
-      margin-top: 6px;
+      margin-top: 8px;
       font-size: 12px;
-      color: #bfdbfe;
+      color: rgba(255, 255, 255, 0.62);
     }}
     .stack-badge {{
       display: inline-block;
@@ -991,25 +1437,34 @@ def render_html(snapshot: dict[str, Any]) -> str:
       margin-right: 8px;
       border: 1px solid transparent;
     }}
-    .stack-badge.ok {{ color: #bbf7d0; border-color: #14532d; background: #052e16; }}
-    .stack-badge.warn {{ color: #fde68a; border-color: #78350f; background: #451a03; }}
+    .stack-badge.ok {{ color: #bbf7d0; border-color: rgba(34, 197, 94, 0.35); background: rgba(34, 197, 94, 0.08); }}
+    .stack-badge.warn {{ color: #fde68a; border-color: rgba(245, 158, 11, 0.35); background: rgba(245, 158, 11, 0.08); }}
     .kpi {{
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 10px;
+      border-radius: 8px;
+      padding: 14px;
       display: grid;
       align-content: center;
-      gap: 3px;
+      gap: 4px;
+      min-height: 110px;
+      backdrop-filter: blur(5px) saturate(1.04);
+      -webkit-backdrop-filter: blur(5px) saturate(1.04);
     }}
-    .kpi .label {{ color: var(--muted); font-size: 11px; }}
-    .kpi .value {{ font-size: 22px; font-weight: 700; }}
+    .kpi .label {{ color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0; }}
+    .kpi .value {{ font-size: 26px; font-weight: 700; color: #fff; }}
     .toolbar {{
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      margin-bottom: 12px;
+      margin-bottom: 16px;
       align-items: center;
+      border: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.46);
+      border-radius: 8px;
+      padding: 12px;
+      backdrop-filter: blur(5px) saturate(1.04);
+      -webkit-backdrop-filter: blur(5px) saturate(1.04);
     }}
     .toolbar-group {{
       display: flex;
@@ -1026,40 +1481,48 @@ def render_html(snapshot: dict[str, Any]) -> str:
     }}
     .filter-btn {{
       font-size: 11px;
-      border: 1px solid #244670;
-      background: #0b203f;
-      color: #dbeafe;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.03);
+      color: rgba(255, 255, 255, 0.76);
       border-radius: 999px;
-      padding: 5px 10px;
+      padding: 6px 11px;
       cursor: pointer;
     }}
     .filter-btn.active {{
-      border-color: #0891b2;
-      background: #083344;
-      color: #cffafe;
+      border-color: var(--accent-border);
+      background: rgba(38, 198, 218, 0.08);
+      color: rgba(224, 242, 254, 0.96);
     }}
     .sort-select {{
       font-size: 11px;
-      border: 1px solid #244670;
-      background: #0b203f;
-      color: #dbeafe;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.03);
+      color: rgba(255, 255, 255, 0.82);
       border-radius: 8px;
-      padding: 5px 10px;
+      padding: 6px 10px;
       min-width: 140px;
     }}
     .grid {{
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-      gap: 10px;
+      gap: 12px;
     }}
     .card {{
-      background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+      background: linear-gradient(180deg, rgba(18, 20, 22, 0.52), rgba(0, 0, 0, 0.48));
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 11px;
+      border-radius: 8px;
+      padding: 16px;
       display: grid;
-      gap: 7px;
-      box-shadow: 0 6px 14px rgba(0, 0, 0, 0.24);
+      gap: 10px;
+      box-shadow: 0 18px 52px rgba(0, 0, 0, 0.24);
+      backdrop-filter: blur(5px) saturate(1.04);
+      -webkit-backdrop-filter: blur(5px) saturate(1.04);
+      transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
+    }}
+    .card:hover {{
+      border-color: var(--accent-border);
+      background: linear-gradient(180deg, rgba(24, 28, 30, 0.56), rgba(0, 0, 0, 0.48));
+      transform: translateY(-1px);
     }}
     .card header {{
       display: flex;
@@ -1069,15 +1532,22 @@ def render_html(snapshot: dict[str, Any]) -> str:
     }}
     .card h3 {{
       margin: 0;
-      font-size: 16px;
+      color: #fff;
+      font-size: 17px;
       font-weight: 700;
       line-height: 1.2;
     }}
+    .card-purpose {{
+      margin: -3px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }}
     .badge {{
       font-size: 11px;
-      color: #cffafe;
-      border: 1px solid #164e63;
-      background: #083344;
+      color: rgba(207, 250, 254, 0.92);
+      border: 1px solid var(--accent-border);
+      background: rgba(38, 198, 218, 0.06);
       border-radius: 999px;
       padding: 3px 8px;
       white-space: nowrap;
@@ -1093,14 +1563,14 @@ def render_html(snapshot: dict[str, Any]) -> str:
       border: 1px solid transparent;
       padding: 2px 7px;
       text-transform: uppercase;
-      letter-spacing: 0.4px;
+      letter-spacing: 0;
     }}
-    .chip.surface {{ color: #bfdbfe; background: #172554; border-color: #1d4ed8; }}
-    .chip.category {{ color: #e0f2fe; background: #164e63; border-color: #0e7490; }}
-    .chip.ok {{ color: #bbf7d0; background: #052e16; border-color: #14532d; text-transform: none; }}
-    .chip.warn {{ color: #fde68a; background: #451a03; border-color: #78350f; text-transform: none; }}
+    .chip.surface {{ color: rgba(191, 219, 254, 0.92); background: rgba(59, 130, 246, 0.08); border-color: rgba(59, 130, 246, 0.22); }}
+    .chip.category {{ color: rgba(224, 242, 254, 0.92); background: rgba(38, 198, 218, 0.08); border-color: var(--accent-border); }}
+    .chip.ok {{ color: #bbf7d0; background: rgba(34, 197, 94, 0.08); border-color: rgba(34, 197, 94, 0.28); text-transform: none; }}
+    .chip.warn {{ color: #fde68a; background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.28); text-transform: none; }}
     .path {{
-      color: #bfd7f7;
+      color: rgba(255, 255, 255, 0.68);
       font-size: 12px;
       overflow-wrap: anywhere;
     }}
@@ -1113,10 +1583,10 @@ def render_html(snapshot: dict[str, Any]) -> str:
       padding: 3px 8px;
       border: 1px solid transparent;
     }}
-    .status.ready {{ color: #86efac; border-color: #14532d; background: #052e16; }}
-    .status.warn {{ color: #fde68a; border-color: #78350f; background: #451a03; }}
-    .status.empty {{ color: #fde68a; border-color: #78350f; background: #451a03; }}
-    .status.error {{ color: #fecaca; border-color: #7f1d1d; background: #450a0a; }}
+    .status.ready {{ color: #86efac; border-color: rgba(34, 197, 94, 0.28); background: rgba(34, 197, 94, 0.08); }}
+    .status.warn {{ color: #fde68a; border-color: rgba(245, 158, 11, 0.28); background: rgba(245, 158, 11, 0.08); }}
+    .status.empty {{ color: #fde68a; border-color: rgba(245, 158, 11, 0.28); background: rgba(245, 158, 11, 0.08); }}
+    .status.error {{ color: #fecaca; border-color: rgba(239, 68, 68, 0.32); background: rgba(239, 68, 68, 0.08); }}
     .counts {{
       display: flex;
       flex-wrap: wrap;
@@ -1124,9 +1594,9 @@ def render_html(snapshot: dict[str, Any]) -> str:
     }}
     .counts span {{
       font-size: 11px;
-      color: #dbeafe;
-      background: rgba(15, 23, 42, 0.65);
-      border: 1px solid #1e3a5f;
+      color: rgba(255, 255, 255, 0.76);
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 999px;
       padding: 2px 7px;
     }}
@@ -1136,38 +1606,53 @@ def render_html(snapshot: dict[str, Any]) -> str:
       gap: 5px;
     }}
     .metrics div {{
-      background: rgba(2, 8, 25, 0.5);
-      border: 1px solid #20314d;
+      background: rgba(0, 0, 0, 0.34);
+      border: 1px solid rgba(255, 255, 255, 0.06);
       border-radius: 8px;
       padding: 6px 7px;
       display: grid;
       gap: 2px;
     }}
     .metrics span {{ color: var(--muted); font-size: 11px; }}
-    .metrics strong {{ font-size: 13px; color: #f0f9ff; }}
+    .metrics strong {{ font-size: 13px; color: #fff; }}
     .muted {{ color: var(--muted); font-size: 12px; }}
     .topn {{
       font-size: 11px;
       color: #86efac;
-      background: rgba(5, 46, 22, 0.5);
-      border: 1px solid #14532d;
+      background: rgba(34, 197, 94, 0.08);
+      border: 1px solid rgba(34, 197, 94, 0.28);
       border-radius: 8px;
       padding: 4px 6px;
     }}
+    details.technical {{
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 8px;
+      padding: 7px;
+      background: rgba(0, 0, 0, 0.34);
+    }}
+    details.technical summary {{
+      cursor: pointer;
+      color: rgba(255, 255, 255, 0.62);
+      font-size: 12px;
+    }}
+    details.technical[open] {{
+      display: grid;
+      gap: 6px;
+    }}
     details.cmd {{
-      background: rgba(8, 15, 32, 0.8);
-      border: 1px solid #1f3759;
+      background: rgba(0, 0, 0, 0.22);
+      border: 1px solid rgba(255, 255, 255, 0.06);
       border-radius: 8px;
       padding: 6px;
     }}
     details.cmd summary {{
       cursor: pointer;
-      color: #bfdbfe;
+      color: rgba(191, 219, 254, 0.86);
       font-size: 12px;
     }}
     details.cmd pre {{
       margin: 8px 0 0;
-      color: #e0f2fe;
+      color: rgba(224, 242, 254, 0.9);
       font-size: 11px;
       white-space: pre-wrap;
       word-break: break-word;
@@ -1182,24 +1667,25 @@ def render_html(snapshot: dict[str, Any]) -> str:
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 6px 10px;
+      min-height: 36px;
+      padding: 0 12px;
       border-radius: 8px;
       font-size: 12px;
       text-decoration: none;
-      border: 1px solid #0e7490;
-      background: #083344;
-      color: #cffafe;
+      border: 1px solid var(--accent-border);
+      background: rgba(38, 198, 218, 0.08);
+      color: rgba(207, 250, 254, 0.96);
     }}
     .btn.disabled {{
-      border-color: #334155;
-      background: #0f172a;
-      color: #64748b;
+      border-color: rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.03);
+      color: rgba(255, 255, 255, 0.34);
     }}
     .warning {{
       font-size: 11px;
       color: #fecaca;
-      background: #450a0a;
-      border: 1px solid #7f1d1d;
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.32);
       border-radius: 8px;
       padding: 5px 7px;
       overflow-wrap: anywhere;
@@ -1212,14 +1698,50 @@ def render_html(snapshot: dict[str, Any]) -> str:
         grid-column: 1 / -1;
       }}
     }}
+    @media (max-width: 720px) {{
+      .brandbar {{
+        height: auto;
+        min-height: 72px;
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+        padding: 16px 20px;
+      }}
+      .brand {{
+        flex-wrap: wrap;
+      }}
+      .brand img {{
+        width: 150px;
+      }}
+      .brand span {{
+        border-left: 0;
+        padding-left: 0;
+      }}
+      .brand-meta {{
+        display: none;
+      }}
+      .top {{
+        grid-template-columns: 1fr;
+      }}
+      .grid {{
+        grid-template-columns: 1fr;
+      }}
+    }}
   </style>
 </head>
 <body>
+  <header class="brandbar">
+    <a class="brand" href="/">
+      <img src="/assets/warbird-logo.svg" alt="Warbird Pro" />
+      <span>Optuna Study Operations</span>
+    </a>
+    <div class="brand-meta">Local Operator Surface</div>
+  </header>
   <main class="wrap">
     <section class="top">
       <div class="summary">
-        <h1>Warbird Optuna Hub</h1>
-        <div class="meta">Unified dashboard for all indicators + strategies with AutoGluon 1.5 readiness checks.</div>
+        <h1>Warbird Optuna Study Hub</h1>
+        <div class="meta">One professional card per indicator lane. Each lane can hold multiple purpose-named studies.</div>
         <div class="meta">Generated: {_h(snapshot['generated_at'])}</div>
         <div class="meta" id="scope-label">Viewing: All Lanes</div>
         <div class="best" id="best-text">{best_text}</div>
@@ -1441,17 +1963,16 @@ def render_html(snapshot: dict[str, Any]) -> str:
         }}
 
         const bestName = stringAttr(bestCard, 'data-name');
-        const bestKey = stringAttr(bestCard, 'data-key');
         const events = numberAttr(bestCard, 'data-best-events', 0);
         if (events > 0) {{
           const score = numberAttr(bestCard, 'data-best-score', 0);
-          bestText.textContent = `${{bestName}} (${{bestKey}}) Score ${{score.toFixed(3)}} | Events ${{events}}`;
+          bestText.textContent = `${{bestName}} Score ${{score.toFixed(3)}} | Events ${{events}}`;
           return;
         }}
         const winRate = numberAttr(bestCard, 'data-best-win-rate', 0) * 100;
         const pf = numberAttr(bestCard, 'data-best-pf', 0);
         const trades = numberAttr(bestCard, 'data-best-trades', 0);
-        bestText.textContent = `${{bestName}} (${{bestKey}}) WR ${{winRate.toFixed(2)}}% | PF ${{pf.toFixed(3)}} | Trades ${{trades}}`;
+        bestText.textContent = `${{bestName}} WR ${{winRate.toFixed(2)}}% | PF ${{pf.toFixed(3)}} | Trades ${{trades}}`;
       }}
 
       function applyState() {{
@@ -1512,6 +2033,683 @@ def render_html(snapshot: dict[str, Any]) -> str:
 </html>"""
 
 
+def render_study_landing(card: dict[str, Any], child_dashboards_enabled: bool) -> str:
+    display_name = _display_indicator_name(card["name"])
+    studies = load_workspace_studies(Path(card["db_path"]))
+    studies_html: list[str] = []
+    for study in studies:
+        best = study["best_score"]
+        best_text = "n/a" if best is None else f"{_safe_float(best):.4f}"
+        study_url = f"/studies/{_h(card['key'])}/{_safe_int(study['study_id'])}"
+        studies_html.append(
+            "<article class='study-card'>"
+            f"<h2><a class='study-link' href='{study_url}'>{_h(study['title'])}</a></h2>"
+            f"<p>{_h(study['purpose'])}</p>"
+            "<div class='facts'>"
+            f"<span>Direction {_h(study['direction'])}</span>"
+            f"<span>Trials {_safe_int(study['trial_count'])}</span>"
+            f"<span>Complete {_safe_int(study['complete_count'])}</span>"
+            f"<span>Running {_safe_int(study['running_count'])}</span>"
+            f"<span>Fail {_safe_int(study['fail_count'])}</span>"
+            f"<span>Best {best_text}</span>"
+            "</div>"
+            f"<div class='meta'>Study name: {_h(study['study_name'])}</div>"
+            f"<div class='meta'>Last complete: {_h(study['last_complete'] or 'n/a')}</div>"
+            f"<div class='study-actions'><a class='btn primary' href='{study_url}'>Open Study</a></div>"
+            "</article>"
+        )
+
+    if not studies_html:
+        studies_html.append("<div class='empty'>No studies have been created for this indicator yet.</div>")
+
+    raw_link = (
+        f"<a class='btn primary' href='/open-study/{_h(card['key'])}' target='_blank' rel='noreferrer'>"
+        "Open Optuna Dashboard</a>"
+        if child_dashboards_enabled and card["db_exists"]
+        else "<span class='btn disabled'>Optuna Dashboard unavailable</span>"
+    )
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{_h(display_name)} Studies</title>
+  <style>
+    :root {{
+      color-scheme: dark;
+      --bg: #000000;
+      --panel: rgba(0, 0, 0, 0.50);
+      --panel-2: rgba(18, 20, 22, 0.52);
+      --text: rgba(255, 255, 255, 0.92);
+      --muted: rgba(255, 255, 255, 0.56);
+      --soft: rgba(255, 255, 255, 0.34);
+      --line: rgba(255, 255, 255, 0.08);
+      --accent: #26c6da;
+      --accent-line: rgba(38, 198, 218, 0.22);
+    }}
+    * {{ box-sizing: border-box; }}
+    html {{
+      background: #000;
+    }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 72% 16%, rgba(38, 198, 218, 0.11), transparent 32%),
+        linear-gradient(135deg, #000000 0%, #0a0a0a 50%, #111111 100%);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
+    body::before {{
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: url("/assets/chart_watermark.svg") center 92px / min(980px, 92vw) no-repeat;
+      opacity: 0.68;
+      filter: saturate(1.45) brightness(1.55) contrast(1.08);
+      mix-blend-mode: screen;
+      z-index: 0;
+    }}
+    body::after {{
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, rgba(0, 0, 0, 0.10), rgba(0, 0, 0, 0.38)),
+        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.05), transparent 36%);
+      z-index: 0;
+    }}
+    .brandbar {{
+      position: relative;
+      z-index: 1;
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 max(20px, calc((100vw - 1120px) / 2 + 24px));
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(12px);
+    }}
+    .brand {{
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      color: var(--text);
+      text-decoration: none;
+      min-width: 0;
+    }}
+    .brand img {{
+      width: 190px;
+      height: auto;
+      display: block;
+    }}
+    .brand span {{
+      color: var(--muted);
+      font-size: 13px;
+      border-left: 1px solid rgba(255, 255, 255, 0.1);
+      padding-left: 14px;
+      white-space: nowrap;
+    }}
+    .brand-meta {{
+      color: var(--soft);
+      font-size: 12px;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }}
+    main {{
+      position: relative;
+      z-index: 1;
+      width: min(1120px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 34px 0 48px;
+    }}
+    .top {{
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: flex-start;
+      padding: 24px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(18, 20, 22, 0.52), rgba(0, 0, 0, 0.48));
+      border-radius: 8px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(5px) saturate(1.04);
+      -webkit-backdrop-filter: blur(5px) saturate(1.04);
+    }}
+    h1 {{
+      margin: 0 0 8px;
+      color: #fff;
+      font-size: clamp(30px, 4vw, 46px);
+      line-height: 1.15;
+      letter-spacing: 0;
+    }}
+    .subtitle {{
+      max-width: 760px;
+      color: var(--muted);
+      line-height: 1.45;
+      font-size: 14px;
+    }}
+    .actions {{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }}
+    .btn {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 36px;
+      padding: 0 13px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      color: var(--text);
+      text-decoration: none;
+      font-size: 13px;
+      white-space: nowrap;
+      background: rgba(255, 255, 255, 0.03);
+    }}
+    .btn.primary {{
+      border-color: var(--accent-line);
+      background: rgba(38, 198, 218, 0.08);
+      color: rgba(224, 242, 254, 0.96);
+    }}
+    .btn.disabled {{
+      color: rgba(255, 255, 255, 0.34);
+      background: rgba(255, 255, 255, 0.03);
+    }}
+    .grid {{
+      margin-top: 22px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+    }}
+    .study-card, .empty {{
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(18, 20, 22, 0.52), rgba(0, 0, 0, 0.48));
+      border-radius: 8px;
+      padding: 18px;
+      backdrop-filter: blur(5px) saturate(1.04);
+      -webkit-backdrop-filter: blur(5px) saturate(1.04);
+      box-shadow: 0 18px 52px rgba(0, 0, 0, 0.24);
+      transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
+    }}
+    .study-card:hover {{
+      border-color: var(--accent-line);
+      background: linear-gradient(180deg, rgba(24, 28, 30, 0.56), rgba(0, 0, 0, 0.48));
+      transform: translateY(-1px);
+    }}
+    .study-card h2 {{
+      margin: 0 0 8px;
+      color: #fff;
+      font-size: 21px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }}
+    .study-link {{
+      color: inherit;
+      text-decoration: none;
+    }}
+    .study-link:hover {{
+      color: rgba(224, 242, 254, 0.96);
+    }}
+    .study-card p {{
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }}
+    .facts {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-bottom: 12px;
+    }}
+    .facts span {{
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.035);
+      border-radius: 999px;
+      padding: 5px 9px;
+      color: rgba(255, 255, 255, 0.76);
+      font-size: 12px;
+    }}
+    .meta {{
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }}
+    .study-actions {{
+      margin-top: 14px;
+      display: flex;
+      justify-content: flex-start;
+    }}
+    @media (max-width: 720px) {{
+      .brandbar {{
+        height: auto;
+        min-height: 72px;
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+        padding: 16px 20px;
+      }}
+      .brand {{
+        flex-wrap: wrap;
+      }}
+      .brand img {{
+        width: 150px;
+      }}
+      .brand span {{
+        border-left: 0;
+        padding-left: 0;
+      }}
+      .brand-meta {{
+        display: none;
+      }}
+      main {{
+        width: min(100vw - 32px, 1120px);
+      }}
+      .top {{
+        flex-direction: column;
+      }}
+      .actions {{
+        justify-content: flex-start;
+      }}
+    }}
+  </style>
+</head>
+<body>
+  <header class="brandbar">
+    <a class="brand" href="/">
+      <img src="/assets/warbird-logo.svg" alt="Warbird Pro" />
+      <span>Optuna Study Operations</span>
+    </a>
+    <div class="brand-meta">Local Operator Surface</div>
+  </header>
+  <main>
+    <section class="top">
+      <div>
+        <h1>{_h(display_name)} Studies</h1>
+        <div class="subtitle">
+          One indicator lane, multiple clearly named Optuna studies. Use this page as the clean landing view;
+          open the raw Optuna dashboard only when you need trial-level controls.
+        </div>
+      </div>
+      <div class="actions">
+        <a class="btn" href="/">Back to Hub</a>
+        {raw_link}
+      </div>
+    </section>
+    <section class="grid">
+      {''.join(studies_html)}
+    </section>
+  </main>
+</body>
+</html>"""
+
+
+def render_study_detail(card: dict[str, Any], study_id: int, child_dashboards_enabled: bool) -> str | None:
+    display_name = _display_indicator_name(card["name"])
+    study = load_workspace_study_detail(Path(card["db_path"]), study_id)
+    if study is None:
+        return None
+
+    best_trial = study["best_trial"]
+    best_score = best_trial["score"] if best_trial else None
+    best_trial_text = f"Trial {best_trial['number']}" if best_trial else "No completed trial"
+    best_score_text = _display_scalar(best_score)
+
+    facts_html = (
+        f"<span>Direction {_h(study['direction'])}</span>"
+        f"<span>Trials {_safe_int(study['trial_count'])}</span>"
+        f"<span>Complete {_safe_int(study['complete_count'])}</span>"
+        f"<span>Running {_safe_int(study['running_count'])}</span>"
+        f"<span>Fail {_safe_int(study['fail_count'])}</span>"
+        f"<span>Best {best_score_text}</span>"
+    )
+
+    params_html = "".join(
+        "<div class='param-row'>"
+        f"<span>{_h(param['label'])}</span>"
+        f"<strong>{_h(param['value'])}</strong>"
+        "</div>"
+        for param in study["params"]
+    ) or "<div class='empty-inline'>No best-trial parameters found.</div>"
+
+    metrics_html = "".join(
+        "<div class='metric-row'>"
+        f"<span>{_h(metric['label'])}</span>"
+        f"<strong>{_h(metric['value'])}</strong>"
+        "</div>"
+        for metric in study["metrics"]
+    ) or "<div class='empty-inline'>No best-trial metrics found.</div>"
+
+    trials_html = "".join(
+        "<tr>"
+        f"<td>{_h(trial['number'])}</td>"
+        f"<td>{_h(_display_scalar(trial['score']))}</td>"
+        f"<td>{_h(trial['state'])}</td>"
+        f"<td>{_h(trial['completed'] or 'n/a')}</td>"
+        "</tr>"
+        for trial in study["top_trials"]
+    ) or "<tr><td colspan='4'>No completed trials found.</td></tr>"
+
+    raw_link = (
+        f"<a class='btn secondary' href='/open-study/{_h(card['key'])}' target='_blank' rel='noreferrer'>"
+        "Open Raw Optuna</a>"
+        if child_dashboards_enabled and card["db_exists"]
+        else ""
+    )
+
+    detail_css = """
+    :root {
+      color-scheme: dark;
+      --text: rgba(255, 255, 255, 0.92);
+      --muted: rgba(255, 255, 255, 0.56);
+      --soft: rgba(255, 255, 255, 0.34);
+      --line: rgba(255, 255, 255, 0.08);
+      --accent: #26c6da;
+      --accent-line: rgba(38, 198, 218, 0.22);
+    }
+    * { box-sizing: border-box; }
+    html { background: #000; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 72% 16%, rgba(38, 198, 218, 0.11), transparent 32%),
+        linear-gradient(135deg, #000000 0%, #0a0a0a 50%, #111111 100%);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: url("/assets/chart_watermark.svg") center 92px / min(980px, 92vw) no-repeat;
+      opacity: 0.68;
+      filter: saturate(1.45) brightness(1.55) contrast(1.08);
+      mix-blend-mode: screen;
+      z-index: 0;
+    }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, rgba(0, 0, 0, 0.10), rgba(0, 0, 0, 0.38)),
+        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.05), transparent 36%);
+      z-index: 0;
+    }
+    .brandbar {
+      position: relative;
+      z-index: 1;
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 max(20px, calc((100vw - 1120px) / 2 + 24px));
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(12px);
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      color: var(--text);
+      text-decoration: none;
+      min-width: 0;
+    }
+    .brand img { width: 190px; height: auto; display: block; }
+    .brand span {
+      color: var(--muted);
+      font-size: 13px;
+      border-left: 1px solid rgba(255, 255, 255, 0.1);
+      padding-left: 14px;
+      white-space: nowrap;
+    }
+    .brand-meta {
+      color: var(--soft);
+      font-size: 12px;
+      text-transform: uppercase;
+    }
+    main {
+      position: relative;
+      z-index: 1;
+      width: min(1120px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 34px 0 48px;
+    }
+    .hero, .panel {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(18, 20, 22, 0.52), rgba(0, 0, 0, 0.48));
+      border-radius: 8px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(5px) saturate(1.04);
+      -webkit-backdrop-filter: blur(5px) saturate(1.04);
+    }
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: flex-start;
+      padding: 24px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      color: #fff;
+      font-size: clamp(30px, 4vw, 46px);
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+    .subtitle {
+      max-width: 780px;
+      color: var(--muted);
+      line-height: 1.45;
+      font-size: 14px;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 36px;
+      padding: 0 13px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      color: var(--text);
+      text-decoration: none;
+      font-size: 13px;
+      white-space: nowrap;
+      background: rgba(255, 255, 255, 0.03);
+    }
+    .btn.primary, .btn.secondary {
+      border-color: var(--accent-line);
+      background: rgba(38, 198, 218, 0.08);
+      color: rgba(224, 242, 254, 0.96);
+    }
+    .facts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-top: 16px;
+    }
+    .facts span {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.035);
+      border-radius: 999px;
+      padding: 5px 9px;
+      color: rgba(255, 255, 255, 0.76);
+      font-size: 12px;
+    }
+    .grid {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 0.7fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .panel {
+      padding: 18px;
+    }
+    .panel h2 {
+      margin: 0 0 14px;
+      color: #fff;
+      font-size: 18px;
+      line-height: 1.25;
+    }
+    .param-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .param-row, .metric-row {
+      display: grid;
+      gap: 3px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(0, 0, 0, 0.34);
+      border-radius: 8px;
+      padding: 9px;
+    }
+    .param-row span, .metric-row span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .param-row strong, .metric-row strong {
+      color: #fff;
+      font-size: 14px;
+      font-weight: 650;
+      overflow-wrap: anywhere;
+    }
+    .metric-list {
+      display: grid;
+      gap: 8px;
+    }
+    .trial-callout {
+      margin-bottom: 16px;
+      border: 1px solid var(--accent-line);
+      background: rgba(38, 198, 218, 0.08);
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .trial-callout span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    .trial-callout strong {
+      color: #fff;
+      font-size: 24px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th, td {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 9px 6px;
+      text-align: left;
+      color: rgba(255, 255, 255, 0.72);
+    }
+    th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .empty-inline {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 860px) {
+      .brandbar {
+        height: auto;
+        min-height: 72px;
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 8px;
+        padding: 16px 20px;
+      }
+      .brand { flex-wrap: wrap; }
+      .brand img { width: 150px; }
+      .brand span { border-left: 0; padding-left: 0; }
+      .brand-meta { display: none; }
+      main { width: min(100vw - 32px, 1120px); }
+      .hero { flex-direction: column; }
+      .actions { justify-content: flex-start; }
+      .grid { grid-template-columns: 1fr; }
+      .param-grid { grid-template-columns: 1fr; }
+    }
+    """
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{_h(study['title'])}</title>
+  <style>{detail_css}</style>
+</head>
+<body>
+  <header class="brandbar">
+    <a class="brand" href="/">
+      <img src="/assets/warbird-logo.svg" alt="Warbird Pro" />
+      <span>Optuna Study Operations</span>
+    </a>
+    <div class="brand-meta">Local Operator Surface</div>
+  </header>
+  <main>
+    <section class="hero">
+      <div>
+        <h1>{_h(study['title'])}</h1>
+        <div class="subtitle">{_h(display_name)} · {_h(study['purpose'])}</div>
+        <div class="facts">{facts_html}</div>
+      </div>
+      <div class="actions">
+        <a class="btn" href="/studies/{_h(card['key'])}">Back to Studies</a>
+        {raw_link}
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="panel">
+        <h2>Best Parameters</h2>
+        <div class="param-grid">{params_html}</div>
+      </div>
+      <aside class="panel">
+        <div class="trial-callout">
+          <span>{_h(best_trial_text)}</span>
+          <strong>{_h(best_score_text)}</strong>
+        </div>
+        <h2>Best Trial Metrics</h2>
+        <div class="metric-list">{metrics_html}</div>
+      </aside>
+      <div class="panel" style="grid-column: 1 / -1;">
+        <h2>Top Completed Trials</h2>
+        <table>
+          <thead>
+            <tr><th>Trial</th><th>Score</th><th>State</th><th>Completed</th></tr>
+          </thead>
+          <tbody>{trials_html}</tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</body>
+</html>"""
+
+
 def _detect_optuna_dashboard_bin(user_path: str | None) -> str:
     if user_path:
         p = Path(user_path)
@@ -1539,6 +2737,20 @@ def _build_handler(state: HubState):
             parsed = urlparse(self.path)
             snap = state.snapshot()
 
+            if parsed.path in PUBLIC_ASSETS:
+                asset_path = PUBLIC_ASSETS[parsed.path]
+                if not asset_path.exists():
+                    self.send_error(404, f"Asset not found: {parsed.path}")
+                    return
+                payload = asset_path.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/svg+xml; charset=utf-8")
+                self.send_header("Cache-Control", "public, max-age=3600")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
             if parsed.path == "/favicon.ico":
                 self.send_response(204)
                 self.end_headers()
@@ -1557,6 +2769,42 @@ def _build_handler(state: HubState):
                 payload = json.dumps(snap, indent=2).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
+            if parsed.path.startswith("/studies/"):
+                parts = [part for part in parsed.path.removeprefix("/studies/").split("/") if part]
+                if not parts:
+                    self.send_error(404, "Missing workspace key")
+                    return
+                if len(parts) > 2:
+                    self.send_error(404, "Unknown study route")
+                    return
+                key = parts[0]
+                card = next((c for c in snap["cards"] if c["key"] == key), None)
+                if card is None:
+                    self.send_error(404, f"Unknown workspace key: {key}")
+                    return
+                if len(parts) == 2:
+                    if not parts[1].isdigit():
+                        self.send_error(404, f"Unknown study id: {parts[1]}")
+                        return
+                    payload_html = render_study_detail(card, _safe_int(parts[1]), snap["child_dashboards_enabled"])
+                    if payload_html is None:
+                        self.send_error(404, f"Study not found: {parts[1]}")
+                        return
+                    payload = payload_html.encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
+                payload = render_study_landing(card, snap["child_dashboards_enabled"]).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)

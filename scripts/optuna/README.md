@@ -43,6 +43,7 @@ Rules:
 - Additional named studies stay inside `experiments/` for that same indicator.
 - Shared mixed-indicator SQLite DBs are retired. Historical mixed DBs belong in `archive/`.
 - Legacy `data/*optuna*` directories are deprecated and should stay empty.
+- Study names are operator-facing titles in `optuna-dashboard`. Use clear words with spaces that state the study purpose. Do not use snake_case, version labels, or generic names such as `<indicator>_study`.
 
 ## Current Runtime Ops
 
