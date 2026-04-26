@@ -26,9 +26,10 @@ ready for reuse by another agent.
 
 Allowed training inputs are only:
 
-- TradingView indicator CSV exports
+- TradingView indicator CSV exports for non-Nexus lanes
 - TradingView Strategy Tester trade exports
 - CDP-read TradingView Strategy Tester data
+- TradingView/Pine `request.footprint()` `nexus_fp_*` snapshots for Nexus ML RSI
 - deterministic features derived from those Pine/TradingView outputs
 
 Disallowed active training inputs:
@@ -83,6 +84,12 @@ Primary metrics:
   - Optuna/backtest wrapper for direct fib-anchor tests
   - default backtest trigger: direct selected fib execution-anchor hit/reclaim
     when `Backtest Fib Anchor Hits Directly` is enabled
+- `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
+  - Nexus lower-pane footprint-delta research surface
+  - active trigger family: `NEXUS_FOOTPRINT_DELTA`
+  - footprint delta must come from TradingView/Pine `request.footprint()`
+    `nexus_fp_*` fields; CSV exports, local OHLCV parquet, and synthetic
+    body/wick delta are invalid tuning evidence for this surface
 
 `v8-warbird-live.pine` and `v8-warbird-prescreen.pine` remain code-frozen
 legacy baselines. Only approved `input.*` default changes may be made there.
@@ -96,6 +103,8 @@ Admitted feature families:
 - Pine input settings
 - Pine state-machine fields
 - Pine `ml_*` hidden exports
+- Nexus `nexus_fp_*` footprint fields from TradingView/Pine
+  `request.footprint()`
 - TradingView Strategy Tester trade fields
 - OHLCV columns included in the TradingView export
 - deterministic columns computed only from the same Pine export

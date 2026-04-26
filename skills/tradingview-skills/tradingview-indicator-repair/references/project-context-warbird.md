@@ -39,9 +39,10 @@ changes.
 
 Use only Pine/TradingView-derived surfaces:
 
-- TradingView indicator CSV export
+- TradingView indicator CSV export for non-Nexus lanes
 - TradingView Strategy Tester trade export
 - CDP-read `reportData().trades()`
+- TradingView/Pine `request.footprint()` `nexus_fp_*` snapshot for Nexus ML RSI
 - deterministic fields derived from the same export
 
 Do not map suggestions to database tables unless the task is explicitly runtime

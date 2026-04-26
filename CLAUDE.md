@@ -21,9 +21,10 @@ agent-ready.
 
 Training/modeling uses Pine/TradingView outputs only:
 
-- TradingView indicator CSV exports
+- TradingView indicator CSV exports for non-Nexus lanes
 - TradingView Strategy Tester trade exports
 - CDP-read Strategy Tester data from local tooling
+- TradingView/Pine `request.footprint()` `nexus_fp_*` snapshots for Nexus ML RSI
 - deterministic features derived from those Pine outputs
 
 No daily/hourly ingestion, FRED, macro, cross-asset, news, options, Supabase, or
@@ -50,6 +51,9 @@ Budget verification from 2026-04-26:
 - `scripts/optuna/` is the active local optimization workspace.
 - `scripts/ag/tv_auto_tune.py` and `scripts/ag/tune_strategy_params.py` remain useful
   for TradingView-driven settings trials.
+- Nexus ML RSI Optuna must use TradingView/Pine `request.footprint()`
+  `nexus_fp_*` evidence. Do not run Nexus tuning from CSV exports, local OHLCV
+  parquet, Databento bars, or synthetic body/wick delta.
 - `scripts/ag/train_ag_baseline.py`, local `ag_training`, FRED joins, and SHAP lineage
   tables are legacy unless explicitly reopened.
 

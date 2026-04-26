@@ -68,14 +68,15 @@ context, or agent-facing notes pointing at an older trigger or training surface.
 ## Contract First
 
 - Pine/TradingView output is the active training truth.
-- Modeling inputs come only from TradingView indicator CSV exports, Strategy Tester
-  exports, CDP-read Strategy Tester data, and deterministic fields derived from
-  those Pine outputs.
+- Modeling inputs come only from TradingView/Pine outputs: TradingView
+  indicator CSV exports for non-Nexus lanes, Strategy Tester exports, CDP-read
+  Strategy Tester data, TradingView `request.footprint()` snapshots for Nexus,
+  and deterministic fields derived from those Pine outputs.
 - The active modeling object is the indicator behavior, not a server-side model.
 - The active output is a Pine settings/build recommendation, not a live scoring packet.
 - Every modeling run must declare one trigger family:
   `LIVE_ANCHOR_FOOTPRINT`, `STRATEGY_ACCEPT_SCALP`, or
-  `BACKTEST_DIRECT_ANCHOR`.
+  `BACKTEST_DIRECT_ANCHOR`, or `NEXUS_FOOTPRINT_DELTA`.
 - No external feature stacking: no FRED, macro, news, options, cross-asset, cloud,
   or Databento-ingestion joins in the active modeling dataset.
 - Daily/hourly ingestion is not a training source. It may remain for runtime chart
@@ -136,6 +137,10 @@ If any `.pine` file is touched, run:
 - Do not accept a settings result without export/CDP evidence, manifest, row/trade
   count, date range, and exact Pine inputs.
 - Do not start training/modeling unless explicitly asked.
+- Nexus ML RSI Optuna is the exception to generic indicator CSV export language:
+  it must use TradingView/Pine `request.footprint()` `nexus_fp_*` evidence only.
+  Do not tune Nexus from CSV exports, local OHLCV parquet, Databento bars, or
+  synthetic body/wick delta.
 
 ### Cloud And Database
 

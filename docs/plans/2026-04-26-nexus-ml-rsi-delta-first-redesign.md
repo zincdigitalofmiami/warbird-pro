@@ -77,10 +77,20 @@ Visual reference approved: the fade behavior matches the reference indicator scr
 
 **Research basis:** Cumulative delta divergence + bar-level order flow imbalance is the highest research-proven method for detecting 5m MES reversal setups (CME microstructure research, VSA/auction theory literature).
 
+**Hard data rule:** Nexus Optuna uses TradingView/Pine `request.footprint()`
+outputs only for footprint delta. CSV exports, local OHLCV parquet, Databento
+bars, and body/wick synthetic delta are invalid tuning evidence for this lane.
+
 **Implementation via `request.footprint()`** (already budgeted — 1 footprint call in current indicator):
 - Bar delta = `ask_volume − bid_volume` per bar
 - Cumulative delta = rolling sum over `delta_lookback` bars
 - Normalized cumulative delta = cumulative delta / (avg_bar_volume × lookback)
+
+**Optuna data contract:** Nexus tuning uses TradingView footprint data only.
+The profile consumes a TradingView-derived parquet containing hidden Pine plots
+from `request.footprint()` (`nexus_fp_available`, `nexus_fp_bar_delta`,
+`nexus_fp_total_volume`). CSV exports, plain OHLCV parquet, and synthetic
+body/wick delta reconstruction are not valid evidence for this lane.
 
 **Gassing out signature → White diamond:**
 - Price making new high (or continuing) across 2–3 bars

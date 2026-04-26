@@ -111,9 +111,10 @@ Capture training rows from TradingView/Pine only.
 
 Allowed sources:
 
-- TradingView indicator CSV export
+- TradingView indicator CSV export for non-Nexus lanes
 - TradingView Strategy Tester trade export
 - CDP-read Strategy Tester data from `tv_auto_tune.py`
+- TradingView/Pine `request.footprint()` `nexus_fp_*` snapshots for Nexus ML RSI
 - deterministic artifacts produced from those Pine outputs
 
 Required manifest fields:

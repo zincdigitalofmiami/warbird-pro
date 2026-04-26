@@ -2,9 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Rebuild the Nexus ML RSI Optuna profile and Pine indicator around footprint cumulative delta as the primary signal driver, with four signal tiers, Warbird brand colors, delta-fade bar coloring, and per-mode Optuna studies tuned for real 10+ point MES reversal legs.
+**Goal:** Rebuild the Nexus ML RSI Optuna profile and Pine indicator around TradingView `request.footprint()` cumulative delta as the primary signal driver, with four signal tiers, Warbird brand colors, delta-fade bar coloring, and per-mode Optuna studies tuned for real 10+ point MES reversal legs.
 
-**Architecture:** Delta-first (footprint cumulative delta drives signal firing), oscillator confirmation (AMF: ROC + EWI + Stoch blend preserved unchanged), KNN validation on delta features. Four-tier signals: teal diamond (confirmed bull reversal), red diamond (confirmed bear reversal), white diamond (gassing out — delta fading, not flipped), yellow dot (oscillator signal but low volume/KNN neutral). Four-mode indicator with separate Optuna study per mode.
+**Architecture:** Delta-first (TradingView footprint cumulative delta drives signal firing), oscillator confirmation (AMF: ROC + EWI + Stoch blend preserved unchanged), KNN validation on delta features. Four-tier signals: teal diamond (confirmed bull reversal), red diamond (confirmed bear reversal), white diamond (gassing out — delta fading, not flipped), yellow dot (oscillator signal but low volume/KNN neutral). Four-mode indicator with separate Optuna study per mode.
+
+**Hard Data Rule:** Nexus Optuna must not tune from CSV exports, local OHLCV parquet, Databento-derived bars, or synthetic body/wick delta. The only valid delta source is TradingView/Pine `request.footprint()` evidence captured into a manifest-backed `nexus_fp_*` footprint snapshot.
 
 **Tech Stack:** Pine Script v6, Python 3, Optuna TPE, backtesting.py, ruff, pine-lint.sh, pine-facade TV compiler
 
@@ -14,32 +16,26 @@
 
 ## Phase 1: Optuna Profile Rebuild (5m Study A)
 
-### Task 1: Add delta helper functions to profile
+### Task 1: Add TV footprint delta contract and helpers to profile
 
 **Files:**
 - Modify: `scripts/optuna/warbird_nexus_ml_rsi_profile.py` (after line ~217, before `class NexusMLRSIProfile`)
 
-**Step 1: Add three delta helpers after the existing helper block**
+**Step 1: Add the TradingView footprint input contract and delta helpers**
 
-Insert after the last existing helper function (before the class definition):
+Delete any local `mes_5m.parquet` / `mes_1m.parquet` loader and any synthetic
+OHLCV delta helper. The profile must load only a manifest-backed TradingView
+footprint snapshot with these Pine-derived columns:
+
+- `nexus_fp_available`
+- `nexus_fp_bar_delta`
+- `nexus_fp_total_volume`
+
+Keep only true delta helpers that operate on the TradingView/Pine footprint
+series:
 
 ```python
 # ── Delta helpers ─────────────────────────────────────────────────────────────
-
-def _bar_delta(
-    open_: np.ndarray,
-    high: np.ndarray,
-    low: np.ndarray,
-    close: np.ndarray,
-    volume: np.ndarray,
-) -> np.ndarray:
-    """Synthetic bar delta: body-direction × body-ratio × volume."""
-    body = np.abs(close - open_)
-    candle_range = np.maximum(high - low, 1e-9)
-    body_ratio = np.clip(body / candle_range, 0.0, 1.0)
-    body_dir = np.where(close > open_, 1.0, np.where(close < open_, -1.0, 0.0))
-    return body_dir * body_ratio * np.maximum(volume, 0.0)
-
 
 def _cumulative_delta(bar_delta: np.ndarray, lookback: float) -> np.ndarray:
     lb = max(int(lookback), 1)
@@ -119,29 +115,28 @@ git commit -m "optuna: make evaluation horizon + delta params tunable"
 
 ---
 
-### Task 3: Wire delta features into `_compute_features()`
+### Task 3: Wire TradingView footprint delta features into `_compute_features()`
 
 **Files:**
 - Modify: `scripts/optuna/warbird_nexus_ml_rsi_profile.py` — `_compute_features()` / `_compute_core()` methods
 
-**Step 1: Add delta computation at the top of `_compute_features()`**
+**Step 1: Add delta computation from `nexus_fp_*` fields at the top of `_compute_features()`**
 
-After the existing feature computation (VNVF etc.), add:
+After the existing feature computation (VNVF etc.), add. Do not reconstruct
+delta from OHLCV:
 
 ```python
-# ── Footprint-style cumulative delta ────────────────────────────────────────
-bar_dlt   = _bar_delta(df["open"].values, df["high"].values,
-                       df["low"].values, df["close"].values,
-                       df["volume"].values)
+# ── TradingView request.footprint() cumulative delta ────────────────────────
+bar_dlt   = df["nexus_fp_bar_delta"].values
+total_vol = np.maximum(df["nexus_fp_total_volume"].values, 1.0)
 cum_dlt   = _cumulative_delta(bar_dlt, params["delta_lookback"])
-avg_vol   = _series(df["volume"].values).rolling(
+avg_vol   = _series(total_vol).rolling(
                 max(int(params["delta_lookback"]), 1), min_periods=1
             ).mean().to_numpy(dtype=np.float64)
 norm_cum  = cum_dlt / np.maximum(avg_vol * params["delta_lookback"], 1.0)
 norm_cum  = np.clip(norm_cum, -1.0, 1.0)
 dlt_slope = _delta_slope(cum_dlt, params["delta_slope_len"])
 
-total_vol = np.maximum(df["volume"].values, 1.0)
 bar_ratio = np.clip(bar_dlt / total_vol, -1.0, 1.0)
 
 price_pos = (df["close"].values - df["low"].values) / np.maximum(

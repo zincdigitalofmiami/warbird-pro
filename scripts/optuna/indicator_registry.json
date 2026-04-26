@@ -152,6 +152,6 @@
     "default_study_name": "Warbird Nexus ML Fast 5m Signal Quality April 25",
     "symbol": "MES1!",
     "timeframe": "5",
-    "notes": "Research proxy harness on real MES 5m OHLCV parquet with Volume Flow scored as a first-class subsystem. Optimizes Nexus indicator settings only: source, preset, smoothing, signal smoothing, engine period, zones, confluence thresholds, fatigue bars, KNN neighbors/window, volume-flow quality, and confirmation gates. No commissions, trade sizing, stops, targets, ATR exits, or non-5m bias gate are active in the Nexus search."
+    "notes": "Nexus footprint lane. Optimizes Nexus indicator settings only from manifest-backed TradingView/Pine request.footprint() snapshots containing nexus_fp_available, nexus_fp_bar_delta, and nexus_fp_total_volume. CSV exports, local OHLCV parquet, and synthetic body/wick delta are invalid for this lane."
   }
 ]

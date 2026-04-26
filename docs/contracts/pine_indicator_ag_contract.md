@@ -23,9 +23,11 @@ settings still match the current contract.
 
 Training rows may come only from:
 
-- TradingView indicator CSV exports
+- TradingView indicator CSV exports for non-Nexus lanes
 - TradingView Strategy Tester trade exports
 - CDP-read Strategy Tester data
+- TradingView/Pine `request.footprint()` `nexus_fp_*` snapshots for
+  `NEXUS_FOOTPRINT_DELTA`
 - deterministic columns derived from those Pine/TradingView exports
 
 No external feature stack is admitted.
@@ -49,6 +51,11 @@ Do not mix trigger families inside one run.
   `Backtest Fib Anchor Hits Directly` is enabled. Entries fire from the selected
   fib execution-anchor hit/reclaim path and intentionally bypass the full live
   footprint/context path.
+- `NEXUS_FOOTPRINT_DELTA`: Nexus lower-pane footprint-delta trigger from
+  `warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`. Rows must come
+  from TradingView/Pine `request.footprint()` evidence containing `nexus_fp_*`
+  fields. CSV exports, local OHLCV parquet, Databento bars, and synthetic
+  body/wick delta are not valid tuning evidence for this trigger family.
 
 `acceptEvent` alone is not the live institutional entry trigger. It is a
 diagnostic/setup-archetype event unless a specific strategy surface uses it as
@@ -76,7 +83,8 @@ Every modeling run must record:
 - TradingView symbol
 - timeframe
 - export date range
-- export method (`CSV`, `STRATEGY_TESTER_CSV`, `CDP_REPORT_DATA`)
+- export method (`CSV`, `STRATEGY_TESTER_CSV`, `CDP_REPORT_DATA`,
+  `TV_FOOTPRINT_PARQUET`)
 - trigger family
 - Pine input settings
 - Strategy Tester properties where applicable

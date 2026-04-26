@@ -3,15 +3,19 @@
 
 Guide-driven tuning surface for the user's actual workflow on MES 5m:
 - primary signals are oscillator/signal crosses on the correct side of the midline
-- confirmations come from volume flow, KNN, and confluence
+- confirmations come from TradingView request.footprint() delta, KNN, and confluence
 - fatigue is a first-class weakening/reversal warning
 
-This is still a research harness over MES 5m OHLCV, not a claim of exact
-TradingView parity for every visual or alert-only subsystem.
+This profile requires a TradingView-derived footprint parquet. CSV exports,
+plain OHLCV parquet, and synthetic OHLCV delta reconstruction are not accepted
+for this Nexus lane.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -26,8 +30,28 @@ if str(REPO_ROOT) not in sys.path:
 
 
 MINTICK = 0.25
-DATA_PATH = REPO_ROOT / "data" / "mes_5m.parquet"
-SOURCE_1M_PATH = REPO_ROOT / "data" / "mes_1m.parquet"
+WORKSPACE_DIR = REPO_ROOT / "scripts" / "optuna" / "workspaces" / "warbird_nexus_ml_rsi"
+TV_FOOTPRINT_PATH = WORKSPACE_DIR / "tv_footprint_5m.parquet"
+TV_FOOTPRINT_ENV = "WARBIRD_NEXUS_TV_FOOTPRINT_PARQUET"
+TV_FOOTPRINT_MANIFEST_ENV = "WARBIRD_NEXUS_TV_FOOTPRINT_MANIFEST"
+NEXUS_TRIGGER_FAMILY = "NEXUS_FOOTPRINT_DELTA"
+NEXUS_PINE_FILE = "indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine"
+TV_FOOTPRINT_CAPTURE_METHODS = {
+    "TV_CDP_FOOTPRINT",
+    "TV_MCP_FOOTPRINT",
+    "TV_FOOTPRINT_PARQUET",
+    "TRADINGVIEW_FOOTPRINT_SNAPSHOT",
+}
+REQUIRED_TV_FOOTPRINT_COLUMNS = {
+    "ts",
+    "open",
+    "high",
+    "low",
+    "close",
+    "nexus_fp_available",
+    "nexus_fp_bar_delta",
+    "nexus_fp_total_volume",
+}
 
 
 BOOL_PARAMS: list[str] = [
@@ -253,20 +277,6 @@ def _calc_er(src: np.ndarray, length: int) -> np.ndarray:
     return _safe_div(direction, volatility, 0.0)
 
 
-def _bar_delta(
-    open_: np.ndarray,
-    high: np.ndarray,
-    low: np.ndarray,
-    close: np.ndarray,
-    volume: np.ndarray,
-) -> np.ndarray:
-    body = np.abs(close - open_)
-    candle_range = np.maximum(high - low, 1e-9)
-    body_ratio = np.clip(body / candle_range, 0.0, 1.0)
-    body_dir = np.where(close > open_, 1.0, np.where(close < open_, -1.0, 0.0))
-    return body_dir * body_ratio * np.maximum(volume, 0.0)
-
-
 def _cumulative_delta(bar_delta: np.ndarray, lookback: float) -> np.ndarray:
     lb = max(int(lookback), 1)
     return _series(bar_delta).rolling(lb, min_periods=1).sum().to_numpy(dtype=np.float64)
@@ -329,8 +339,8 @@ def _compute_core(frame: pd.DataFrame, params: dict[str, Any]) -> dict[str, np.n
     source = _resolve_source(frame, str(params.get("sourceInput", "close")))
     smooth_type = str(params.get("smoothTypeInput", "DEMA"))
     sig_type = str(params.get("sigTypeInput", "EMA"))
-    vf_body_weight = float(np.clip(_safe_float(params.get("vfBodyWeightInput"), 0.70), 0.0, 1.0))
-    vf_wick_weight = 1.0 - vf_body_weight
+    vf_delta_weight = float(np.clip(_safe_float(params.get("vfBodyWeightInput"), 0.70), 0.0, 1.0))
+    vf_rolling_delta_weight = 1.0 - vf_delta_weight
     vf_fast_len_mult = max(_safe_float(params.get("vfFastLenMultInput"), 0.60), 0.10)
     vf_slow_len_mult = max(_safe_float(params.get("vfSlowLenMultInput"), 1.40), 0.10)
     vf_fast_blend_weight = float(np.clip(_safe_float(params.get("vfFastBlendWeightInput"), 0.60), 0.0, 1.0))
@@ -340,9 +350,17 @@ def _compute_core(frame: pd.DataFrame, params: dict[str, Any]) -> dict[str, np.n
     high = frame["high"].to_numpy(dtype=np.float64)
     low = frame["low"].to_numpy(dtype=np.float64)
     close = frame["close"].to_numpy(dtype=np.float64)
-    volume = np.nan_to_num(frame["volume"].to_numpy(dtype=np.float64), nan=0.0)
-    volume_available = np.cumsum(np.maximum(volume, 0.0)) > 0.0
-    bar_volume = np.where(volume_available, volume, 0.0)
+    fp_available = np.nan_to_num(frame["nexus_fp_available"].to_numpy(dtype=np.float64), nan=0.0) > 0.0
+    fp_bar_delta = frame["nexus_fp_bar_delta"].to_numpy(dtype=np.float64)
+    fp_total_volume = frame["nexus_fp_total_volume"].to_numpy(dtype=np.float64)
+    volume_available = (
+        fp_available
+        & np.isfinite(fp_bar_delta)
+        & np.isfinite(fp_total_volume)
+        & (fp_total_volume > 0.0)
+    )
+    volume = np.where(volume_available, fp_total_volume, 0.0)
+    bar_volume = volume
 
     shifted = np.roll(source, eff_len)
     shifted[:eff_len] = np.nan
@@ -377,15 +395,14 @@ def _compute_core(frame: pd.DataFrame, params: dict[str, Any]) -> dict[str, np.n
     osc = np.clip(np.nan_to_num(_u_smooth(osc_raw, osc_smooth_len, smooth_type, volume), nan=50.0), 0.0, 100.0)
     sig = np.nan_to_num(_u_smooth(osc, sig_len, sig_type, volume), nan=50.0)
 
-    candle_range = high - low
-    body_size = np.abs(close - open_)
-    body_ratio = _safe_div(body_size, candle_range, 0.0)
-    upper_wick = high - np.maximum(close, open_)
-    lower_wick = np.minimum(close, open_) - low
-    wick_bias = _safe_div(lower_wick - upper_wick, candle_range, 0.0)
-    body_dir = np.where(close > open_, 1.0, np.where(close < open_, -1.0, 0.0))
-    candle_score = body_dir * body_ratio * vf_body_weight + wick_bias * vf_wick_weight
-    signed_vol = np.where(volume_available, candle_score * bar_volume, 0.0)
+    delta_lookback = max(_safe_int(params.get("delta_lookback"), 10), 1)
+    fp_delta_clean = np.where(volume_available, fp_bar_delta, 0.0)
+    rolling_delta_mean = _sma(fp_delta_clean, delta_lookback)
+    signed_vol = np.where(
+        volume_available,
+        fp_delta_clean * vf_delta_weight + rolling_delta_mean * vf_rolling_delta_weight,
+        0.0,
+    )
     avg_vol = _sma(bar_volume, eff_len * 2)
     vnvf_raw = np.where(
         volume_available,
@@ -406,6 +423,8 @@ def _compute_core(frame: pd.DataFrame, params: dict[str, Any]) -> dict[str, np.n
         "close": close,
         "volume": volume,
         "volume_available": volume_available,
+        "fp_bar_delta": np.where(volume_available, fp_bar_delta, np.nan),
+        "fp_total_volume": np.where(volume_available, fp_total_volume, np.nan),
         "atr_eff": np.maximum(atr_eff, MINTICK),
         "atr14": np.maximum(atr14, MINTICK),
         "er_smoothed": er_smoothed,
@@ -586,22 +605,23 @@ def _compute_features(frame: pd.DataFrame, params: dict[str, Any]) -> pd.DataFra
     fat_ob_signal = (fat_ob_count == fatigue_bars) & warmup_mask
     fat_os_signal = (fat_os_count == fatigue_bars) & warmup_mask
 
-    # ── Footprint-style cumulative delta ────────────────────────────────────
+    # TradingView request.footprint() delta only. No OHLCV reconstruction.
     _delta_lb   = max(int(params.get("delta_lookback", 10)), 1)
     _slope_len  = max(int(params.get("delta_slope_len", 5)), 1)
     _flip_th    = float(params.get("delta_flip_thresh", 0.10))
     _gasout_th  = float(params.get("gasout_thresh", 0.05))
 
-    bar_dlt    = _bar_delta(core["open"], core["high"], core["low"], core["close"], core["volume"])
+    bar_dlt    = np.where(volume_available, core["fp_bar_delta"], 0.0)
+    fp_total   = np.where(volume_available, core["fp_total_volume"], 0.0)
     cum_dlt    = _cumulative_delta(bar_dlt, _delta_lb)
-    avg_vol_d  = _series(core["volume"]).rolling(_delta_lb, min_periods=1).mean().to_numpy(dtype=np.float64)
+    avg_vol_d  = _series(fp_total).rolling(_delta_lb, min_periods=1).mean().to_numpy(dtype=np.float64)
     norm_cum   = np.clip(
         _safe_div(cum_dlt, np.maximum(avg_vol_d * _delta_lb, 1.0), 0.0),
         -1.0, 1.0,
     )
     dlt_slope  = _delta_slope(cum_dlt, _slope_len)
     bar_ratio  = np.clip(
-        _safe_div(bar_dlt, np.maximum(core["volume"], 1.0), 0.0),
+        _safe_div(bar_dlt, np.maximum(fp_total, 1.0), 0.0),
         -1.0, 1.0,
     )
     price_pos  = _safe_div(
@@ -850,43 +870,144 @@ def objective_score(result: dict[str, Any]) -> float:
     return _bounded(_safe_float(result.get("composite_score"), 0.0))
 
 
-def _rollup_1m_to_5m(df: pd.DataFrame) -> pd.DataFrame:
-    frame = df.copy()
-    frame["ts"] = pd.to_datetime(frame["ts"], utc=True)
-    frame = frame.sort_values("ts").drop_duplicates(subset=["ts"]).set_index("ts")
-    agg: dict[str, Any] = {
-        "open": "first",
-        "high": "max",
-        "low": "min",
-        "close": "last",
-        "volume": "sum",
-    }
-    if "symbol" in frame.columns:
-        agg["symbol"] = "first"
-    rolled = frame.resample("5min", origin="epoch", label="left", closed="left").agg(agg)
-    rolled = rolled.dropna(subset=["open", "high", "low", "close"]).reset_index()
-    if "symbol" not in rolled.columns:
-        rolled["symbol"] = "MES"
-    return rolled.loc[:, ["ts", "open", "high", "low", "close", "volume", "symbol"]]
+def _resolve_tv_footprint_path() -> Path:
+    configured = os.environ.get(TV_FOOTPRINT_ENV, "").strip()
+    path = Path(configured).expanduser() if configured else TV_FOOTPRINT_PATH
+    if path.suffix.lower() == ".csv":
+        raise ValueError(
+            "Nexus Optuna CSV input is disabled. Provide a TradingView-derived "
+            f"footprint parquet via {TV_FOOTPRINT_ENV} or {TV_FOOTPRINT_PATH}."
+        )
+    return path
+
+
+def _resolve_tv_footprint_manifest_path(footprint_path: Path) -> Path:
+    configured = os.environ.get(TV_FOOTPRINT_MANIFEST_ENV, "").strip()
+    return Path(configured).expanduser() if configured else footprint_path.with_suffix(".manifest.json")
+
+
+def _sha256_file(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def _load_tv_footprint_manifest(footprint_path: Path) -> dict[str, Any]:
+    manifest_path = _resolve_tv_footprint_manifest_path(footprint_path)
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            "Missing Nexus TradingView footprint manifest: "
+            f"{manifest_path}\n"
+            "The Nexus Optuna lane requires a manifest proving the snapshot was "
+            "captured from TradingView request.footprint(), not CSV or local OHLCV."
+        )
+
+    manifest = json.loads(manifest_path.read_text())
+    capture_method = str(manifest.get("capture_method", "")).strip()
+    if capture_method not in TV_FOOTPRINT_CAPTURE_METHODS:
+        raise ValueError(
+            "Nexus footprint manifest capture_method must be one of "
+            f"{sorted(TV_FOOTPRINT_CAPTURE_METHODS)}; got {capture_method!r}."
+        )
+
+    trigger_family = str(manifest.get("trigger_family", "")).strip()
+    if trigger_family and trigger_family != NEXUS_TRIGGER_FAMILY:
+        raise ValueError(
+            f"Nexus footprint manifest trigger_family must be {NEXUS_TRIGGER_FAMILY!r}; "
+            f"got {trigger_family!r}."
+        )
+
+    indicator_file = str(manifest.get("indicator_file", "")).strip()
+    if indicator_file and indicator_file != NEXUS_PINE_FILE:
+        raise ValueError(
+            f"Nexus footprint manifest indicator_file must be {NEXUS_PINE_FILE!r}; "
+            f"got {indicator_file!r}."
+        )
+
+    expected_hash = manifest.get("sha256") or manifest.get("snapshot_sha256")
+    if expected_hash:
+        actual_hash = _sha256_file(footprint_path)
+        if str(expected_hash).lower() != actual_hash.lower():
+            raise ValueError(
+                f"Nexus footprint snapshot hash mismatch: manifest={expected_hash} "
+                f"actual={actual_hash}"
+            )
+
+    return manifest
+
+
+def _prepare_tv_footprint_frame(df: pd.DataFrame) -> pd.DataFrame:
+    missing = REQUIRED_TV_FOOTPRINT_COLUMNS.difference(df.columns)
+    if missing:
+        raise ValueError(
+            "Nexus TradingView footprint parquet missing required columns: "
+            f"{sorted(missing)}"
+        )
+
+    df = df.copy()
+    df["ts"] = pd.to_datetime(df["ts"], utc=True)
+    numeric_cols = [
+        "open",
+        "high",
+        "low",
+        "close",
+        "nexus_fp_available",
+        "nexus_fp_bar_delta",
+        "nexus_fp_total_volume",
+    ]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    footprint_mask = (
+        df["nexus_fp_available"].fillna(0.0).gt(0.0)
+        & df["nexus_fp_bar_delta"].notna()
+        & df["nexus_fp_total_volume"].notna()
+        & df["nexus_fp_total_volume"].gt(0.0)
+    )
+    if not bool(footprint_mask.any()):
+        raise ValueError(
+            "Nexus TradingView footprint parquet has no usable footprint rows. "
+            "request.footprint() data is required for tuning."
+        )
+
+    df["volume"] = df["nexus_fp_total_volume"]
+    if "symbol" not in df.columns:
+        df["symbol"] = "MES"
+
+    keep_cols = [
+        "ts",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "symbol",
+        "nexus_fp_available",
+        "nexus_fp_bar_delta",
+        "nexus_fp_total_volume",
+    ]
+    df = df.loc[:, keep_cols]
+    df = df.sort_values("ts").drop_duplicates(subset=["ts"]).reset_index(drop=True)
+    return df
 
 
 def load_data() -> pd.DataFrame:
-    if DATA_PATH.exists():
-        df = pd.read_parquet(DATA_PATH)
-    elif SOURCE_1M_PATH.exists():
-        df = _rollup_1m_to_5m(pd.read_parquet(SOURCE_1M_PATH))
-    else:
-        raise FileNotFoundError(f"Missing MES 5m parquet: {DATA_PATH}")
+    footprint_path = _resolve_tv_footprint_path()
+    if not footprint_path.exists():
+        raise FileNotFoundError(
+            "Missing Nexus TradingView footprint parquet: "
+            f"{footprint_path}\n"
+            "This profile must be fed rows captured from TradingView "
+            "request.footprint() plots: nexus_fp_available, "
+            "nexus_fp_bar_delta, and nexus_fp_total_volume. CSV exports, "
+            "plain OHLCV parquet, and synthetic OHLCV delta are disabled."
+        )
 
-    required = {"ts", "open", "high", "low", "close", "volume"}
-    missing = required.difference(df.columns)
-    if missing:
-        raise ValueError(f"mes_5m parquet missing required columns: {sorted(missing)}")
-
-    df = df.loc[:, [c for c in df.columns if c in {"ts", "open", "high", "low", "close", "volume", "symbol"}]].copy()
-    df["ts"] = pd.to_datetime(df["ts"], utc=True)
-    df = df.sort_values("ts").drop_duplicates(subset=["ts"]).reset_index(drop=True)
-    return df
+    _load_tv_footprint_manifest(footprint_path)
+    df = pd.read_parquet(footprint_path)
+    return _prepare_tv_footprint_frame(df)
 
 
 def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> dict[str, Any]:
