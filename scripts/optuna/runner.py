@@ -10,8 +10,9 @@ Usage:
     --profile-module scripts.optuna.<key>_profile \
     --n-trials 300 --study-name "Purpose-Named Study Title"
 
-Dashboard (pick any free local port, e.g. 8180):
-  optuna-dashboard sqlite:///scripts/optuna/workspaces/<indicator_key>/study.db --port 8180
+Dashboard:
+  http://127.0.0.1:8090/
+  http://127.0.0.1:8090/studies/<indicator_key>
 """
 
 import sys
@@ -37,13 +38,13 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.optuna.paths import workspace_dir
+from scripts.optuna.paths import workspace_dir  # noqa: E402
 
 MIN_TRADES = 20  # prune configs that produce fewer trades
 SL_FLOOR = 0.618  # hard constraint: structural stop floor
 START_DATE_IS = "2025-01-01"  # IS window default (Trump regime structural break Jan 2025)
 END_DATE_IS = "2026-12-31"  # IS end — OOS defined per config lock date
-RECOMMENDED_LOCAL_DASHBOARD_PORT = 8180
+RECOMMENDED_HUB_URL = "http://127.0.0.1:8090"
 
 # Ranking policies — opt-in per --ranking-policy CLI flag.
 # win_rate_first_pf_second: legacy default, preserved for backward compat.
@@ -391,6 +392,7 @@ def register_study_metadata(
     profile_name: str,
     ranking_policy: str = DEFAULT_RANKING_POLICY,
     objective_primary: str | None = None,
+    data_metadata: dict[str, Any] | None = None,
 ) -> None:
     study.set_user_attr("project", "warbird-pro")
     study.set_user_attr("contract", "MES_5m" if indicator_key == "warbird_nexus_ml_rsi" else "MES_15m")
@@ -404,6 +406,10 @@ def register_study_metadata(
     study.set_user_attr("objective_secondary", "pf")
     study.set_user_attr("is_start", start_date)
     study.set_user_attr("is_end", END_DATE_IS)
+    if data_metadata:
+        for key, value in data_metadata.items():
+            if isinstance(value, bool | int | float | str) or value is None:
+                study.set_user_attr(f"data_{key}", value)
 
 
 def seed_champion(study: optuna.Study, champ_path: Path | None, profile: ProfileAdapter) -> None:
@@ -686,6 +692,7 @@ def main():
         profile.name,
         ranking_policy,
         objective_primary=objective_metric_name,
+        data_metadata=dict(df.attrs.get("warbird_manifest", {})),
     )
     seed_champion(study, champ_path, profile)
 
@@ -736,8 +743,8 @@ def main():
         export_top_n(study, optuna_dir=optuna_dir, n=args.top_n, min_wr=args.min_wr)
 
     print(
-        f"\nDashboard: optuna-dashboard sqlite:///{db_path} "
-        f"--port {RECOMMENDED_LOCAL_DASHBOARD_PORT}"
+        f"\nHub: {RECOMMENDED_HUB_URL}/studies/{args.indicator_key} "
+        f"(workspace DB: {db_path})"
     )
 
 

@@ -86,6 +86,9 @@ Primary metrics:
   - direct-anchor fib geometry locks the first structural leg; after price
     retraces into the locked `.786`, later same-base wick extensions do not
     replace the active anchors
+- `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
+  - Nexus lower-pane footprint-delta signal-quality research surface
+  - active trigger family: `NEXUS_FOOTPRINT_DELTA`
 
 `v8-warbird-live.pine` and `v8-warbird-prescreen.pine` remain code-frozen
 legacy baselines. Only approved `input.*` default changes may be made there.

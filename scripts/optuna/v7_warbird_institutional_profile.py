@@ -9,7 +9,7 @@ Architecture
 ------------
 1. load_data()
    - Reads scripts/optuna/workspaces/v7_warbird_institutional/export.csv (TV CSV export)
-   - Merges with data/mes_15m.parquet for OHLCV ground truth
+   - Uses the OHLCV columns in that same TradingView export as ground truth
    - Precomputes ATR(14), EMA(100), DMI(14) for filter/simulation use
 
 2. run_backtest(df, params, start_date)
@@ -60,7 +60,6 @@ from scripts.optuna.paths import workspace_dir
 
 OPTUNA_DIR = workspace_dir("v7_warbird_institutional")
 CSV_PATH   = OPTUNA_DIR / "export.csv"
-OHLCV_PATH = REPO_ROOT / "data" / "mes_15m.parquet"
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -715,7 +714,7 @@ def _parse_tv_csv(path: Path) -> pd.DataFrame:
 
 def load_data() -> pd.DataFrame:
     """
-    Load the TV CSV export and merge with mes_15m.parquet OHLCV.
+    Load the TV CSV export as the only modeling data source.
 
     Precomputes: ATR(14), EMA(100), DMI(14) — required for stop re-simulation
     and short-gate filter.
@@ -740,26 +739,50 @@ def load_data() -> pd.DataFrame:
             "See docs/runbooks/wbv7_institutional_optuna.md for full instructions.\n"
         )
 
-    if not OHLCV_PATH.exists():
-        raise FileNotFoundError(f"OHLCV parquet not found: {OHLCV_PATH}")
-
     csv_df = _parse_tv_csv(CSV_PATH)
 
-    ohlcv = pd.read_parquet(OHLCV_PATH)[["ts", "open", "high", "low", "close", "volume"]].copy()
+    required_export_cols = {
+        "ts",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "trade_state",
+        "ml_last_exit_outcome",
+        "ml_direction_code",
+        "fib_range",
+        "ml_fib_neg_0236",
+    }
+    missing_required = sorted(required_export_cols.difference(csv_df.columns))
+    if missing_required:
+        raise ValueError(
+            "TradingView export is missing required indicator-only columns: "
+            f"{missing_required}. Re-export the Pine/TradingView CSV; do not "
+            "backfill these fields from parquet, warehouse, or external data."
+        )
 
-    # Drop OHLCV columns from CSV (parquet is ground truth)
-    drop_ohlcv = [c for c in ("open", "high", "low", "close", "volume") if c in csv_df.columns]
-    merged = ohlcv.merge(
-        csv_df.drop(columns=drop_ohlcv, errors="ignore"),
-        on="ts",
-        how="left",
-    )
+    merged = csv_df.copy()
 
     merged = (
         merged[merged["ts"] >= pd.Timestamp(DATA_FLOOR, tz="UTC")]
         .copy()
         .reset_index(drop=True)
     )
+    if merged.empty:
+        raise ValueError(f"TradingView export has no rows on or after {DATA_FLOOR}.")
+
+    numeric_cols = sorted(required_export_cols.difference({"ts"}))
+    for col in numeric_cols:
+        merged[col] = pd.to_numeric(merged[col], errors="coerce")
+
+    ohlcv_cols = ["open", "high", "low", "close", "volume"]
+    if merged[ohlcv_cols].isna().any().any():
+        bad_cols = [col for col in ohlcv_cols if merged[col].isna().any()]
+        raise ValueError(
+            "TradingView export has missing OHLCV values in required columns: "
+            f"{bad_cols}."
+        )
 
     hi = merged["high"].values.astype(float)
     lo = merged["low"].values.astype(float)
@@ -775,13 +798,8 @@ def load_data() -> pd.DataFrame:
     merged["_di_minus"] = di_m
     merged["_adx14"]    = adx
 
-    # Fill missing Pine export columns with safe defaults
+    # Optional Pine diagnostics. Core label/geometry columns are required above.
     _pine_defaults: dict[str, float] = {
-        "trade_state":               0.0,
-        "ml_last_exit_outcome":      0.0,
-        "ml_direction_code":         1.0,
-        "fib_range":                 0.0,
-        "ml_fib_neg_0236":           np.nan,
         "ml_exh_confidence_tier":    0.0,
         "ml_exh_geom_confluence":    0.0,
         "ml_liq_sweep":              0.0,

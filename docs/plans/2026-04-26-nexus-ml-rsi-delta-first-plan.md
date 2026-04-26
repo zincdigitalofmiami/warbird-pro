@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Rebuild the Nexus ML RSI Optuna profile and Pine indicator around footprint cumulative delta as the primary signal driver, with four signal tiers, Warbird brand colors, delta-fade bar coloring, and per-mode Optuna studies tuned for real 10+ point MES reversal legs.
+**Goal:** Rebuild the Nexus ML RSI Optuna profile and Pine indicator around footprint cumulative delta as the primary signal driver, with four signal tiers, Warbird brand colors, delta-fade bar coloring, and 5m/15m/1H/4H modes tuned from the existing Nexus hub lane.
 
-**Architecture:** Delta-first (footprint cumulative delta drives signal firing), oscillator confirmation (AMF: ROC + EWI + Stoch blend preserved unchanged), KNN validation on delta features. Four-tier signals: teal diamond (confirmed bull reversal), red diamond (confirmed bear reversal), white diamond (gassing out — delta fading, not flipped), yellow dot (oscillator signal but low volume/KNN neutral). Four-mode indicator with separate Optuna study per mode.
+**Architecture:** Delta-first (footprint cumulative delta drives signal firing), oscillator confirmation (AMF: ROC + EWI + Stoch blend preserved unchanged), KNN validation on delta features. Four-tier signals: teal diamond (confirmed bull reversal), red diamond (confirmed bear reversal), white diamond (gassing out — delta fading, not flipped), yellow dot (oscillator signal but low volume/KNN neutral). One Nexus study lane covers the four-mode indicator; do not create duplicate per-timeframe lanes.
 
 **Tech Stack:** Pine Script v6, Python 3, Optuna TPE, backtesting.py, ruff, pine-lint.sh, pine-facade TV compiler
 
@@ -12,169 +12,114 @@
 
 ---
 
+## Takeover Gate - 2026-04-26
+
+**Current status:** BLOCKED for active Optuna launch.
+
+This plan is now governed by the active Warbird indicator-only contract. Nexus
+fast-test is not exempt when results are used for settings recommendations,
+Pine defaults, Pine edits, champion claims, or promotion decisions.
+
+The current profile work is quarantined until it is made evidence-clean:
+
+- active source rows must be a manifest-backed Pine/TradingView export
+- active delta features must be ask/bid footprint fields exported from Pine
+- Nexus trigger family is `NEXUS_FOOTPRINT_DELTA`
+- no Study A process, DB entry, or log exists for `nexus-5m-delta-first-v1`
+- no Pine changes are approved or complete in this session
+
+**Do not launch promotable Study A** until Phase 0 below is complete. The
+existing `warbird_nexus_ml_rsi` hub study must not be resumed until the manifest
+gate passes; historical raw-parquet trials remain non-promotable.
+
+Required before active Study A:
+
+1. Lock the exact indicator baseline: source path, version, commit, symbol,
+   timeframe, inputs, plot/request budget, compile/lint status.
+2. Use trigger family `NEXUS_FOOTPRINT_DELTA`.
+3. Capture a TradingView/Pine export or CDP evidence package.
+4. Save a manifest with date range, row/trade count, export method, export hash,
+   exact inputs, and platform-limited fields.
+5. Use the profile loader that consumes the manifest-backed export, not
+   `data/mes_5m.parquet`.
+6. Reserve "footprint delta" for ask/bid footprint evidence.
+7. Resume `warbird_nexus_ml_rsi` only after the manifest gate passes.
+
+---
+
+## Phase 0: Strict Baseline Recovery
+
+### Task 0.1: Contract classification
+
+Choose one path before any new study:
+
+- **Active tuning path:** update the active contract/spec/runbook set to define
+  the Nexus trigger family and export fields.
+- **Sandbox path:** document Nexus as non-promotable research. Sandbox results
+  may inform hypotheses but cannot become champion settings or Pine defaults.
+
+### Task 0.2: Pine/TradingView baseline lock
+
+Record these facts in a manifest before modeling:
+
+- indicator file and commit
+- indicator version
+- TradingView symbol and timeframe
+- Pine input settings
+- trigger family
+- exported columns or Strategy Tester fields
+- plot/request budget
+- compile/lint status
+- export date range
+- row/trade count
+- export hash
+
+### Task 0.3: Profile source rewrite
+
+Promotable Nexus tuning requires `warbird_nexus_ml_rsi_profile.py` to load a
+manifest-backed Pine/TradingView export. The active hub profile now rejects
+local OHLCV/parquet proxies. The planned manifest path is:
+
+```text
+scripts/optuna/workspaces/warbird_nexus_ml_rsi/pine_export_manifest.json
+```
+
+The manifest may also be selected with `WARBIRD_NEXUS_EXPORT_MANIFEST`.
+
+---
+
 ## Phase 1: Optuna Profile Rebuild (5m Study A)
 
-### Task 1: Add delta helper functions to profile
+**Gate:** Tasks 1-3 are superseded. Do not add synthetic OHLCV delta helpers or
+synthetic delta feature columns to the active Nexus profile.
 
-**Files:**
-- Modify: `scripts/optuna/warbird_nexus_ml_rsi_profile.py` (after line ~217, before `class NexusMLRSIProfile`)
+### Task 1: Enforce manifest-backed source loading
 
-**Step 1: Add three delta helpers after the existing helper block**
+**Status:** DONE for source gating; blocked only by missing export manifest.
 
-Insert after the last existing helper function (before the class definition):
+`scripts/optuna/warbird_nexus_ml_rsi_profile.py` now requires the manifest path
+above or `WARBIRD_NEXUS_EXPORT_MANIFEST`.
 
-```python
-# ── Delta helpers ─────────────────────────────────────────────────────────────
+### Task 2: Require true footprint delta fields
 
-def _bar_delta(
-    open_: np.ndarray,
-    high: np.ndarray,
-    low: np.ndarray,
-    close: np.ndarray,
-    volume: np.ndarray,
-) -> np.ndarray:
-    """Synthetic bar delta: body-direction × body-ratio × volume."""
-    body = np.abs(close - open_)
-    candle_range = np.maximum(high - low, 1e-9)
-    body_ratio = np.clip(body / candle_range, 0.0, 1.0)
-    body_dir = np.where(close > open_, 1.0, np.where(close < open_, -1.0, 0.0))
-    return body_dir * body_ratio * np.maximum(volume, 0.0)
+**Status:** DONE in the active profile.
 
+The active profile requires one of these manifest/export surfaces:
 
-def _cumulative_delta(bar_delta: np.ndarray, lookback: float) -> np.ndarray:
-    lb = max(int(lookback), 1)
-    return _series(bar_delta).rolling(lb, min_periods=1).sum().to_numpy(dtype=np.float64)
+- `nexus_fp_available`
+- `nexus_fp_bar_delta`
+- `nexus_fp_total_volume`
+- optional precomputed `nexus_norm_cum_delta`, `nexus_delta_slope`, and
+  `nexus_bar_delta_ratio` exported from Pine/TradingView footprint logic
 
+Synthetic candle-body delta is not an active feature source.
 
-def _delta_slope(cumulative_delta: np.ndarray, slope_len: float) -> np.ndarray:
-    sl = max(int(slope_len), 1)
-    shifted = np.roll(cumulative_delta, sl)
-    shifted[:sl] = cumulative_delta[0]
-    return cumulative_delta - shifted
-```
+### Task 3: Keep tunable evaluation parameters
 
-**Step 2: Run ruff + py_compile**
+**Status:** DONE in the active profile.
 
-```bash
-cd "/Volumes/Satechi Hub/warbird-pro"
-ruff check scripts/optuna/warbird_nexus_ml_rsi_profile.py && python3 -m py_compile scripts/optuna/warbird_nexus_ml_rsi_profile.py && echo "PASS"
-```
-
-Expected: `PASS` with no errors
-
-**Step 3: Commit**
-
-```bash
-git add scripts/optuna/warbird_nexus_ml_rsi_profile.py
-git commit -m "optuna: add delta helper functions to nexus profile"
-```
-
----
-
-### Task 2: Add tunable delta + evaluation parameters
-
-**Files:**
-- Modify: `scripts/optuna/warbird_nexus_ml_rsi_profile.py` — `suggest_params()` method
-
-**Step 1: Replace the hardcoded evaluation constants and add delta params**
-
-Find and replace the block that defines `ENTRY_RESPONSE_BARS`, `FAST_RESPONSE_BARS`, `CONTEXT_RESPONSE_BARS` as module-level constants. These move into `suggest_params()` as tunable values:
-
-```python
-# ── Evaluation horizon (formerly hardcoded) ────────────────────────────────
-params["leg_threshold_pts"] = trial.suggest_float("leg_threshold_pts", 6.0, 20.0)
-params["response_bars"]     = trial.suggest_int("response_bars", 5, 25)
-params["early_bars"]        = trial.suggest_int("early_bars", 2, 10)
-params["adverse_bars"]      = trial.suggest_int("adverse_bars", 3, 15)
-
-# ── Delta parameters ────────────────────────────────────────────────────────
-params["delta_lookback"]    = trial.suggest_int("delta_lookback", 3, 20)
-params["delta_slope_len"]   = trial.suggest_int("delta_slope_len", 2, 10)
-params["gasout_stall_bars"] = trial.suggest_int("gasout_stall_bars", 2, 8)
-params["delta_flip_thresh"] = trial.suggest_float("delta_flip_thresh", 0.05, 0.40)
-params["gasout_thresh"]     = trial.suggest_float("gasout_thresh", -0.20, -0.01)
-```
-
-Remove the old module-level constants:
-```python
-# DELETE these lines:
-ENTRY_RESPONSE_BARS = 5
-FAST_RESPONSE_BARS  = 3
-CONTEXT_RESPONSE_BARS = 3
-```
-
-**Step 2: Run ruff + py_compile**
-
-```bash
-cd "/Volumes/Satechi Hub/warbird-pro"
-ruff check scripts/optuna/warbird_nexus_ml_rsi_profile.py && python3 -m py_compile scripts/optuna/warbird_nexus_ml_rsi_profile.py && echo "PASS"
-```
-
-**Step 3: Commit**
-
-```bash
-git add scripts/optuna/warbird_nexus_ml_rsi_profile.py
-git commit -m "optuna: make evaluation horizon + delta params tunable"
-```
-
----
-
-### Task 3: Wire delta features into `_compute_features()`
-
-**Files:**
-- Modify: `scripts/optuna/warbird_nexus_ml_rsi_profile.py` — `_compute_features()` / `_compute_core()` methods
-
-**Step 1: Add delta computation at the top of `_compute_features()`**
-
-After the existing feature computation (VNVF etc.), add:
-
-```python
-# ── Footprint-style cumulative delta ────────────────────────────────────────
-bar_dlt   = _bar_delta(df["open"].values, df["high"].values,
-                       df["low"].values, df["close"].values,
-                       df["volume"].values)
-cum_dlt   = _cumulative_delta(bar_dlt, params["delta_lookback"])
-avg_vol   = _series(df["volume"].values).rolling(
-                max(int(params["delta_lookback"]), 1), min_periods=1
-            ).mean().to_numpy(dtype=np.float64)
-norm_cum  = cum_dlt / np.maximum(avg_vol * params["delta_lookback"], 1.0)
-norm_cum  = np.clip(norm_cum, -1.0, 1.0)
-dlt_slope = _delta_slope(cum_dlt, params["delta_slope_len"])
-
-total_vol = np.maximum(df["volume"].values, 1.0)
-bar_ratio = np.clip(bar_dlt / total_vol, -1.0, 1.0)
-
-price_pos = (df["close"].values - df["low"].values) / np.maximum(
-                df["high"].values - df["low"].values, 1e-9
-            )
-
-features["delta_slope"]      = dlt_slope
-features["norm_cum_delta"]   = norm_cum
-features["bar_delta_ratio"]  = bar_ratio
-features["price_position"]   = price_pos
-```
-
-Also expose these arrays on the dataframe for use in `_label_setups()`:
-```python
-df = df.copy()
-df["_bar_dlt"]   = bar_dlt
-df["_norm_cum"]  = norm_cum
-df["_dlt_slope"] = dlt_slope
-```
-
-**Step 2: Run ruff + py_compile**
-
-```bash
-cd "/Volumes/Satechi Hub/warbird-pro"
-ruff check scripts/optuna/warbird_nexus_ml_rsi_profile.py && python3 -m py_compile scripts/optuna/warbird_nexus_ml_rsi_profile.py && echo "PASS"
-```
-
-**Step 3: Commit**
-
-```bash
-git add scripts/optuna/warbird_nexus_ml_rsi_profile.py
-git commit -m "optuna: wire delta features into _compute_features"
-```
+The profile keeps the evaluation horizon and delta threshold parameters, but all
+delta calculations start from exported footprint fields.
 
 ---
 
@@ -361,25 +306,28 @@ git commit -m "optuna: rewrite run_backtest with delta-first 5-component objecti
 
 ---
 
-### Task 6: Smoke test the rebuilt profile (1 trial)
+### Task 6: Smoke test the rebuilt profile (1 trial, after Phase 0)
 
 **Files:**
 - Read: `scripts/optuna/runner.py` — verify it imports and calls the profile correctly
 
-**Step 1: Run a single-trial smoke test**
+**Step 1: Run a single-trial smoke test only after the profile consumes the
+manifest-backed Pine/TradingView export**
 
 ```bash
 cd "/Volumes/Satechi Hub/warbird-pro"
 python3 scripts/optuna/runner.py \
-    --profile warbird_nexus_ml_rsi \
+    --indicator-key warbird_nexus_ml_rsi \
+    --profile-module scripts.optuna.warbird_nexus_ml_rsi_profile \
     --study-name "nexus-delta-smoke" \
     --n-trials 1 \
-    --symbol MES1! \
-    --timeframe 5 \
+    --start <manifest-start-date> \
     2>&1 | tail -20
 ```
 
-Expected: `Trial 0 finished with value: X.XXX` (any non-zero score) with no stack traces
+Expected: `Trial 0 finished with value: X.XXX` with no stack traces and the
+trial user attributes matching the manifest-backed source. A raw-parquet smoke
+test does not open the active Study A gate.
 
 **Step 2: Fix any import or runtime errors before proceeding**
 
@@ -391,39 +339,48 @@ Edit this plan doc's Progress table to update Task 6 status to DONE once smoke p
 
 ---
 
-### Task 7: Launch Study A — 5m, 500 trials
+### Task 7: Launch Study A — existing Nexus lane, 1000 trials (blocked until Phase 0)
 
 **Files:**
 - Run: `scripts/optuna/runner.py`
 
-**Step 1: Launch Study A**
+**Step 1: Launch Study A only after Phase 0 and Task 6 pass**
+
+Before running this command, set `launch_enabled` back to `true` in
+`scripts/optuna/indicator_registry.json` and record the approved manifest path.
 
 ```bash
 cd "/Volumes/Satechi Hub/warbird-pro"
 python3 scripts/optuna/runner.py \
-    --profile warbird_nexus_ml_rsi \
-    --study-name "nexus-5m-delta-first-v1" \
-    --n-trials 500 \
-    --symbol MES1! \
-    --timeframe 5 \
-    2>&1 | tee /tmp/nexus_study_a.log &
+    --indicator-key warbird_nexus_ml_rsi \
+    --profile-module scripts.optuna.warbird_nexus_ml_rsi_profile \
+    --study-name "Warbird Nexus ML Fast 5m Signal Quality April 25" \
+    --n-trials 1000 \
+    --start <manifest-start-date> \
+    --top-n 10 \
+    2>&1 | tee scripts/optuna/workspaces/warbird_nexus_ml_rsi/study_a.log &
 echo "Study A launched — PID $!"
 ```
 
 **Step 2: Monitor until completion**
 
 ```bash
-tail -f /tmp/nexus_study_a.log
+tail -f scripts/optuna/workspaces/warbird_nexus_ml_rsi/study_a.log
 ```
 
-Expected: 500 trials, best score > 0.55 (meaningfully above the prior 0.402 baseline)
+Expected: 1000 completed trials with the same manifest identity. Do not use a
+score threshold alone as evidence; compare against manifest, signal count,
+feature availability, and later IS/OOS or walk-forward review.
 
 **Step 3: Extract champion params**
 
 ```bash
 python3 -c "
 import optuna
-study = optuna.load_study(study_name='nexus-5m-delta-first-v1', storage='sqlite:///scripts/optuna/optuna.db')
+study = optuna.load_study(
+    study_name='nexus-5m-delta-first-v1',
+    storage='sqlite:///scripts/optuna/workspaces/warbird_nexus_ml_rsi/study.db',
+)
 t = study.best_trial
 print(f'Best trial: #{t.number}  score={t.value:.6f}')
 for k, v in sorted(t.params.items()):
@@ -446,10 +403,19 @@ git commit -m "optuna: Study A complete — record champion params"
 
 ## Phase 2: Pine Indicator Update
 
+**Gate:** Phase 2 is blocked. Do not edit the Nexus fast-test Pine file from
+this plan until there is explicit current-session Pine approval, a locked
+Pine/TradingView baseline manifest, priced plot/request budget, a verified
+compile/lint path, and true ask/bid footprint evidence available through
+`request.footprint()` or exported Pine fields.
+
 ### Task 8: Add Mode input and per-mode parameter presets
 
 **Files:**
 - Modify: `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
+
+**Gate:** do not wire mode presets until manifest-backed Study A/B/C/D champion
+values exist. Do not reuse placeholder values as defaults.
 
 **Step 1: Add Mode input at top of inputs section**
 
@@ -458,20 +424,21 @@ modeInput = input.string("5m", "Mode", options=["5m", "15m", "1H", "4H"],
     tooltip="Select chart timeframe. Each mode uses champion Optuna settings for that TF.")
 ```
 
-**Step 2: Add mode-keyed parameter defaults**
+**Step 2: Add mode-keyed parameter defaults only after champion evidence exists**
+
+Preserve the current defaults until each mode has its own manifest-backed
+champion parameters. When evidence exists, wire each value from that mode's
+study manifest:
 
 ```pine
-// Champion defaults wired in after Study A/B/C/D complete.
-// Temporary: use Study A champion values for all modes until studies run.
-i_enginePeriod  = modeInput == "5m"  ? 21  : modeInput == "15m" ? 21 : modeInput == "1H" ? 21 : 21
-i_signalPeriod  = modeInput == "5m"  ? 8   : modeInput == "15m" ? 8  : modeInput == "1H" ? 8  : 8
-i_knnWindow     = modeInput == "5m"  ? 184 : modeInput == "15m" ? 184 : modeInput == "1H" ? 184 : 184
-i_knnK          = modeInput == "5m"  ? 6   : modeInput == "15m" ? 6  : modeInput == "1H" ? 6  : 6
-i_knnBull       = modeInput == "5m"  ? 58  : modeInput == "15m" ? 58 : modeInput == "1H" ? 58 : 58
-i_knnBear       = modeInput == "5m"  ? 42  : modeInput == "15m" ? 42 : modeInput == "1H" ? 42 : 42
+i_enginePeriod = modeInput == "5m"  ? <study_a_engine_period> :
+                 modeInput == "15m" ? <study_b_engine_period> :
+                 modeInput == "1H"  ? <study_c_engine_period> :
+                                       <study_d_engine_period>
 ```
 
-(Update these values in Task 16 after all four studies complete.)
+Repeat for `i_signalPeriod`, `i_knnWindow`, `i_knnK`, `i_knnBull`, and
+`i_knnBear` after all four studies complete.
 
 **Step 3: Run pine-lint and pine-facade**
 
@@ -556,10 +523,15 @@ git commit -m "Pine: enable watermark by default"
 
 ---
 
-### Task 11: Add footprint cumulative delta computation layer
+### Task 11: Add true footprint cumulative delta computation layer
 
 **Files:**
 - Modify: `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
+
+**Gate:** Do not execute this task without explicit current-session Pine edit
+approval, Pine budget pricing, a verified compile/lint path, and ask/bid
+footprint evidence from TradingView/Pine. An OHLCV reconstruction is not
+acceptable for this task.
 
 **Step 1: Verify footprint budget**
 
@@ -577,21 +549,17 @@ i_deltaFlipThresh = input.float(0.10, "Delta Flip Threshold", minval=0.05, maxva
 i_gasoutThresh = input.float(-0.08, "Gas-Out Threshold", minval=-0.20, maxval=-0.01, step=0.01, group="Delta")
 ```
 
-**Step 3: Add delta computation**
+**Step 3: Add true footprint delta computation**
 
-```pine
-// ── Footprint cumulative delta ──────────────────────────────────────────────
-body         = math.abs(close - open)
-candleRange  = math.max(high - low, 1e-9)
-bodyRatio    = math.min(body / candleRange, 1.0)
-bodyDir      = close > open ? 1.0 : close < open ? -1.0 : 0.0
-barDelta     = bodyDir * bodyRatio * math.max(volume, 0.0)
-cumDelta     = ta.sma(barDelta, i_deltaLookback) * i_deltaLookback   // rolling sum via SMA×N
-avgVol       = ta.sma(volume, i_deltaLookback)
-normCumDelta = math.max(-1.0, math.min(1.0, cumDelta / math.max(avgVol * i_deltaLookback, 1.0)))
-deltaSlope   = normCumDelta - normCumDelta[math.max(i_deltaLookback / 2, 1)]
-deltaDir     = normCumDelta > i_deltaFlipThresh ? 1 : normCumDelta < -i_deltaFlipThresh ? -1 : 0
-```
+Do not use `body_direction * body_ratio * volume` here. This layer must consume
+ask/bid footprint volume from `request.footprint()` or exported Pine fields
+already named in the run manifest. Minimum calculations:
+
+- `barDelta = askVolume - bidVolume`
+- `cumDelta = rolling sum(barDelta, i_deltaLookback)`
+- `normCumDelta = cumDelta / max(avgVolume * i_deltaLookback, 1.0)`
+- `deltaSlope = normCumDelta - normCumDelta[lookback_half]`
+- `deltaDir = 1/-1/0` from `i_deltaFlipThresh`
 
 **Step 4: Run pine-lint + pine-facade**
 
@@ -605,7 +573,7 @@ Then `pine_smart_compile` via MCP.
 
 ```bash
 git add indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine
-git commit -m "Pine: add footprint cumulative delta computation layer"
+git commit -m "Pine: add true footprint cumulative delta computation layer"
 ```
 
 ---
@@ -614,6 +582,9 @@ git commit -m "Pine: add footprint cumulative delta computation layer"
 
 **Files:**
 - Modify: `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
+
+**Gate:** complete in the active Pine surface; white diamonds and red/teal gates
+are wired to `request.footprint()` variables only.
 
 **Step 1: Add gassing-out detection**
 
@@ -680,6 +651,9 @@ git commit -m "Pine: add white diamond gassing-out tier + delta gates on teal/re
 **Files:**
 - Modify: `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
 
+**Gate:** blocked until Task 11 has true footprint variables. Bar color must
+reflect ask/bid delta conviction, not synthetic candle-body direction.
+
 **Step 1: Add barcolor with conviction-faded transparency**
 
 ```pine
@@ -714,109 +688,12 @@ git commit -m "Pine: add delta-fade bar coloring (teal/red/gray by conviction)"
 
 ---
 
-## Phase 3: Mode Studies (15m / 1H / 4H)
+## Phase 3: Duplicate Mode Studies Retired
 
-### Task 14: Create 15m Optuna profile and run Study B
-
-**Files:**
-- Create: `scripts/optuna/warbird_nexus_ml_rsi_15m_profile.py` (copy + adjust ranges for 15m)
-
-**Step 1: Copy 5m profile and adjust parameter ranges for 15m**
-
-15m adjustments:
-- `leg_threshold_pts`: range `15.0–50.0` (vs 6–20 for 5m)
-- `response_bars`: range `4–15` (15m bars are 3× longer)
-- `delta_lookback`: range `3–15`
-- Target signal rate: `2–6/day` → `bars_per_day = 26` (6.5 hr × 4 bars/hr)
-
-**Step 2: Launch Study B**
-
-```bash
-python3 scripts/optuna/runner.py \
-    --profile warbird_nexus_ml_rsi_15m \
-    --study-name "nexus-15m-delta-first-v1" \
-    --n-trials 500 \
-    --symbol MES1! \
-    --timeframe 15
-```
-
-**Step 3: Extract champion params and wire into Pine Mode preset**
-
-Update Task 8's `i_enginePeriod` / `i_knnWindow` etc. for `modeInput == "15m"` with Study B champion values.
-
----
-
-### Task 15: Create 1H Optuna profile and run Study C
-
-**Files:**
-- Create: `scripts/optuna/warbird_nexus_ml_rsi_1h_profile.py`
-
-**Step 1: Copy and adjust for 1H**
-
-1H adjustments:
-- `leg_threshold_pts`: range `30.0–100.0`
-- `response_bars`: range `3–10`
-- Target signal rate: `1–4/day` → `bars_per_day = 7`
-
-**Step 2: Launch Study C**
-
-```bash
-python3 scripts/optuna/runner.py \
-    --profile warbird_nexus_ml_rsi_1h \
-    --study-name "nexus-1h-delta-first-v1" \
-    --n-trials 500 \
-    --symbol MES1! \
-    --timeframe 60
-```
-
-**Step 3: Wire champion defaults into Pine for `modeInput == "1H"`**
-
----
-
-### Task 16: Create 4H Optuna profile and run Study D + finalize Pine mode presets
-
-**Files:**
-- Create: `scripts/optuna/warbird_nexus_ml_rsi_4h_profile.py`
-- Modify: `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine` — wire all four champion sets
-
-**Step 1: Copy and adjust for 4H**
-
-4H adjustments:
-- `leg_threshold_pts`: range `60.0–200.0`
-- `response_bars`: range `2–6`
-- Target signal rate: `0.5–2/day` → `bars_per_day = 2`
-
-**Step 2: Launch Study D**
-
-```bash
-python3 scripts/optuna/runner.py \
-    --profile warbird_nexus_ml_rsi_4h \
-    --study-name "nexus-4h-delta-first-v1" \
-    --n-trials 500 \
-    --symbol MES1! \
-    --timeframe 240
-```
-
-**Step 3: Wire all four champion sets into Pine Mode presets**
-
-Update Task 8's `i_enginePeriod`, `i_knnWindow`, `i_knnK`, `i_knnBull`, `i_knnBear` for all four modes with their respective Study champion values.
-
-**Step 4: Run full verification pipeline on final Pine file**
-
-```bash
-cd "/Volumes/Satechi Hub/warbird-pro"
-./scripts/guards/pine-lint.sh indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine
-./scripts/guards/check-contamination.sh
-npm run build
-```
-
-**Step 5: Final commit**
-
-```bash
-git add indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine \
-        scripts/optuna/warbird_nexus_ml_rsi_4h_profile.py
-git commit -m "Pine+optuna: wire all four mode champion defaults — delta-first redesign complete"
-```
+Do not create separate Nexus profile modules or registry keys for 15m, 1H, or
+4H. Keep current Nexus trials on the existing `warbird_nexus_ml_rsi` hub study.
+Additional timeframes can be reopened only after the canonical 5m lane has
+manifest-backed Pine/TradingView evidence and an approved contract update.
 
 ---
 
@@ -824,22 +701,26 @@ git commit -m "Pine+optuna: wire all four mode champion defaults — delta-first
 
 | Phase | Task | Status | Notes |
 |-------|------|--------|-------|
-| Phase 1 | Task 1: Delta helpers | PENDING | |
-| Phase 1 | Task 2: Tunable params | PENDING | |
-| Phase 1 | Task 3: Wire delta features | PENDING | |
-| Phase 1 | Task 4: _label_setups() | PENDING | |
-| Phase 1 | Task 5: Rewrite run_backtest() | PENDING | |
-| Phase 1 | Task 6: Smoke test (1 trial) | PENDING | |
-| Phase 1 | Task 7: Study A (500 trials) | PENDING | |
-| Phase 2 | Task 8: Mode input + presets | PENDING | |
-| Phase 2 | Task 9: Bear color #cc0000 | PENDING | |
-| Phase 2 | Task 10: Watermark default=true | PENDING | |
-| Phase 2 | Task 11: Footprint delta layer | PENDING | |
-| Phase 2 | Task 12: White diamond + delta gates | PENDING | |
-| Phase 2 | Task 13: Delta-fade bar coloring | PENDING | |
-| Phase 3 | Task 14: 15m Study B | PENDING | After Study A |
-| Phase 3 | Task 15: 1H Study C | PENDING | After Study A |
-| Phase 3 | Task 16: 4H Study D + finalize | PENDING | After Studies B/C |
+| Pre  | Design doc | DONE | `docs/plans/2026-04-26-nexus-ml-rsi-delta-first-redesign.md` commit bb0c918 |
+| Pre  | Implementation plan | DONE | This doc, commit 874b9e8 |
+| QA takeover | Strict contract gate | DONE | Active tuning requires Pine/TradingView export + manifest before Study A |
+| Phase 0 | Contract classification | DONE | Nexus trigger family is `NEXUS_FOOTPRINT_DELTA` |
+| Phase 0 | Baseline + manifest | BLOCKED | No manifest-backed Pine/TradingView export exists yet |
+| Phase 0 | Profile manifest gate | DONE | Active profile refuses OHLCV/parquet rows and requires a manifest-backed TradingView export |
+| Phase 1 | Task 1: Manifest source gate | DONE | Loader requires `pine_export_manifest.json` or `WARBIRD_NEXUS_EXPORT_MANIFEST` |
+| Phase 1 | Task 2: True footprint field gate | DONE | Required `nexus_fp_*` fields come from Pine `request.footprint()` exports |
+| Phase 1 | Task 3: Synthetic delta quarantine | DONE | OHLCV/parquet delta proxy removed from active profile |
+| Phase 1 | Task 4: _label_setups() | DONE | vectorized inner loop (commit 254a58b) |
+| Phase 1 | Task 5: Rewrite run_backtest() | DONE | 5-component objective + runner aliases |
+| Phase 1 | Task 6: Smoke test (1 trial) | QUARANTINED | raw-parquet smoke does not open active Study A gate |
+| Phase 1 | Task 7: Study A (1000 trials) | BLOCKED | no run, no log, no DB entry; wait for TradingView export manifest |
+| Phase 2 | Task 8: Mode input + presets | PARTIAL | 5m/15m/1H/4H Mode input restored; evidence-backed per-mode defaults still pending |
+| Phase 2 | Task 9: Bear color #cc0000 | DONE | Nexus fast-test uses Warbird red |
+| Phase 2 | Task 10: Watermark default=true | DONE | Existing default retained and Warbird Pro watermark restored |
+| Phase 2 | Task 11: True footprint delta layer | DONE | Pine caches one `request.footprint()` path and exports `nexus_fp_*` fields |
+| Phase 2 | Task 12: White diamond + delta gates | DONE | Gas-out diamonds and delta-confirmed reversal triggers restored |
+| Phase 2 | Task 13: Delta-fade bar coloring | DONE | Bar colors now fade by real footprint delta conviction |
+| Phase 3 | Duplicate mode-study profiles | RETIRED | Do not create per-timeframe Nexus study keys |
 
 ---
 
@@ -849,7 +730,11 @@ git commit -m "Pine+optuna: wire all four mode champion defaults — delta-first
 
 | Parameter | Champion Value | Notes |
 |-----------|---------------|-------|
-| (pending Study A completion) | | |
+| (none) | | Study A is blocked until a manifest-backed Pine/TradingView export exists |
+
+No current Nexus Optuna result is promotable as a champion setting or Pine
+default. Existing raw-parquet trials may be reviewed only as sandbox hypothesis
+material.
 
 ---
 

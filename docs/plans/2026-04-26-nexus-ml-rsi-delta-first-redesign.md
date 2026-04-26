@@ -1,17 +1,46 @@
 # Nexus ML RSI — Delta-First Redesign Design Doc
 **Date:** 2026-04-26  
-**Status:** APPROVED — brainstorm complete, ready for implementation planning  
+**Status:** ACTIVE REPAIR — Pine footprint surface restored; TradingView export manifest required before Optuna launch
 **Indicator:** `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
+
+---
+
+## QA Takeover Decision
+
+This design is not launch-ready for a new Optuna batch until a TradingView/Pine
+export manifest exists. The delta-first concept remains valid, and the active
+Nexus profile now requires exported `nexus_fp_*` fields from `request.footprint()`
+instead of accepting local OHLCV/parquet delta proxies.
+
+Study A must stay blocked until the project has:
+
+- exact indicator source path, version, and commit
+- symbol and timeframe
+- Pine input defaults
+- exported columns or Strategy Tester fields
+- trigger family `NEXUS_FOOTPRINT_DELTA`
+- plot/request budget and compile/lint status
+- TradingView export or CDP evidence
+- manifest with row/trade count, date range, export method, and export hash
+
+If Nexus is intentionally reopened as a pure sandbox, that decision must be
+documented explicitly first. Sandbox outputs cannot be called champion settings
+and cannot be promoted to Pine defaults.
+
+Implementation note: `warbird_nexus_ml_rsi_profile.py` now refuses to load
+without `scripts/optuna/workspaces/warbird_nexus_ml_rsi/pine_export_manifest.json`
+or `WARBIRD_NEXUS_EXPORT_MANIFEST`. The manifest must point at a TradingView
+CSV export containing the hidden `nexus_fp_*` footprint fields.
 
 ---
 
 ## Why We're Rebuilding
 
-The prior 500-trial Optuna study produced a score of 0.402 because the objective function was fundamentally wrong:
+The prior Optuna study produced a score of 0.402 because the objective function was fundamentally wrong:
 
 - `favorable_atr = 0.50` / `adverse_atr = 0.50` hardcoded — rewarded half-ATR scalp ticks, not real legs
 - `ENTRY_RESPONSE_BARS = 5` hardcoded — 25 minutes is too short for swing entry evaluation
-- 33 parameters × 500 trials = thin coverage (TPE needs ~330 trials just to warm up)
+- 33 parameters with sub-1000 trial coverage = thin coverage (TPE needs ~330 trials just to warm up)
 - Volume: only body/wick-weighted signed volume (VNVF) — no footprint delta, no true order flow
 - Mode presets (Scalping/Default/Swing/Position): only Default unlocked fine-grained numeric tuning
 
@@ -22,9 +51,12 @@ Kirk's actual success criterion: **signal at the bottom (or top) that precedes a
 ## Approved Architecture: Option A — Delta-First, Oscillator Confirms
 
 ### Core Principle
-Footprint cumulative delta is the **primary signal driver**. The oscillator (AMF: ROC + EWI + Stoch) is confirmation only. KNN is trained on delta features to validate conviction.
+True footprint cumulative delta is the **target primary signal driver**. The oscillator (AMF: ROC + EWI + Stoch) is confirmation only. KNN is trained on exported Pine/TradingView delta features to validate conviction.
 
 The existing indicator visual style is PRESERVED — smooth AMF wave, gradual color fills, positioned diamonds. The redesign layers delta intelligence on top without changing the core oscillator math.
+
+Historical Python runs computed synthetic OHLCV delta, not true footprint delta.
+Do not treat those outputs as active tuning evidence.
 
 ---
 
@@ -73,14 +105,18 @@ Visual reference approved: the fade behavior matches the reference indicator scr
 
 ---
 
-## Volume Architecture — Footprint Cumulative Delta
+## Volume Architecture — Target Footprint Cumulative Delta
 
 **Research basis:** Cumulative delta divergence + bar-level order flow imbalance is the highest research-proven method for detecting 5m MES reversal setups (CME microstructure research, VSA/auction theory literature).
 
-**Implementation via `request.footprint()`** (already budgeted — 1 footprint call in current indicator):
+**Active implementation requirement via `request.footprint()` or exported Pine fields:**
 - Bar delta = `ask_volume − bid_volume` per bar
 - Cumulative delta = rolling sum over `delta_lookback` bars
 - Normalized cumulative delta = cumulative delta / (avg_bar_volume × lookback)
+
+The prior Python profile's `body_direction × body_ratio × volume` helper was
+synthetic OHLCV delta. The active profile must not use that proxy as footprint
+evidence.
 
 **Gassing out signature → White diamond:**
 - Price making new high (or continuing) across 2–3 bars
@@ -92,19 +128,26 @@ Visual reference approved: the fade behavior matches the reference indicator scr
 2. Delta flip: first bar where `bid_vol > ask_vol` after a bullish sequence
 3. Cumulative delta diverging from price direction
 
-**KNN features (trained on delta + price state):**
+**KNN features (trained on exported delta + price state):**
 - `delta_slope` — rate of change of bar delta over N bars
 - `norm_cumulative_delta` — cumulative delta normalized by avg bar volume
 - `bar_delta_ratio` — `(ask − bid) / total_volume` per bar (range: −1 to +1)
 - `price_position` — where in the bar's range price closed
 - `oscillator_value` — current AMF oscillator reading
 
+Each feature must be present in, or deterministically derived from, the same
+TradingView/Pine export named by the run manifest.
+
 ---
 
 ## Optuna: Behavioral Discovery
 
 ### The Job
-Find what volume, KNN, price action, footprint delta, and imbalance ALL did before large moves. Define the repeating behavior signature. Watch when it replicates. Watch when it breaks down and fails — what caused the failure. Tune to detect success setups and suppress failure-mode lookalikes.
+After the Pine/TradingView baseline is locked, find what volume, KNN, price action, footprint delta, and imbalance ALL did before large moves. Define the repeating behavior signature. Watch when it replicates. Watch when it breaks down and fails — what caused the failure. Tune to detect success setups and suppress failure-mode lookalikes.
+
+Do not launch this study from raw OHLCV parquet under an active tuning or
+promotion frame. Raw OHLCV reconstruction is prohibited as canonical active
+model truth by `WARBIRD_MODEL_SPEC.md`.
 
 ### Two Labeled Datasets
 - **Success set:** Bars in the N bars BEFORE a confirmed 10+ point leg started
@@ -136,16 +179,17 @@ score = 0.40 × reversal_precision           # diamonds catch real 10+ pt legs
 
 ---
 
-## Mode Architecture — One Indicator, Four Optuna Studies
+## Mode Architecture — One Indicator, One Active Hub Study
 
-Single Pine indicator with `Mode` input dropdown. Mode changes all internal lookbacks, delta windows, KNN horizon, and leg threshold. Champion settings from each study become preset defaults for that mode.
+The only active Nexus route is the existing hub study:
+`warbird_nexus_ml_rsi` / `Warbird Nexus ML Fast 5m Signal Quality April 25`.
+Do not create duplicate per-timeframe Optuna profiles or study keys. Multi-mode
+Pine presets can be reconsidered only after the canonical 5m lane has
+manifest-backed Pine/TradingView evidence.
 
-| Mode | Chart TF | Min Leg Target | Response Horizon | Signal Rate | Optuna Study |
-|------|----------|---------------|-----------------|-------------|-------------|
-| 5m (default) | 5m | ~10+ pts (tunable) | 5–15 bars | 4–10/day | Study A |
-| 15m | 15m | ~20–30+ pts (tunable) | 5–10 bars | 2–6/day | Study B |
-| 1H | 1H | ~50–80+ pts (tunable) | 3–8 bars | 1–4/day | Study C |
-| 4H | 4H | ~100+ pts (tunable) | 3–5 bars | 0.5–2/day | Study D |
+| Route | Chart TF | Current status | Evidence class |
+|------|----------|----------------|----------------|
+| `warbird_nexus_ml_rsi` | 5m | Existing hub sandbox study | Non-promotable until Pine/TradingView manifest exists |
 
 ---
 
@@ -167,25 +211,31 @@ Single Pine indicator with `Mode` input dropdown. Mode changes all internal look
 
 ## Implementation Phases (for writing-plans)
 
-**Phase 1 — Optuna profile rebuild (5m, Study A)**
-- Rebuild `warbird_nexus_ml_rsi_profile.py` with footprint delta features
+**Phase 1 — Optuna profile rebuild (existing Nexus lane, 1000-trial batches)**
+- Rebuild `warbird_nexus_ml_rsi_profile.py` to load a manifest-backed
+  Pine/TradingView export before active Study A
+- Reject OHLCV/parquet delta proxies so they cannot be mistaken for footprint
+  delta
 - Make leg_threshold_pts, response_bars, early_bars, delta_lookback all tunable
 - Build pre-move success set + failure set labeling logic
 - Rewrite objective function with new formula
-- Run Study A (500+ trials)
+- Run the existing `warbird_nexus_ml_rsi` lane at 1000 trials only after the
+  baseline/export gate passes
 
 **Phase 2 — Pine indicator update**
-- Add `request.footprint()` delta computation layer
+- Blocked until explicit current-session Pine approval, Pine budget pricing, and
+  a manifest-backed true footprint/export field source exist
+- Add true footprint delta computation layer from ask/bid evidence only
 - Add white diamond tier (gassing out detection)
 - Update bar coloring to delta-fade system (`#26C6DA` / `#cc0000`)
 - Fix bear color to `#cc0000`
 - Add Mode input (5m / 15m / 1H / 4H)
 - Enable watermark by default
 
-**Phase 3 — Remaining mode studies (B / C / D)**
-- Duplicate profile per mode with TF-appropriate parameter ranges
-- Run Study B (15m), Study C (1H), Study D (4H)
-- Wire champion defaults into Pine mode presets
+**Phase 3 — Retired duplicate mode-study proposal**
+- Do not create separate Nexus 15m, 1H, or 4H Optuna profile modules.
+- Do not add duplicate registry keys for per-timeframe Nexus studies.
+- Keep all current Nexus trials on the existing `warbird_nexus_ml_rsi` hub lane.
 
 ---
 
@@ -194,7 +244,8 @@ Single Pine indicator with `Mode` input dropdown. Mode changes all internal look
 | Phase | Task | Status | Notes |
 |-------|------|--------|-------|
 | Brainstorm | Context exploration | DONE | Profile analyzed, objective gaps identified |
-| Brainstorm | Design approved | DONE | All sections approved 2026-04-26 |
-| Phase 1 | Optuna profile rebuild (5m) | PENDING | |
-| Phase 2 | Pine indicator update | PENDING | |
-| Phase 3 | Mode studies 15m/1H/4H | PENDING | |
+| QA takeover | Strict contract decision | DONE | Nexus is not exempt when outputs drive settings, defaults, Pine changes, or champion claims |
+| Phase 0 | Pine/TradingView baseline + manifest | BLOCKED | Required before active Optuna launch |
+| Phase 1 | Optuna profile rebuild (5m) | BLOCKED | Promotable loader gate still requires manifest-backed Pine/TradingView rows |
+| Phase 2 | Pine indicator update | BLOCKED | Requires explicit Pine edit approval, budget pricing, compile/lint path, and true footprint/export fields |
+| Phase 3 | Duplicate mode-study proposal | RETIRED | Use the existing `warbird_nexus_ml_rsi` hub lane only |

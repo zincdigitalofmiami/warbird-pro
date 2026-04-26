@@ -2,6 +2,12 @@
 
 Canonical Optuna state now lives under `scripts/optuna/`, not `data/optuna/`.
 
+Canonical hub: `http://127.0.0.1:8090/`.
+Canonical Nexus lane:
+`http://127.0.0.1:8090/studies/warbird_nexus_ml_rsi`.
+Do not create alternate hub processes, duplicate workspaces, or replacement
+study names for active Warbird tuning lanes.
+
 ## Layout
 
 - `runner.py`
@@ -47,6 +53,12 @@ Rules:
 
 ## Current Runtime Ops
 
+- Hub: `http://127.0.0.1:8090/`
+- Nexus lane: `http://127.0.0.1:8090/studies/warbird_nexus_ml_rsi`
+- Nexus batches use the existing `warbird_nexus_ml_rsi` workspace and `1000`
+  trials. They require `scripts/optuna/workspaces/warbird_nexus_ml_rsi/pine_export_manifest.json`
+  or `WARBIRD_NEXUS_EXPORT_MANIFEST` pointing at a TradingView CSV export with
+  real `nexus_fp_*` footprint fields.
 - Current-runtime-only health: `python scripts/optuna/runtime_health.py`
 - Stale child-log archive (dry run): `python scripts/optuna/prune_runtime_logs.py`
 - Stale child-log archive (apply): `python scripts/optuna/prune_runtime_logs.py --apply`

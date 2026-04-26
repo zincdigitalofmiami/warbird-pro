@@ -57,6 +57,10 @@ context, or agent-facing notes pointing at an older trigger or training surface.
 - `indicators/`: Pine indicator and strategy files; primary active surface is
   `indicators/v7-warbird-institutional.pine`.
 - `scripts/optuna/`: active local optimization workspaces and runner.
+- Canonical Optuna hub: `http://127.0.0.1:8090/`. The Nexus lane is
+  `http://127.0.0.1:8090/studies/warbird_nexus_ml_rsi`; use the existing
+  `scripts/optuna/workspaces/warbird_nexus_ml_rsi/study.db` and do not create
+  alternate hubs, workspaces, or replacement study names for that lane.
 - `scripts/ag/tv_auto_tune.py`, `scripts/ag/tune_strategy_params.py`: TradingView
   settings-trial helpers retained for Pine-derived modeling.
 - `artifacts/tuning/`: tuning suggestions, exports, and trial artifacts.
@@ -74,8 +78,8 @@ context, or agent-facing notes pointing at an older trigger or training surface.
 - The active modeling object is the indicator behavior, not a server-side model.
 - The active output is a Pine settings/build recommendation, not a live scoring packet.
 - Every modeling run must declare one trigger family:
-  `LIVE_ANCHOR_FOOTPRINT`, `STRATEGY_ACCEPT_SCALP`, or
-  `BACKTEST_DIRECT_ANCHOR`.
+  `LIVE_ANCHOR_FOOTPRINT`, `STRATEGY_ACCEPT_SCALP`,
+  `BACKTEST_DIRECT_ANCHOR`, or `NEXUS_FOOTPRINT_DELTA`.
 - No external feature stacking: no FRED, macro, news, options, cross-asset, cloud,
   or Databento-ingestion joins in the active modeling dataset.
 - Daily/hourly ingestion is not a training source. It may remain for runtime chart
@@ -136,6 +140,8 @@ If any `.pine` file is touched, run:
 - Do not accept a settings result without export/CDP evidence, manifest, row/trade
   count, date range, and exact Pine inputs.
 - Do not start training/modeling unless explicitly asked.
+- Nexus tuning batches use the existing hub lane and `1000` trials unless the
+  user explicitly changes the batch size.
 
 ### Cloud And Database
 

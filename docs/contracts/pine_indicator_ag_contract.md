@@ -48,10 +48,14 @@ Do not mix trigger families inside one run.
   `v7-warbird-institutional-backtest-strategy.pine` when
   `Backtest Fib Anchor Hits Directly` is enabled. Entries fire from the selected
   fib execution-anchor hit/reclaim path and intentionally bypass the full live
-  footprint/context path.
-  The direct-anchor wrapper uses first-structural-leg fib geometry: after price
-  retraces into the locked `.786` level, later same-base wick extensions do not
-  replace the active `0`/`1` anchors.
+  footprint/context path. The direct-anchor wrapper uses first-structural-leg fib
+  geometry: after price retraces into the locked `.786` level, later same-base
+  wick extensions do not replace the active `0`/`1` anchors.
+- `NEXUS_FOOTPRINT_DELTA`: Nexus lower-pane signal-quality trigger from
+  `warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`. Rows must come
+  from TradingView indicator exports containing the hidden `nexus_fp_*`
+  `request.footprint()` fields; OHLCV/parquet delta reconstruction is not valid
+  evidence for this family.
 
 `acceptEvent` alone is not the live institutional entry trigger. It is a
 diagnostic/setup-archetype event unless a specific strategy surface uses it as

@@ -32,7 +32,7 @@ from scripts.optuna.paths import WORKSPACES_ROOT, study_db_path
 REGISTRY_PATH = REPO_ROOT / "scripts" / "optuna" / "indicator_registry.json"
 
 PERSISTENT_ENDPOINTS: list[tuple[str, str]] = [
-    ("hub", "http://localhost:8090/api/snapshot"),
+    ("hub", "http://127.0.0.1:8090/api/snapshot"),
 ]
 
 WORKTREE_PATHS: list[str] = [
@@ -45,9 +45,8 @@ WORKTREE_PATHS: list[str] = [
 ]
 
 VSCODE_PORTS: list[tuple[str, int]] = [
-    ("shared-dashboard", 8180),
-    ("hub", 8190),
-    ("hub-child-start", 8200),
+    ("canonical-hub", 8090),
+    ("hub-child-start", 8100),
 ]
 
 
@@ -183,11 +182,11 @@ def main() -> None:
         ok, detail = http_ok(url)
         print(f"- {label}: {url} [{'up' if ok else 'down'}: {detail}]")
 
-    hub_ok, _ = http_ok("http://localhost:8090/api/snapshot")
+    hub_ok, _ = http_ok("http://127.0.0.1:8090/api/snapshot")
     if hub_ok:
         try:
             with urllib.request.urlopen(
-                "http://localhost:8090/api/snapshot", timeout=2
+                "http://127.0.0.1:8090/api/snapshot", timeout=2
             ) as response:
                 snapshot = json.loads(response.read().decode("utf-8"))
         except Exception:
@@ -219,16 +218,15 @@ def main() -> None:
     print()
 
     print_section("Usage")
-    print("- primary live hub: http://localhost:8090/")
+    print("- primary live hub: http://127.0.0.1:8090/")
+    print("- Nexus lane: http://127.0.0.1:8090/studies/warbird_nexus_ml_rsi")
     print("- current-runtime-only health: `python scripts/optuna/runtime_health.py`")
     print("- stale log cleanup: `python scripts/optuna/prune_runtime_logs.py --apply`")
     print("- open `.vscode/OPTUNA_WORKSPACE.md` for one-click Simple Browser links")
     print(
         "- right-click any study.db file in Explorer and run `Open in Optuna Dashboard`"
     )
-    print("- optional Run and Debug sidecars:")
-    print("  `Optuna: Optional Sidecar Hub (8190)`")
-    print("  `Optuna: Optional Sidecar V7 Institutional Dashboard (8182)`")
+    print("- no sidecar hub/workspace should be launched for the active Warbird lanes")
     print("- tasks:")
     print("  `Optuna: Doctor`")
     print("  `Optuna: Print Study Layout`")

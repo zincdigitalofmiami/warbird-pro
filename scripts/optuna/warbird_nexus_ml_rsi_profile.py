@@ -6,12 +6,19 @@ Guide-driven tuning surface for the user's actual workflow on MES 5m:
 - confirmations come from volume flow, KNN, and confluence
 - fatigue is a first-class weakening/reversal warning
 
-This is still a research harness over MES 5m OHLCV, not a claim of exact
-TradingView parity for every visual or alert-only subsystem.
+This is the canonical Nexus research lane used by the Warbird Optuna Hub:
+http://127.0.0.1:8090/studies/warbird_nexus_ml_rsi
+
+It runs only over manifest-backed TradingView/Pine exports that include the
+Nexus footprint columns emitted by request.footprint(). The prior local OHLCV
+parquet delta proxy is intentionally not accepted as active model truth.
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -26,8 +33,22 @@ if str(REPO_ROOT) not in sys.path:
 
 
 MINTICK = 0.25
-DATA_PATH = REPO_ROOT / "data" / "mes_5m.parquet"
-SOURCE_1M_PATH = REPO_ROOT / "data" / "mes_1m.parquet"
+WORKSPACE_DIR = REPO_ROOT / "scripts" / "optuna" / "workspaces" / "warbird_nexus_ml_rsi"
+DEFAULT_MANIFEST_PATH = WORKSPACE_DIR / "pine_export_manifest.json"
+NEXUS_TRIGGER_FAMILY = "NEXUS_FOOTPRINT_DELTA"
+NEXUS_PINE_FILE = "indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine"
+EXPORT_PATH_KEYS = ("export_path", "csv_path", "path", "tradingview_csv")
+REQUIRED_EXPORT_COLS = {
+    "ts",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "nexus_fp_available",
+    "nexus_fp_bar_delta",
+    "nexus_fp_total_volume",
+}
 
 
 BOOL_PARAMS: list[str] = [
@@ -151,7 +172,7 @@ INPUT_DEFAULTS: dict[str, Any] = {
     "gasout_thresh":     0.05,
 }
 
-OBJECTIVE_METRIC = "nexus_5m_fast_signal_quality"
+OBJECTIVE_METRIC = "nexus_footprint_delta_signal_quality"
 
 
 def _safe_float(value: Any, default: float = 0.0) -> float:
@@ -166,6 +187,125 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except Exception:
         return default
+
+
+def _manifest_path() -> Path:
+    raw = os.environ.get("WARBIRD_NEXUS_EXPORT_MANIFEST")
+    return Path(raw).expanduser() if raw else DEFAULT_MANIFEST_PATH
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _canonical_col(name: Any) -> str:
+    col = str(name).strip().lower()
+    for old, new in (
+        (" ", "_"),
+        ("-", "_"),
+        (":", "_"),
+        ("/", "_"),
+        ("(", ""),
+        (")", ""),
+        ("%", "pct"),
+        (".", "_"),
+    ):
+        col = col.replace(old, new)
+    return "_".join(part for part in col.split("_") if part)
+
+
+def _resolve_export_path(manifest: dict[str, Any], manifest_path: Path) -> Path:
+    raw_path = None
+    for key in EXPORT_PATH_KEYS:
+        value = manifest.get(key)
+        if value:
+            raw_path = str(value)
+            break
+    if not raw_path:
+        raise ValueError(
+            f"Nexus export manifest {manifest_path} must include one of "
+            f"{', '.join(EXPORT_PATH_KEYS)}."
+        )
+    export_path = Path(raw_path).expanduser()
+    if not export_path.is_absolute():
+        export_path = manifest_path.parent / export_path
+    return export_path
+
+
+def _normalize_export_frame(raw: pd.DataFrame) -> pd.DataFrame:
+    frame = raw.copy()
+    frame.columns = [_canonical_col(c) for c in frame.columns]
+    frame = frame.loc[:, ~frame.columns.duplicated()].copy()
+
+    rename_map = {
+        "time": "ts",
+        "datetime": "ts",
+        "date": "ts",
+        "timestamp": "ts",
+        "open": "open",
+        "high": "high",
+        "low": "low",
+        "close": "close",
+        "volume": "volume",
+    }
+    for src, dst in rename_map.items():
+        if src in frame.columns and dst not in frame.columns:
+            frame = frame.rename(columns={src: dst})
+    for required_col in REQUIRED_EXPORT_COLS:
+        if required_col in frame.columns:
+            continue
+        if not required_col.startswith("nexus_"):
+            continue
+        matches = [
+            col
+            for col in frame.columns
+            if col.endswith(f"_{required_col}") or col.endswith(required_col)
+        ]
+        if len(matches) == 1:
+            frame = frame.rename(columns={matches[0]: required_col})
+
+    missing = REQUIRED_EXPORT_COLS.difference(frame.columns)
+    if missing:
+        raise ValueError(
+            "Nexus TradingView export is missing required Pine footprint "
+            f"columns: {sorted(missing)}. Do not backfill these from OHLCV or "
+            "local parquet; export the Nexus indicator with request.footprint() "
+            "fields enabled."
+        )
+
+    keep_cols = [
+        c
+        for c in frame.columns
+        if c in REQUIRED_EXPORT_COLS or c in {"symbol", "nexus_mode_minutes"}
+    ]
+    frame = frame.loc[:, keep_cols].copy()
+    ts_raw = frame["ts"]
+    if pd.api.types.is_numeric_dtype(ts_raw):
+        ts_numeric = pd.to_numeric(ts_raw, errors="coerce")
+        unit = "ms" if ts_numeric.dropna().median() > 1_000_000_000_000 else "s"
+        frame["ts"] = pd.to_datetime(ts_numeric, unit=unit, utc=True, errors="coerce")
+    else:
+        ts_text = ts_raw.astype(str).str.strip()
+        ts_numeric = pd.to_numeric(ts_text.str.replace(",", "", regex=False), errors="coerce")
+        numeric_ratio = float(ts_numeric.notna().mean()) if len(ts_numeric) else 0.0
+        if numeric_ratio >= 0.90:
+            unit = "ms" if ts_numeric.dropna().median() > 1_000_000_000_000 else "s"
+            frame["ts"] = pd.to_datetime(ts_numeric, unit=unit, utc=True, errors="coerce")
+        else:
+            frame["ts"] = pd.to_datetime(ts_raw, utc=True, errors="coerce")
+    numeric_cols = [c for c in frame.columns if c not in {"ts", "symbol"}]
+    for col in numeric_cols:
+        frame[col] = pd.to_numeric(
+            frame[col].astype(str).str.replace(",", "", regex=False),
+            errors="coerce",
+        )
+    frame = frame.dropna(subset=["ts", "open", "high", "low", "close"]).sort_values("ts")
+    frame = frame.drop_duplicates(subset=["ts"]).reset_index(drop=True)
+    return frame
 
 
 def _series(values: np.ndarray) -> pd.Series:
@@ -253,20 +393,6 @@ def _calc_er(src: np.ndarray, length: int) -> np.ndarray:
     return _safe_div(direction, volatility, 0.0)
 
 
-def _bar_delta(
-    open_: np.ndarray,
-    high: np.ndarray,
-    low: np.ndarray,
-    close: np.ndarray,
-    volume: np.ndarray,
-) -> np.ndarray:
-    body = np.abs(close - open_)
-    candle_range = np.maximum(high - low, 1e-9)
-    body_ratio = np.clip(body / candle_range, 0.0, 1.0)
-    body_dir = np.where(close > open_, 1.0, np.where(close < open_, -1.0, 0.0))
-    return body_dir * body_ratio * np.maximum(volume, 0.0)
-
-
 def _cumulative_delta(bar_delta: np.ndarray, lookback: float) -> np.ndarray:
     lb = max(int(lookback), 1)
     return _series(bar_delta).rolling(lb, min_periods=1).sum().to_numpy(dtype=np.float64)
@@ -329,8 +455,7 @@ def _compute_core(frame: pd.DataFrame, params: dict[str, Any]) -> dict[str, np.n
     source = _resolve_source(frame, str(params.get("sourceInput", "close")))
     smooth_type = str(params.get("smoothTypeInput", "DEMA"))
     sig_type = str(params.get("sigTypeInput", "EMA"))
-    vf_body_weight = float(np.clip(_safe_float(params.get("vfBodyWeightInput"), 0.70), 0.0, 1.0))
-    vf_wick_weight = 1.0 - vf_body_weight
+    vf_delta_weight = float(np.clip(_safe_float(params.get("vfBodyWeightInput"), 0.70), 0.0, 1.0))
     vf_fast_len_mult = max(_safe_float(params.get("vfFastLenMultInput"), 0.60), 0.10)
     vf_slow_len_mult = max(_safe_float(params.get("vfSlowLenMultInput"), 1.40), 0.10)
     vf_fast_blend_weight = float(np.clip(_safe_float(params.get("vfFastBlendWeightInput"), 0.60), 0.0, 1.0))
@@ -341,8 +466,11 @@ def _compute_core(frame: pd.DataFrame, params: dict[str, Any]) -> dict[str, np.n
     low = frame["low"].to_numpy(dtype=np.float64)
     close = frame["close"].to_numpy(dtype=np.float64)
     volume = np.nan_to_num(frame["volume"].to_numpy(dtype=np.float64), nan=0.0)
-    volume_available = np.cumsum(np.maximum(volume, 0.0)) > 0.0
-    bar_volume = np.where(volume_available, volume, 0.0)
+    fp_available = frame["nexus_fp_available"].to_numpy(dtype=np.float64) > 0.0
+    fp_bar_delta = np.nan_to_num(frame["nexus_fp_bar_delta"].to_numpy(dtype=np.float64), nan=0.0)
+    fp_total_volume = np.nan_to_num(frame["nexus_fp_total_volume"].to_numpy(dtype=np.float64), nan=0.0)
+    volume_available = fp_available & np.isfinite(fp_bar_delta) & (fp_total_volume > 0.0)
+    bar_volume = np.where(volume_available, fp_total_volume, 0.0)
 
     shifted = np.roll(source, eff_len)
     shifted[:eff_len] = np.nan
@@ -377,15 +505,13 @@ def _compute_core(frame: pd.DataFrame, params: dict[str, Any]) -> dict[str, np.n
     osc = np.clip(np.nan_to_num(_u_smooth(osc_raw, osc_smooth_len, smooth_type, volume), nan=50.0), 0.0, 100.0)
     sig = np.nan_to_num(_u_smooth(osc, sig_len, sig_type, volume), nan=50.0)
 
-    candle_range = high - low
-    body_size = np.abs(close - open_)
-    body_ratio = _safe_div(body_size, candle_range, 0.0)
-    upper_wick = high - np.maximum(close, open_)
-    lower_wick = np.minimum(close, open_) - low
-    wick_bias = _safe_div(lower_wick - upper_wick, candle_range, 0.0)
-    body_dir = np.where(close > open_, 1.0, np.where(close < open_, -1.0, 0.0))
-    candle_score = body_dir * body_ratio * vf_body_weight + wick_bias * vf_wick_weight
-    signed_vol = np.where(volume_available, candle_score * bar_volume, 0.0)
+    delta_lb = max(_safe_int(params.get("delta_lookback"), 10), 1)
+    rolling_delta_mean = _cumulative_delta(fp_bar_delta, delta_lb) / float(delta_lb)
+    signed_vol = np.where(
+        volume_available,
+        fp_bar_delta * vf_delta_weight + rolling_delta_mean * (1.0 - vf_delta_weight),
+        0.0,
+    )
     avg_vol = _sma(bar_volume, eff_len * 2)
     vnvf_raw = np.where(
         volume_available,
@@ -405,6 +531,8 @@ def _compute_core(frame: pd.DataFrame, params: dict[str, Any]) -> dict[str, np.n
         "low": low,
         "close": close,
         "volume": volume,
+        "fp_bar_delta": fp_bar_delta,
+        "fp_total_volume": fp_total_volume,
         "volume_available": volume_available,
         "atr_eff": np.maximum(atr_eff, MINTICK),
         "atr14": np.maximum(atr14, MINTICK),
@@ -586,32 +714,32 @@ def _compute_features(frame: pd.DataFrame, params: dict[str, Any]) -> pd.DataFra
     fat_ob_signal = (fat_ob_count == fatigue_bars) & warmup_mask
     fat_os_signal = (fat_os_count == fatigue_bars) & warmup_mask
 
-    # ── Footprint-style cumulative delta ────────────────────────────────────
-    _delta_lb   = max(int(params.get("delta_lookback", 10)), 1)
-    _slope_len  = max(int(params.get("delta_slope_len", 5)), 1)
-    _flip_th    = float(params.get("delta_flip_thresh", 0.10))
-    _gasout_th  = float(params.get("gasout_thresh", 0.05))
+    # ── Real footprint cumulative delta from exported Pine fields ───────────
+    _delta_lb = max(int(params.get("delta_lookback", 10)), 1)
+    _slope_len = max(int(params.get("delta_slope_len", 5)), 1)
+    _flip_th = float(params.get("delta_flip_thresh", 0.10))
+    _gasout_th = float(params.get("gasout_thresh", 0.05))
 
-    bar_dlt    = _bar_delta(core["open"], core["high"], core["low"], core["close"], core["volume"])
-    cum_dlt    = _cumulative_delta(bar_dlt, _delta_lb)
-    avg_vol_d  = _series(core["volume"]).rolling(_delta_lb, min_periods=1).mean().to_numpy(dtype=np.float64)
-    norm_cum   = np.clip(
-        _safe_div(cum_dlt, np.maximum(avg_vol_d * _delta_lb, 1.0), 0.0),
-        -1.0, 1.0,
-    )
-    dlt_slope  = _delta_slope(cum_dlt, _slope_len)
-    bar_ratio  = np.clip(
-        _safe_div(bar_dlt, np.maximum(core["volume"], 1.0), 0.0),
-        -1.0, 1.0,
-    )
+    bar_dlt = np.nan_to_num(core["fp_bar_delta"], nan=0.0)
+    fp_total_volume = np.nan_to_num(core["fp_total_volume"], nan=0.0)
+    fp_valid = volume_available & (fp_total_volume > 0.0)
+    cum_dlt = _cumulative_delta(bar_dlt, _delta_lb)
+    avg_vol_d = _series(fp_total_volume).rolling(_delta_lb, min_periods=1).mean().to_numpy(dtype=np.float64)
+    norm_cum = np.clip(_safe_div(cum_dlt, np.maximum(avg_vol_d * _delta_lb, 1.0), 0.0), -1.0, 1.0)
+    dlt_slope = _delta_slope(norm_cum, _slope_len)
+    bar_ratio = np.clip(_safe_div(bar_dlt, np.maximum(fp_total_volume, 1.0), 0.0), -1.0, 1.0)
     price_pos  = _safe_div(
         core["close"] - core["low"],
         np.maximum(core["high"] - core["low"], 1e-9),
         0.5,
     )
-    delta_dir  = np.where(norm_cum > _flip_th, 1, np.where(norm_cum < -_flip_th, -1, 0)).astype(np.int8)
-    gasout_bull = (norm_cum > 0.0) & (dlt_slope < -_gasout_th)
-    gasout_bear = (norm_cum < 0.0) & (dlt_slope > _gasout_th)
+    delta_dir = np.where(
+        fp_valid & (norm_cum > _flip_th),
+        1,
+        np.where(fp_valid & (norm_cum < -_flip_th), -1, 0),
+    ).astype(np.int8)
+    gasout_bull = fp_valid & (norm_cum > 0.0) & (dlt_slope < -_gasout_th)
+    gasout_bear = fp_valid & (norm_cum < 0.0) & (dlt_slope > _gasout_th)
 
     return pd.DataFrame(
         {
@@ -850,42 +978,74 @@ def objective_score(result: dict[str, Any]) -> float:
     return _bounded(_safe_float(result.get("composite_score"), 0.0))
 
 
-def _rollup_1m_to_5m(df: pd.DataFrame) -> pd.DataFrame:
-    frame = df.copy()
-    frame["ts"] = pd.to_datetime(frame["ts"], utc=True)
-    frame = frame.sort_values("ts").drop_duplicates(subset=["ts"]).set_index("ts")
-    agg: dict[str, Any] = {
-        "open": "first",
-        "high": "max",
-        "low": "min",
-        "close": "last",
-        "volume": "sum",
-    }
-    if "symbol" in frame.columns:
-        agg["symbol"] = "first"
-    rolled = frame.resample("5min", origin="epoch", label="left", closed="left").agg(agg)
-    rolled = rolled.dropna(subset=["open", "high", "low", "close"]).reset_index()
-    if "symbol" not in rolled.columns:
-        rolled["symbol"] = "MES"
-    return rolled.loc[:, ["ts", "open", "high", "low", "close", "volume", "symbol"]]
-
-
 def load_data() -> pd.DataFrame:
-    if DATA_PATH.exists():
-        df = pd.read_parquet(DATA_PATH)
-    elif SOURCE_1M_PATH.exists():
-        df = _rollup_1m_to_5m(pd.read_parquet(SOURCE_1M_PATH))
-    else:
-        raise FileNotFoundError(f"Missing MES 5m parquet: {DATA_PATH}")
+    manifest_path = _manifest_path()
+    if not manifest_path.exists():
+        raise FileNotFoundError(
+            f"Nexus Pine export manifest not found: {manifest_path}. "
+            f"Export {NEXUS_PINE_FILE} from TradingView with the hidden "
+            "nexus_fp_* plots, save the CSV, and write a manifest for trigger "
+            f"family {NEXUS_TRIGGER_FAMILY}. Set WARBIRD_NEXUS_EXPORT_MANIFEST "
+            "to override the manifest path."
+        )
 
-    required = {"ts", "open", "high", "low", "close", "volume"}
-    missing = required.difference(df.columns)
-    if missing:
-        raise ValueError(f"mes_5m parquet missing required columns: {sorted(missing)}")
+    manifest = json.loads(manifest_path.read_text())
+    trigger_family = str(manifest.get("trigger_family", "")).strip()
+    if trigger_family != NEXUS_TRIGGER_FAMILY:
+        raise ValueError(
+            f"Nexus manifest {manifest_path} trigger_family must be "
+            f"{NEXUS_TRIGGER_FAMILY!r}; got {trigger_family!r}."
+        )
 
-    df = df.loc[:, [c for c in df.columns if c in {"ts", "open", "high", "low", "close", "volume", "symbol"}]].copy()
-    df["ts"] = pd.to_datetime(df["ts"], utc=True)
-    df = df.sort_values("ts").drop_duplicates(subset=["ts"]).reset_index(drop=True)
+    indicator_file = str(manifest.get("indicator_file", "")).strip()
+    if indicator_file and indicator_file != NEXUS_PINE_FILE:
+        raise ValueError(
+            f"Nexus manifest indicator_file must reference {NEXUS_PINE_FILE}; "
+            f"got {indicator_file!r}."
+        )
+
+    export_path = _resolve_export_path(manifest, manifest_path)
+    if not export_path.exists():
+        raise FileNotFoundError(f"Nexus TradingView export CSV not found: {export_path}")
+
+    expected_hash = manifest.get("export_hash") or manifest.get("sha256") or manifest.get("csv_sha256")
+    actual_hash = _sha256_file(export_path)
+    if expected_hash and str(expected_hash).lower() != actual_hash.lower():
+        raise ValueError(
+            f"Nexus export hash mismatch for {export_path}: manifest={expected_hash} "
+            f"actual={actual_hash}"
+        )
+
+    raw = pd.read_csv(export_path)
+    df = _normalize_export_frame(raw)
+    manifest_row_count = manifest.get("row_count")
+    if manifest_row_count is not None and _safe_int(manifest_row_count, -1) != len(df):
+        raise ValueError(
+            f"Nexus manifest row_count={manifest_row_count} does not match "
+            f"normalized export rows={len(df)}."
+        )
+
+    df = df.loc[df["nexus_fp_available"].fillna(0.0) > 0.0].reset_index(drop=True)
+    df = df.loc[df["nexus_fp_total_volume"].fillna(0.0) > 0.0].reset_index(drop=True)
+    if df.empty:
+        raise ValueError(
+            "Nexus export contains no rows with available real footprint volume. "
+            "Do not run Optuna from OHLCV-only rows."
+        )
+
+    if "symbol" not in df.columns:
+        df["symbol"] = str(manifest.get("symbol", "MES1!"))
+
+    df.attrs["warbird_manifest"] = {
+        "manifest_path": str(manifest_path),
+        "export_path": str(export_path),
+        "export_hash": actual_hash,
+        "trigger_family": NEXUS_TRIGGER_FAMILY,
+        "indicator_file": NEXUS_PINE_FILE,
+        "symbol": manifest.get("symbol"),
+        "timeframe": manifest.get("timeframe"),
+        "row_count": len(df),
+    }
     return df
 
 

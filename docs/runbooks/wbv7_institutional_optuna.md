@@ -15,9 +15,10 @@ Supabase, or local `ag_training` data into this workflow.
 ## 1. One-time: Export TV CSV
 
 The profile requires a TV Pine Script CSV export from the live chart.
-This export is the ground truth for fib geometry, trade state machine, and
-footprint exhaustion signals.  You only need to re-export when you bump the
-indicator version.
+This export is the ground truth for OHLCV, fib geometry, trade state machine,
+and footprint exhaustion signals.  Do not merge `data/mes_15m.parquet`,
+Databento, FRED, Supabase, or warehouse rows into this workflow. You only need
+to re-export when you bump the indicator version or change a TV-only input.
 
 1. Open TradingView Desktop with `indicators/v7-warbird-institutional.pine`
    loaded on MES1! 15m, date range 2020-01-01 to present.
@@ -29,7 +30,11 @@ indicator version.
    ```
 4. Verify the file has columns including `time`, `open`, `high`, `low`,
    `close`, `volume`, `trade_state`, `ml_last_exit_outcome`, `fib_range`,
-   `ml_fib_neg_0236`, and the momentum columns (`ml_vf_bull`, etc.).
+   `ml_direction_code`, and `ml_fib_neg_0236`.
+   `ml_last_exit_outcome` must be a one-bar resolution event: `0` on all
+   non-resolution bars, non-zero only on the bar where the setup/trade resolves.
+   Momentum columns are recomputed from the same exported OHLCV inside the
+   profile and are not required in the CSV.
 
 ---
 
@@ -64,7 +69,7 @@ cd "/Volumes/Satechi Hub/warbird-pro"
 python3 scripts/optuna/runner.py \
   --indicator-key v7_warbird_institutional \
   --profile-module scripts.optuna.v7_warbird_institutional_profile \
-  --study-name v7_warbird_institutional_wr_pf \
+  --study-name "Warbird Institutional Signal Optimization" \
   --n-trials 200 \
   --start 2020-01-01
 ```
@@ -78,7 +83,7 @@ Typical runtime: 2–8 min per trial (stop re-simulation is O(n_trades × max_ba
 python3 scripts/optuna/runner.py \
   --indicator-key v7_warbird_institutional \
   --profile-module scripts.optuna.v7_warbird_institutional_profile \
-  --study-name v7_warbird_institutional_wr_pf \
+  --study-name "Warbird Institutional Signal Optimization" \
   --n-trials 100 \
   --start 2020-01-01 \
   --resume
@@ -103,13 +108,13 @@ for t in top5:
 
 ### Dashboard
 
-The canonical operator surface is the live multi-study hub on `8090` (the
-legacy `8080` compatibility redirect was retired 2026-04-23). For this study,
-open the v7 workspace DB in the VS Code Optuna Dashboard extension or launch
-the dedicated sidecar on port `8182`.
+The canonical operator surface is the live multi-study hub at
+`http://127.0.0.1:8090/` (the legacy `8080` compatibility redirect was retired
+2026-04-23). Do not launch a sidecar hub for the active Warbird lanes.
 
 Open:
-- `http://localhost:8090/`
+- `http://127.0.0.1:8090/`
+- `http://127.0.0.1:8090/studies/v7_warbird_institutional`
 
 ---
 
@@ -252,4 +257,4 @@ sanity checks (run `--start 2025-01-01` as OOS verification):
 | `scripts/optuna/workspaces/v7_warbird_institutional/export.csv` | TV CSV export (manual, one-time) |
 | `scripts/optuna/workspaces/v7_warbird_institutional/top5.json` | Auto-written after each run |
 | `indicators/v7-warbird-institutional.pine` | Source indicator (DO NOT EDIT without approval) |
-| `docs/contracts/ag_local_training_schema.md` | AG feature contract |
+| `docs/contracts/pine_indicator_ag_contract.md` | Active indicator-only modeling contract |

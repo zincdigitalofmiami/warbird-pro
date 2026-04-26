@@ -6,6 +6,8 @@ Read and follow `AGENTS.md` at the repository root.
 - **Active architecture plan:** `/Volumes/Satechi Hub/warbird-pro/docs/MASTER_PLAN.md` — Warbird Indicator-Only AG Plan v6
 - **Indicator contract:** `/Volumes/Satechi Hub/warbird-pro/docs/contracts/pine_indicator_ag_contract.md`
 - **Repo:** github.com/zincdigitalofmiami/warbird-pro
+- **Optuna Hub:** `http://127.0.0.1:8090/`
+- **Nexus Optuna lane:** `http://127.0.0.1:8090/studies/warbird_nexus_ml_rsi`
 
 ## Current Status
 
@@ -38,6 +40,9 @@ Databento feature stacking is admitted into the active modeling dataset.
 - `indicators/v7-warbird-institutional-backtest-strategy.pine` —
   Optuna/backtest wrapper; trigger family `BACKTEST_DIRECT_ANCHOR` when
   `Backtest Fib Anchor Hits Directly` is enabled
+- `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine` —
+  Nexus lower-pane footprint-delta research surface; trigger family
+  `NEXUS_FOOTPRINT_DELTA`
 
 Budget verification from 2026-04-26:
 
@@ -48,6 +53,13 @@ Budget verification from 2026-04-26:
 ### Modeling Surfaces
 
 - `scripts/optuna/` is the active local optimization workspace.
+- The canonical local hub is `http://127.0.0.1:8090/`. Do not create sidecar
+  hubs or alternate workspaces for active Warbird lanes.
+- Nexus ML RSI tuning uses the existing lane
+  `http://127.0.0.1:8090/studies/warbird_nexus_ml_rsi`, the existing workspace
+  `scripts/optuna/workspaces/warbird_nexus_ml_rsi`, the existing default study
+  name `Warbird Nexus ML Fast 5m Signal Quality April 25`, and `1000` trials
+  for the current batch size.
 - `scripts/ag/tv_auto_tune.py` and `scripts/ag/tune_strategy_params.py` remain useful
   for TradingView-driven settings trials.
 - `scripts/ag/train_ag_baseline.py`, local `ag_training`, FRED joins, and SHAP lineage
@@ -55,9 +67,9 @@ Budget verification from 2026-04-26:
 
 ### Current Blocker
 
-Refresh the Pine-derived baseline export and align the active optimization
-scripts/runbooks to the new indicator-only contract before launching modeling.
-Do not start training until the user explicitly approves it.
+Active optimization scripts and runbooks must point at the canonical hub before
+any run is launched. Nexus work must resume the existing hub lane; do not create
+a new hub, workspace, or study name for the current Nexus tuning batch.
 
 ## Locked Rules
 

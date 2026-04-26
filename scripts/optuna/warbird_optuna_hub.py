@@ -60,7 +60,7 @@ REFRESH_SECONDS = 15
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.optuna.paths import WORKSPACES_ROOT, experiments_dir, workspace_dir
+from scripts.optuna.paths import WORKSPACES_ROOT, experiments_dir, workspace_dir  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -71,6 +71,9 @@ class IndicatorSpec:
     surface_type: str
     pine_file: str
     notes: str = ""
+    status: str = "active"
+    launch_enabled: bool = True
+    blocked_reason: str = ""
     storage_mode: str = "standard"
     profile_module: str = ""
     profile_builtin: str = ""
@@ -100,6 +103,16 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def _safe_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "no", "off", "disabled", "blocked"}
+    return bool(value)
 
 
 def _parse_json_scalar(value_json: str | None, fallback: float = 0.0) -> float:
@@ -303,6 +316,9 @@ def load_registry(path: Path) -> list[IndicatorSpec]:
                 surface_type=str(row.get("surface_type", "indicator")).strip(),
                 pine_file=str(row.get("pine_file", "")).strip(),
                 notes=str(row.get("notes", "")).strip(),
+                status=str(row.get("status", "active")).strip() or "active",
+                launch_enabled=_safe_bool(row.get("launch_enabled"), default=True),
+                blocked_reason=str(row.get("blocked_reason", "")).strip(),
                 storage_mode=str(row.get("storage_mode", "standard")).strip(),
                 profile_module=str(row.get("profile_module", "")).strip(),
                 profile_builtin=str(row.get("profile_builtin", "")).strip(),
@@ -459,7 +475,8 @@ def build_run_command(spec: IndicatorSpec) -> str:
     else:
         parts.append(f"--profile-module scripts.optuna.{spec.key}_profile")
     parts.append(f"--study-name {shlex.quote(spec.default_study_name)}")
-    parts.append("--n-trials 300")
+    n_trials = "1000" if spec.key == "warbird_nexus_ml_rsi" else "300"
+    parts.append(f"--n-trials {n_trials}")
     parts.append("--resume")
     return " \\\n  ".join(parts)
 
@@ -1019,6 +1036,9 @@ class HubState:
                 "surface_type": spec.surface_type,
                 "pine_file": spec.pine_file,
                 "notes": spec.notes,
+                "status": spec.status,
+                "launch_enabled": spec.launch_enabled,
+                "blocked_reason": spec.blocked_reason,
                 "indicator_dir": str(indicator_dir),
                 "experiments_dir": str(exp_dir),
                 "db_path": str(db_path),
@@ -1180,8 +1200,13 @@ def render_html(snapshot: dict[str, Any]) -> str:
         if card["topn_error"]:
             topn_block = f"<div class='warning'>{_h(card['topn_error'])}</div>"
 
-        profile_class = "ok" if card["profile_status"] == "ready" else "warn"
-        profile_chip_label = "Profile Ready" if card["profile_status"] == "ready" else "Profile Missing"
+        launch_blocked = (not card["launch_enabled"]) or str(card["status"]).lower() in {"blocked", "disabled", "retired"}
+        profile_class = "warn" if launch_blocked else ("ok" if card["profile_status"] == "ready" else "warn")
+        profile_chip_label = (
+            "Launch Blocked"
+            if launch_blocked
+            else ("Profile Ready" if card["profile_status"] == "ready" else "Profile Missing")
+        )
 
         link_html = "<span class='btn disabled'>No DB</span>"
         if card["dashboard_url"]:
@@ -1208,12 +1233,20 @@ def render_html(snapshot: dict[str, Any]) -> str:
         if card["db_error"]:
             db_status = "error"
             db_status_label = f"DB error: {card['db_error']}"
+        if launch_blocked:
+            db_status = "error"
+            db_status_label = f"Launch blocked: {card['blocked_reason'] or card['status']}"
 
         dash_error_html = ""
         if card["dashboard_error"]:
             dash_error_html = f"<div class='warning'>{_h(card['dashboard_error'])}</div>"
 
         notes_html = f"<div class='path'><span>Notes:</span> {_h(card['notes'])}</div>" if card["notes"] else ""
+        blocked_html = (
+            f"<div class='path'><span>Blocked:</span> {_h(card['blocked_reason'] or card['status'])}</div>"
+            if launch_blocked
+            else ""
+        )
         operational_details = (
             "<details class='technical'>"
             "<summary>Operational Details</summary>"
@@ -1226,6 +1259,7 @@ def render_html(snapshot: dict[str, Any]) -> str:
             f"<div class='path'><span>DB:</span> {_h(card['db_path'])}</div>"
             f"<div class='path'><span>Top-N:</span> {_h(card['topn_path'])}</div>"
             f"{notes_html}"
+            f"{blocked_html}"
             "<details class='cmd'>"
             "<summary>Run Command</summary>"
             f"<pre>{_h(card['run_command'])}</pre>"

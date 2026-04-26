@@ -5,6 +5,11 @@
 
 The active runbooks support indicator-only Pine modeling.
 
+Canonical Optuna hub: `http://127.0.0.1:8090/`.
+Canonical Nexus lane: `http://127.0.0.1:8090/studies/warbird_nexus_ml_rsi`.
+Do not create alternate hub processes, workspaces, or replacement Nexus study
+names for active tuning.
+
 ## Iteration Rule
 
 Runbooks are operational snapshots for the current tuning cycle. Trigger

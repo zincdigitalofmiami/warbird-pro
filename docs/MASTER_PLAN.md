@@ -45,6 +45,7 @@ contract/runbook Markdown in the same change.
 - Backtest/modeling surfaces:
   - `indicators/v7-warbird-strategy.pine`
   - `indicators/v7-warbird-institutional-backtest-strategy.pine`
+  - `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
 - Optimization and modeling tools:
   - `scripts/optuna/`
   - `scripts/ag/tv_auto_tune.py`
@@ -99,6 +100,8 @@ Required facts:
   - `STRATEGY_ACCEPT_SCALP` for the v7 Strategy Tester accept/scalp path
   - `BACKTEST_DIRECT_ANCHOR` for the institutional backtest wrapper's direct
     fib-anchor Optuna path
+  - `NEXUS_FOOTPRINT_DELTA` for the Nexus lower-pane footprint-delta signal
+    quality lane
 - plot/request budget
 - compile/lint status
 - backtest property assumptions: commission, slippage, bar magnifier, fill model

@@ -17,7 +17,7 @@ from urllib.parse import quote, urljoin, urlparse
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-HUB_URL = "http://localhost:8090"
+HUB_URL = "http://127.0.0.1:8090"
 SNAPSHOT_URL = f"{HUB_URL}/api/snapshot"
 LEGACY_PORT = 8080
 TIMEOUT_SECONDS = 3
