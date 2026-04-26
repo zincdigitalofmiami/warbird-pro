@@ -183,6 +183,9 @@ Stop and report blockers if any are true:
 4. Runtime validation is required but unavailable.
 5. The assistant cannot prove that the claimed file edits exist.
 6. The assistant cannot prove that verification commands actually passed.
+7. Nexus ML RSI work would touch styling, watermark, dashboard/KNN tables,
+   `barcolor`, plots, fills, labels, markers, or visible output inventory
+   without Kirk explicitly requesting that exact visual/plot edit.
 
 When blocked, report:
 
@@ -190,6 +193,17 @@ When blocked, report:
 2. the evidence
 3. the safest next options
 4. the recommended next option
+
+## 11. Nexus Visual/Plot Freeze
+
+The frozen Nexus surface is
+`indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`.
+
+Do not alter Nexus colors, theme constants, watermark, dashboard/KNN tables,
+`barcolor`, `plot`, `plotshape`, `fill`, labels, line styling, or visible output
+inventory unless Kirk explicitly requests that exact visual/plot edit in the
+current session. Tuning approval for inputs or nonvisual calculations does not
+grant visual permission.
 
 ## 9. Warbird Verifier Intent
 

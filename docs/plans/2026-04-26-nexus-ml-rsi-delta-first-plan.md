@@ -12,6 +12,15 @@
 
 **Design Doc:** `docs/plans/2026-04-26-nexus-ml-rsi-delta-first-redesign.md`
 
+> **2026-04-26 visual/plot freeze:** This implementation plan is superseded for
+> any Nexus Pine styling or visible-output task. Do not execute the Pine visual
+> tasks below, including colors, watermark, `barcolor`, signal-tier markers,
+> visible plots, fills, labels, dashboard/KNN table styling, or output-inventory
+> changes. The active authority is
+> `docs/contracts/nexus_visual_plot_freeze.md`. The Optuna/profile data-contract
+> tasks remain reference only where they preserve the frozen Nexus visual
+> surface.
+
 ---
 
 ## Phase 1: Optuna Profile Rebuild (5m Study A)

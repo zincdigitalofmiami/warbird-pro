@@ -114,6 +114,10 @@ Output: Release recommendation and next blocker.
 - Never assume optional Pine toolchains are available; verify environment capabilities first.
 - Never use mock data.
 - Prefer exact-copy harness internals for required open-source modules; apply interface-only edits.
+- For Nexus ML RSI, never alter styling or visible outputs unless Kirk
+  explicitly requests that exact visual/plot edit in the current session.
+  Frozen surfaces include colors, watermark, dashboard/KNN tables, `barcolor`,
+  visible plots, fills, markers, labels, and visible output inventory.
 
 ## Resources
 

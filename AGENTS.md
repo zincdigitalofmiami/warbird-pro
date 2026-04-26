@@ -14,11 +14,12 @@ is a thin redirector only; do not expand it into a competing source.
 3. `docs/MASTER_PLAN.md`
 4. `docs/contracts/README.md`
 5. `docs/contracts/pine_indicator_ag_contract.md`
-6. `docs/runbooks/README.md`
-7. `docs/cloud_scope.md`
-8. `WARBIRD_MODEL_SPEC.md`
-9. `CLAUDE.md`
-10. `docs/agent-safety-gates.md`
+6. `docs/contracts/nexus_visual_plot_freeze.md`
+7. `docs/runbooks/README.md`
+8. `docs/cloud_scope.md`
+9. `WARBIRD_MODEL_SPEC.md`
+10. `CLAUDE.md`
+11. `docs/agent-safety-gates.md`
 
 ## Active Plan
 
@@ -45,6 +46,12 @@ When evidence changes the contract, update the active Markdown in the same
 change as the code/settings/artifacts. Do not leave stale plans, runbooks, skill
 context, or agent-facing notes pointing at an older trigger or training surface.
 
+Exception: the Nexus ML RSI visual and visible-output surface is frozen by
+`docs/contracts/nexus_visual_plot_freeze.md`. Tuning evidence may change Nexus
+settings or nonvisual calculations only after approval; it must not be used as
+permission to alter Nexus styling, watermark, dashboards, tables, visible plots,
+fills, markers, labels, or bar colors.
+
 ## Default Preflight
 
 - Run `git status --short` before edits.
@@ -56,6 +63,9 @@ context, or agent-facing notes pointing at an older trigger or training surface.
 
 - `indicators/`: Pine indicator and strategy files; primary active surface is
   `indicators/v7-warbird-institutional.pine`.
+  Nexus ML RSI lives at
+  `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`; its
+  visual/plot surface is frozen.
 - `scripts/optuna/`: active local optimization workspaces and runner.
 - `scripts/ag/tv_auto_tune.py`, `scripts/ag/tune_strategy_params.py`: TradingView
   settings-trial helpers retained for Pine-derived modeling.
@@ -108,6 +118,13 @@ context, or agent-facing notes pointing at an older trigger or training surface.
 - Never edit `indicators/v7-warbird-institutional.pine` without explicit approval
   in the current session.
 - Never push Pine changes to TradingView Pine Editor without explicit approval.
+- Never alter Nexus ML RSI styling or visible outputs in
+  `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine` unless
+  Kirk explicitly requests that exact visual/plot edit in the current session.
+  Frozen surfaces include colors, theme constants, watermark, dashboard/KNN
+  tables, `plot`, `fill`, `plotshape`, `barcolor`, labels, line styling, and the
+  visible output inventory. Numeric tuning/default changes do not imply visual
+  permission.
 - `indicators/v8-warbird-live.pine` and `indicators/v8-warbird-prescreen.pine`
   are code-frozen. Only approved `input.*` default changes are allowed.
 - Pine budget baselines verified 2026-04-26:
@@ -141,6 +158,10 @@ If any `.pine` file is touched, run:
   it must use TradingView/Pine `request.footprint()` `nexus_fp_*` evidence only.
   Do not tune Nexus from CSV exports, local OHLCV parquet, Databento bars, or
   synthetic body/wick delta.
+- Nexus Optuna/modeling recommendations must preserve the frozen visual/plot
+  contract. Reject any Nexus recommendation that removes, renames, hides,
+  consolidates, recolors, or restyles visible outputs unless Kirk explicitly
+  requested that visual/plot edit in the current session.
 
 ### Cloud And Database
 

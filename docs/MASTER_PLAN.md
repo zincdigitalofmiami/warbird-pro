@@ -8,7 +8,7 @@
 Warbird training is now a pure PineScript indicator modeling program.
 
 The active goal is to perfect the TradingView indicator itself: its settings,
-state machine, entries, exits, filters, and visual/operator build. AutoGluon,
+state machine, entries, exits, filters, and operator build. AutoGluon,
 Optuna, SHAP, and supporting scripts may be used offline, but only to model and
 rank PineScript indicator behavior. They do not create a separate data-stack
 decision engine.
@@ -37,6 +37,10 @@ contract/runbook Markdown in the same change.
   training truth. They remain reference-only unless explicitly reopened.
 - Cloud Supabase is runtime/support only. It is not a model-training mirror and
   does not receive raw trials, raw labels, raw SHAP, or full research datasets.
+- Nexus ML RSI styling and visible outputs are frozen by
+  `docs/contracts/nexus_visual_plot_freeze.md`. Tuning may not alter its colors,
+  watermark, dashboards, tables, `barcolor`, plots, fills, markers, labels, or
+  visible output inventory.
 
 ## Active Surfaces
 
@@ -45,6 +49,8 @@ contract/runbook Markdown in the same change.
 - Backtest/modeling surfaces:
   - `indicators/v7-warbird-strategy.pine`
   - `indicators/v7-warbird-institutional-backtest-strategy.pine`
+  - `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
+    for Nexus footprint-delta research; visual/plot surface frozen
 - Optimization and modeling tools:
   - `scripts/optuna/`
   - `scripts/ag/tv_auto_tune.py`
@@ -100,10 +106,13 @@ Required facts:
   - `BACKTEST_DIRECT_ANCHOR` for the institutional backtest wrapper's direct
     fib-anchor Optuna path
 - plot/request budget
+- Nexus visual/plot freeze status when the Nexus file is in scope
 - compile/lint status
 - backtest property assumptions: commission, slippage, bar magnifier, fill model
 
 No Pine code changes are allowed without explicit session approval.
+No Nexus visual or visible-output changes are allowed unless Kirk explicitly
+requests that exact visual/plot edit in the current session.
 
 ### Phase 2 — Pine Output Capture
 
@@ -167,6 +176,9 @@ The output is not a live model packet. The output is a settings/build brief:
 ### Phase 5 — Pine Implementation
 
 Only after Kirk approval, apply Pine changes or default-setting changes.
+For Nexus ML RSI, this approval must be specific to the exact visual/plot item
+before touching colors, watermark, dashboard/KNN tables, `barcolor`, visible
+plots, fills, markers, labels, or visible output inventory.
 
 Required gates after any `.pine` edit:
 
