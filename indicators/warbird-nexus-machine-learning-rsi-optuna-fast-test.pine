@@ -590,53 +590,6 @@ string confStr = confVal >= confHighInput ? "Strong Bull" : confVal <= confLowIn
 color confColor = confVal >= confHighInput ? BULL_TEXT : confVal <= confLowInput ? BEAR_TEXT : confVal > 55.0 ? color.new(BULL_TEXT, 40) : confVal < 45.0 ? color.new(BEAR_TEXT, 40) : NEUTRAL_TEXT
 
 // ══════════════════════════════════════════════════════════
-// KNN TABLE PANEL
-// ══════════════════════════════════════════════════════════
-color knnBgH = isDark ? color.new(#181818, 0) : color.new(#f0f0f0, 0)
-color knnBgM = isDark ? color.new(#111111, 0) : color.new(#fafafa, 0)
-color knnBgF = isDark ? color.new(#0e0e0e, 0) : color.new(#e8e8e8, 0)
-color knnBrd = isDark ? color.new(BULL_TEXT, 55) : color.new(BULL_TEXT, 65)
-color knnTxS = isDark ? color.new(BULL_TEXT, 0)  : color.new(BULL_TEXT, 5)
-color knnTxM = isDark ? color.new(BULL_TEXT, 25) : color.new(BULL_TEXT, 30)
-
-string knnTblPos = switch knnPosInput
-    "Top Right"    => position.top_right
-    "Bottom Right" => position.bottom_right
-    "Top Left"     => position.top_left
-    => position.bottom_left
-
-var table knnTable = table.new(knnTblPos, 2, 5, bgcolor = knnBgM, border_color = knnBrd, border_width = 1, frame_color = knnBrd, frame_width = 1)
-
-if knnShowInput and barstate.islast and isWarmedUp
-    string kDir  = knnIsBull ? "BULL" : knnIsBear ? "BEAR" : "NEUTRAL"
-    string kIcon = knnIsBull ? "▲" : knnIsBear ? "▼" : "◈"
-    table.cell(knnTable, 0, 0, "KNN AI", text_color = knnTxS, text_size = knnSz, bgcolor = knnBgH, text_halign = text.align_left, text_font_family = font.family_monospace)
-    table.cell(knnTable, 1, 0, kIcon + " " + kDir, text_color = knnCol, text_size = knnSz, bgcolor = knnBgH, text_halign = text.align_right, text_font_family = font.family_monospace)
-    table.cell(knnTable, 0, 1, "Confidence", text_color = knnTxS, text_size = knnSz, bgcolor = knnBgM, text_halign = text.align_left, text_font_family = font.family_monospace)
-    table.cell(knnTable, 1, 1, str.tostring(knnConf) + "%", text_color = knnTxS, text_size = knnSz, bgcolor = knnBgM, text_halign = text.align_right, text_font_family = font.family_monospace)
-
-    int filled = math.round(knnConf / 10)
-    string barStr = ""
-    if filled > 0
-        for _i = 0 to filled - 1
-            barStr := barStr + "█"
-    int emptyBlocks = 10 - filled
-    if emptyBlocks > 0
-        for _i = 0 to emptyBlocks - 1
-            barStr := barStr + "░"
-    table.cell(knnTable, 0, 2, barStr, text_color = knnTxS, text_size = knnSz, bgcolor = knnBgM, text_halign = text.align_left, text_font_family = font.family_monospace)
-    table.cell(knnTable, 1, 2, str.tostring(kSize) + " bars", text_color = knnTxM, text_size = knnSz, bgcolor = knnBgM, text_halign = text.align_right, text_font_family = font.family_monospace)
-
-    string fTxt = (feat1 > 0.5 ? "M+" : "M-") + "  " + (feat2 > 0.5 ? "V+" : "V-") + "  " + (feat4 > 0.3 ? "E+" : "E-") + "  " + (feat3 > 0.5 ? "X+" : "X-")
-    table.cell(knnTable, 0, 3, fTxt, text_color = knnTxS, text_size = knnSz, bgcolor = knnBgF, text_halign = text.align_left, text_font_family = font.family_monospace)
-    table.cell(knnTable, 1, 3, "K=" + str.tostring(knnKInput), text_color = knnTxM, text_size = knnSz, bgcolor = knnBgF, text_halign = text.align_right, text_font_family = font.family_monospace)
-
-    string regStr = erTrending ? "TREND" : "RANGE"
-    color  regCol = erTrending ? BULL_TEXT : NEUTRAL_TEXT
-    table.cell(knnTable, 0, 4, "Regime", text_color = knnTxM, text_size = knnSz, bgcolor = knnBgF, text_halign = text.align_left, text_font_family = font.family_monospace)
-    table.cell(knnTable, 1, 4, regStr, text_color = regCol, text_size = knnSz, bgcolor = knnBgF, text_halign = text.align_right, text_font_family = font.family_monospace)
-
-// ══════════════════════════════════════════════════════════
 // OSCILLATOR LINE COLOR
 // ══════════════════════════════════════════════════════════
 color lineCol = oscVal >= effOB ? bullColorInput : oscVal <= effOS ? bearColorInput : adaptColorInput ? (oscVal >= 50.0 ? color.new(bullColorInput, 40) : color.new(bearColorInput, 40)) : color.new(bullColorInput, 60)
@@ -812,41 +765,6 @@ color  regimeCol   = erTrending ? BULL_TEXT : NEUTRAL_TEXT
 string knnStr      = knnIsBull ? "Bullish" : knnIsBear ? "Bearish" : "Neutral"
 string tfModeStr   = modeInput + " Native"
 color  tfModeCol   = TEXT_MUTED
-
-if showDashInput and barstate.islast
-    var dashTable = table.new(dashPos, 2, 14, TABLE_BG, TABLE_BORDER, 1, TABLE_BORDER, 1)
-    table.cell(dashTable, 0, 0, "Nexus Fusion ML", text_color = HEADER_TEXT, bgcolor = HEADER_BG, text_size = size.small, text_halign = text.align_center)
-    table.merge_cells(dashTable, 0, 0, 1, 0)
-    table.cell(dashTable, 0, 1, "Trend", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 1, 1, trendStr, text_color = trendCol, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 0, 2, "Signal", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 1, 2, signalStr, text_color = signalCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 0, 3, "Strength", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 1, 3, strengthStr, text_color = strengthCol, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 0, 4, "Oscillator", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 1, 4, str.tostring(oscVal, "#.#"), text_color = trendCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 0, 5, "Momentum", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 1, 5, momStr, text_color = momCol, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 0, 6, "TF Mode", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 1, 6, tfModeStr, text_color = tfModeCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 0, 7, "Vol Flow", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 1, 7, vfStr, text_color = vfCol, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 0, 8, "Regime", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 1, 8, regimeStr, text_color = regimeCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 0, 9, "KNN Bias", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 1, 9, knnStr, text_color = knnCol, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 0, 10, "Confluence", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 1, 10, confStr + " (" + str.tostring(confVal, "#.#") + ")", text_color = confColor, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 0, 11, "ER", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 1, 11, str.tostring(erSmoothed, "#.##"), text_color = regimeCol, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 0, 12, "Score", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    string scoreStr = str.tostring(regimeScore) + "/" + str.tostring(regimeScoreMax)
-    color scoreCol = regimeScore >= regimeScoreMax - 1 ? BULL_TEXT : regimeScore <= 1 ? BEAR_TEXT : NEUTRAL_TEXT
-    table.cell(dashTable, 1, 12, scoreStr, text_color = scoreCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 0, 13, "Consensus", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    string consStr = str.tostring(confBullVotes) + "B / " + str.tostring(confBearVotes) + "S"
-    color consCol = confBullVotes > confBearVotes ? BULL_TEXT : confBearVotes > confBullVotes ? BEAR_TEXT : NEUTRAL_TEXT
-    table.cell(dashTable, 1, 13, consStr, text_color = consCol, text_size = size.small, bgcolor = TABLE_BG)
 
 // ══════════════════════════════════════════════════════════
 // WATERMARK — WillyAlgoTrader
