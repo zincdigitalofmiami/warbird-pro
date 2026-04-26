@@ -1,45 +1,43 @@
 # Candidate Identity Contract
 
+**Date:** 2026-04-26
 **Status:** Active
 
 ## Purpose
 
-Defines what makes a candidate the same candidate and how replays are handled.
+Defines identity for Pine-derived modeling rows and trials.
 
-## Same-Candidate Rule
+## Same-Run Rule
 
-Two payloads represent the same candidate only when all of the following match:
+Two exports belong to the same modeling run only when all of the following
+match:
 
-- `symbol`
-- `timeframe`
-- `bar_close_ts_utc`
-- `direction`
-- `setup_archetype`
-- `fib_anchor_high_ts_utc`
-- `fib_anchor_low_ts_utc`
-- `fib_anchor_high_price`
-- `fib_anchor_low_price`
-- `indicator_version`
+- indicator file
+- repo commit or indicator version
+- symbol
+- timeframe
+- export date range
+- Pine input settings
+- TradingView Strategy Tester properties where applicable
 
-## Idempotency Key Rule
+## Row Identity
 
-`candidate_idempotency_key` must be a deterministic hash of the same-candidate fields above plus the normalized `stop_family_id`.
+For indicator-state rows, identity is:
 
-## Replay Handling
+- export manifest hash
+- bar timestamp
+- direction/state fields when present
 
-- exact replay with the same payload is a no-op
-- exact replay with missing audit metadata may update audit-only columns
-- conflicting replay with the same `candidate_idempotency_key` must not overwrite canonical warehouse truth silently
-- conflicting replay must be logged as an ingress conflict for reconciliation
+For Strategy Tester trades, identity is:
 
-## Revision Rule
+- export manifest hash
+- trade number or TradingView trade id if present
+- entry timestamp
+- exit timestamp
+- direction
 
-Canonical candidate rows are immutable after first acceptance.
+## Replay Rule
 
-If Pine emits a materially different payload for the same candidate key:
-
-- do not overwrite the accepted canonical row
-- record the later payload in audit or conflict storage
-- require an explicit contract or writer change before allowing mutation semantics
-
-This keeps training truth stable and replay-safe.
+Re-exporting the same settings and date range should produce the same manifest
+hash or be recorded as a new export with a reason. Do not silently merge
+conflicting exports.

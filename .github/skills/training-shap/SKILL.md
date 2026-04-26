@@ -3,6 +3,9 @@ name: training-shap
 description: Hi-def SHAP deep-dive on a completed AutoGluon training run. Produces aggregate + per-class + per-cohort feature importance plus diagnostic reports on leakage, calibration, and feature drift. Core outputs map directly to entry/TP decision rules. Use after every training run; mandatory before promoting any model or proposing indicator changes.
 ---
 
+> **2026-04-26 indicator-only reset:** This training skill is legacy unless Kirk explicitly reopens the old warehouse AG architecture. Active modeling uses Pine/TradingView outputs only; do not use FRED, macro, local `ag_training`, or daily-ingestion training flows.
+
+
 # Training — SHAP Deep Dive (Hi-Def)
 
 **Locked execution plan:** `docs/plans/2026-04-15-hi-def-shap-mc-implementation.md`. The bucket cutoffs, leakage conjunction, and strip-list in that plan are authoritative — do not deviate in implementation.

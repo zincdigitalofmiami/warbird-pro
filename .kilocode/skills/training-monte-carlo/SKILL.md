@@ -3,6 +3,9 @@ name: training-monte-carlo
 description: Hi-def Monte Carlo P&L deep-dive on a completed AutoGluon training run. Produces entry-rule tables, per-stop-family TP-ladder decisions, probability-threshold sweeps, calibration diagnostics, win-profile anatomy, and regime-stability checks. Outputs directly answer the project's core trading questions — when to enter, when to TP, what wins look like, what's broken. NinjaTrader Basic (free) flat 1-tick fee. MES $5/point. 1-contract fixed sizing.
 ---
 
+> **2026-04-26 indicator-only reset:** This training skill is legacy unless Kirk explicitly reopens the old warehouse AG architecture. Active modeling uses Pine/TradingView outputs only; do not use FRED, macro, local `ag_training`, or daily-ingestion training flows.
+
+
 # Training — Monte Carlo Deep Dive (Hi-Def)
 
 **Locked execution plan:** `docs/plans/2026-04-15-hi-def-shap-mc-implementation.md`. Strip-list for A-D parity + cache format + task contracts are authoritative in that plan — do not deviate.

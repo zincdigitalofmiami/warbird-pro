@@ -6,6 +6,10 @@
 **Symbol/TF:** MES1! 15m
 **Data floor:** 2020-01-01
 
+**Contract:** Active indicator-only modeling. The TradingView/Pine export is the
+ground truth. Do not join FRED, macro, cross-asset, Databento-ingestion,
+Supabase, or local `ag_training` data into this workflow.
+
 ---
 
 ## 1. One-time: Export TV CSV

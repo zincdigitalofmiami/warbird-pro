@@ -1,76 +1,46 @@
-# Signal Event Payload Contract
+# Pine Export Payload Contract
 
+**Date:** 2026-04-26
 **Status:** Active
-**Updated:** 2026-04-09 — separated Pine candidate transport from AG decision fields and deferred execution-model-dependent stop geometry
 
 ## Purpose
 
-Defines the alert payload emitted by Pine (Tier 1 candidate transport) and the decision fields assigned by AG scoring (Tier 2 operator signal).
+Defines the minimum metadata required for Pine/TradingView exports used in
+indicator-only modeling.
 
-## Tier 1 — Pine Candidate Payload
+## Required Identity Fields
 
-This is the structured candidate event emitted by Pine at bar close. It feeds the ingress pipeline only.
-
-### Required Version Fields
-
-- `schema_version`
-- `indicator_version`
-
-### Required Identity Fields
-
+- `indicator_file`
+- `indicator_version` or repo commit
 - `symbol`
 - `timeframe`
-- `bar_close_ts_utc`
-- `candidate_idempotency_key`
+- `export_start`
+- `export_end`
+- `export_method`
+- `export_hash`
 
-`bar_close_ts_utc` is the ingress timestamp authority. The canonical warehouse derives the MES 15m `America/Chicago` key from this field during canonical write.
+## Required Settings Fields
 
-### Required Setup Snapshot Fields
+- full Pine input settings used for the export
+- Strategy Tester commission/slippage/fill settings where applicable
+- Bar Magnifier state where applicable
 
-- `direction`
-- `setup_archetype`
-- `fib_anchor_high_ts_utc`
-- `fib_anchor_low_ts_utc`
-- `fib_anchor_high_price`
-- `fib_anchor_low_price`
-- `fib_level_touched`
+## Required Row/Trade Fields
 
-### Required Stop Identity Field
+The exact row fields may vary by export, but each run must document:
 
-- `stop_family_id`
-
-### Server-Reconstructed / Deferred Stop Geometry Fields
-
-- `stop_level_price`
-- `stop_distance_ticks`
-
-These fields depend on the canonical execution model and are server-reconstructed or deferred until that contract is locked. They are not required Pine-emitted Tier 1 fields in the current phase.
-
-### Optional Audit Fields
-
-- `payload_hash`
-- `tv_alert_id`
-- `source_chart_id`
-
-## Tier 2 — AG Decision Fields (Server-Side Only)
-
-These fields are assigned after AG scores the candidate against the active packet. They are NOT emitted by Pine.
-
-The `gate_reason_bucket` taxonomy is currently locked to the values below.
-
-- `gate_decision` — one of `TAKE_TRADE`, `WAIT`, `PASS`
-- `gate_reason_bucket` — one of `REGIME_BLOCK`, `CONFLUENCE_TOO_LOW`, `VOLATILITY_BLOCK`, `SESSION_TIME_BLOCK`, `STRUCTURE_INVALID`
-- `tp1_probability` — calibrated from active packet
-- `tp2_probability` — calibrated from active packet
-- `reversal_probability` — calibrated from active packet
-- `packet_id` — FK to the scoring packet
-- `scored_at` — timestamp of AG scoring
+- time column
+- OHLCV columns present
+- Pine state columns present
+- trade entry/exit columns present
+- label/outcome columns present
+- fields missing because TradingView did not export them
 
 ## Payload Rules
 
-- UTC only in transport timestamps
-- deterministic serialization for idempotency hashing
-- confirmed-bar emission only
-- no repaint-prone or post-outcome fields
-- unknown fields must be rejected or explicitly version-gated
-- Pine must NOT emit `gate_decision`, `gate_reason_bucket`, calibrated probabilities, or execution-model-dependent stop geometry fields unless a future contract version explicitly promotes them
+- UTC or explicitly documented exchange/chart timezone only.
+- No unknown derived columns without formula documentation.
+- No external joins.
+- No post-outcome leakage columns in predictor sets.
+- Missing fields must be documented instead of silently backfilled from another
+  data source.

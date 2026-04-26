@@ -10,12 +10,13 @@ Resolve instruction conflicts in this exact order:
 
 1. `AGENTS.md`
 2. `docs/INDEX.md`
-3. `CLAUDE.md`
-4. `docs/MASTER_PLAN.md`
-5. `docs/contracts/README.md`
+3. `docs/MASTER_PLAN.md`
+4. `docs/contracts/README.md`
+5. `docs/contracts/pine_indicator_ag_contract.md`
 6. `docs/cloud_scope.md`
 7. `WARBIRD_MODEL_SPEC.md`
-8. `docs/agent-safety-gates.md`
+8. `CLAUDE.md`
+9. `docs/agent-safety-gates.md`
 
 If a task touches one specific phase or checkpoint, reread that exact active-plan section before editing.
 
@@ -133,6 +134,9 @@ If any touched file is under `supabase/`, `app/api/cron/`, or ingestion librarie
 
 1. `npm run build`
 2. Run the narrowest path-specific runtime or script validation available
+
+Runtime ingestion work must not be described as training work unless the active
+Pine indicator-only contract is explicitly updated.
 
 ### Docs-Only Work
 

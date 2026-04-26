@@ -3,6 +3,9 @@ name: training-quant-trading
 description: Quant-trading discipline for time-series ML. Use when designing training splits, setting embargoes, interpreting leakage signals, handling session boundaries, and evaluating whether a model's reported metrics are trustworthy for real trading.
 ---
 
+> **2026-04-26 indicator-only reset:** This training skill is legacy unless Kirk explicitly reopens the old warehouse AG architecture. Active modeling uses Pine/TradingView outputs only; do not use FRED, macro, local `ag_training`, or daily-ingestion training flows.
+
+
 # Training — Quant Trading Discipline
 
 Non-negotiable rules for training ML models on financial time-series data. Every rule here has burned real compute or real capital in the project's history.

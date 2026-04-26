@@ -2,82 +2,49 @@
 
 ## Dynamic Discovery Rules
 
-1. Read `AGENTS.md` first and resolve the active plan path from that file.
-2. Treat the active plan as higher priority than stale archived plans.
-3. Re-read `AGENTS.md` when user direction changes mid-task.
+1. Read `AGENTS.md` first.
+2. Resolve active architecture from `docs/INDEX.md` and `docs/MASTER_PLAN.md`.
+3. Treat this file as a convenience summary only; active docs win.
 
-## Current Snapshot (2026-03-26)
+## Current Snapshot (2026-04-26)
 
 ### Canonical Contract
 
-- Canonical trade object: MES 15m fib setup.
-- Canonical key: MES 15m bar-close timestamp in `America/Chicago`.
-- Pine is canonical signal surface; Next.js dashboard mirrors that contract.
+- Active plan: Warbird Indicator-Only AG Plan v6.
+- Modeling truth: Pine/TradingView outputs only.
+- Goal: perfect indicator settings, state machine, and build quality.
+- No external feature stacking: no FRED, macro, news, options, cross-asset,
+  Databento-ingestion, Supabase, or local `ag_training` joins.
 
 ### Current Pine Surfaces
 
-- Indicator: `indicators/v6-warbird-complete.pine`
-- Strategy: `indicators/v6-warbird-complete-strategy.pine`
+- Live indicator: `indicators/v7-warbird-institutional.pine`
+- Strategy Tester mirror: `indicators/v7-warbird-strategy.pine`
+- Optuna/backtest wrapper: `indicators/v7-warbird-institutional-backtest-strategy.pine`
 
-### Current Gate Baseline
+### Current Budget Snapshot
 
-- `scripts/guards/pine-lint.sh indicators/v6-warbird-complete.pine`: pass with one warning.
-- `scripts/guards/check-contamination.sh`: pass.
-- `scripts/guards/check-indicator-strategy-parity.sh`: fail due hidden export drift (strategy contains fields indicator does not expose).
-- `npm run build`: pass.
+- v7 institutional: 58/64 output calls
+- v7 strategy: 60/64 output calls
+- v7 institutional backtest strategy: 53/64 output calls
 
-### Current Code Metrics Snapshot
+### Data Surfaces For Suggestions
 
-- Indicator lines: 947
-- Strategy lines: 1023
-- Indicator `request.security()` calls: 11
-- Indicator `request.economic()` calls: 3
+Use only Pine/TradingView-derived surfaces:
 
-## Data Surfaces for Matching Suggestions
+- TradingView indicator CSV export
+- TradingView Strategy Tester trade export
+- CDP-read `reportData().trades()`
+- deterministic fields derived from the same export
 
-Use these surfaces when tying indicator suggestions to data or schema changes.
-
-### Market Data
-
-- `mes_1m`
-- `mes_15m`
-- `cross_asset_1h`
-- `cross_asset_1d`
-
-### Economic Data
-
-- `econ_rates_1d`
-- `econ_yields_1d`
-- `econ_fx_1d`
-- `econ_vol_1d`
-- `econ_inflation_1d`
-- `econ_labor_1d`
-- `econ_activity_1d`
-- `econ_money_1d`
-- `econ_commodities_1d`
-- `econ_indexes_1d`
-- `econ_calendar`
-
-### News and Event Context
-
-- `news_signals` (market-impact polarity, not trade-direction engine)
-- `econ_news_topics`
-- `econ_news_rss_articles`
-- `econ_news_finnhub_articles`
-
-### Warbird Decision Surfaces
-
-- `warbird_triggers_15m`
-- `warbird_conviction`
-- `warbird_setups`
-- `warbird_setup_events`
-- `warbird_risk`
+Do not map suggestions to database tables unless the task is explicitly runtime
+or bookkeeping work.
 
 ## Suggestion Mapping Template
 
-For each recommendation, map all of the following:
+For each recommendation, map:
 
-1. Pine logic section(s) and file path(s)
-2. Hidden export fields changed or added (`ml_*`)
-3. Data surface dependencies (table names)
+1. Pine file and logic section
+2. Pine input setting or `ml_*` field involved
+3. TradingView export/trade evidence required
 4. Validation gates required before release

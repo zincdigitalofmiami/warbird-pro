@@ -1,5 +1,9 @@
 # Integrating AutoGluon 1.5 With Warbird v7 for Precise Entries + Fib TP1/TP2
 
+> **Historical 2026-04-26:** This research predates the indicator-only reset.
+> Ignore Supabase event-schema, external feature-stack, and warehouse training
+> recommendations for active work.
+
 ## Executive summary
 
 Warbird v7 already has the right *structural primitives* to become “smart”: non-lookahead gating, a canonical fib engine with TP1=1.236 and TP2=1.618, explicit intermarket regime scoring, and an explicit trade outcome label surface (`ml_last_exit_outcome`). fileciteturn1file0 The bottleneck is not “more indicators”; it’s **(1) governance of point‑in‑time (PIT) semantics**, **(2) a clean event schema in Supabase**, and **(3) an ML loop that meta-labels candidate setups instead of learning entries from scratch**.

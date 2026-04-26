@@ -3,6 +3,9 @@ name: training-full-zoo
 description: Launch a full-model-zoo AutoGluon run (GBM + CAT + XGB + RF + XT + NN_TORCH + FASTAI) for real multi-family comparison. Use for final model selection, SHAP-comparison runs, and any production-candidate training. Mandatory num-bag-folds=0 for time-series correctness.
 ---
 
+> **2026-04-26 indicator-only reset:** This training skill is legacy unless Kirk explicitly reopens the old warehouse AG architecture. Active modeling uses Pine/TradingView outputs only; do not use FRED, macro, local `ag_training`, or daily-ingestion training flows.
+
+
 # Training — Full Zoo
 
 Real multi-family model comparison with explicit OpenMP guards so LightGBM doesn't deadlock Apple Silicon.

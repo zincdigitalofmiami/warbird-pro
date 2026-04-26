@@ -1,56 +1,44 @@
 # Feature Catalog Contract
 
+**Date:** 2026-04-26
 **Status:** Active
 
 ## Purpose
 
-Defines which features are packet-eligible and which are local-only research features.
+Defines which fields are admitted into active indicator-only modeling.
 
-## Tier 1: Packet-Eligible Features
+## Active Feature Rule
 
-Tier 1 features must be:
+A feature is admitted only if it is present in, or deterministically derived
+from, the Pine/TradingView export used for the run.
 
-- computable from Pine or canonical runtime state
-- point-in-time valid at bar close
-- stable enough to publish in a packet
+Allowed feature families:
 
-Allowed Tier 1 families:
+- Pine input settings
+- Pine state-machine fields
+- Pine `ml_*` hidden exports
+- Strategy Tester trade fields
+- OHLCV fields included in the TradingView export
+- deterministic transformations of the same export
 
-- fib geometry and anchor state
-- micro execution-state and order-flow trigger state attached to the parent 15m setup
-- pivot state and pivot distance
-- target-viability state
-- exhaustion and event-response state
-- TA core pack states
-- intermarket state from the admitted basket
-- ES execution-quality states
-- regime score
-- agreement velocity
-- impulse quality
-- session or schedule context that is available at decision time
+Disallowed feature families:
 
-## Tier 2: Local-Only Research Features
-
-Tier 2 features may exist only in local PostgreSQL and local artifacts.
-
-Allowed Tier 2 families:
-
-- wide macro joins
-- experimental feature expansions
-- research-only derived statistics
-- raw SHAP matrices
-- fold diagnostics
-- training-only regime experiments
-- post-trade explanatory features
+- FRED, macro, and economic calendar joins
+- news/options fields
+- cross-asset features
+- Databento or Supabase ingestion tables
+- local `ag_training` columns
+- Python reconstructed fib features not emitted by Pine
 
 ## Point-In-Time Rule
 
-Every feature must declare:
+Every modeling column must declare:
 
-- source surface
-- event timestamp
-- bar-close alignment rule
-- parent 15m setup linkage when the feature comes from a child `1m` / `3m` / `5m` trigger state
-- whether it is Tier 1 or Tier 2
+- source export
+- source column
+- whether it is a raw Pine field or deterministic derived field
+- timestamp / trade identity
+- whether it is available before the label being modeled
 
-If a feature cannot be proven point-in-time valid, it is not admitted.
+If point-in-time validity cannot be proven from the export, the field is not
+admitted.

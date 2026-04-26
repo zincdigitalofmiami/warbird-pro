@@ -1,5 +1,9 @@
 # Policy MC Sweep — Design (2026-04-15)
 
+> **Superseded 2026-04-26:** This design belongs to the retired warehouse
+> `ag_training` architecture. Active modeling is indicator-only Pine/TradingView
+> output analysis. Use this file for lineage only.
+
 ## 🔴 READ THIS FIRST — ASSUME NOTHING
 
 **In this project, do NOT assume anything claimed in docs, skills, plans, audits, prior agent summaries, or prior commits is correct. Verify against ground truth before acting or writing.**

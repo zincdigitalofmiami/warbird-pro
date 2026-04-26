@@ -1,5 +1,9 @@
 # Hi-Def SHAP + Monte Carlo Implementation Plan
 
+> **Superseded 2026-04-26:** This plan belongs to the retired warehouse
+> `ag_training` architecture. Active modeling is indicator-only Pine/TradingView
+> output analysis. Use this file for lineage only.
+
 **Date:** 2026-04-15
 **Status:** Approved execution note — NOT a new authority doc
 **Scope:** `scripts/ag/run_diagnostic_shap.py` + `scripts/ag/monte_carlo_run.py`

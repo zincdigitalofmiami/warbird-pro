@@ -1,51 +1,38 @@
-# Packet Schema Contract
+# Settings Artifact Contract
 
+**Date:** 2026-04-26
 **Status:** Active
 
 ## Purpose
 
-Defines the offline packet artifact produced from local training and published to cloud serving surfaces.
+The active output is a Pine settings/build artifact, not a server-side scoring
+packet.
 
 ## Required Header Fields
 
-- `packet_version`
-- `feature_schema_version`
-- `trained_on_utc`
-- `repo_commit`
-- `dataset_manifest_hash`
-- `label_contract_version`
+- `artifact_version`
+- `indicator_file`
+- `indicator_commit`
+- `symbol`
+- `timeframe`
+- `export_manifest_hash`
+- `generated_at_utc`
 
 ## Required Body Fields
 
-- ordered `feature_list`
-- model output specification
-- calibration metadata
-- admitted `stop_family_id` set
-- packet checksum
+- champion Pine input settings
+- rejected Pine input settings
+- evaluated search space
+- objective metrics
+- IS/OOS or walk-forward metrics
+- module keep/remove recommendations
+- stop/target policy recommendation
+- known failure modes
+- recommended Pine changes, if any
 
-## Ordered Feature Rule
+## Rules
 
-- every packet must include an explicit ordered `feature_list`
-- the ordered list must contain Tier 1 features only
-- packet consumers must reject packets whose `feature_schema_version` or `feature_list` does not match the active runtime contract
-
-## Output Rule
-
-Packets may publish:
-
-- calibrated TP1 probability
-- calibrated TP2 probability
-- calibrated reversal or failure probability
-- bounded stop-family recommendation or ranking
-
-Packets may not publish:
-
-- arbitrary free-form stop prices
-- raw research-only features
-- Tier 2-only diagnostics
-
-## Compatibility Rule
-
-- unknown schema versions are rejected
-- missing required header fields are rejected
-- extra feature names not allowed by the active feature catalog are rejected
+- The artifact must not include external feature gates.
+- The artifact must not imply a live server-side scorer.
+- Raw trial rows and raw SHAP matrices remain local artifacts only.
+- Any Pine code or default-setting change still requires explicit approval.

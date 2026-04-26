@@ -4,7 +4,8 @@
 
 ## Purpose
 
-Defines how local canonical and cloud runtime schema changes are proposed, versioned, and applied.
+Defines how cloud/runtime schema changes are proposed, versioned, and applied.
+The active modeling plan does not require new training schema.
 
 ## Cloud Policy
 
@@ -12,11 +13,13 @@ Defines how local canonical and cloud runtime schema changes are proposed, versi
 - no manual production DDL without a matching migration file and ledger reconciliation
 - any cloud schema addition must first be approved in `docs/cloud_scope.md`
 
-## Local Canonical Policy
+## Local Database Policy
 
-- local PostgreSQL canonical DDL must be versioned in repo before it is applied
-- local warehouse changes must preserve canonical lineage and auditability
-- local training tables must not be introduced ad hoc from notebooks or one-off scripts without versioned DDL
+- local database DDL must be versioned in repo before it is applied
+- local tables used only for Optuna/tuning bookkeeping must not be described as
+  canonical training truth
+- local training tables for the retired warehouse AG plan must not be expanded
+  unless that architecture is explicitly reopened
 
 ## Promotion Policy
 
@@ -29,7 +32,7 @@ Defines how local canonical and cloud runtime schema changes are proposed, versi
 
 Before any schema change lands, answer:
 
-1. Is this object local canonical or cloud runtime subset?
+1. Is this object runtime support, Optuna bookkeeping, or legacy/reference?
 2. Why does it exist?
 3. Which contract field or plan phase requires it?
 4. What reader or writer owns it?

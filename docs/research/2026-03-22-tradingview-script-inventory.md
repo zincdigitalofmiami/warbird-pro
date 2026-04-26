@@ -1,5 +1,9 @@
 # TradingView Community Script Library Research
 
+> **Historical 2026-04-26:** This inventory is reference material only. Active
+> modeling uses the current Pine indicator outputs and does not admit external
+> data stacking.
+
 **Date:** 2026-03-22
 **Purpose:** Exhaustive catalog of Pine Script v5/v6 libraries and indicators for AutoGluon feature engineering and Warbird Pro indicator development.
 

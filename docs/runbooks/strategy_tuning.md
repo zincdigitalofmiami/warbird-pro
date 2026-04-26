@@ -1,19 +1,17 @@
 # Strategy Tuning Runbook
 
 **Date:** 2026-04-13
-**Status:** Active — pre-AG settings sweep for MES1! 15m v7 strategy
+**Status:** Active — Pine/TradingView settings sweep for MES1! indicator modeling
 
 ## Purpose
 
-Exhaustively sweep all tunable Pine v7 indicator/strategy knobs across 2020+ 15m MES1! history
-and produce a defensible minimum-viable settings lock before AutoGluon starts optimizing via packets.
+Sweep tunable Pine v7 indicator/strategy knobs across TradingView MES1! history
+and produce a defensible settings/build recommendation for the indicator.
 
-This is **not** AutoGluon training. AG does the real optimization via live packets after Phase 4.
-This harness locks the settings floor AG trains from. AG must not train from a garbage baseline.
-This harness also does **not** choose the lower-timeframe micro trigger (`5m`)
-versus parent-bar `15m` execution. It tunes the parent 15m strategy surface
-only. A separate micro-execution profile is required
-for the 2026-04-14 parent/micro execution delta.
+This runbook is now part of the active modeling loop. AutoGluon/Optuna may be
+used offline, but only over Pine/TradingView outputs. No FRED, macro,
+cross-asset, Databento-ingestion, Supabase, or local `ag_training` joins are
+admitted.
 
 Three commands: `suggest`, `record`, `leaderboard`.
 Authoritative scored evaluation modes are:
@@ -97,11 +95,9 @@ there is no way to set it programmatically.
 8. Go to **List of Trades** tab → click the download icon → Export CSV
 9. Save the file; note the path for the `--trades-csv` argument
 
-> **Why 2020-01-01?** The v5 training data floor is `2020-01-01`. Most bars in
-> 2020–2023 will have `ml_exh_footprint_available = false` (TV tick archive is bounded —
-> this is a platform limit, not a subscription tier issue). The tuner stratifies metrics
-> by this footprint boundary so a knob that looks good only on the recent footprint-rich
-> tail does not dominate the leaderboard.
+> **Why 2020-01-01?** Use as much TradingView history as the script/export
+> supports for stability review. This is a Pine/TradingView range choice, not a
+> local warehouse ingestion floor.
 
 ## Workflow
 
@@ -181,8 +177,9 @@ candidates so the search does not get stuck in a local optimum:
 python scripts/ag/tune_strategy_params.py suggest --count 20
 ```
 
-Lock the winning config in `strategy_tuning_space.json` under `locked_parameters` once
-you have a stable leaderboard top. AG starts from this lock.
+Lock the winning config in `strategy_tuning_space.json` under `locked_parameters`
+once you have a stable leaderboard top. Any Pine default or code change still
+requires explicit approval.
 
 ## What The Harness Scores
 
@@ -336,11 +333,13 @@ Re-run the tuner when any of these happen:
 - rolling max drawdown exceeds the locked config's backtest drawdown by `25%+`
 - footprint-cohort PF diverges materially from all-bars PF for two consecutive monthly reviews
 - a structural strategy change lands in `v7-warbird-strategy.pine`
-- quarterly calendar roll / macro regime shifts materially alter the MES 15m trade distribution
+- quarterly or monthly Pine/TradingView review shows material drift in MES 15m trade distribution
 
 ## Storage Model
 
-Default storage: Postgres in the local `warbird` warehouse.
+Default storage: Postgres in the local `warbird` database for trial bookkeeping only.
+This is not permission to join warehouse market/macro features into the active
+modeling dataset.
 
 - `warbird_strategy_tuning_batches` — one row per suggestion batch
 - `warbird_strategy_tuning_trials` — one row per trial
@@ -360,7 +359,8 @@ python scripts/ag/tune_strategy_params.py --storage jsonl leaderboard
 ## Boundaries
 
 - This harness does not modify Pine code.
-- This harness does not call AutoGluon.
+- This harness does not call AutoGluon directly; AutoGluon/SHAP analysis, when
+  used, must consume Pine-derived trial/export artifacts only.
 - This harness cannot set TradingView's Deep Backtesting date range (TV UI-only).
 - If Pine semantics are wrong, this tool ranks wrong semantics more efficiently.
 

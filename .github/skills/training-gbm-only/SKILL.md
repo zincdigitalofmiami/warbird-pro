@@ -3,6 +3,9 @@ name: training-gbm-only
 description: Launch a fast, GBM-only AutoGluon run for iteration speed. Use when you need a quick probe of the training surface, a baseline for comparison, or to test pipeline plumbing. Not for final model selection — see training-full-zoo for multi-family comparisons.
 ---
 
+> **2026-04-26 indicator-only reset:** This training skill is legacy unless Kirk explicitly reopens the old warehouse AG architecture. Active modeling uses Pine/TradingView outputs only; do not use FRED, macro, local `ag_training`, or daily-ingestion training flows.
+
+
 # Training — GBM Only
 
 ## When to use

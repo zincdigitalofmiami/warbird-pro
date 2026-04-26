@@ -1,20 +1,25 @@
 # Warbird Runbooks
 
-**Date:** 2026-04-07
+**Date:** 2026-04-26
 **Status:** Active Runbook Index
 
-This directory is the operational runbook surface referenced by `docs/INDEX.md`.
+The active runbooks support indicator-only Pine modeling.
 
-Until dedicated runbooks are split out further, use these runbook sources:
-
-- `CLAUDE.md`
-  - current runtime status, blockers, and operational context
-- `docs/agent-safety-gates.md`
-  - fail-closed execution and verification gates
-
-Future operational procedures should be added here instead of being spread across sidecar notes.
+## Active
 
 - `docs/runbooks/strategy_tuning.md`
-  - local parameter-search harness for TradingView strategy settings before AG training
+  - TradingView/Pine settings sweep workflow
+- `docs/runbooks/wbv7_institutional_optuna.md`
+  - v7 institutional indicator Optuna workflow
+- `CLAUDE.md`
+  - current operational truth
+- `docs/agent-safety-gates.md`
+  - fail-closed verification gates
+
+## Legacy
+
 - `docs/runbooks/optuna_legacy_strategy_tuning.md`
-  - archived note for the retired single-lane Optuna workflow
+  - archived single-lane Optuna note
+
+Warehouse AG runbooks and skills are legacy unless Kirk explicitly reopens the
+old local `ag_training` architecture.

@@ -1,5 +1,8 @@
 # v7 Interface Reconciliation Implementation Plan
 
+> **Historical 2026-04-26:** This plan is closed lineage. The active architecture
+> is indicator-only Pine/TradingView modeling under `docs/MASTER_PLAN.md`.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Reconcile the v7 Pine indicator/strategy surfaces and authority docs so the repository state matches the post-audit truth — no stale claims, no orphan exports, no dead stubs in strategy, guard points at v7 files.

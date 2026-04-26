@@ -3,6 +3,9 @@ name: training-supabase-data
 description: Read patterns, schema references, and canonical data sources for training. Warbird uses a LOCAL Postgres 17 warehouse (warbird, 127.0.0.1:5432) as source-of-truth; cloud Supabase is serving-only. Points to which tables and views are training-safe, which are legacy, and which belong to the serving layer.
 ---
 
+> **2026-04-26 indicator-only reset:** This training skill is legacy unless Kirk explicitly reopens the old warehouse AG architecture. Active modeling uses Pine/TradingView outputs only; do not use FRED, macro, local `ag_training`, or daily-ingestion training flows.
+
+
 # Training — Supabase / Warehouse Data
 
 This skill covers data access for training ONLY. For broader Supabase ops (migrations, RLS, Edge Functions, cron), see the existing `supabase-ml-ops` skill.

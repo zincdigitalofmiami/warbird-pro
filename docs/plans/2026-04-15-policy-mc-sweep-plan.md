@@ -1,5 +1,10 @@
 # Policy MC Sweep Implementation Plan
 
+> **Superseded 2026-04-26:** This implementation plan belongs to the retired
+> warehouse `ag_training` architecture. Active modeling is indicator-only
+> Pine/TradingView output analysis. Do not execute this plan unless Kirk
+> explicitly reopens the old architecture.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Build `scripts/ag/policy_mc_sweep.py` — a post-hoc Monte Carlo sweep over macro-fib-trade exit management policies on a locked AG training fixture — honoring the corrected scope from design commit `1e6a8c6`.

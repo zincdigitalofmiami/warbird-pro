@@ -10,6 +10,11 @@
 
 *All configurations, feature sets, data sources, and workflows described in this document are initial planning artifacts. Every section requires independent validation through primary-source research before implementation.*
 
+**2026-04-26 ACTIVE-CONTRACT NOTE:** This report is historical reference only.
+The active Warbird plan is indicator-only PineScript AG modeling from
+TradingView/Pine outputs. Ignore any sections below that propose external data
+stacking, daily ingestion, macro/FRED joins, or warehouse-driven training.
+
 Architecture Reference Document
 
 Halsey / Warbird Trading System

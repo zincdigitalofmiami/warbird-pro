@@ -3,6 +3,9 @@ name: training-ag-feature-finder
 description: Catalog of AutoGluon 1.5 features NOT yet used on the Warbird project, with pointers to when each might be worth adopting. Use before proposing a trainer extension — check here first to see if AG already has a built-in for what you want.
 ---
 
+> **2026-04-26 indicator-only reset:** This training skill is legacy unless Kirk explicitly reopens the old warehouse AG architecture. Active modeling uses Pine/TradingView outputs only; do not use FRED, macro, local `ag_training`, or daily-ingestion training flows.
+
+
 # Training — AutoGluon Feature Finder
 
 Living inventory of AutoGluon Tabular 1.5 capabilities that are available but currently unused in `scripts/ag/train_ag_baseline.py`. Each entry: what it is, when to adopt, adoption cost.
@@ -81,7 +84,7 @@ Semi-supervised fit — labels unlabeled MES bars with model predictions and ret
 
 ### Text-column handling
 
-If we ever add text features (news headlines, analyst commentary), AG's `ag_text` transformers auto-handle via sentence-embedding models. Currently not needed — macro scope is curated `FRED + econ_calendar` only per CLAUDE.md.
+If we ever add text features (news headlines, analyst commentary), AG's `ag_text` transformers auto-handle via sentence-embedding models. Currently not needed under the active indicator-only contract.
 
 ### Per-row sample weights
 

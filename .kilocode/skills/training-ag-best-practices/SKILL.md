@@ -3,6 +3,9 @@ name: training-ag-best-practices
 description: AutoGluon Tabular 1.5 configuration best-practices and gotchas learned the hard way on this project. Covers hyperparameters dict semantics, num_bag_folds/num_stack_levels interaction, presets vs explicit model dicts, OpenMP handling on Apple Silicon, feature drift between train and inference.
 ---
 
+> **2026-04-26 indicator-only reset:** This training skill is legacy unless Kirk explicitly reopens the old warehouse AG architecture. Active modeling uses Pine/TradingView outputs only; do not use FRED, macro, local `ag_training`, or daily-ingestion training flows.
+
+
 # Training — AutoGluon 1.5 Best Practices
 
 Config patterns that work, anti-patterns that have cost real compute, and specific AG 1.5 quirks that are not obvious from the docs.

@@ -3,6 +3,9 @@ name: training-hard-gate
 description: Single-command hard gate for AutoGluon training + SHAP + Monte Carlo. Runs strict preflight checks, launches safe full-zoo training, then blocks if lineage/zoo/class-coverage/SHAP/MC integrity contracts fail. Use this instead of calling train_ag_baseline.py directly.
 ---
 
+> **2026-04-26 indicator-only reset:** This training skill is legacy unless Kirk explicitly reopens the old warehouse AG architecture. Active modeling uses Pine/TradingView outputs only; do not use FRED, macro, local `ag_training`, or daily-ingestion training flows.
+
+
 # Training Hard Gate
 
 This skill enforces one deterministic command path that **blocks bad runs** before they waste more compute.

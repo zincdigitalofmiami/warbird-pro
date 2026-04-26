@@ -3,6 +3,9 @@ name: training-pre-audit
 description: Run BEFORE launching any AutoGluon training run. Verifies warehouse row counts, migration ledger, constraint/trainer consistency, interpreter path, no orphan running rows, and feature zoo expectations match. Catches the bug classes that wasted real compute this project (AUTOGLOON typo, hyperparameters-dict lockout, IID bag leakage, missing venv, stale lineage rows).
 ---
 
+> **2026-04-26 indicator-only reset:** This training skill is legacy unless Kirk explicitly reopens the old warehouse AG architecture. Active modeling uses Pine/TradingView outputs only; do not use FRED, macro, local `ag_training`, or daily-ingestion training flows.
+
+
 # Training Pre-Audit
 
 Catches avoidable failures before burning 1-6 hours of compute. Every finding here came from a real failure that cost real time.
