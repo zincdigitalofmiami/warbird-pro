@@ -8,6 +8,14 @@ This file is the single entrypoint for Warbird architecture, contract, and opera
 
 Ignore all other plans, decisions, scratch notes, and historical architecture docs unless they are linked from this index.
 
+## Iteration Rule
+
+The indicator-only plan is active, but tuning and training are ongoing. Treat
+current trigger families, settings, thresholds, and search spaces as the latest
+documented evidence snapshot. They may change after new TradingView exports,
+Strategy Tester runs, Optuna trials, AG analysis, or SHAP review. Any accepted
+change must update this indexed authority set in the same commit.
+
 ## Read Order
 
 1. `docs/MASTER_PLAN.md` — Warbird Indicator-Only AG Plan v6

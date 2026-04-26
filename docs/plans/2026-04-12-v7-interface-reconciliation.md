@@ -2,6 +2,9 @@
 
 > **Historical 2026-04-26:** This plan is closed lineage. The active architecture
 > is indicator-only Pine/TradingView modeling under `docs/MASTER_PLAN.md`.
+> Trigger-semantics notes in this historical plan are superseded. Current v7
+> trigger families live in `docs/contracts/v7_interface_divergence.md` and
+> `docs/contracts/pine_indicator_ag_contract.md`.
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -203,7 +206,9 @@ The v7 guard should:
 2. Check budget caps (< 64 outputs each)
 3. Check that shared `ml_*` fields are not orphaned (no field in strategy-only or indicator-only)
 4. Check v7 strategy execution primitives exist
-5. NOT check trigger parity (institutional uses `acceptEvent`, strategy uses `candidateSetup` — intentional divergence documented in Task 4)
+5. NOT check trigger parity. This historical note previously named stale
+   trigger paths; current trigger families are governed by
+   `docs/contracts/v7_interface_divergence.md`.
 
 ### Step 1: Rewrite the guard
 
@@ -213,7 +218,8 @@ Replace entire file content with:
 #!/bin/bash
 # Parity guard for v7 warbird indicator and strategy Pine surfaces.
 # Checks: file existence, budget cap, shared ml_* field consistency, strategy primitives.
-# NOTE: trigger semantics intentionally diverge (institutional=acceptEvent, strategy=candidateSetup).
+# NOTE: trigger semantics intentionally diverge; current families are documented
+# in docs/contracts/v7_interface_divergence.md.
 # Guard does NOT enforce trigger parity — only shared export field parity.
 
 set -euo pipefail
@@ -501,7 +507,8 @@ Add or create with this content:
 - Verified by `scripts/guards/check-indicator-strategy-parity.sh`
 
 **Intentionally NOT enforced by guard:**
-- Entry trigger semantics (acceptEvent vs. candidateSetup)
+- Entry trigger semantics (current families are documented in
+  `docs/contracts/v7_interface_divergence.md`)
 - Exit mechanics (alert-based vs. SL/TP5 only)
 - alertcondition presence (institutional has 3, strategy has 0)
 ```
@@ -512,8 +519,7 @@ Add or create with this content:
 git add docs/contracts/
 git commit -m "Docs: add v7 interface divergence contract note
 
-Documents intentional trigger-path split between institutional (acceptEvent)
-and strategy (candidateSetup). Clarifies what the parity guard enforces vs.
+Documents intentional trigger-family split. Clarifies what the parity guard enforces vs.
 what is explicitly excluded."
 ```
 

@@ -9,6 +9,11 @@ performance. AutoGluon, Optuna, SHAP, and local scripts may be used offline, but
 only to analyze Pine/TradingView outputs and recommend Pine settings/build
 changes.
 
+This repo is in an active tuning/training phase. Current triggers, settings,
+thresholds, and search spaces are evidence snapshots and may change as new
+TradingView/Optuna/AG/SHAP results land. Accepted changes must update the active
+Markdown authority set before another agent treats them as current.
+
 **Repo:** [github.com/zincdigitalofmiami/warbird-pro](https://github.com/zincdigitalofmiami/warbird-pro)  
 **Canonical docs index:** `docs/INDEX.md`
 **Active plan:** `docs/MASTER_PLAN.md`

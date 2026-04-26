@@ -13,6 +13,11 @@ used offline, but only over Pine/TradingView outputs. No FRED, macro,
 cross-asset, Databento-ingestion, Supabase, or local `ag_training` joins are
 admitted.
 
+This runbook is expected to change as tuning and training continue. Before any
+new batch, verify that its trigger family, search space, date range, friction
+settings, and evidence capture still match the current Master Plan and Pine
+contract.
+
 Three commands: `suggest`, `record`, `leaderboard`.
 Authoritative scored evaluation modes are:
 - `CSV_FULL` (manual CSV record path)

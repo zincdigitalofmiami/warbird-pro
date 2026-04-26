@@ -11,6 +11,17 @@ The model program exists to improve the TradingView indicator settings and
 build. It does not create a separate live prediction engine and it does not
 train from external data stacks.
 
+## Iteration Policy
+
+Tuning and training are ongoing. Current trigger families, settings, thresholds,
+search spaces, labels, and recommended build choices are mutable evidence
+snapshots. They may be revised after new Pine/TradingView exports, Strategy
+Tester evidence, Optuna trials, AutoGluon analysis, or SHAP review.
+
+Any accepted model-contract change must update this spec, the Master Plan, the
+active contract docs, and the relevant runbooks before the result is considered
+ready for reuse by another agent.
+
 ## Training Truth
 
 Allowed training inputs are only:

@@ -4,6 +4,11 @@
 **Updated:** 2026-04-26
 **Status:** Active - documents intentional mechanical divergences between the v7 files.
 
+This is the current trigger-family snapshot during active tuning. It may change
+after new TradingView evidence, Optuna runs, AG analysis, or SHAP review. Any
+accepted change must update this file with the same commit that updates Pine,
+settings, or runbooks.
+
 ## Institutional (`v7-warbird-institutional.pine`) — Live Chart Surface
 
 - **Entry trigger:** `entryLongTrigger` / `entryShortTrigger` from the fib

@@ -8,6 +8,11 @@ Cloud Supabase is runtime/support only. It is not an active model-training
 database and must not become a mirror of local Pine/TradingView modeling
 artifacts.
 
+The Pine tuning contract may change as training continues, but that does not
+expand cloud scope by default. New cloud surfaces still require an explicit
+runtime/support reason and must not become a back door for raw trial, label, or
+training artifact storage.
+
 ## Allowed Cloud Roles
 
 Cloud may support:

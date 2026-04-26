@@ -26,6 +26,14 @@ Ignore interface definitions in old plans, scratch notes, and historical decisio
 `ag_local_training_schema.md` is superseded reference for the retired warehouse
 AG plan and must not drive active modeling unless explicitly reopened.
 
+## Iteration Rule
+
+Contract details are expected to evolve during active Pine tuning and training.
+When a run changes trigger semantics, settings, labels, features, or promotion
+criteria, update the affected contract Markdown before another agent relies on
+the result. Historical contract text must be clearly marked superseded instead
+of left ambiguous.
+
 ## Working Rule
 
 - `docs/MASTER_PLAN.md` defines sequencing and architecture.

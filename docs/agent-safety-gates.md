@@ -4,6 +4,11 @@ Use this document as the Warbird-specific fail-closed operating contract for Cla
 
 This document exists for one reason: agents in this repo must not self-certify. Completion requires repo evidence.
 
+Warbird Pine tuning and training are ongoing. Agents must treat current trigger
+families, settings, thresholds, and runbooks as evidence snapshots that may
+change. If a task changes the accepted evidence, the task is not complete until
+the active Markdown authority set is updated with that new understanding.
+
 ## 1. Authority Order
 
 Resolve instruction conflicts in this exact order:

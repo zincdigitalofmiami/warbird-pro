@@ -8,6 +8,17 @@
 This contract defines the active Warbird training/modeling surface: pure
 PineScript indicator behavior on TradingView.
 
+## Iteration Policy
+
+The active contract is allowed to evolve as tuning and training continue.
+Trigger families, settings, thresholds, search spaces, and labels are current
+evidence snapshots. They must be versioned through Markdown updates whenever a
+new TradingView export, Strategy Tester result, Optuna trial set, AG model, or
+SHAP review changes the accepted understanding.
+
+Do not reuse an old export or trial without checking that its trigger family and
+settings still match the current contract.
+
 ## Source Of Truth
 
 Training rows may come only from:

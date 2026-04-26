@@ -5,6 +5,13 @@
 
 The active runbooks support indicator-only Pine modeling.
 
+## Iteration Rule
+
+Runbooks are operational snapshots for the current tuning cycle. Trigger
+families, settings spaces, export requirements, and pass/fail gates may change
+as Pine tuning and training continue. When a runbook no longer matches accepted
+TradingView/Optuna/AG evidence, update it before launching the next batch.
+
 ## Active
 
 - `docs/runbooks/strategy_tuning.md`

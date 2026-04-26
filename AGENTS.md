@@ -33,6 +33,18 @@ The goal is pure PineScript trading-indicator modeling:
 
 The old warehouse/FRED/macro `ag_training` plan is superseded and reference-only.
 
+## Iterative Tuning Contract
+
+Warbird is actively tuning and training the Pine indicator. Current trigger
+families, settings, thresholds, search spaces, and build recommendations are
+evidence snapshots, not frozen production truth. Agents must expect these
+details to change as TradingView exports, Strategy Tester evidence, Optuna
+trials, AG analysis, and SHAP review produce stronger results.
+
+When evidence changes the contract, update the active Markdown in the same
+change as the code/settings/artifacts. Do not leave stale plans, runbooks, skill
+context, or agent-facing notes pointing at an older trigger or training surface.
+
 ## Default Preflight
 
 - Run `git status --short` before edits.

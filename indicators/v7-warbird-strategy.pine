@@ -1053,8 +1053,8 @@ float slDistAtr = atr14 > 0 ? slDistPts / atr14 : 0.0
 bool atrRiskAcceptable = not na(slLevel) and atr14 > 0 and slDistAtr <= optMaxRiskAtr
 
 // --- CANDIDATE DIAGNOSTICS ---
-// Touch/archetype fields remain exported for AG and review, but live strategy
-// activation now follows the same SETUP -> acceptEvent path as the indicator.
+// Touch/archetype fields remain exported for AG and review. Strategy activation
+// is the STRATEGY_ACCEPT_SCALP family, separate from live institutional alerts.
 float fibTouchTol = atr14 * 0.15  // within 15% of ATR of a fib level = "touch"
 bool priceAtFibLevel = isValid and confirmed and (
     math.abs(close - p236) <= fibTouchTol or

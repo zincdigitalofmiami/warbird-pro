@@ -8,6 +8,13 @@
 
 ## Current Snapshot (2026-04-26)
 
+This snapshot is intentionally iterative. Warbird is actively tuning and
+training the Pine indicator, so trigger families, settings, thresholds, search
+spaces, and build recommendations may change after new TradingView exports,
+Strategy Tester evidence, Optuna trials, AG analysis, or SHAP review. Re-read
+the active docs before each task and update this context when accepted evidence
+changes.
+
 ### Canonical Contract
 
 - Active plan: Warbird Indicator-Only AG Plan v6.

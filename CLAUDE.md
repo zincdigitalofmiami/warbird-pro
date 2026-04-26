@@ -13,6 +13,12 @@ Read and follow `AGENTS.md` at the repository root.
 
 Warbird is now an indicator-only PineScript AG modeling project.
 
+This status is a live tuning snapshot. Trigger families, settings, thresholds,
+search spaces, and build recommendations may change as TradingView exports,
+Strategy Tester evidence, Optuna trials, AG analysis, and SHAP review continue.
+When that happens, update the active docs before treating the new result as
+agent-ready.
+
 Training/modeling uses Pine/TradingView outputs only:
 
 - TradingView indicator CSV exports

@@ -13,6 +13,12 @@ Optuna, SHAP, and supporting scripts may be used offline, but only to model and
 rank PineScript indicator behavior. They do not create a separate data-stack
 decision engine.
 
+This plan is intentionally iterative while tuning and training continue. Trigger
+families, thresholds, search spaces, default settings, and Pine build
+recommendations are the current evidence-backed snapshot, not immutable
+production law. When a new run changes the evidence, update this plan and the
+contract/runbook Markdown in the same change.
+
 ## Current Contract
 
 - The canonical modeling object is the Pine indicator/strategy behavior on
