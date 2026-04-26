@@ -815,6 +815,13 @@ def _empty_quality_result() -> dict[str, Any]:
         "gasout_accuracy": 0.5,
         "false_avoidance": 0.0,
         "signal_rate_score": 0.0,
+        "signals_per_day": 0.0,
+        "leg_threshold_pts": 10.0,
+        "win_rate": 0.0,
+        "pf": 0.0,
+        "gross_profit": 0.0,
+        "gross_loss": 1.0,
+        "max_dd_abs": 1.0,
     }
 
 
@@ -1011,4 +1018,10 @@ def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> d
         "signal_rate_score":   signal_rate_score,
         "signals_per_day":     signals_per_day,
         "leg_threshold_pts":   leg_pts,
+        # Runner-required aliases
+        "win_rate":            reversal_precision,
+        "pf":                  _bounded(reversal_precision / max(1.0 - reversal_precision, 0.001), 0.0, 99.0),
+        "gross_profit":        composite,
+        "gross_loss":          max(1.0 - composite, 0.0),
+        "max_dd_abs":          max(1.0 - false_avoidance, 0.0),
     }
