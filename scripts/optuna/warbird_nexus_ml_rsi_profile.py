@@ -779,26 +779,44 @@ def _label_setups(
     Returns (success_mask, failure_mask).
     SUCCESS: price moves leg_threshold_pts in direction within response_bars.
     FAILURE: adverse move happened first OR threshold not reached.
+
+    Inner j-loop replaced with vectorized NumPy window slice + np.argmax.
+    Outer loop over signal_indices is retained (typically ~1k-3k items/run).
     """
     n = len(close)
     r_bars = max(int(response_bars), 1)
     adv_bars = max(int(adverse_bars), 1)
+    signal_indices = np.where(signal_mask)[0]
     success = np.zeros(n, dtype=bool)
     failure = np.zeros(n, dtype=bool)
-    for i in np.where(signal_mask)[0]:
+    if len(signal_indices) == 0:
+        return success, failure
+
+    # Pad close so window slices never exceed array bounds.
+    pad = r_bars + 1
+    close_padded = np.concatenate([close, np.full(pad, close[-1])])
+
+    for i in signal_indices:
         if i + 1 >= n:
             failure[i] = True
             continue
-        entry = close[i]
-        hit_success = False
-        for j in range(1, min(r_bars + 1, n - i)):
-            move = (close[i + j] - entry) * direction
-            if move >= leg_threshold_pts:
-                hit_success = True
-                break
-            if j <= adv_bars and move <= -leg_threshold_pts * 0.5:
-                break
-        if hit_success:
+        entry = close_padded[i]
+        # Vectorized moves for the full response window.
+        window_len = min(r_bars, n - i - 1)
+        moves = (close_padded[i + 1 : i + 1 + window_len] - entry) * direction
+
+        # Adverse check: first bar where move <= -0.5 * leg_threshold_pts
+        # within the adverse window.
+        adv_len = min(adv_bars, window_len)
+        adv_hits = moves[:adv_len] <= -leg_threshold_pts * 0.5
+        if adv_hits.any():
+            adv_bar = int(np.argmax(adv_hits))  # index of first adverse hit
+            # Success only if threshold was crossed before the adverse bar.
+            if adv_bar > 0 and moves[:adv_bar].max() >= leg_threshold_pts:
+                success[i] = True
+            else:
+                failure[i] = True
+        elif moves.max() >= leg_threshold_pts:
             success[i] = True
         else:
             failure[i] = True
@@ -948,14 +966,17 @@ def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> d
     early_hits  = 0
     early_total = int(bull_succ.sum() + bear_succ.sum())
     if early_total > 0:
+        # Pad close once; reuse for both directions.
+        _pad = early + 1
+        close_padded_eq = np.concatenate([close, np.full(_pad, close[-1])])
         for direction, succ_mask in [(+1, bull_succ), (-1, bear_succ)]:
             for i in np.where(succ_mask)[0]:
-                entry = close[i]
-                for j in range(1, min(early + 1, len(close) - i)):
-                    move = (close[i + j] - entry) * direction
-                    if move >= leg_pts * 0.5:
-                        early_hits += 1
-                        break
+                window_len = min(early, len(close) - i - 1)
+                if window_len < 1:
+                    continue
+                moves = (close_padded_eq[i + 1 : i + 1 + window_len] - close_padded_eq[i]) * direction
+                if moves.max() >= leg_pts * 0.5:
+                    early_hits += 1
         early_entry_quality = early_hits / early_total
     else:
         early_entry_quality = 0.0
