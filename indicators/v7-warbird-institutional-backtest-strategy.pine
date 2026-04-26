@@ -488,6 +488,69 @@ fibZzSource() =>
 
 [zzNewPivot, zzHighPrice, zzLowPrice, zzHighTime, zzLowTime, zzSwingDir] = fibZzSource()
 
+float structuralPivotHigh = ta.pivothigh(high, fibPivotRightRoomBars, fibPivotRightRoomBars)
+float structuralPivotLow = ta.pivotlow(low, fibPivotRightRoomBars, fibPivotRightRoomBars)
+int structuralPivotTime = time[fibPivotRightRoomBars]
+float structuralRetraceWindowLow = ta.lowest(low, fibPivotRightRoomBars + 1)
+float structuralRetraceWindowHigh = ta.highest(high, fibPivotRightRoomBars + 1)
+float structuralMinRange = minFibRangeAtr * nz(atr14, syminfo.mintick)
+var float structuralBullBasePrice = na
+var int structuralBullBaseTime = na
+var float structuralBullTerminalPrice = na
+var int structuralBullTerminalTime = na
+var bool structuralBullRetraced = false
+var float structuralBearBasePrice = na
+var int structuralBearBaseTime = na
+var float structuralBearTerminalPrice = na
+var int structuralBearTerminalTime = na
+var bool structuralBearRetraced = false
+
+if not na(structuralPivotLow)
+    bool replaceBullBase = na(structuralBullBaseTime) or na(structuralBullTerminalTime) or structuralPivotLow < structuralBullBasePrice
+    if replaceBullBase
+        structuralBullBasePrice := structuralPivotLow
+        structuralBullBaseTime := structuralPivotTime
+        structuralBullTerminalPrice := na
+        structuralBullTerminalTime := na
+        structuralBullRetraced := false
+
+if not na(structuralPivotHigh)
+    bool replaceBearBase = na(structuralBearBaseTime) or na(structuralBearTerminalTime) or structuralPivotHigh > structuralBearBasePrice
+    if replaceBearBase
+        structuralBearBasePrice := structuralPivotHigh
+        structuralBearBaseTime := structuralPivotTime
+        structuralBearTerminalPrice := na
+        structuralBearTerminalTime := na
+        structuralBearRetraced := false
+
+if not na(structuralPivotHigh) and not na(structuralBullBaseTime) and structuralPivotTime > structuralBullBaseTime and na(structuralBullTerminalTime)
+    float bullStructuralRange = structuralPivotHigh - structuralBullBasePrice
+    if bullStructuralRange >= structuralMinRange
+        structuralBullTerminalPrice := structuralPivotHigh
+        structuralBullTerminalTime := structuralPivotTime
+        float bullStructural786 = structuralBullBasePrice + bullStructuralRange * FIB_786
+        structuralBullRetraced := not na(structuralRetraceWindowLow) and structuralRetraceWindowLow <= bullStructural786
+
+if not na(structuralPivotLow) and not na(structuralBearBaseTime) and structuralPivotTime > structuralBearBaseTime and na(structuralBearTerminalTime)
+    float bearStructuralRange = structuralBearBasePrice - structuralPivotLow
+    if bearStructuralRange >= structuralMinRange
+        structuralBearTerminalPrice := structuralPivotLow
+        structuralBearTerminalTime := structuralPivotTime
+        float bearStructural786 = structuralBearBasePrice - bearStructuralRange * FIB_786
+        structuralBearRetraced := not na(structuralRetraceWindowHigh) and structuralRetraceWindowHigh >= bearStructural786
+
+if not na(structuralBullTerminalTime) and not structuralBullRetraced
+    float bullLockedRange = structuralBullTerminalPrice - structuralBullBasePrice
+    float bullLocked786 = structuralBullBasePrice + bullLockedRange * FIB_786
+    if bullLockedRange > 0 and low <= bullLocked786
+        structuralBullRetraced := true
+
+if not na(structuralBearTerminalTime) and not structuralBearRetraced
+    float bearLockedRange = structuralBearBasePrice - structuralBearTerminalPrice
+    float bearLocked786 = structuralBearBasePrice - bearLockedRange * FIB_786
+    if bearLockedRange > 0 and high >= bearLocked786
+        structuralBearRetraced := true
+
 var float firstStructuralHigh = na
 var float firstStructuralLow = na
 var int firstStructuralHighTime = na
@@ -530,16 +593,24 @@ if sourceAnchorChanged and htfSnapshotReady and zzSwingDir != 0
     bool terminalExpanded = firstStructuralReady and (candidateDir == 1 ? candidateTerminalPrice > firstStructuralTerminalPrice : candidateTerminalPrice < firstStructuralTerminalPrice)
     bool sameBaseExpansionAllowed = firstStructuralReady and not directionChanged and not baseChanged and terminalExpanded and not firstStructuralRetraced
     if noLockedStructuralLeg or directionChanged or baseChanged or sameBaseExpansionAllowed
-        firstStructuralHigh := zzHighPrice
-        firstStructuralLow := zzLowPrice
-        firstStructuralHighTime := zzHighTime
-        firstStructuralLowTime := zzLowTime
+        bool useBullStructuralTerminal = candidateDir == 1 and not na(structuralBullBaseTime) and not na(structuralBullTerminalTime) and (candidateBaseTime == structuralBullBaseTime or math.abs(candidateBasePrice - structuralBullBasePrice) <= syminfo.mintick) and structuralBullTerminalTime <= candidateTerminalTime
+        bool useBearStructuralTerminal = candidateDir == -1 and not na(structuralBearBaseTime) and not na(structuralBearTerminalTime) and (candidateBaseTime == structuralBearBaseTime or math.abs(candidateBasePrice - structuralBearBasePrice) <= syminfo.mintick) and structuralBearTerminalTime <= candidateTerminalTime
+        float acceptedHigh = useBullStructuralTerminal ? structuralBullTerminalPrice : useBearStructuralTerminal ? structuralBearBasePrice : zzHighPrice
+        float acceptedLow = useBullStructuralTerminal ? structuralBullBasePrice : useBearStructuralTerminal ? structuralBearTerminalPrice : zzLowPrice
+        int acceptedHighTime = useBullStructuralTerminal ? structuralBullTerminalTime : useBearStructuralTerminal ? structuralBearBaseTime : zzHighTime
+        int acceptedLowTime = useBullStructuralTerminal ? structuralBullBaseTime : useBearStructuralTerminal ? structuralBearTerminalTime : zzLowTime
+        float acceptedTerminalPrice = useBullStructuralTerminal ? structuralBullTerminalPrice : useBearStructuralTerminal ? structuralBearTerminalPrice : candidateTerminalPrice
+        int acceptedTerminalTime = useBullStructuralTerminal ? structuralBullTerminalTime : useBearStructuralTerminal ? structuralBearTerminalTime : candidateTerminalTime
+        firstStructuralHigh := acceptedHigh
+        firstStructuralLow := acceptedLow
+        firstStructuralHighTime := acceptedHighTime
+        firstStructuralLowTime := acceptedLowTime
         firstStructuralBasePrice := candidateBasePrice
         firstStructuralBaseTime := candidateBaseTime
-        firstStructuralTerminalPrice := candidateTerminalPrice
-        firstStructuralTerminalTime := candidateTerminalTime
+        firstStructuralTerminalPrice := acceptedTerminalPrice
+        firstStructuralTerminalTime := acceptedTerminalTime
         firstStructuralDir := candidateDir
-        firstStructuralRetraced := false
+        firstStructuralRetraced := useBullStructuralTerminal ? structuralBullRetraced : useBearStructuralTerminal ? structuralBearRetraced : false
         anchorSnapshotChanged := true
 
 if anchorSnapshotChanged
