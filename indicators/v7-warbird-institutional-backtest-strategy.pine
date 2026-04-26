@@ -52,8 +52,6 @@ int fibPivotRightRoomBars = input.int(4, "Pivot Right Room (parent bars)", minva
 int fibRecentLegLookbackBars = input.int(20, "Recent Leg Lookback (parent bars)", minval=5, maxval=120, group=groupFibEngine,
   tooltip="Parent bars scanned for the active major move after excluding Pivot Right Room. On the 15m parent, 20 bars is the last 5 hours.")
 float minFibRangeAtr = input.float(0.5, "Min Fib Range (ATR)", minval=0.5, maxval=10.0, step=0.1, group=groupFibEngine)
-float directLockMaxRecentRangeMult = input.float(1.50, "Direct Lock Max Range / Recent Leg", minval=1.0, maxval=5.0, step=0.05, group=groupFibEngine,
-  tooltip="Direct fib-anchor backtests may only lock a native chart ladder when its range is no wider than this multiple of the recent native leg range. This prevents stale wide legs from becoming frozen trade ladders.")
 bool useParentFibTimeframe = input.bool(false, "Use Parent Fib Timeframe", group=groupFibEngine,
   tooltip="OFF (default) keeps fibs native to the chart timeframe (5m canonical, matches the live indicator). Turn ON to anchor fibs to a higher parent timeframe.")
 string fibAnchorTimeframe = input.timeframe("15", "Parent Fib Timeframe", group=groupFibEngine,
@@ -488,65 +486,21 @@ fibZzSource() =>
 
 [zzNewPivot, zzHighPrice, zzLowPrice, zzHighTime, zzLowTime, zzSwingDir] = fibZzSource()
 
-var float firstStructuralHigh = na
-var float firstStructuralLow = na
-var int firstStructuralHighTime = na
-var int firstStructuralLowTime = na
-var float firstStructuralBasePrice = na
-var int firstStructuralBaseTime = na
-var float firstStructuralTerminalPrice = na
-var int firstStructuralTerminalTime = na
-var int firstStructuralDir = na
-var bool firstStructuralRetraced = false
-
 var float fibAnchorHigh = na
 var float fibAnchorLow = na
 var int anchorHighTime = na
 var int anchorLowTime = na
 var int lastBreakBar = na
 bool htfSnapshotReady = not na(zzHighPrice) and not na(zzLowPrice) and not na(zzHighTime) and not na(zzLowTime) and zzHighPrice > zzLowPrice and zzHighTime != zzLowTime
-bool sourceAnchorChanged = useFibAnchorTimeframeOverride
+bool anchorSnapshotChanged = useFibAnchorTimeframeOverride
   ? htfSnapshotReady and ((na(anchorHighTime) or zzHighTime != anchorHighTime) or (na(anchorLowTime) or zzLowTime != anchorLowTime))
   : zzNewPivot
 
-bool firstStructuralReady = not na(firstStructuralHigh) and not na(firstStructuralLow) and not na(firstStructuralHighTime) and not na(firstStructuralLowTime) and not na(firstStructuralDir)
-if firstStructuralReady and not firstStructuralRetraced
-    float lockedRange = firstStructuralHigh - firstStructuralLow
-    float locked786 = firstStructuralDir == 1 ? firstStructuralLow + lockedRange * FIB_786 : firstStructuralHigh - lockedRange * FIB_786
-    bool retracedIntoLockedLeg = lockedRange > 0 and (firstStructuralDir == 1 ? low <= locked786 : high >= locked786)
-    if retracedIntoLockedLeg
-        firstStructuralRetraced := true
-
-bool anchorSnapshotChanged = false
-if sourceAnchorChanged and htfSnapshotReady and zzSwingDir != 0
-    int candidateDir = zzSwingDir
-    float candidateBasePrice = candidateDir == 1 ? zzLowPrice : zzHighPrice
-    int candidateBaseTime = candidateDir == 1 ? zzLowTime : zzHighTime
-    float candidateTerminalPrice = candidateDir == 1 ? zzHighPrice : zzLowPrice
-    int candidateTerminalTime = candidateDir == 1 ? zzHighTime : zzLowTime
-    bool noLockedStructuralLeg = not firstStructuralReady
-    bool directionChanged = firstStructuralReady and candidateDir != firstStructuralDir
-    bool baseChanged = firstStructuralReady and (candidateBaseTime != firstStructuralBaseTime or candidateBasePrice != firstStructuralBasePrice)
-    bool terminalExpanded = firstStructuralReady and (candidateDir == 1 ? candidateTerminalPrice > firstStructuralTerminalPrice : candidateTerminalPrice < firstStructuralTerminalPrice)
-    bool sameBaseExpansionAllowed = firstStructuralReady and not directionChanged and not baseChanged and terminalExpanded and not firstStructuralRetraced
-    if noLockedStructuralLeg or directionChanged or baseChanged or sameBaseExpansionAllowed
-        firstStructuralHigh := zzHighPrice
-        firstStructuralLow := zzLowPrice
-        firstStructuralHighTime := zzHighTime
-        firstStructuralLowTime := zzLowTime
-        firstStructuralBasePrice := candidateBasePrice
-        firstStructuralBaseTime := candidateBaseTime
-        firstStructuralTerminalPrice := candidateTerminalPrice
-        firstStructuralTerminalTime := candidateTerminalTime
-        firstStructuralDir := candidateDir
-        firstStructuralRetraced := false
-        anchorSnapshotChanged := true
-
 if anchorSnapshotChanged
-    fibAnchorHigh := firstStructuralHigh
-    fibAnchorLow  := firstStructuralLow
-    anchorHighTime := firstStructuralHighTime
-    anchorLowTime  := firstStructuralLowTime
+    fibAnchorHigh := zzHighPrice
+    fibAnchorLow  := zzLowPrice
+    anchorHighTime := zzHighTime
+    anchorLowTime  := zzLowTime
     lastBreakBar  := na
 
 anchorBarFromTime(int anchorTime) =>
@@ -598,14 +552,6 @@ if not na(fibAnchorHigh) and not na(fibAnchorLow)
 float fibRange = fibAnchorHigh - fibAnchorLow
 float minFibRange = minFibRangeAtr * atr14
 bool isValid = not na(fibAnchorHigh) and not na(fibAnchorLow) and fibRange >= minFibRange
-
-// Keep trade ladders frozen after entry, but reject stale oversized native legs
-// before they can become the direct-anchor snapshot source.
-float directLockRecentHigh = ta.highest(high[fibPivotRightRoomBars], fibRecentLegLookbackBars)
-float directLockRecentLow = ta.lowest(low[fibPivotRightRoomBars], fibRecentLegLookbackBars)
-float directLockRecentRange = directLockRecentHigh - directLockRecentLow
-bool directLockNativeRangeTight = not useFibAnchorTimeframeOverride and isValid and not na(directLockRecentRange) and directLockRecentRange > 0 and fibRange <= directLockRecentRange * directLockMaxRecentRangeMult
-bool directLockQualityOk = useFibAnchorTimeframeOverride or directLockNativeRangeTight
 
 float fibMidpoint = fibAnchorLow + fibRange * 0.5
 float fibHystBand = fibRange * 0.02
@@ -1105,8 +1051,8 @@ bool longTriggerCore = setupContextLong and footprintEntryLong
 bool shortTriggerCore = setupContextShort and footprintEntryShort
 bool longTriggerEvent = longTriggerCore and (oneShotEvent ? not longTriggerCore[1] : true)
 bool shortTriggerEvent = shortTriggerCore and (oneShotEvent ? not shortTriggerCore[1] : true)
-bool directBacktestLongEvent = directLockQualityOk and dir == 1 and entryAnchorBullTrigger and longPivotSafety
-bool directBacktestShortEvent = directLockQualityOk and dir == -1 and entryAnchorBearTrigger and shortPivotSafety
+bool directBacktestLongEvent = dir == 1 and entryAnchorBullTrigger and longPivotSafety
+bool directBacktestShortEvent = dir == -1 and entryAnchorBearTrigger and shortPivotSafety
 bool directBacktestLongTrigger = backtestFibAnchorOnlyInput and atrRiskAcceptable and directBacktestLongEvent and (oneShotEvent ? not directBacktestLongEvent[1] : true)
 bool directBacktestShortTrigger = backtestFibAnchorOnlyInput and atrRiskAcceptable and directBacktestShortEvent and (oneShotEvent ? not directBacktestShortEvent[1] : true)
 bool entryLongTrigger = backtestFibAnchorOnlyInput ? directBacktestLongTrigger : (longTriggerEvent and not ladderInvalidated)
