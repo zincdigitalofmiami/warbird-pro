@@ -592,9 +592,10 @@ The local AG training ingestion path is only: `scripts/ag/` Python reconstructio
 
 TradingView enforces a hard maximum of `64` output calls per script, and hidden `display.none` plots count toward that limit.
 
-**Current v7 budget (verified 2026-04-13):**
-- Institutional: `51/64` (46 plot + 2 plotshape + 3 alertcondition, 13 headroom)
-- Strategy: `52/64` (50 plot + 2 plotshape, 12 headroom)
+**Current v7 budget (verified 2026-04-26):**
+- Institutional: `58/64` (55 plot + 3 alertcondition, 6 headroom)
+- Strategy: `60/64` (60 plot, 4 headroom)
+- Institutional backtest strategy: `53/64` (53 plot, 11 headroom)
 
 Any change that exceeds `64` is invalid.
 

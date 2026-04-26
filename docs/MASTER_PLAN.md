@@ -134,14 +134,18 @@ warehouse execution. It blocks only the Pine indicator implementation work strea
 
 ### Pine Budget Baseline
 
-Verified 2026-04-13 (pine-lint.sh, both files):
+Verified 2026-04-26 (pine-facade compile, `pine-lint.sh`, and v7 parity guard):
 
 `v7-warbird-institutional.pine` (live indicator):
-  Output: 51/64 (46 plot + 2 plotshape + 3 alertcondition, 13 headroom)
+  Output: 58/64 (55 plot + 3 alertcondition, 6 headroom)
   Request: 4 `request.security()` + 1 `request.footprint()` = 5 paths
 
-`v7-warbird-strategy.pine` (AG training data generator):
-  Output: 52/64 (50 plot + 2 plotshape, 12 headroom)
+`v7-warbird-strategy.pine` (Strategy Tester / AG export-compatibility surface):
+  Output: 60/64 (60 plot, 4 headroom)
+  Request: 4 `request.security()` + 1 `request.footprint()` = 5 paths
+
+`v7-warbird-institutional-backtest-strategy.pine` (Optuna/backtest wrapper):
+  Output: 53/64 (53 plot, 11 headroom)
   Request: 4 `request.security()` + 1 `request.footprint()` = 5 paths
 
 2026-04-13 session changes:
@@ -157,7 +161,10 @@ Verified 2026-04-13 (pine-lint.sh, both files):
   `ml_exh_extreme_vol_ratio`, `ml_exh_stacked_imbalance_count`.
 - CDP tuner automation built: `scripts/ag/tv_auto_tune.py` replaces manual knob→CSV loop.
 
-All additions must be priced against these baselines before any code is written.
+The local AG training ingestion path remains Python reconstruction through
+`scripts/ag/build_ag_pipeline.py` into the four canonical local AG tables and
+`ag_training`; Pine strategy orders are not the canonical local training row
+source. All additions must be priced against these baselines before any code is written.
 Any implementation exceeding 64 plots or 40 request calls is invalid without
 an explicit approved recount.
 
