@@ -83,6 +83,9 @@ Primary metrics:
   - Optuna/backtest wrapper for direct fib-anchor tests
   - default backtest trigger: direct selected fib execution-anchor hit/reclaim
     when `Backtest Fib Anchor Hits Directly` is enabled
+  - direct-anchor fib geometry locks the first structural leg; after price
+    retraces into the locked `.786`, later same-base wick extensions do not
+    replace the active anchors
 
 `v8-warbird-live.pine` and `v8-warbird-prescreen.pine` remain code-frozen
 legacy baselines. Only approved `input.*` default changes may be made there.

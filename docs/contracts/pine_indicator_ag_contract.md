@@ -49,6 +49,9 @@ Do not mix trigger families inside one run.
   `Backtest Fib Anchor Hits Directly` is enabled. Entries fire from the selected
   fib execution-anchor hit/reclaim path and intentionally bypass the full live
   footprint/context path.
+  The direct-anchor wrapper uses first-structural-leg fib geometry: after price
+  retraces into the locked `.786` level, later same-base wick extensions do not
+  replace the active `0`/`1` anchors.
 
 `acceptEvent` alone is not the live institutional entry trigger. It is a
 diagnostic/setup-archetype event unless a specific strategy surface uses it as
