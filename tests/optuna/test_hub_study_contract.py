@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from scripts.optuna.warbird_optuna_hub import REGISTRY_PATH, build_run_command, load_registry
-from scripts.optuna.warbird_nexus_ml_rsi_profile import _normalize_export_frame
+from scripts.optuna.warbird_nexus_ml_rsi_profile import _manifest_mode_minutes, _normalize_export_frame
 
 
 CANONICAL_STUDIES = {
@@ -63,9 +63,15 @@ def test_nexus_export_normalizes_numeric_tradingview_epoch_seconds() -> None:
             "Nexus FP Available": [1.0],
             "Nexus FP Bar Delta": [25.0],
             "Nexus FP Total Volume": [100.0],
+            "Nexus Mode Minutes": [5.0],
         }
     )
 
     frame = _normalize_export_frame(raw)
 
     assert frame.loc[0, "ts"] == pd.Timestamp(1_710_000_000, unit="s", tz="UTC")
+
+
+def test_nexus_manifest_mode_minutes_accepts_string_and_numeric_modes() -> None:
+    assert _manifest_mode_minutes({"pine_mode": "1H"}) == 60.0
+    assert _manifest_mode_minutes({"timeframe": 5.0}) == 5.0

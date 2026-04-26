@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Optuna profile for Warbird Nexus Machine Learning RSI.
 
-Guide-driven tuning surface for the user's actual workflow on MES 5m:
+Guide-driven tuning surface for the user's actual workflow on MES 5m/15m/1H/4H:
 - primary signals are oscillator/signal crosses on the correct side of the midline
 - confirmations come from volume flow, KNN, and confluence
 - fatigue is a first-class weakening/reversal warning
@@ -10,8 +10,9 @@ This is the canonical Nexus research lane used by the Warbird Optuna Hub:
 http://127.0.0.1:8090/studies/warbird_nexus_ml_rsi
 
 It runs only over manifest-backed TradingView/Pine exports that include the
-Nexus footprint columns emitted by request.footprint(). The prior local OHLCV
-parquet delta proxy is intentionally not accepted as active model truth.
+Nexus footprint columns emitted by request.footprint() and the Pine mode export.
+The prior local OHLCV parquet delta proxy is intentionally not accepted as
+active model truth.
 """
 
 from __future__ import annotations
@@ -48,6 +49,18 @@ REQUIRED_EXPORT_COLS = {
     "nexus_fp_available",
     "nexus_fp_bar_delta",
     "nexus_fp_total_volume",
+    "nexus_mode_minutes",
+}
+
+MODE_MINUTES = {
+    "5": 5.0,
+    "5m": 5.0,
+    "15": 15.0,
+    "15m": 15.0,
+    "60": 60.0,
+    "1h": 60.0,
+    "240": 240.0,
+    "4h": 240.0,
 }
 
 
@@ -234,6 +247,24 @@ def _resolve_export_path(manifest: dict[str, Any], manifest_path: Path) -> Path:
     if not export_path.is_absolute():
         export_path = manifest_path.parent / export_path
     return export_path
+
+
+def _manifest_mode_minutes(manifest: dict[str, Any]) -> float | None:
+    for key in ("mode", "timeframe", "chart_timeframe", "pine_mode"):
+        raw = manifest.get(key)
+        if raw is None:
+            continue
+        raw_text = str(raw).strip().lower()
+        value = MODE_MINUTES.get(raw_text)
+        if value is not None:
+            return value
+        try:
+            numeric_value = float(raw_text)
+        except ValueError:
+            continue
+        if numeric_value in {5.0, 15.0, 60.0, 240.0}:
+            return numeric_value
+    return None
 
 
 def _normalize_export_frame(raw: pd.DataFrame) -> pd.DataFrame:
@@ -1033,6 +1064,23 @@ def load_data() -> pd.DataFrame:
             "Do not run Optuna from OHLCV-only rows."
         )
 
+    mode_values = sorted(df["nexus_mode_minutes"].dropna().astype(float).unique().tolist())
+    if not mode_values:
+        raise ValueError(
+            "Nexus export contains no nexus_mode_minutes values. Export the "
+            "Nexus indicator Mode plot from TradingView instead of using a "
+            "5m-only or hand-edited CSV."
+        )
+    manifest_mode_minutes = _manifest_mode_minutes(manifest)
+    if manifest_mode_minutes is not None and any(
+        abs(mode_value - manifest_mode_minutes) > 1e-9 for mode_value in mode_values
+    ):
+        raise ValueError(
+            "Nexus export mode mismatch: manifest mode resolves to "
+            f"{manifest_mode_minutes:g} minutes, but CSV contains "
+            f"nexus_mode_minutes={mode_values}."
+        )
+
     if "symbol" not in df.columns:
         df["symbol"] = str(manifest.get("symbol", "MES1!"))
 
@@ -1044,6 +1092,7 @@ def load_data() -> pd.DataFrame:
         "indicator_file": NEXUS_PINE_FILE,
         "symbol": manifest.get("symbol"),
         "timeframe": manifest.get("timeframe"),
+        "mode_minutes": mode_values,
         "row_count": len(df),
     }
     return df

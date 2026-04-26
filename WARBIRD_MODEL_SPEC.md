@@ -89,6 +89,8 @@ Primary metrics:
 - `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
   - Nexus lower-pane footprint-delta signal-quality research surface
   - active trigger family: `NEXUS_FOOTPRINT_DELTA`
+  - mode-aware export surface: `nexus_mode_minutes` distinguishes 5m, 15m, 1H,
+    and 4H rows on the single Nexus hub lane
 
 `v8-warbird-live.pine` and `v8-warbird-prescreen.pine` remain code-frozen
 legacy baselines. Only approved `input.*` default changes may be made there.

@@ -688,12 +688,16 @@ git commit -m "Pine: add delta-fade bar coloring (teal/red/gray by conviction)"
 
 ---
 
-## Phase 3: Duplicate Mode Studies Retired
+## Phase 3: Mode Studies Retained On Existing Hub Lane
 
-Do not create separate Nexus profile modules or registry keys for 15m, 1H, or
-4H. Keep current Nexus trials on the existing `warbird_nexus_ml_rsi` hub study.
-Additional timeframes can be reopened only after the canonical 5m lane has
-manifest-backed Pine/TradingView evidence and an approved contract update.
+Keep 5m, 15m, 1H, and 4H as first-class Nexus modes. Do not create duplicate
+profile modules, registry keys, alternate hubs, or replacement workspaces for
+those modes. Run each mode through the existing `warbird_nexus_ml_rsi` hub lane
+using a manifest-backed TradingView export from the selected Pine `Mode`.
+
+Every mode export must include both the real footprint fields and
+`nexus_mode_minutes`; rows missing the mode export are invalid. Per-mode Pine
+defaults stay blocked until that mode has a manifest-backed champion.
 
 ---
 
@@ -720,7 +724,7 @@ manifest-backed Pine/TradingView evidence and an approved contract update.
 | Phase 2 | Task 11: True footprint delta layer | DONE | Pine caches one `request.footprint()` path and exports `nexus_fp_*` fields |
 | Phase 2 | Task 12: White diamond + delta gates | DONE | Gas-out diamonds and delta-confirmed reversal triggers restored |
 | Phase 2 | Task 13: Delta-fade bar coloring | DONE | Bar colors now fade by real footprint delta conviction |
-| Phase 3 | Duplicate mode-study profiles | RETIRED | Do not create per-timeframe Nexus study keys |
+| Phase 3 | Mode studies B/C/D | RETAINED | 15m/1H/4H remain active modes on the existing Nexus hub lane; no duplicate profile keys |
 
 ---
 
@@ -732,9 +736,27 @@ manifest-backed Pine/TradingView evidence and an approved contract update.
 |-----------|---------------|-------|
 | (none) | | Study A is blocked until a manifest-backed Pine/TradingView export exists |
 
+### Study B — 15m
+
+| Parameter | Champion Value | Notes |
+|-----------|---------------|-------|
+| (none) | | Blocked until a manifest-backed 15m Pine/TradingView export with `nexus_mode_minutes = 15` exists |
+
+### Study C — 1H
+
+| Parameter | Champion Value | Notes |
+|-----------|---------------|-------|
+| (none) | | Blocked until a manifest-backed 1H Pine/TradingView export with `nexus_mode_minutes = 60` exists |
+
+### Study D — 4H
+
+| Parameter | Champion Value | Notes |
+|-----------|---------------|-------|
+| (none) | | Blocked until a manifest-backed 4H Pine/TradingView export with `nexus_mode_minutes = 240` exists |
+
 No current Nexus Optuna result is promotable as a champion setting or Pine
-default. Existing raw-parquet trials may be reviewed only as sandbox hypothesis
-material.
+default for any mode. Existing raw-parquet trials may be reviewed only as
+sandbox hypothesis material.
 
 ---
 

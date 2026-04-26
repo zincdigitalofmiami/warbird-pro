@@ -54,8 +54,8 @@ Do not mix trigger families inside one run.
 - `NEXUS_FOOTPRINT_DELTA`: Nexus lower-pane signal-quality trigger from
   `warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`. Rows must come
   from TradingView indicator exports containing the hidden `nexus_fp_*`
-  `request.footprint()` fields; OHLCV/parquet delta reconstruction is not valid
-  evidence for this family.
+  `request.footprint()` fields and `nexus_mode_minutes`; OHLCV/parquet delta
+  reconstruction is not valid evidence for this family.
 
 `acceptEvent` alone is not the live institutional entry trigger. It is a
 diagnostic/setup-archetype event unless a specific strategy surface uses it as

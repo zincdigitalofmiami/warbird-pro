@@ -157,6 +157,6 @@
     "default_study_name": "Warbird Nexus ML Fast 5m Signal Quality April 25",
     "symbol": "MES1!",
     "timeframe": "5",
-    "notes": "Canonical Nexus footprint lane served by the Warbird Optuna Hub at http://127.0.0.1:8090/studies/warbird_nexus_ml_rsi. Runs resume the existing study.db and default study name with 1000 trials. The active profile requires a TradingView/Pine export manifest for trigger family NEXUS_FOOTPRINT_DELTA and real nexus_fp_* request.footprint() fields; OHLCV/parquet delta proxies are rejected."
+    "notes": "Canonical Nexus footprint lane served by the Warbird Optuna Hub at http://127.0.0.1:8090/studies/warbird_nexus_ml_rsi. Runs resume the existing study.db and default study name with 1000 trials. The active profile requires a TradingView/Pine export manifest for trigger family NEXUS_FOOTPRINT_DELTA, real nexus_fp_* request.footprint() fields, and nexus_mode_minutes for 5m/15m/1H/4H mode exports; OHLCV/parquet delta proxies are rejected."
   }
 ]
