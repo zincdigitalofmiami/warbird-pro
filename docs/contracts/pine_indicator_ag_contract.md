@@ -56,10 +56,25 @@ Do not mix trigger families inside one run.
   from TradingView/Pine `request.footprint()` evidence containing `nexus_fp_*`
   fields. CSV exports, local OHLCV parquet, Databento bars, and synthetic
   body/wick delta are not valid tuning evidence for this trigger family.
+  This trigger family does not authorize Nexus styling or visible-output edits;
+  those are frozen by `docs/contracts/nexus_visual_plot_freeze.md`.
 
 `acceptEvent` alone is not the live institutional entry trigger. It is a
 diagnostic/setup-archetype event unless a specific strategy surface uses it as
 part of its own execution path.
+
+## Nexus Visual And Plot Freeze
+
+`indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine` has a
+frozen visual and visible-output contract. Agents must not change its colors,
+theme constants, watermark, dashboard/KNN tables, line styling, fills, labels,
+markers, `barcolor`, visible plots, or visible output inventory unless Kirk
+explicitly requests that exact visual/plot edit in the current session.
+
+Allowed Nexus tuning recommendations are limited to approved numeric settings,
+approved nonvisual calculation changes, and Optuna/profile evidence work. A
+settings or model result does not imply permission to remove, rename, hide,
+consolidate, recolor, or restyle Nexus visuals.
 
 ## Explicit Exclusions
 

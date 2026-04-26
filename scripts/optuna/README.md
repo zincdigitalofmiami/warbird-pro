@@ -49,6 +49,10 @@ Rules:
 - `warbird_nexus_ml_rsi` is footprint-only: use the TradingView/Pine
   `request.footprint()` parquet + manifest. Do not use CSV exports, plain OHLCV
   parquet, Databento bars, or synthetic body/wick delta for that lane.
+- `warbird_nexus_ml_rsi` must preserve the frozen Nexus visual/plot contract.
+  Optuna/profile work may not edit Nexus colors, watermark, dashboard/KNN
+  tables, `barcolor`, visible plots, fills, labels, markers, or visible output
+  inventory.
 
 ## Current Runtime Ops
 

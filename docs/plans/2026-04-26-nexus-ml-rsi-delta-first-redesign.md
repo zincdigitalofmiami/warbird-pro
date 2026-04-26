@@ -3,6 +3,12 @@
 **Status:** APPROVED — brainstorm complete, ready for implementation planning  
 **Indicator:** `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
 
+> **2026-04-26 visual/plot freeze:** This design doc is now historical
+> reference for the data/model idea only. It is not approval to change Nexus
+> styling, watermark, dashboard/KNN tables, `barcolor`, plots, fills, markers,
+> labels, or visible output inventory. The active authority is
+> `docs/contracts/nexus_visual_plot_freeze.md`.
+
 ---
 
 ## Why We're Rebuilding
@@ -24,7 +30,11 @@ Kirk's actual success criterion: **signal at the bottom (or top) that precedes a
 ### Core Principle
 Footprint cumulative delta is the **primary signal driver**. The oscillator (AMF: ROC + EWI + Stoch) is confirmation only. KNN is trained on delta features to validate conviction.
 
-The existing indicator visual style is PRESERVED — smooth AMF wave, gradual color fills, positioned diamonds. The redesign layers delta intelligence on top without changing the core oscillator math.
+The existing indicator visual style is PRESERVED — smooth AMF wave, gradual
+color fills, positioned diamonds. The redesign layers delta intelligence on top
+without changing the core oscillator math. Under the 2026-04-26 freeze, agents
+must treat all visual examples below as reference-only and must not implement
+visual or plot edits from this document.
 
 ---
 

@@ -20,6 +20,11 @@ changes.
 - Active plan: Warbird Indicator-Only AG Plan v6.
 - Modeling truth: Pine/TradingView outputs only.
 - Goal: perfect indicator settings, state machine, and build quality.
+- Nexus ML RSI styling and visible outputs are frozen by
+  `docs/contracts/nexus_visual_plot_freeze.md`; do not touch colors, watermark,
+  dashboard/KNN tables, `barcolor`, visible plots, fills, markers, labels, or
+  visible output inventory unless Kirk explicitly requests that exact
+  visual/plot edit in the current session.
 - No external feature stacking: no FRED, macro, news, options, cross-asset,
   Databento-ingestion, Supabase, or local `ag_training` joins.
 
@@ -28,6 +33,9 @@ changes.
 - Live indicator: `indicators/v7-warbird-institutional.pine`
 - Strategy Tester mirror: `indicators/v7-warbird-strategy.pine`
 - Optuna/backtest wrapper: `indicators/v7-warbird-institutional-backtest-strategy.pine`
+- Nexus lower-pane research surface:
+  `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
+  (visual/plot surface frozen)
 
 ### Current Budget Snapshot
 

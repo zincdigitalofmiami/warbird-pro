@@ -30,6 +30,12 @@ Training/modeling uses Pine/TradingView outputs only:
 No daily/hourly ingestion, FRED, macro, cross-asset, news, options, Supabase, or
 Databento feature stacking is admitted into the active modeling dataset.
 
+Nexus ML RSI styling and visible outputs are frozen by
+`docs/contracts/nexus_visual_plot_freeze.md`. Do not infer permission to change
+Nexus colors, watermark, dashboard/KNN tables, `barcolor`, plots, fills, labels,
+markers, or visible output inventory from a tuning, repair, or optimization
+request.
+
 ### Active Pine Surfaces
 
 - `indicators/v7-warbird-institutional.pine` — live indicator work surface;
@@ -39,6 +45,9 @@ Databento feature stacking is admitted into the active modeling dataset.
 - `indicators/v7-warbird-institutional-backtest-strategy.pine` —
   Optuna/backtest wrapper; trigger family `BACKTEST_DIRECT_ANCHOR` when
   `Backtest Fib Anchor Hits Directly` is enabled
+- `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine` —
+  Nexus lower-pane footprint-delta research surface; trigger family
+  `NEXUS_FOOTPRINT_DELTA`; visual/plot surface frozen
 
 Budget verification from 2026-04-26:
 
@@ -70,6 +79,8 @@ Do not start training until the user explicitly approves it.
 - No mock data.
 - No daily-ingestion training dependency.
 - No Pine edits without explicit approval in the current session.
+- No Nexus ML RSI styling or visible-output edits unless Kirk explicitly
+  requests that exact visual/plot edit in the current session.
 - No TradingView Pine Editor push without explicit approval.
 - Commission floor for MES Strategy Tester evidence: $1.00/side.
 - Slippage floor: 1 tick.

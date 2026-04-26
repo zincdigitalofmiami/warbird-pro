@@ -90,6 +90,8 @@ Primary metrics:
   - footprint delta must come from TradingView/Pine `request.footprint()`
     `nexus_fp_*` fields; CSV exports, local OHLCV parquet, and synthetic
     body/wick delta are invalid tuning evidence for this surface
+  - visual and visible-output surface is frozen by
+    `docs/contracts/nexus_visual_plot_freeze.md`
 
 `v8-warbird-live.pine` and `v8-warbird-prescreen.pine` remain code-frozen
 legacy baselines. Only approved `input.*` default changes may be made there.
@@ -191,3 +193,14 @@ The following are legacy for active modeling:
 - FRED/macro feature scope
 - Python reconstruction as canonical training generator
 - server-side AG packet promotion
+
+## Nexus Visual And Plot Freeze
+
+Nexus ML RSI styling is not a model target. Agents must not change
+`indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine` colors,
+watermark, dashboard/KNN tables, `barcolor`, visible plots, fills, markers,
+labels, or visible output inventory unless Kirk explicitly requests that exact
+visual/plot edit in the current session.
+
+Modeling may recommend approved numeric setting changes or nonvisual
+calculation changes. It must preserve the approved Warbird visual baseline.

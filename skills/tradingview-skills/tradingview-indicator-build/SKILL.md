@@ -27,6 +27,11 @@ Stop immediately and ask for direction if any of these occur:
 6. Required harness internals would need rewrites instead of interface-only edits.
 7. Build request lacks acceptance criteria that can be validated.
 8. Any step depends on non-real data.
+9. Nexus ML RSI work would alter styling or visible outputs without Kirk
+   explicitly requesting that exact visual/plot edit in the current session.
+   Frozen Nexus surfaces include colors, watermark, dashboard/KNN tables,
+   `barcolor`, visible plots, fills, markers, labels, and visible output
+   inventory.
 
 ## Checkpoints
 
@@ -73,4 +78,3 @@ Every build result must include:
 - [deep-quant-validation](references/deep-quant-validation.md)
 - [tradingview-limits-2026-03-26](references/tradingview-limits-2026-03-26.md)
 - [sp500-futures-insights](references/sp500-futures-insights.md)
-
