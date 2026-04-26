@@ -88,6 +88,11 @@ Required facts:
 - indicator version / commit
 - exported columns or Strategy Tester fields
 - Pine input defaults
+- trigger family:
+  - `LIVE_ANCHOR_FOOTPRINT` for live institutional alerts
+  - `STRATEGY_ACCEPT_SCALP` for the v7 Strategy Tester accept/scalp path
+  - `BACKTEST_DIRECT_ANCHOR` for the institutional backtest wrapper's direct
+    fib-anchor Optuna path
 - plot/request budget
 - compile/lint status
 - backtest property assumptions: commission, slippage, bar magnifier, fill model
@@ -113,6 +118,7 @@ Required manifest fields:
 - timeframe
 - TradingView export range
 - Pine input settings
+- trigger family and source Pine file
 - TradingView tester properties
 - row count / trade count
 - export hash

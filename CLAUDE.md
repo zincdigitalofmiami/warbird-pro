@@ -25,9 +25,13 @@ Databento feature stacking is admitted into the active modeling dataset.
 
 ### Active Pine Surfaces
 
-- `indicators/v7-warbird-institutional.pine` — live indicator work surface
-- `indicators/v7-warbird-strategy.pine` — Strategy Tester / export-compatible surface
-- `indicators/v7-warbird-institutional-backtest-strategy.pine` — Optuna/backtest wrapper
+- `indicators/v7-warbird-institutional.pine` — live indicator work surface;
+  trigger family `LIVE_ANCHOR_FOOTPRINT`
+- `indicators/v7-warbird-strategy.pine` — Strategy Tester / export-compatible
+  surface; trigger family `STRATEGY_ACCEPT_SCALP`
+- `indicators/v7-warbird-institutional-backtest-strategy.pine` —
+  Optuna/backtest wrapper; trigger family `BACKTEST_DIRECT_ANCHOR` when
+  `Backtest Fib Anchor Hits Directly` is enabled
 
 Budget verification from 2026-04-26:
 

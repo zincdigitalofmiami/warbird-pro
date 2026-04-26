@@ -62,10 +62,16 @@ Primary metrics:
 
 - `indicators/v7-warbird-institutional.pine`
   - live indicator work surface
+  - live entry trigger: `entryLongTrigger` / `entryShortTrigger` from fib
+    execution-anchor reclaim plus footprint confirmation
 - `indicators/v7-warbird-strategy.pine`
   - Strategy Tester and export-compatibility surface
+  - strategy entry trigger: `acceptEvent` plus confirmation, or optional
+    footprint scalp path, with risk/ladder/HTF/suppression gates
 - `indicators/v7-warbird-institutional-backtest-strategy.pine`
   - Optuna/backtest wrapper for direct fib-anchor tests
+  - default backtest trigger: direct selected fib execution-anchor hit/reclaim
+    when `Backtest Fib Anchor Hits Directly` is enabled
 
 `v8-warbird-live.pine` and `v8-warbird-prescreen.pine` remain code-frozen
 legacy baselines. Only approved `input.*` default changes may be made there.
@@ -129,6 +135,7 @@ The promotion artifact is a Pine settings/build brief containing:
 - indicator file and commit
 - symbol/timeframe
 - TradingView export manifest
+- trigger family used for evidence
 - champion settings
 - validation metrics
 - rejected settings

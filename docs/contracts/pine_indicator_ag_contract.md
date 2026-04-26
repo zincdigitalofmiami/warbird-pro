@@ -19,6 +19,30 @@ Training rows may come only from:
 
 No external feature stack is admitted.
 
+## Entry Trigger Authority
+
+Every modeling run must declare which Pine trigger family produced its rows.
+Do not mix trigger families inside one run.
+
+- `LIVE_ANCHOR_FOOTPRINT`: live institutional trigger from
+  `v7-warbird-institutional.pine`. Entries are
+  `entryLongTrigger` / `entryShortTrigger`, built from the selected fib
+  execution-anchor reclaim, setup context, footprint confirmation, one-shot
+  gating, ladder validity, and the bullish-trend short gate.
+- `STRATEGY_ACCEPT_SCALP`: Strategy Tester trigger from
+  `v7-warbird-strategy.pine`. Entries are `acceptEvent` plus confirmation, or
+  the optional footprint scalp path, with risk, ladder, HTF, and suppression
+  gates.
+- `BACKTEST_DIRECT_ANCHOR`: Optuna/backtest wrapper trigger from
+  `v7-warbird-institutional-backtest-strategy.pine` when
+  `Backtest Fib Anchor Hits Directly` is enabled. Entries fire from the selected
+  fib execution-anchor hit/reclaim path and intentionally bypass the full live
+  footprint/context path.
+
+`acceptEvent` alone is not the live institutional entry trigger. It is a
+diagnostic/setup-archetype event unless a specific strategy surface uses it as
+part of its own execution path.
+
 ## Explicit Exclusions
 
 The active modeling dataset must not join:
@@ -42,6 +66,7 @@ Every modeling run must record:
 - timeframe
 - export date range
 - export method (`CSV`, `STRATEGY_TESTER_CSV`, `CDP_REPORT_DATA`)
+- trigger family
 - Pine input settings
 - Strategy Tester properties where applicable
 - row count and trade count

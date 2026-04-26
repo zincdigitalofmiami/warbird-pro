@@ -61,6 +61,9 @@ The old warehouse/FRED/macro `ag_training` plan is superseded and reference-only
   those Pine outputs.
 - The active modeling object is the indicator behavior, not a server-side model.
 - The active output is a Pine settings/build recommendation, not a live scoring packet.
+- Every modeling run must declare one trigger family:
+  `LIVE_ANCHOR_FOOTPRINT`, `STRATEGY_ACCEPT_SCALP`, or
+  `BACKTEST_DIRECT_ANCHOR`.
 - No external feature stacking: no FRED, macro, news, options, cross-asset, cloud,
   or Databento-ingestion joins in the active modeling dataset.
 - Daily/hourly ingestion is not a training source. It may remain for runtime chart

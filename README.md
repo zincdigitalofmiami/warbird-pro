@@ -31,6 +31,9 @@ explicitly reopened.
 
 - Training/modeling source: Pine/TradingView outputs only.
 - Primary indicator: `indicators/v7-warbird-institutional.pine`.
+- Trigger family must be explicit for every run:
+  `LIVE_ANCHOR_FOOTPRINT`, `STRATEGY_ACCEPT_SCALP`, or
+  `BACKTEST_DIRECT_ANCHOR`.
 - Backtest/modeling files:
   - `indicators/v7-warbird-strategy.pine`
   - `indicators/v7-warbird-institutional-backtest-strategy.pine`

@@ -45,8 +45,14 @@ reads `reportData().trades()` directly, and records the trial — no CSV export 
    open -a "TradingView" --args --remote-debugging-port=9222
    ```
 2. Active chart: `CME_MINI:MES1!` 15m with Warbird v7 Strategy loaded.
-3. Strategy Tester → Properties → **From** set to `2020-01-01`, Bar Magnifier ON.
-4. `pip install requests websockets` (one-time, if not already installed).
+3. Record the trigger family before running a batch. The default Warbird v7
+   Strategy surface is `STRATEGY_ACCEPT_SCALP`: `acceptEvent` plus
+   confirmation, or the optional footprint scalp path, with risk, ladder, HTF,
+   and suppression gates. That is not the same as the live institutional alert
+   trigger (`LIVE_ANCHOR_FOOTPRINT`) or the institutional backtest wrapper's
+   direct fib-anchor Optuna path (`BACKTEST_DIRECT_ANCHOR`).
+4. Strategy Tester → Properties → **From** set to `2020-01-01`, Bar Magnifier ON.
+5. `pip install requests websockets` (one-time, if not already installed).
 
 > **Entity ID note:** `tv_auto_tune.py` discovers the strategy entity ID at runtime
 > from `chartModel().dataSources()`. No hardcoded `STRATEGY_ENTITY_ID` is required.
@@ -322,8 +328,9 @@ This prevents the tuner from treating chart-rendering tweaks as distinct strateg
 - TradingView Deep Backtesting date selection is still manual.
 - Footprint history quality is not stationary across the full sample. Recent bars are richer than the early `2020-2023` segment.
 - Walk-forward stability is approximated from rolling chronological trade windows. It is a penalty surface, not a replacement for a true purged re-optimization loop.
-- This runbook does not solve `FORMING -> READY -> TRADE_ON -> INVALIDATED`
-  micro execution policy or select which `5m` / `15m` trigger family should fire under an active 15m parent setup.
+- This runbook ranks the trigger family loaded in TradingView. It does not
+  silently reconcile `LIVE_ANCHOR_FOOTPRINT`, `STRATEGY_ACCEPT_SCALP`, and
+  `BACKTEST_DIRECT_ANCHOR`; choose and record one family per batch.
 
 ## Re-optimization Triggers
 
