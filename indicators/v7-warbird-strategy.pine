@@ -202,27 +202,11 @@ fmtTime(int ts) =>
 // --- ADX(14) + signed DI spread + ADX slope ---
 int adxLen = 14
 [diPlus, diMinus, adxVal] = ta.dmi(adxLen, adxLen)
-float diSpread = diPlus - diMinus
-float adxSlope = adxVal - nz(adxVal[3])
-
-// Regime classification: trending vs ranging
-bool regimeTrending = adxVal > 25
-bool regimeRanging  = adxVal < 20
-
-// --- Efficiency Ratio (10, 20) ---
-float er10Direction = math.abs(close - close[10])
-float er10Volatility = math.sum(math.abs(close - close[1]), 10)
-float er10 = er10Volatility != 0 ? er10Direction / er10Volatility : 0.0
-
-float er20Direction = math.abs(close - close[20])
-float er20Volatility = math.sum(math.abs(close - close[1]), 20)
-float er20 = er20Volatility != 0 ? er20Direction / er20Volatility : 0.0
 
 // --- VIX daily calls removed — replaced by VVIX 60min in intermarket section ---
 
 // --- ATR percentage (normalized volatility) ---
 float atrRaw = ta.atr(20)
-float atrPct = close != 0 ? atrRaw / close * 100.0 : 0.0
 
 //=====================
 // TA CORE PACK (15-metric feature set for ML training capture)
@@ -235,11 +219,6 @@ float ema200 = ta.ema(close, 200)
 [_macdFast, _macdSlow, macdHist] = ta.macd(close, 12, 26, 9)
 float rsi14 = ta.rsi(close, 14)
 float atr14 = ta.atr(14)
-float barSpreadXVol = (high - low) * volume
-float obvChangeRaw = nz(ta.change(close))
-float _obvDelta = obvChangeRaw > 0 ? volume : obvChangeRaw < 0 ? -volume : 0.0
-float obvVal = ta.cum(_obvDelta)
-float mfi14 = ta.mfi(hlc3, 14)
 
 //=====================
 // OPENING RANGE (first 30 min of RTH: 8:30-9:00 CT)
@@ -710,12 +689,6 @@ bool provenBearishPattern = longUpperShadow or shootingStar or bearishEngulfing 
 //=====================
 // INTERMARKET SERIES + REGIMES
 //=====================
-f_ema_dir(float emaVal) =>
-    close > emaVal and emaVal > nz(emaVal[1], emaVal) ? 1 : close < emaVal and emaVal < nz(emaVal[1], emaVal) ? -1 : 0
-
-f_ema_dist_pct(float emaVal) =>
-    emaVal != 0 ? (close - emaVal) / emaVal * 100.0 : 0.0
-
 f_rsi_knn(float src, int window) =>
     float sumW = 0.0
     float sumV = 0.0
@@ -1362,13 +1335,6 @@ else
 
 // trendStr / corrStr removed — monotonic rescalings of adxVal and im_score_on/off.
 // Collinear with existing ADX and IM score exports. Zero new information for AG.
-
-int ema21Dir = f_ema_dir(ema21)
-int ema50Dir = f_ema_dir(ema50)
-int ema200Dir = f_ema_dir(ema200)
-float ema21DistPct = f_ema_dist_pct(ema21)
-float ema50DistPct = f_ema_dist_pct(ema50)
-float ema200DistPct = f_ema_dist_pct(ema200)
 
 //=====================
 // MOMENTUM OSCILLATORS (VF + NFE + RSI KNN)

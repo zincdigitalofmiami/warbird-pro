@@ -49,7 +49,8 @@ fi
 # --- WARNINGS (may cause issues) ---
 
 # W1: request.security() budget
-SEC_COUNT=$(grep -c 'request\.security(' "$FILE" 2>/dev/null || echo 0)
+SEC_COUNT=$(grep -c 'request\.security(' "$FILE" 2>/dev/null || true)
+SEC_COUNT=${SEC_COUNT:-0}
 # Subtract comment-only lines
 SEC_COMMENT=$(grep 'request\.security(' "$FILE" | grep '^\s*//' | wc -l | tr -d ' ')
 SEC_ACTUAL=$((SEC_COUNT - SEC_COMMENT))
@@ -137,8 +138,10 @@ if [ -n "$RISK_ON_BASE" ] && [ -n "$RISK_OFF_BASE" ]; then
 fi
 
 # W7: max_boxes_count check
-MAX_BOXES=$(grep 'max_boxes_count' "$FILE" | grep -oE '[0-9]+' | tail -1 || echo "0")
-BOX_NEWS=$(grep -c 'box\.new(' "$FILE" 2>/dev/null || echo 0)
+MAX_BOXES=$(grep 'max_boxes_count' "$FILE" | grep -oE '[0-9]+' | tail -1 || true)
+MAX_BOXES=${MAX_BOXES:-0}
+BOX_NEWS=$(grep -c 'box\.new(' "$FILE" 2>/dev/null || true)
+BOX_NEWS=${BOX_NEWS:-0}
 echo "INFO: max_boxes_count=$MAX_BOXES, box.new() calls=$BOX_NEWS"
 
 # W8: import statement present for ZigZag

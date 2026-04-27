@@ -240,27 +240,11 @@ f_label_size(string sizeName) =>
 // --- ADX(14) + signed DI spread + ADX slope ---
 int adxLen = 14
 [diPlus, diMinus, adxVal] = ta.dmi(adxLen, adxLen)
-float diSpread = diPlus - diMinus
-float adxSlope = adxVal - nz(adxVal[3])
-
-// Regime classification: trending vs ranging
-bool regimeTrending = adxVal > 25
-bool regimeRanging  = adxVal < 20
-
-// --- Efficiency Ratio (10, 20) ---
-float er10Direction = math.abs(close - close[10])
-float er10Volatility = math.sum(math.abs(close - close[1]), 10)
-float er10 = er10Volatility != 0 ? er10Direction / er10Volatility : 0.0
-
-float er20Direction = math.abs(close - close[20])
-float er20Volatility = math.sum(math.abs(close - close[1]), 20)
-float er20 = er20Volatility != 0 ? er20Direction / er20Volatility : 0.0
 
 // --- VIX/VVIX intermarket path removed from active Pine runtime ---
 
 // --- ATR percentage (normalized volatility) ---
 float atrRaw = ta.atr(20)
-float atrPct = close != 0 ? atrRaw / close * 100.0 : 0.0
 
 //=====================
 // TA CORE PACK (15-metric feature set for ML training capture)
@@ -274,14 +258,6 @@ float ema100 = ta.ema(close, 100)
 [_macdFast, _macdSlow, macdHist] = ta.macd(close, 12, 26, 9)
 float rsi14 = ta.rsi(close, 14)
 float atr14 = ta.atr(14)
-// NOTE: barSpreadXVol, OBV, MFI use standard volume — kept as AG exports only.
-// AG computes these server-side from Databento tick data. Pine exports are placeholders.
-// Footprint delta is the canonical volume truth for all live indicator decisions.
-float barSpreadXVol = (high - low) * volume
-float obvChangeRaw = nz(ta.change(close))
-float _obvDelta = obvChangeRaw > 0 ? volume : obvChangeRaw < 0 ? -volume : 0.0
-float obvVal = ta.cum(_obvDelta)
-float mfi14 = ta.mfi(hlc3, 14)
 
 //=====================
 // OPENING RANGE (first 30 min of RTH: 8:30-9:00 CT)
@@ -364,7 +340,6 @@ float fvgBearDist = (not na(nearestFvgBearMid) and atr14 > 0) ? (nearestFvgBearM
 //=====================
 // HTF FIB CONFLUENCE (1H, 4H, Daily)
 //=====================
-string groupHTF = "HTF Confluence"
 float htfConfTolPct = 0.15
 
 [htf1hHigh, htf1hLow] = request.security(syminfo.tickerid, "60", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
@@ -590,7 +565,6 @@ int htfConfTotal = htfConfPivot + htfConf382 + htfConf618
 footprint reqFootprint = request.footprint(footprintTicksPerRow, footprintVaPercent, footprintImbalancePercent)
 bool fpAvailable = not na(reqFootprint)
 float fpDelta = fpAvailable ? footprint.delta(reqFootprint) : na
-float fpDeltaAbs = fpAvailable and not na(fpDelta) ? math.abs(fpDelta) : na
 
 //=====================
 // FOOTPRINT DELTA AT FIB TOUCHES
@@ -850,7 +824,6 @@ bool mlExhZExtreme = false
 // Footprint row-level evidence (ML exports + diamond enrichment)
 volume_row triggerRow = fpAvailable and not na(exhaustionTriggerPrice) ? footprint.get_row_by_price(reqFootprint, exhaustionTriggerPrice) : na
 volume_row extremeRow = fpAvailable ? footprint.get_row_by_price(reqFootprint, close > open ? high : low) : na
-float triggerRowDelta = not na(triggerRow) ? volume_row.delta(triggerRow) : na
 float extremeRowVol = not na(extremeRow) ? volume_row.total_volume(extremeRow) : na
 float extremeRowVolRatio = not na(pocRowVol) and pocRowVol > 0 and not na(extremeRowVol) ? extremeRowVol / pocRowVol : na
 
@@ -1001,8 +974,6 @@ bool trendBiasShort = ema9 < ema21 and close <= ema50 and close <= vwapVal
 bool entryZoneTouched = not na(entryZoneUpper) and not na(entryZoneLower) and high >= entryZoneLower and low <= entryZoneUpper
 bool entryAnchorBullTrigger = confirmed and not na(entryLevel) and low <= entryLevel and close >= entryLevel
 bool entryAnchorBearTrigger = confirmed and not na(entryLevel) and high >= entryLevel and close <= entryLevel
-bool entryZoneRejectBullLive = not na(entryZoneLower) and low < entryZoneLower and close >= entryZoneLower and bullishCandle
-bool entryZoneRejectBearLive = not na(entryZoneUpper) and high > entryZoneUpper and close <= entryZoneUpper and bearishCandle
 float localBreakHigh = ta.highest(high, valueReclaimBreakoutLookbackBarsInput)[1]
 float localBreakLow = ta.lowest(low, valueReclaimBreakoutLookbackBarsInput)[1]
 bool footprintLongTrigger = fpAvailable and fpDeltaBullish and (pocNearLow or mlExhAbsorption or mlExhZeroPrint or stackedBuyImbalance)
@@ -1010,8 +981,6 @@ bool footprintShortTrigger = fpAvailable and fpDeltaBearish and (pocNearHigh or 
 bool footprintBacktestFallback = not fpAvailable and not requireFootprintForBacktestInput
 bool footprintLongGate = footprintLongTrigger or footprintBacktestFallback
 bool footprintShortGate = footprintShortTrigger or footprintBacktestFallback
-bool sweepLongTrigger = entryZoneTouched and liqSweepBull
-bool sweepShortTrigger = entryZoneTouched and liqSweepBear
 bool atrRiskAcceptable = not na(slLevel) and atr14 > 0 and slDistAtr <= optMaxRiskAtr
 bool microTrendLong = trendBiasLong or (ema9 >= ema21 and vwapCode >= 0)
 bool microTrendShort = trendBiasShort or (ema9 <= ema21 and vwapCode <= 0)
@@ -1145,7 +1114,6 @@ if confirmed
         entryBar := na
         highestTargetHit := 0
 
-bool tradeSetupEndedNow = tradeSetupWasActive and tradeState != TRADE_SETUP
 bool tradeInFlightNow = tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
 float activeStopPrice = tradeInFlightNow ? slPrice : na
 
@@ -1476,17 +1444,10 @@ else
 if barstate.islast
     table.cell(webWatermarkTable, 0, 0, showWebWatermarkInput ? "WARBIRD" : "", text_color=webWatermarkWarbirdColorInput, text_size=size.huge, text_halign=text.align_right, bgcolor=color.new(color.black, 100), text_formatting=text.format_bold)
     table.cell(webWatermarkTable, 1, 0, showWebWatermarkInput ? "PRO" : "", text_color=webWatermarkProColorInput, text_size=size.huge, text_halign=text.align_left, bgcolor=color.new(color.black, 100))
-plot(showEma9Input ? ema9 : na, "EMA 9", ema9ColorInput, ema9WidthInput)
-plot(showEma21Input ? ema21 : na, "EMA 21", ema21ColorInput, ema21WidthInput)
-plot(showEma50Input ? ema50 : na, "EMA 50", ema50ColorInput, ema50WidthInput)
-plot(showVwapInput ? vwapVal : na, "VWAP", vwapColorInput, vwapWidthInput)
-
-int ema21Dir = f_ema_dir(ema21)
-int ema50Dir = f_ema_dir(ema50)
-int ema200Dir = f_ema_dir(ema200)
-float ema21DistPct = f_ema_dist_pct(ema21)
-float ema50DistPct = f_ema_dist_pct(ema50)
-float ema200DistPct = f_ema_dist_pct(ema200)
+plot(showEma9Input ? ema9 : na, "EMA 9", ema9ColorInput, ema9WidthInput, display=display.all)
+plot(showEma21Input ? ema21 : na, "EMA 21", ema21ColorInput, ema21WidthInput, display=display.all)
+plot(showEma50Input ? ema50 : na, "EMA 50", ema50ColorInput, ema50WidthInput, display=display.all)
+plot(showVwapInput ? vwapVal : na, "VWAP", vwapColorInput, vwapWidthInput, display=display.all)
 
 //=====================
 // MOMENTUM OSCILLATORS (VF + NFE + RSI KNN — ported from Layout surface)
