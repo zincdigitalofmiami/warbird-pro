@@ -147,7 +147,7 @@
     "name": "Warbird Nexus Machine Learning RSI",
     "surface_type": "indicator",
     "category": "lower-pane",
-    "pine_file": "indicators/warbird-nexus-machine-learning-rsi.pine",
+    "pine_file": "indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine",
     "profile_module": "scripts.optuna.warbird_nexus_ml_rsi_profile",
     "default_study_name": "Warbird Nexus ML Fast 5m Signal Quality April 25",
     "symbol": "MES1!",

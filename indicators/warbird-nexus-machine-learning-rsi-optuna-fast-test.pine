@@ -3,7 +3,7 @@
 // Warbird Nexus Machine Learning RSI
 // ══════════════════════════════════════════════════════════
 // Author:  Kirk Musick
-// Version: 1.2.4-optuna-fast-visual — 5m-only Nexus lane
+// Version: 1.2.5-optuna-footprint — Nexus footprint/multi-mode lane
 // Defaults restored to Optuna Fast 5m Signal Quality April 25 trial #357 after expanded #492 visual rejection.
 // Signal-quality research only; not a production trade/P&L champion.
 
@@ -26,13 +26,18 @@ GRP_VOL     = "📊 Volume Flow"
 GRP_REGIME  = "🔬 Regime Detection"
 GRP_DIV     = "🔀 Divergence"
 GRP_EXHAUST = "💨 Momentum Fatigue"
+GRP_DELTA   = "🧩 Footprint Delta"
 GRP_KNN     = "🧠 KNN Bias"
 GRP_CONF    = "🎯 Confluence"
 GRP_DASH    = "📊 Dashboard"
 GRP_ALERT   = "🔔 Alerts"
 GRP_COLORS  = "🎨 Colors"
 
-INDICATOR_VERSION = "v1.2.4-optuna-fast-visual"
+const string INDICATOR_VERSION = "v1.2.5-optuna-footprint"
+const color WARBIRD_BULL = #26C6DA
+const color WARBIRD_BEAR = #cc0000
+const color WARBIRD_YELLOW = #FFEB3B
+const color WARBIRD_NEUTRAL = #888888
 
 // ══════════════════════════════════════════════════════════
 // INPUTS — Main Settings
@@ -62,6 +67,10 @@ presetInput = input.string("Default", "Preset",
               "• Default: uses the tuned 5m input defaults\n" +
               "• Swing: period 21, relaxed zones\n" +
               "• Position: period 34, wide zones, maximum filter")
+modeInput = input.string("5m", "Mode",
+    options = ["5m", "15m", "1H", "4H"],
+    group = GRP_MAIN,
+    tooltip = "Select the chart timeframe mode. All modes stay on this single Nexus study lane; per-mode defaults must come from manifest-backed Optuna evidence.")
 
 // ══════════════════════════════════════════════════════════
 // INPUTS — Signal Line
@@ -88,9 +97,9 @@ themeInput = input.string("Auto", "Theme",
 adaptColorInput = input.bool(true, "Adaptive Line Color", group = GRP_VISUAL,
     tooltip = "ON — oscillator color shifts with momentum direction.\nOFF — uses a neutral muted color.")
 showWatermarkInput = input.bool(true, "Show Watermark", group = GRP_VISUAL,
-    tooltip = "Display 'WillyAlgoTrader' watermark on chart")
-bullColorInput = input.color(#00E676, "Bull", inline = "colors", group = GRP_COLORS)
-bearColorInput = input.color(#FF5252, "Bear", inline = "colors", group = GRP_COLORS)
+    tooltip = "Display the Warbird Pro watermark on chart")
+bullColorInput = input.color(WARBIRD_BULL, "Bull", inline = "colors", group = GRP_COLORS)
+bearColorInput = input.color(WARBIRD_BEAR, "Bear", inline = "colors", group = GRP_COLORS)
 
 // ══════════════════════════════════════════════════════════
 // INPUTS — Zones
@@ -111,8 +120,8 @@ showVfInput = input.bool(true, "Show Volume Flow", group = GRP_VOL,
     tooltip = "Renders a volatility-normalized volume flow overlay.\nGreen fill = net buying pressure\nRed fill = net selling pressure")
 vfAlphaInput = input.int(18, "Volume Flow Opacity", minval = 0, maxval = 100, group = GRP_VOL,
     tooltip = "Fill opacity for volume flow. Keep 10–25 so oscillator line stays visible.")
-vfBodyWeightInput = input.float(0.70, "Body Weight", minval = 0.0, maxval = 1.0, step = 0.01, group = GRP_VOL,
-    tooltip = "Weight applied to candle body direction in volume-flow scoring.\nWick weight is 1 - Body Weight.")
+vfBodyWeightInput = input.float(0.70, "Bar Delta Weight", minval = 0.0, maxval = 1.0, step = 0.01, group = GRP_VOL,
+    tooltip = "Weight applied to the current footprint bar delta.\nThe remaining weight uses rolling footprint delta. No candle-body proxy is used.")
 vfFastLenMultInput = input.float(0.60, "Fast Length Mult", minval = 0.1, maxval = 3.0, step = 0.01, group = GRP_VOL,
     tooltip = "Fast EMA length multiplier for volume-flow smoothing.")
 vfSlowLenMultInput = input.float(1.40, "Slow Length Mult", minval = 0.1, maxval = 4.0, step = 0.01, group = GRP_VOL,
@@ -125,6 +134,18 @@ vfSignalThresholdInput = input.float(50.0, "Signal Threshold", minval = 50.0, ma
     tooltip = "Volume-flow event threshold.\nBear threshold is calculated as 100 - this value.")
 vfGateThresholdInput = input.float(50.0, "Confirmation Threshold", minval = 50.0, maxval = 80.0, step = 0.1, group = GRP_VOL,
     tooltip = "Volume-flow confirmation threshold for optional filters.\nBear threshold is calculated as 100 - this value.")
+
+// ══════════════════════════════════════════════════════════
+// INPUTS — Footprint Delta
+// ══════════════════════════════════════════════════════════
+footprintTicksPerRowInput = input.int(4, "Footprint Ticks Per Row", minval = 1, group = GRP_DELTA,
+    tooltip = "Row size for TradingView request.footprint(). Used for real ask/bid footprint volume, not OHLCV reconstruction.")
+footprintVaPercentInput = input.float(50.0, "Footprint VA %", minval = 1.0, maxval = 100.0, step = 1.0, group = GRP_DELTA)
+footprintImbalancePercentInput = input.float(195.0, "Footprint Imbalance %", minval = 100.0, maxval = 1000.0, step = 10.0, group = GRP_DELTA)
+deltaLookbackInput = input.int(10, "Delta Lookback", minval = 3, maxval = 20, group = GRP_DELTA)
+deltaSlopeLenInput = input.int(5, "Delta Slope Length", minval = 2, maxval = 10, group = GRP_DELTA)
+deltaFlipThresholdInput = input.float(0.10, "Delta Flip Threshold", minval = 0.05, maxval = 0.40, step = 0.01, group = GRP_DELTA)
+gasoutThreshInput = input.float(0.05, "Gas-Out Threshold", minval = 0.01, maxval = 0.20, step = 0.01, group = GRP_DELTA)
 
 // ══════════════════════════════════════════════════════════
 // INPUTS — Regime Detection
@@ -259,14 +280,14 @@ isDark = switch themeInput
 TEXT_COLOR    = isDark ? #E0E0E0 : #1A1A1A
 TEXT_MUTED    = isDark ? color.new(#9E9E9E, 0) : color.new(#757575, 0)
 
-BULL_TEXT     = isDark ? #00E676 : #00A152
-BEAR_TEXT     = isDark ? #FF5252 : #D32F2F
-NEUTRAL_TEXT  = isDark ? #FFEB3B : #F57F17
+BULL_TEXT     = bullColorInput
+BEAR_TEXT     = bearColorInput
+NEUTRAL_TEXT  = WARBIRD_YELLOW
 
 TABLE_BG      = isDark ? color.new(#131722, 5)  : color.new(#FFFFFF, 5)
 TABLE_BORDER  = isDark ? color.new(#2A2E39, 0)  : color.new(#D0D0D0, 0)
 TABLE_ROW_ALT = isDark ? color.new(#1C2030, 0)  : color.new(#F0F4F8, 0)
-HEADER_BG     = isDark ? color.new(#0D47A1, 0)  : color.new(#1565C0, 0)
+HEADER_BG     = isDark ? color.new(#0D47A1, 0)  : color.new(WARBIRD_BULL, 15)
 HEADER_TEXT   = #FFFFFF
 
 LINE_SUBTLE   = isDark ? color.new(#666666, 0) : color.new(#999999, 0)
@@ -346,6 +367,34 @@ int WARMUP_BARS = math.max(effLen * 3, 60)
 bool isWarmedUp = bar_index >= WARMUP_BARS
 
 // ══════════════════════════════════════════════════════════
+// FOOTPRINT DELTA — real ask/bid volume from TradingView
+// ══════════════════════════════════════════════════════════
+footprint reqFootprint = request.footprint(footprintTicksPerRowInput, footprintVaPercentInput, footprintImbalancePercentInput)
+bool fpAvailable = not na(reqFootprint)
+float fpBarDelta = fpAvailable ? footprint.delta(reqFootprint) : na
+float fpTotalVolume = na
+if fpAvailable
+    array<volume_row> fpRows = footprint.rows(reqFootprint)
+    int fpRowCount = array.size(fpRows)
+    float rowTotal = 0.0
+    if fpRowCount > 0
+        for ri = 0 to fpRowCount - 1
+            volume_row row = array.get(fpRows, ri)
+            rowTotal += nz(volume_row.total_volume(row), 0.0)
+    fpTotalVolume := rowTotal
+bool fpFlowAvailable = fpAvailable and not na(fpBarDelta) and not na(fpTotalVolume) and fpTotalVolume > 0
+float fpCumDelta = fpFlowAvailable ? math.sum(fpBarDelta, deltaLookbackInput) : na
+float fpAvgVolume = fpFlowAvailable ? ta.sma(fpTotalVolume, deltaLookbackInput) : na
+float normCumDelta = fpFlowAvailable and not na(fpAvgVolume) and fpAvgVolume > 0 ? safeDiv(fpCumDelta, math.max(fpAvgVolume * deltaLookbackInput, 1.0), 0.0) : na
+float deltaSlope = fpFlowAvailable ? normCumDelta - nz(normCumDelta[deltaSlopeLenInput], normCumDelta) : na
+float barDeltaRatio = fpFlowAvailable ? safeDiv(fpBarDelta, fpTotalVolume, 0.0) : na
+int deltaDir = not fpFlowAvailable or na(normCumDelta) ? 0 : normCumDelta > deltaFlipThresholdInput ? 1 : normCumDelta < -deltaFlipThresholdInput ? -1 : 0
+bool gasOutBull = fpFlowAvailable and normCumDelta > 0.0 and deltaSlope < -gasoutThreshInput
+bool gasOutBear = fpFlowAvailable and normCumDelta < 0.0 and deltaSlope > gasoutThreshInput
+bool deltaBullConfirm = fpFlowAvailable and deltaDir == 1
+bool deltaBearConfirm = fpFlowAvailable and deltaDir == -1
+
+// ══════════════════════════════════════════════════════════
 // ENGINE — Adaptive Momentum Fusion (AMF)
 // ══════════════════════════════════════════════════════════
 float roc = safeDiv(sourceInput - sourceInput[effLen], sourceInput[effLen], 0.0) * 100.0
@@ -379,25 +428,16 @@ float oscVal = math.max(0.0, math.min(100.0, nz(uSmooth(oscRaw, oscSmoothLen, sm
 float sigVal = nz(uSmooth(oscVal, sigLenInput, sigTypeInput), oscVal)
 
 // ══════════════════════════════════════════════════════════
-// VOLUME FLOW — Volatility-Normalized Volume Flow (VNVF)
+// VOLUME FLOW — footprint-delta Volatility-Normalized Volume Flow (VNVF)
 // ══════════════════════════════════════════════════════════
-bool  volumeAvailable = ta.cum(nz(volume, 0.0)) > 0.0
-float barVolume       = volumeAvailable ? nz(volume, 0.0) : 0.0
-float candleRange = high - low
-float bodySize   = math.abs(close - open)
-float bodyRatio  = safeDiv(bodySize, candleRange, 0.0)
-float upperWick  = high - math.max(close, open)
-float lowerWick  = math.min(close, open) - low
-float wickBias   = safeDiv(lowerWick - upperWick, candleRange, 0.0)
-float bodyDir    = close > open ? 1.0 : close < open ? -1.0 : 0.0
-
-float vfBodyWeight = math.max(0.0, math.min(1.0, vfBodyWeightInput))
-float vfWickWeight = 1.0 - vfBodyWeight
-float candleScore = bodyDir * bodyRatio * vfBodyWeight + wickBias * vfWickWeight
-float signedVol   = volumeAvailable ? candleScore * barVolume : 0.0
+bool  volumeAvailable = fpFlowAvailable
+float barVolume       = fpFlowAvailable ? fpTotalVolume : 0.0
+float vfDeltaWeight = math.max(0.0, math.min(1.0, vfBodyWeightInput))
+float rollingDeltaMean = fpFlowAvailable ? fpCumDelta / math.max(float(deltaLookbackInput), 1.0) : 0.0
+float signedVol       = fpFlowAvailable ? fpBarDelta * vfDeltaWeight + rollingDeltaMean * (1.0 - vfDeltaWeight) : 0.0
 float atrNorm     = nz(ta.atr(effLen), 1.0)
 float avgVol      = math.max(nz(ta.sma(barVolume, effLen * 2), barVolume), 1.0)
-float vnvfRaw     = volumeAvailable ? safeDiv(signedVol, atrNorm * avgVol, 0.0) : 0.0
+float vnvfRaw     = fpFlowAvailable ? safeDiv(signedVol, atrNorm * avgVol, 0.0) : 0.0
 
 int   vnvfFastLen = math.max(math.round(effLen * vfFastLenMultInput), 2)
 int   vnvfSlowLen = math.max(math.round(effLen * vfSlowLenMultInput), 3)
@@ -550,56 +590,10 @@ string confStr = confVal >= confHighInput ? "Strong Bull" : confVal <= confLowIn
 color confColor = confVal >= confHighInput ? BULL_TEXT : confVal <= confLowInput ? BEAR_TEXT : confVal > 55.0 ? color.new(BULL_TEXT, 40) : confVal < 45.0 ? color.new(BEAR_TEXT, 40) : NEUTRAL_TEXT
 
 // ══════════════════════════════════════════════════════════
-// KNN TABLE PANEL
-// ══════════════════════════════════════════════════════════
-color knnBgH = isDark ? color.new(#181818, 0) : color.new(#f0f0f0, 0)
-color knnBgM = isDark ? color.new(#111111, 0) : color.new(#fafafa, 0)
-color knnBgF = isDark ? color.new(#0e0e0e, 0) : color.new(#e8e8e8, 0)
-color knnBrd = isDark ? color.new(BULL_TEXT, 55) : color.new(BULL_TEXT, 65)
-color knnTxS = isDark ? color.new(BULL_TEXT, 0)  : color.new(BULL_TEXT, 5)
-color knnTxM = isDark ? color.new(BULL_TEXT, 25) : color.new(BULL_TEXT, 30)
-
-string knnTblPos = switch knnPosInput
-    "Top Right"    => position.top_right
-    "Bottom Right" => position.bottom_right
-    "Top Left"     => position.top_left
-    => position.bottom_left
-
-var table knnTable = table.new(knnTblPos, 2, 5, bgcolor = knnBgM, border_color = knnBrd, border_width = 1, frame_color = knnBrd, frame_width = 1)
-
-if knnShowInput and barstate.islast and isWarmedUp
-    string kDir  = knnIsBull ? "BULL" : knnIsBear ? "BEAR" : "NEUTRAL"
-    string kIcon = knnIsBull ? "▲" : knnIsBear ? "▼" : "◈"
-    table.cell(knnTable, 0, 0, "KNN AI", text_color = knnTxS, text_size = knnSz, bgcolor = knnBgH, text_halign = text.align_left, text_font_family = font.family_monospace)
-    table.cell(knnTable, 1, 0, kIcon + " " + kDir, text_color = knnCol, text_size = knnSz, bgcolor = knnBgH, text_halign = text.align_right, text_font_family = font.family_monospace)
-    table.cell(knnTable, 0, 1, "Confidence", text_color = knnTxS, text_size = knnSz, bgcolor = knnBgM, text_halign = text.align_left, text_font_family = font.family_monospace)
-    table.cell(knnTable, 1, 1, str.tostring(knnConf) + "%", text_color = knnTxS, text_size = knnSz, bgcolor = knnBgM, text_halign = text.align_right, text_font_family = font.family_monospace)
-
-    int filled = math.round(knnConf / 10)
-    string barStr = ""
-    if filled > 0
-        for _i = 0 to filled - 1
-            barStr := barStr + "█"
-    int emptyBlocks = 10 - filled
-    if emptyBlocks > 0
-        for _i = 0 to emptyBlocks - 1
-            barStr := barStr + "░"
-    table.cell(knnTable, 0, 2, barStr, text_color = knnTxS, text_size = knnSz, bgcolor = knnBgM, text_halign = text.align_left, text_font_family = font.family_monospace)
-    table.cell(knnTable, 1, 2, str.tostring(kSize) + " bars", text_color = knnTxM, text_size = knnSz, bgcolor = knnBgM, text_halign = text.align_right, text_font_family = font.family_monospace)
-
-    string fTxt = (feat1 > 0.5 ? "M+" : "M-") + "  " + (feat2 > 0.5 ? "V+" : "V-") + "  " + (feat4 > 0.3 ? "E+" : "E-") + "  " + (feat3 > 0.5 ? "X+" : "X-")
-    table.cell(knnTable, 0, 3, fTxt, text_color = knnTxS, text_size = knnSz, bgcolor = knnBgF, text_halign = text.align_left, text_font_family = font.family_monospace)
-    table.cell(knnTable, 1, 3, "K=" + str.tostring(knnKInput), text_color = knnTxM, text_size = knnSz, bgcolor = knnBgF, text_halign = text.align_right, text_font_family = font.family_monospace)
-
-    string regStr = erTrending ? "TREND" : "RANGE"
-    color  regCol = erTrending ? BULL_TEXT : NEUTRAL_TEXT
-    table.cell(knnTable, 0, 4, "Regime", text_color = knnTxM, text_size = knnSz, bgcolor = knnBgF, text_halign = text.align_left, text_font_family = font.family_monospace)
-    table.cell(knnTable, 1, 4, regStr, text_color = regCol, text_size = knnSz, bgcolor = knnBgF, text_halign = text.align_right, text_font_family = font.family_monospace)
-
-// ══════════════════════════════════════════════════════════
 // OSCILLATOR LINE COLOR
 // ══════════════════════════════════════════════════════════
 color lineCol = oscVal >= effOB ? bullColorInput : oscVal <= effOS ? bearColorInput : adaptColorInput ? (oscVal >= 50.0 ? color.new(bullColorInput, 40) : color.new(bearColorInput, 40)) : color.new(bullColorInput, 60)
+barcolor(lineCol, title = "Nexus Oscillator Bar Color")
 
 // ══════════════════════════════════════════════════════════
 // DIVERGENCE DETECTION
@@ -706,11 +700,22 @@ p_sig = plot(sigVal, "Signal Line", LINE_SUBTLE, linewidth = 1)
 
 bool crossUp   = ta.crossover(oscVal, sigVal)
 bool crossDown = ta.crossunder(oscVal, sigVal)
-plotshape(showCrossDotsInput and crossUp ? sigVal : na, "Bull Cross", shape.circle, location.absolute, bullColorInput, size = size.tiny)
-plotshape(showCrossDotsInput and crossDown ? sigVal : na, "Bear Cross", shape.circle, location.absolute, bearColorInput, size = size.tiny)
+bool bullReversalSignal = crossUp and isWarmedUp and oscVal < 50.0 and knnIsBull and deltaBullConfirm
+bool bearReversalSignal = crossDown and isWarmedUp and oscVal > 50.0 and knnIsBear and deltaBearConfirm
+bool lowConvictionSignal = isWarmedUp and ((crossUp and oscVal < 50.0 and not bullReversalSignal) or (crossDown and oscVal > 50.0 and not bearReversalSignal))
+float crossDotY = showCrossDotsInput and (crossUp or crossDown) ? sigVal : na
+color crossDotColor = crossUp ? bullColorInput : bearColorInput
+plotshape(crossDotY, "Cross Dot", shape.circle, location.absolute, crossDotColor, size = size.tiny)
 
-plotshape(showFatigueInput and fatObSignal ? math.min(100.0, oscVal + 6.0) : na, "Bearish Exhaustion", shape.diamond, location.absolute, bearColorInput, size = size.small)
-plotshape(showFatigueInput and fatOsSignal ? math.max(0.0, oscVal - 6.0) : na, "Bullish Exhaustion", shape.diamond, location.absolute, bullColorInput, size = size.small)
+float reversalY = bullReversalSignal ? math.max(0.0, oscVal - 8.0) : bearReversalSignal ? math.min(100.0, oscVal + 8.0) : na
+color reversalColor = bullReversalSignal ? bullColorInput : bearColorInput
+plotshape(reversalY, "Confirmed Reversal", shape.diamond, location.absolute, reversalColor, size = size.normal)
+plotshape(lowConvictionSignal ? sigVal : na, "Low Conviction Signal", shape.circle, location.absolute, WARBIRD_YELLOW, size = size.tiny)
+float fatigueY = fatObSignal ? math.min(100.0, oscVal + 6.0) : fatOsSignal ? math.max(0.0, oscVal - 6.0) : na
+color fatigueColor = fatObSignal ? bearColorInput : bullColorInput
+plotshape(fatigueY, "Momentum Fatigue", shape.diamond, location.absolute, fatigueColor, size = size.small)
+float gasOutY = showFatigueInput and gasOutBull ? math.min(100.0, oscVal + 10.0) : showFatigueInput and gasOutBear ? math.max(0.0, oscVal - 10.0) : na
+plotshape(gasOutY, "Delta Gas-Out", shape.diamond, location.absolute, color.new(color.white, 50), size = size.small)
 
 color obLineCol  = color.new(bullColorInput, 50)
 color osLineCol  = color.new(bearColorInput, 50)
@@ -729,6 +734,17 @@ fill(p_mid, p_osc, 50.0, effOS, color.new(chart.bg_color, 100), osFillCol, title
 fill(p_top, p_ob, regObFill, title = "Regime OB State")
 fill(p_os, p_bot, regOsFill, title = "Regime OS State")
 plot(showConfluenceInput ? confVal : na, "Confluence", confColor, linewidth = 1, style = plot.style_stepline)
+plot(fpFlowAvailable ? 1.0 : 0.0, "nexus_fp_available", display = display.none, editable = false)
+plot(fpBarDelta, "nexus_fp_bar_delta", display = display.none, editable = false)
+plot(fpTotalVolume, "nexus_fp_total_volume", display = display.none, editable = false)
+plot(normCumDelta, "nexus_norm_cum_delta", display = display.none, editable = false)
+plot(deltaSlope, "nexus_delta_slope", display = display.none, editable = false)
+plot(barDeltaRatio, "nexus_bar_delta_ratio", display = display.none, editable = false)
+plot(float(deltaDir), "nexus_delta_dir", display = display.none, editable = false)
+plot(gasOutBull ? 1.0 : 0.0, "nexus_gasout_bull", display = display.none, editable = false)
+plot(gasOutBear ? 1.0 : 0.0, "nexus_gasout_bear", display = display.none, editable = false)
+plot(modeInput == "5m" ? 5.0 : modeInput == "15m" ? 15.0 : modeInput == "1H" ? 60.0 : 240.0, "nexus_mode_minutes", display = display.none, editable = false)
+plot(bullReversalSignal ? 1.0 : bearReversalSignal ? -1.0 : lowConvictionSignal ? 0.5 : 0.0, "nexus_signal_tier", display = display.none, editable = false)
 
 // ══════════════════════════════════════════════════════════
 // DASHBOARD
@@ -747,50 +763,16 @@ color  vfCol       = not volumeAvailable ? TEXT_MUTED : vfCalcVal > vfSignalThre
 string regimeStr   = erTrending ? "Trending" : "Ranging"
 color  regimeCol   = erTrending ? BULL_TEXT : NEUTRAL_TEXT
 string knnStr      = knnIsBull ? "Bullish" : knnIsBear ? "Bearish" : "Neutral"
-string tfModeStr   = "5m Native"
+string tfModeStr   = modeInput + " Native"
 color  tfModeCol   = TEXT_MUTED
-
-if showDashInput and barstate.islast
-    var dashTable = table.new(dashPos, 2, 14, TABLE_BG, TABLE_BORDER, 1, TABLE_BORDER, 1)
-    table.cell(dashTable, 0, 0, "Nexus Fusion ML", text_color = HEADER_TEXT, bgcolor = HEADER_BG, text_size = size.small, text_halign = text.align_center)
-    table.merge_cells(dashTable, 0, 0, 1, 0)
-    table.cell(dashTable, 0, 1, "Trend", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 1, 1, trendStr, text_color = trendCol, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 0, 2, "Signal", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 1, 2, signalStr, text_color = signalCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 0, 3, "Strength", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 1, 3, strengthStr, text_color = strengthCol, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 0, 4, "Oscillator", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 1, 4, str.tostring(oscVal, "#.#"), text_color = trendCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 0, 5, "Momentum", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 1, 5, momStr, text_color = momCol, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 0, 6, "TF Mode", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 1, 6, tfModeStr, text_color = tfModeCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 0, 7, "Vol Flow", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 1, 7, vfStr, text_color = vfCol, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 0, 8, "Regime", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 1, 8, regimeStr, text_color = regimeCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 0, 9, "KNN Bias", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 1, 9, knnStr, text_color = knnCol, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 0, 10, "Confluence", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 1, 10, confStr + " (" + str.tostring(confVal, "#.#") + ")", text_color = confColor, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 0, 11, "ER", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 1, 11, str.tostring(erSmoothed, "#.##"), text_color = regimeCol, text_size = size.small, bgcolor = TABLE_BG)
-    table.cell(dashTable, 0, 12, "Score", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    string scoreStr = str.tostring(regimeScore) + "/" + str.tostring(regimeScoreMax)
-    color scoreCol = regimeScore >= regimeScoreMax - 1 ? BULL_TEXT : regimeScore <= 1 ? BEAR_TEXT : NEUTRAL_TEXT
-    table.cell(dashTable, 1, 12, scoreStr, text_color = scoreCol, text_size = size.small, bgcolor = TABLE_ROW_ALT)
-    table.cell(dashTable, 0, 13, "Consensus", text_color = TEXT_MUTED, text_size = size.small, bgcolor = TABLE_BG)
-    string consStr = str.tostring(confBullVotes) + "B / " + str.tostring(confBearVotes) + "S"
-    color consCol = confBullVotes > confBearVotes ? BULL_TEXT : confBearVotes > confBullVotes ? BEAR_TEXT : NEUTRAL_TEXT
-    table.cell(dashTable, 1, 13, consStr, text_color = consCol, text_size = size.small, bgcolor = TABLE_BG)
 
 // ══════════════════════════════════════════════════════════
 // WATERMARK — WillyAlgoTrader
 // ══════════════════════════════════════════════════════════
 if barstate.islast and showWatermarkInput
-    var wmTable = table.new(position = position.bottom_center, columns = 1, rows = 1, bgcolor = color.new(color.black, 100), border_color = color.new(color.black, 100), border_width = 0, frame_color = color.new(color.black, 100), frame_width = 0)
-    table.cell(wmTable, 0, 0, "WillyAlgoTrader", text_color = WM_COLOR, text_size = size.large, text_halign = text.align_center, bgcolor = color.new(color.black, 100))
+    var wmTable = table.new(position = position.bottom_center, columns = 2, rows = 1, bgcolor = color.new(color.black, 100), border_color = color.new(color.black, 100), border_width = 0, frame_color = color.new(color.black, 100), frame_width = 0)
+    table.cell(wmTable, 0, 0, "WARBIRD", text_color = WM_COLOR, text_size = size.large, text_halign = text.align_right, bgcolor = color.new(color.black, 100), text_formatting = text.format_bold)
+    table.cell(wmTable, 1, 0, "PRO", text_color = color.new(WARBIRD_BEAR, 35), text_size = size.large, text_halign = text.align_left, bgcolor = color.new(color.black, 100))
 
 // ══════════════════════════════════════════════════════════
 // ALERTS
@@ -806,7 +788,7 @@ string vfJsonStr   = volumeAvailable ? str.tostring(vfCalcVal, "#.#") : "null"
 string vfAvailJson = volumeAvailable ? "true" : "false"
 string confValStr  = str.tostring(confVal, "#.#")
 string knnConfStr  = str.tostring(knnConf)
-string tfModeAlertStr = "5m Native"
+string tfModeAlertStr = modeInput + " Native"
 bool alertReady    = barstate.isconfirmed and isWarmedUp
 
 bool aCrossUp   = ta.crossover(oscVal, sigVal) and alertReady
@@ -816,8 +798,8 @@ bool aExitOb    = ta.crossunder(oscVal, effOB) and alertReady
 bool aVfIn      = volumeAvailable and ta.crossover(vfCalcVal, vfSignalThresholdInput) and alertReady
 bool aVfOut     = volumeAvailable and ta.crossunder(vfCalcVal, vfSignalBearThreshold) and alertReady
 
-bool tradeTriggerBull = alCrossInput and aCrossUp and oscVal < 50.0
-bool tradeTriggerBear = alCrossInput and aCrossDown and oscVal > 50.0
+bool tradeTriggerBull = alCrossInput and bullReversalSignal
+bool tradeTriggerBear = alCrossInput and bearReversalSignal
 bool exhaustionBull   = alZoneInput and aExitOs
 bool exhaustionBear   = alZoneInput and aExitOb
 bool knnAlertBull     = alKnnInput and knnFlipBull and alertReady
