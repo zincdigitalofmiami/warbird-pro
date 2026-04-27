@@ -1,6 +1,6 @@
 # Warbird Model Spec — Indicator-Only v6
 
-**Date:** 2026-04-26
+**Date:** 2026-04-27
 **Status:** Active, subordinate to `docs/MASTER_PLAN.md`
 
 ## Contract
@@ -93,6 +93,35 @@ Primary metrics:
 
 `v8-warbird-live.pine` and `v8-warbird-prescreen.pine` remain code-frozen
 legacy baselines. Only approved `input.*` default changes may be made there.
+
+## Locked Baseline Checkpoint (2026-04-27)
+
+Operator checkpoint summary from TradingView strategy snapshots:
+
+- 15m: +6.74% PnL, PF 1.143, 434 trades, 3.47% max drawdown
+- 5m: -2.55% PnL, PF 0.91, 295 trades, 3.44% max drawdown
+- 1h: -9.26% PnL, PF 0.929, 801 trades, 14.33% max drawdown
+
+Policy from this checkpoint:
+
+- 15m behavior is the reference baseline for fib and structure semantics.
+- 5m is the active tuning lane.
+- Backtest fib core in
+  `indicators/v7-warbird-institutional-backtest-strategy.pine` is frozen until
+  explicitly reopened with approval and before/after evidence.
+
+Protected fib-core scope:
+
+- `fibHtfSnapshot` and `fibZzSource`
+- anchor ownership transitions (`fibAnchorHigh/Low`, anchor times, snapshot-change logic)
+- fib ladder math (`fibPrice`, canonical retracement/extension level construction)
+- trade-time fib freeze/snapshot surfaces (`snapP*`, `effectiveP*`, frozen draw span)
+
+Allowed tuning scope while locked:
+
+- non-fib risk gates, trigger thresholds, reclaim/sweep lookbacks, cooldowns
+- footprint gating strictness and execution safety parameters
+- module on/off decisions that do not alter fib math or anchor state ownership
 
 ## Feature Scope
 

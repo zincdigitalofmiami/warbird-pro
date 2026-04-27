@@ -1,6 +1,6 @@
 # Warbird Documentation Index
 
-**Date:** 2026-04-26
+**Date:** 2026-04-27
 **Status:** Active Documentation Authority
 **Active Plan:** Warbird Indicator-Only AG Plan v6
 
@@ -15,6 +15,10 @@ current trigger families, settings, thresholds, and search spaces as the latest
 documented evidence snapshot. They may change after new TradingView exports,
 Strategy Tester runs, Optuna trials, AG analysis, or SHAP review. Any accepted
 change must update this indexed authority set in the same commit.
+
+Current checkpoint lock (2026-04-27): 15m is the baseline reference and 5m
+tuning must preserve the protected backtest fib-core scope unless explicitly
+reopened with evidence.
 
 ## Read Order
 

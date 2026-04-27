@@ -1,6 +1,6 @@
 # Warbird Contracts
 
-**Date:** 2026-04-26
+**Date:** 2026-04-27
 **Status:** Active Interface Authority
 
 This directory is the only interface authority for Warbird payloads,
@@ -33,6 +33,10 @@ When a run changes trigger semantics, settings, labels, features, or promotion
 criteria, update the affected contract Markdown before another agent relies on
 the result. Historical contract text must be clearly marked superseded instead
 of left ambiguous.
+
+Current lock checkpoint (2026-04-27): backtest fib core in
+`indicators/v7-warbird-institutional-backtest-strategy.pine` is protected
+scope while 5m tuning iterates.
 
 ## Working Rule
 

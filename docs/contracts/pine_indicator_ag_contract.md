@@ -1,6 +1,6 @@
 # Pine Indicator AG Contract
 
-**Date:** 2026-04-26
+**Date:** 2026-04-27
 **Status:** Active modeling contract
 
 ## Purpose
@@ -60,6 +60,28 @@ Do not mix trigger families inside one run.
 `acceptEvent` alone is not the live institutional entry trigger. It is a
 diagnostic/setup-archetype event unless a specific strategy surface uses it as
 part of its own execution path.
+
+## Locked Fib Baseline (2026-04-27)
+
+Backtest fib core in
+`indicators/v7-warbird-institutional-backtest-strategy.pine` is a protected
+baseline. It must remain stable while 5m tuning iterates.
+
+Protected scope:
+
+- `fibHtfSnapshot` and `fibZzSource`
+- anchor ownership/state transition logic for fib legs
+- fib ladder construction via `fibPrice` and canonical fib ratios
+- trade-time fib snapshot/freeze surfaces (`snapP*`, `effectiveP*`, draw span)
+
+Allowed tuning scope while lock is active:
+
+- non-fib thresholds and safety gates
+- lookback/cooldown controls outside fib anchor math
+- footprint gating strictness and execution toggles
+
+Any proposed fib-core change requires explicit approval plus before/after
+TradingView evidence with manifest coverage.
 
 ## Explicit Exclusions
 

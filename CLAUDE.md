@@ -46,6 +46,12 @@ Budget verification from 2026-04-26:
 - v7 strategy: 60/64 output calls, 4 `request.security()` + 1 `request.footprint()`
 - backtest strategy: 53/64 output calls, 4 `request.security()` + 1 `request.footprint()`
 
+Checkpoint summary from 2026-04-27 operator TradingView snapshots:
+
+- 15m: +6.74% PnL, PF 1.143, 434 trades, 3.47% max DD
+- 5m: -2.55% PnL, PF 0.91, 295 trades, 3.44% max DD
+- 1h: -9.26% PnL, PF 0.929, 801 trades, 14.33% max DD
+
 ### Modeling Surfaces
 
 - `scripts/optuna/` is the active local optimization workspace.
@@ -59,9 +65,9 @@ Budget verification from 2026-04-26:
 
 ### Current Blocker
 
-Refresh the Pine-derived baseline export and align the active optimization
-scripts/runbooks to the new indicator-only contract before launching modeling.
-Do not start training until the user explicitly approves it.
+Run controlled 5m tuning with fib-core lock preserved and produce
+manifest-backed evidence for any settings recommendation. Do not start
+training/modeling unless the user explicitly approves it.
 
 ## Locked Rules
 
@@ -70,7 +76,11 @@ Do not start training until the user explicitly approves it.
 - No mock data.
 - No daily-ingestion training dependency.
 - No Pine edits without explicit approval in the current session.
+- In `indicators/v7-warbird-institutional-backtest-strategy.pine`, fib core is
+  protected scope and must not be changed without explicit approval plus
+  before/after evidence.
 - No TradingView Pine Editor push without explicit approval.
+- Use 15m behavior as the baseline reference when evaluating 5m tuning changes.
 - Commission floor for MES Strategy Tester evidence: $1.00/side.
 - Slippage floor: 1 tick.
 - Bar Magnifier must be enabled when reported results depend on intrabar stop or

@@ -110,6 +110,10 @@ context, or agent-facing notes pointing at an older trigger or training surface.
 - Never push Pine changes to TradingView Pine Editor without explicit approval.
 - `indicators/v8-warbird-live.pine` and `indicators/v8-warbird-prescreen.pine`
   are code-frozen. Only approved `input.*` default changes are allowed.
+- `indicators/v7-warbird-institutional-backtest-strategy.pine` fib core is
+  locked (checkpoint 2026-04-27). Do not modify `fibHtfSnapshot`,
+  `fibZzSource`, anchor ownership transitions, fib ladder math, or trade fib
+  freeze/snapshot internals without explicit approval and before/after evidence.
 - Pine budget baselines verified 2026-04-26:
   - `v7-warbird-institutional.pine`: 58/64 output calls
   - `v7-warbird-strategy.pine`: 60/64 output calls

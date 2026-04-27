@@ -183,6 +183,9 @@ Stop and report blockers if any are true:
 4. Runtime validation is required but unavailable.
 5. The assistant cannot prove that the claimed file edits exist.
 6. The assistant cannot prove that verification commands actually passed.
+7. The task proposes changing backtest fib-core code in
+   `indicators/v7-warbird-institutional-backtest-strategy.pine` without
+   explicit approval and before/after evidence.
 
 When blocked, report:
 

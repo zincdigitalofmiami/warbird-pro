@@ -1,6 +1,6 @@
 # Warbird Indicator-Only AG Plan v6
 
-**Date:** 2026-04-26
+**Date:** 2026-04-27
 **Status:** Active architecture plan
 
 ## Summary
@@ -105,6 +105,30 @@ Required facts:
 
 No Pine code changes are allowed without explicit session approval.
 
+### Phase 1A — Locked Baseline Checkpoint (2026-04-27)
+
+Latest operator checkpoint (TradingView screenshots, 2026-04-27):
+
+- 15m lane (reference baseline): +6.74% PnL, PF 1.143, 434 trades, 3.47% max DD
+- 5m lane (candidate tuning lane): -2.55% PnL, PF 0.91, 295 trades, 3.44% max DD
+- 1h lane (de-prioritized): -9.26% PnL, PF 0.929, 801 trades, 14.33% max DD
+
+Lock decision from this checkpoint:
+
+- Use 15m behavior as the reference baseline for structure and fib semantics.
+- Keep 5m as the active tuning lane.
+- Freeze fib-core behavior in
+  `indicators/v7-warbird-institutional-backtest-strategy.pine` unless explicitly
+  reopened by Kirk with before/after evidence.
+
+Allowed 5m tuning scope while locked:
+
+- risk controls and thresholds
+- reclaim/breakout/sweep lookbacks
+- exhaustion lookbacks/cooldowns
+- trigger gating and module toggles that do not alter fib ownership, ladder math,
+  or anchor state transitions
+
 ### Phase 2 — Pine Output Capture
 
 Capture training rows from TradingView/Pine only.
@@ -204,6 +228,11 @@ Any Pine addition must be priced before code is written.
 - No external feature stacking.
 - No daily-ingestion training dependency.
 - No Pine edits without explicit approval.
+- Backtest fib core is locked in
+  `indicators/v7-warbird-institutional-backtest-strategy.pine`:
+  `fibHtfSnapshot`, `fibZzSource`, anchor ownership transitions, fib ladder
+  construction (`fibPrice` + canonical levels), and trade-fib freeze snapshot
+  logic are protected scope.
 - No strategy result is trusted without TradingView export/CDP evidence.
 - No champion is accepted without IS/OOS or walk-forward-style review.
 - Commission floor is $1.00/side for MES.
@@ -213,6 +242,6 @@ Any Pine addition must be priced before code is written.
 
 ## Current Blocker
 
-The next blocking item is to align the active scripts and runbooks to this
-indicator-only contract, then run a fresh Pine-derived baseline export before
-launching any modeling.
+Run a controlled 5m non-fib tuning pass against the locked 15m-reference
+baseline, then publish a manifest-backed recommendation set. Do not reopen fib
+core without explicit approval and evidence.
