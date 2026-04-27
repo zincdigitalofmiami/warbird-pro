@@ -188,6 +188,8 @@ showFatigueInput = input.bool(true, "Show Fatigue Markers", group = GRP_EXHAUST,
     tooltip = "Detects momentum fatigue with chart markers.\n◆ Bearish Exhaustion: weakening in overbought zone\n◆ Bullish Exhaustion: strengthening in oversold zone")
 fatigueBarsInput = input.int(4, "Confirmation Bars", minval = 1, maxval = 5, group = GRP_EXHAUST,
     tooltip = "Consecutive bars of weakening/strengthening needed.\n1=fast, 3=balanced, 5=very strict")
+fatigueMarkerColorInput = input.color(color.new(WARBIRD_YELLOW, 20), "Fatigue Color", inline = "exh_colors", group = GRP_EXHAUST)
+gasOutMarkerColorInput = input.color(color.new(color.white, 50), "Gas-Out Color", inline = "exh_colors", group = GRP_EXHAUST)
 showGasOutInput = input.bool(true, "Show Delta Gas-Out", group = GRP_EXHAUST,
     tooltip = "Plots translucent white gas-out diamonds when footprint cumulative delta decelerates against its signed direction.")
 gasOutOffsetInput = input.float(10.0, "Gas-Out Offset", minval = 2.0, maxval = 20.0, step = 0.5, group = GRP_EXHAUST,
@@ -704,22 +706,24 @@ p_sig = plot(sigVal, "Signal Line", LINE_SUBTLE, linewidth = 1)
 
 bool crossUp   = ta.crossover(oscVal, sigVal)
 bool crossDown = ta.crossunder(oscVal, sigVal)
-bool bullReversalSignal = crossUp and isWarmedUp and oscVal < 50.0 and knnIsBull and deltaBullConfirm
-bool bearReversalSignal = crossDown and isWarmedUp and oscVal > 50.0 and knnIsBear and deltaBearConfirm
-bool lowConvictionSignal = isWarmedUp and ((crossUp and oscVal < 50.0 and not bullReversalSignal) or (crossDown and oscVal > 50.0 and not bearReversalSignal))
+bool bullPrimaryReversal = crossUp and isWarmedUp and oscVal < 50.0 and knnIsBull
+bool bearPrimaryReversal = crossDown and isWarmedUp and oscVal > 50.0 and knnIsBear
+bool bullReversalSignal = bullPrimaryReversal and deltaBullConfirm
+bool bearReversalSignal = bearPrimaryReversal and deltaBearConfirm
+bool lowConvictionSignal = isWarmedUp and ((crossUp and oscVal < 50.0 and not bullPrimaryReversal) or (crossDown and oscVal > 50.0 and not bearPrimaryReversal))
 float crossDotY = showCrossDotsInput and (crossUp or crossDown) ? sigVal : na
 color crossDotColor = crossUp ? bullColorInput : bearColorInput
 plotshape(crossDotY, "Cross Dot", shape.circle, location.absolute, crossDotColor, size = size.tiny)
 
-float reversalY = bullReversalSignal ? math.max(0.0, oscVal - 8.0) : bearReversalSignal ? math.min(100.0, oscVal + 8.0) : na
-color reversalColor = bullReversalSignal ? bullColorInput : bearColorInput
-plotshape(reversalY, "Confirmed Reversal", shape.diamond, location.absolute, reversalColor, size = size.normal)
+float reversalY = bullPrimaryReversal ? math.max(0.0, oscVal - 8.0) : bearPrimaryReversal ? math.min(100.0, oscVal + 8.0) : na
+color reversalColor = bullPrimaryReversal ? bullColorInput : bearPrimaryReversal ? bearColorInput : na
+plotshape(reversalY, "Confirmed Reversal", shape.diamond, location.absolute, reversalColor, size = size.large)
 plotshape(lowConvictionSignal ? sigVal : na, "Low Conviction Signal", shape.circle, location.absolute, WARBIRD_YELLOW, size = size.tiny)
 float fatigueY = fatObSignal ? math.min(100.0, oscVal + 6.0) : fatOsSignal ? math.max(0.0, oscVal - 6.0) : na
-color fatigueColor = color.new(color.white, 50)
+color fatigueColor = fatigueMarkerColorInput
 plotshape(fatigueY, "Momentum Fatigue", shape.diamond, location.absolute, fatigueColor, size = size.small)
 float gasOutY = showGasOutInput and gasOutBull ? math.min(100.0, oscVal + gasOutOffsetInput) : showGasOutInput and gasOutBear ? math.max(0.0, oscVal - gasOutOffsetInput) : na
-plotshape(gasOutY, "Delta Gas-Out", shape.diamond, location.absolute, color.new(color.white, 50), size = size.small)
+plotshape(gasOutY, "Delta Gas-Out", shape.diamond, location.absolute, gasOutMarkerColorInput, size = size.small)
 
 color obLineCol  = color.new(bullColorInput, 50)
 color osLineCol  = color.new(bearColorInput, 50)
