@@ -18,7 +18,7 @@
 // HTF fib (1H):        [high, low] tuple                 = 1 call
 // HTF fib (4H):        [high, low] tuple                 = 1 call
 // HTF fib (1D):        [high, low] tuple                 = 1 call
-// Parent fib override: request.security(fibAnchorTimeframe) = 1 conditional call
+// Parent fib override: request.security(fibAnchorTimeframe) = 1 conditional call (default OFF; 5m native)
 // NYSE A-D Line (D):   close                             = 1 call
 // Footprint (chart):    request.footprint()              = 1 call
 // TOTAL:                                                 = 6 request.* paths
@@ -27,9 +27,14 @@
 // TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed.
 // Momentum Oscillators (5 plots: ml_vf_bull, ml_vf_bear, ml_nfe, ml_rsi_knn, ml_confluence) added 2026-04-20.
 strategy("Warbird Pro Optuna Backtest", shorttitle="WB Opt BT", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100, pyramiding=0, process_orders_on_close=false, use_bar_magnifier=true, fill_orders_on_standard_ohlc=true, slippage=1, default_qty_type=strategy.fixed, default_qty_value=1, initial_capital=50000, currency=currency.USD, margin_long=25, margin_short=25, commission_type=strategy.commission.cash_per_contract, commission_value=1.00)
-import TradingView/ZigZag/7 as zigzag
 
 const int DRAW_HISTORY_BARS = 5000
+const int TF_SECONDS_15M = 900
+const int TF_SECONDS_1H = 3600
+const int TF_SECONDS_4H = 14400
+const int FIB_SCANNER_MIN_RIGHT_ROOM_BARS = 1
+const int FIB_SCANNER_MIN_LOOKBACK_BARS = 5
+const int FIB_SCANNER_ATR_LEN = 10
 max_bars_back(time, DRAW_HISTORY_BARS)
 
 //=====================
@@ -37,37 +42,33 @@ max_bars_back(time, DRAW_HISTORY_BARS)
 //=====================
 string groupFibEngine = "Fibonacci Engine"
 bool autoTuneZZ = input.bool(true, "Auto-tune ZigZag by Timeframe", group=groupFibEngine,
-  tooltip="ON: 4H+ uses Deviation=4/Depth=20, 1H uses Deviation=3.5/Depth=15, 15m uses Deviation=4/Depth=20, below 15m uses Deviation=3/Depth=15. Turn OFF to set values manually.")
+  tooltip="ON: 4H+ uses Deviation=4, 1H uses Deviation=3.5, 15m uses Deviation=4, below 15m uses Deviation=3. Turn OFF to set value manually.")
 float fibDeviationManual = input.float(4.0, "ZigZag Deviation (manual)",
   minval=0.5, maxval=20.0, step=0.5, group=groupFibEngine,
-  tooltip="Only used when Auto-tune is OFF.")
-int fibDepthManual = input.int(20, "ZigZag Depth (manual)",
-  minval=2, maxval=50, group=groupFibEngine,
   tooltip="Only used when Auto-tune is OFF.")
 float fibConfluenceTolPct = input.float(0.05, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupFibEngine)
 float fibThresholdFloorPct = input.float(0.50, "ZigZag Threshold Floor (%)", minval=0.0, maxval=5.0, step=0.05, group=groupFibEngine,
   tooltip="Minimum percent move required by the ZigZag after ATR scaling.")
-int fibPivotRightRoomBars = input.int(4, "Pivot Right Room (parent bars)", minval=1, maxval=20, group=groupFibEngine,
-  tooltip="Bars after a candidate parent pivot before the fib leg may re-anchor. This keeps anchors off the latest bar while allowing the most recent confirmed major leg.")
-int fibRecentLegLookbackBars = input.int(20, "Recent Leg Lookback (parent bars)", minval=5, maxval=120, group=groupFibEngine,
-  tooltip="Parent bars scanned for the active major move after excluding Pivot Right Room. On the 15m parent, 20 bars is the last 5 hours.")
+int fibPivotRightRoomBars = input.int(4, "Pivot Right Room (bars)", minval=1, maxval=20, group=groupFibEngine,
+  tooltip="Bars after a candidate pivot before the fib leg may re-anchor. This keeps anchors off the latest bar while allowing the most recent confirmed major leg.")
+int fibRecentLegLookbackBars = input.int(20, "Recent Leg Lookback (bars)", minval=5, maxval=120, group=groupFibEngine,
+  tooltip="Bars scanned for the active major move after excluding Pivot Right Room. This control is applied on all timeframes.")
 float minFibRangeAtr = input.float(0.5, "Min Fib Range (ATR)", minval=0.5, maxval=10.0, step=0.1, group=groupFibEngine)
 bool useParentFibTimeframe = input.bool(false, "Use Parent Fib Timeframe", group=groupFibEngine,
-  tooltip="OFF (default) keeps fibs native to the chart timeframe (5m canonical, matches the live indicator). Turn ON to anchor fibs to a higher parent timeframe.")
-string fibAnchorTimeframe = input.timeframe("15", "Parent Fib Timeframe", group=groupFibEngine,
-  tooltip="The parent fib owner. Use 15 for the current Warbird contract. Turn Use Parent Fib Timeframe OFF to let the chart timeframe own the fib ladder.")
+  tooltip="OFF keeps fib ownership on the chart timeframe. ON uses Parent Fib Timeframe ownership (equal or higher timeframe; lower timeframe selections are ignored).")
+string fibAnchorTimeframe = input.timeframe("5", "Parent Fib Timeframe", group=groupFibEngine,
+  tooltip="Fib owner when Use Parent Fib Timeframe is ON. Equal timeframe applies scanner logic natively; higher timeframe projects parent ladders.")
 
 int _chartTfSec = timeframe.in_seconds(timeframe.period)
 int _parentTfSec = timeframe.in_seconds(fibAnchorTimeframe)
-bool useFibAnchorTimeframeOverride = useParentFibTimeframe and fibAnchorTimeframe != timeframe.period and _parentTfSec > _chartTfSec
-string fibCalcTimeframe = useFibAnchorTimeframeOverride ? fibAnchorTimeframe : timeframe.period
+bool parentFibTfUsable = _parentTfSec > 0 and _parentTfSec >= _chartTfSec
+bool useParentFibTimeframeActive = useParentFibTimeframe and parentFibTfUsable
+string fibCalcTimeframe = useParentFibTimeframeActive ? fibAnchorTimeframe : timeframe.period
+bool useFibAnchorTimeframeOverride = fibCalcTimeframe != timeframe.period
 int _tfSec = timeframe.in_seconds(fibCalcTimeframe)
 float fibDeviation = autoTuneZZ
-  ? (_tfSec >= 14400 ? 4.0 : _tfSec >= 3600 ? 3.5 : _tfSec >= 900 ? 4.0 : 3.0)
+  ? (_tfSec >= TF_SECONDS_4H ? 4.0 : _tfSec >= TF_SECONDS_1H ? 3.5 : _tfSec >= TF_SECONDS_15M ? 4.0 : 3.0)
   : fibDeviationManual
-int fibDepth = autoTuneZZ
-  ? (_tfSec >= 14400 ? 20 : _tfSec >= 3600 ? 15 : _tfSec >= 900 ? 20 : 15)
-  : fibDepthManual
 
 barsForMinutes(float minutes, int fallbackBars) =>
     _chartTfSec > 0 ? int(math.max(1.0, math.round(minutes * 60.0 / _chartTfSec))) : fallbackBars
@@ -119,6 +120,8 @@ string groupLogic = "Structure Logic"
 int retestBars   = input.int(1, "Acceptance Retest Window (bars)", minval=1, group=groupLogic)
 bool rejectWick   = input.bool(true, "Rejection = wick into zone then close back out", group=groupLogic)
 bool oneShotEvent = input.bool(true, "One-shot event markers/alerts", group=groupLogic)
+int liqSweepLookbackBarsInput = input.int(10, "Liquidity Sweep Lookback", minval=3, maxval=100, group=groupLogic,
+  tooltip="Bars used for prior swing high/low sweep detection. Default 10 preserves current behavior.")
 
 bool gateShortsInBullTrend = input.bool(true, "Gate Shorts In Bull Trend", group=groupLogic,
   tooltip="Blocks bearish accept-entry triggers when the broader trend context is bullish and rising. Keeps the engine from bleeding into obvious countertrend shorts.")
@@ -137,6 +140,8 @@ string groupExecution = "Execution / Safety"
 int cooldownBarsInput = input.int(0, "Post-Exit Cooldown Bars", minval=0, maxval=50, group=groupExecution,
   tooltip="0 disables the hard time cooldown. Use this only for deliberate anti-cluster testing; otherwise it suppresses valid continuation and reclaim entries.")
 int setupExpiryMinutesInput = input.int(180, "Setup Expiry Minutes", minval=15, maxval=720, step=15, group=groupExecution)
+int valueReclaimBreakoutLookbackBarsInput = input.int(6, "Value Reclaim Breakout Lookback", minval=2, maxval=50, group=groupExecution,
+  tooltip="Bars used for local break-high/low confirmation in value reclaim entries. Default 6 preserves current behavior.")
 bool useMicroValueReclaimInput = input.bool(true, "Use 5m Value-Reclaim Trigger", group=groupExecution,
   tooltip="Adds a subordinate footprint POC/value reclaim trigger while keeping the parent fib direction and risk gates intact.")
 bool backtestFibAnchorOnlyInput = input.bool(true, "Backtest Fib Anchor Hits Directly", group=groupExecution,
@@ -149,6 +154,10 @@ float footprintVaPercent = input.float(50.0, "Footprint VA %", minval=1.0, maxva
 float footprintImbalancePercent = input.float(195.0, "Footprint Imbalance %", minval=100.0, maxval=1000.0, step=10.0, group=groupFootprint)
 float exhaustionLevelAtrTol = input.float(0.10, "Extension ATR Tolerance", minval=0.01, maxval=0.50, step=0.01, group=groupFootprint)
 float zeroPrintVolRatio = input.float(0.10, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
+int exhaustionSwingLookbackBarsInput = input.int(10, "Exhaustion Swing Lookback", minval=3, maxval=50, group=groupFootprint,
+  tooltip="Bars used for swing-high/swing-low exhaustion checks. Default 10 preserves current behavior.")
+int exhaustionCooldownBarsInput = input.int(8, "Exhaustion Cooldown Bars", minval=1, maxval=50, group=groupFootprint,
+  tooltip="Minimum bars between same-side exhaustion diamonds. Default 8 preserves current behavior.")
 int optImbalanceRows = input.int(2, "Imbalance Rows", minval=1, maxval=3, group=groupFootprint,
   tooltip="Minimum consecutive extreme rows with same-side imbalance required for a live entry trigger.")
 bool requireFootprintForBacktestInput = input.bool(false, "Require Footprint For Backtest Entries", group=groupFootprint,
@@ -319,7 +328,7 @@ bool isEventDay = isNFPDay or isFOMCDay or isCPIDay
 // Bull sweep: price wicks below prior swing low, closes back above — stop hunt below
 // Bear sweep: price wicks above prior swing high, closes back below — stop hunt above
 //=====================
-int swingLookback = 10
+int swingLookback = liqSweepLookbackBarsInput
 float swingHigh = ta.highest(high, swingLookback)[1]
 float swingLow = ta.lowest(low, swingLookback)[1]
 bool liqSweepBull = low < swingLow and close > swingLow   // swept below, closed back inside
@@ -412,37 +421,9 @@ htfConfluenceCheck(float level15m, float currentFibRange) =>
 //=====================
 // AUTO FIB ENGINE — ZigZag confirmed pivots (non-repainting)
 //=====================
-fibZzUpdate(float deviationPct, int depthBars, float thresholdFloorPct) =>
-    var fibSettings = zigzag.Settings.new(deviationPct, depthBars, color(na), false, false, false, false, "Absolute", true)
-    var zigzag.ZigZag fibZZ = zigzag.newInstance(fibSettings)
-    zigzag.Pivot lastPvt = na
-    fibSettings.devThreshold := math.max(ta.atr(10) / close * 100 * deviationPct, thresholdFloorPct)
-    bool newPivot = false
-    float pivotHighPrice = na
-    float pivotLowPrice = na
-    int pivotHighTime = na
-    int pivotLowTime = na
-    int swingDir = 0  // +1 = up-swing (low→high, bullish), -1 = down-swing (high→low, bearish), 0 = flat/no pivot
-    if fibZZ.update()
-        lastPvt := fibZZ.lastPivot()
-        if not na(lastPvt)
-            newPivot := true
-            float startP = lastPvt.start.price
-            float endP = lastPvt.end.price
-            pivotHighPrice := math.max(startP, endP)
-            pivotLowPrice  := math.min(startP, endP)
-            swingDir := endP > startP ? 1 : endP < startP ? -1 : 0
-            if startP >= endP
-                pivotHighTime := lastPvt.start.time
-                pivotLowTime  := lastPvt.end.time
-            else
-                pivotHighTime := lastPvt.end.time
-                pivotLowTime  := lastPvt.start.time
-    [newPivot, pivotHighPrice, pivotLowPrice, pivotHighTime, pivotLowTime, swingDir]
-
 fibHtfSnapshot(float deviationPct, int lookbackBars, int rightRoomBars, float thresholdFloorPct) =>
-    int legRightBars = math.max(1, rightRoomBars)
-    int legLookbackBars = math.max(5, lookbackBars)
+    int legRightBars = math.max(FIB_SCANNER_MIN_RIGHT_ROOM_BARS, rightRoomBars)
+    int legLookbackBars = math.max(FIB_SCANNER_MIN_LOOKBACK_BARS, lookbackBars)
     float shiftedHigh = high[legRightBars]
     float shiftedLow = low[legRightBars]
     float recentHigh = ta.highest(shiftedHigh, legLookbackBars)
@@ -464,7 +445,7 @@ fibHtfSnapshot(float deviationPct, int lookbackBars, int rightRoomBars, float th
         float refPrice = math.max(math.abs(recentLow), syminfo.mintick)
         float movePct = candidateRange / refPrice * 100.0
         float candidateClose = close[legRightBars]
-        float candidateAtr = ta.atr(10)[legRightBars]
+        float candidateAtr = ta.atr(FIB_SCANNER_ATR_LEN)[legRightBars]
         float dynThreshold = not na(candidateAtr) and candidateClose != 0 ? math.max(candidateAtr / candidateClose * 100.0 * deviationPct, thresholdFloorPct) : thresholdFloorPct
         if movePct >= dynThreshold
             int candidateDir = candidateHighTime > candidateLowTime ? 1 : candidateLowTime > candidateHighTime ? -1 : 0
@@ -480,9 +461,9 @@ fibHtfSnapshot(float deviationPct, int lookbackBars, int rightRoomBars, float th
 
 fibZzSource() =>
     if useFibAnchorTimeframeOverride
-        request.security(syminfo.tickerid, fibAnchorTimeframe, fibHtfSnapshot(fibDeviation, fibRecentLegLookbackBars, fibPivotRightRoomBars, fibThresholdFloorPct), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+        request.security(syminfo.tickerid, fibCalcTimeframe, fibHtfSnapshot(fibDeviation, fibRecentLegLookbackBars, fibPivotRightRoomBars, fibThresholdFloorPct), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
     else
-        fibZzUpdate(fibDeviation, fibDepth, fibThresholdFloorPct)
+        fibHtfSnapshot(fibDeviation, fibRecentLegLookbackBars, fibPivotRightRoomBars, fibThresholdFloorPct)
 
 [zzNewPivot, zzHighPrice, zzLowPrice, zzHighTime, zzLowTime, zzSwingDir] = fibZzSource()
 
@@ -884,13 +865,13 @@ bool mlExhZeroPrint = mlExhFootprintAvailable and not na(extremeRowVolRatio) and
 int footprintEvidenceCount = (mlExhDeltaDiv ? 1 : 0) + (mlExhAbsorption ? 1 : 0) + (mlExhZeroPrint ? 1 : 0)
 
 // ── SWING EXTREME ───────────────────────────────────────────────────────
-bool isSwingHighBar = high >= ta.highest(high, 10)
-bool isSwingLowBar = low <= ta.lowest(low, 10)
+bool isSwingHighBar = high >= ta.highest(high, exhaustionSwingLookbackBarsInput)
+bool isSwingLowBar = low <= ta.lowest(low, exhaustionSwingLookbackBarsInput)
 
 // ── COOLDOWN: 8 bars (2 hours on 15m) ──────────────────────────────────
 var int lastBearDiamondBar = na
 var int lastBullDiamondBar = na
-int exhCooldown = 8
+int exhCooldown = exhaustionCooldownBarsInput
 bool bearCooldownOk = na(lastBearDiamondBar) or bar_index - lastBearDiamondBar >= exhCooldown
 bool bullCooldownOk = na(lastBullDiamondBar) or bar_index - lastBullDiamondBar >= exhCooldown
 
@@ -1022,8 +1003,8 @@ bool entryAnchorBullTrigger = confirmed and not na(entryLevel) and low <= entryL
 bool entryAnchorBearTrigger = confirmed and not na(entryLevel) and high >= entryLevel and close <= entryLevel
 bool entryZoneRejectBullLive = not na(entryZoneLower) and low < entryZoneLower and close >= entryZoneLower and bullishCandle
 bool entryZoneRejectBearLive = not na(entryZoneUpper) and high > entryZoneUpper and close <= entryZoneUpper and bearishCandle
-float localBreakHigh = ta.highest(high, 6)[1]
-float localBreakLow = ta.lowest(low, 6)[1]
+float localBreakHigh = ta.highest(high, valueReclaimBreakoutLookbackBarsInput)[1]
+float localBreakLow = ta.lowest(low, valueReclaimBreakoutLookbackBarsInput)[1]
 bool footprintLongTrigger = fpAvailable and fpDeltaBullish and (pocNearLow or mlExhAbsorption or mlExhZeroPrint or stackedBuyImbalance)
 bool footprintShortTrigger = fpAvailable and fpDeltaBearish and (pocNearHigh or mlExhAbsorption or mlExhZeroPrint or stackedSellImbalance)
 bool footprintBacktestFallback = not fpAvailable and not requireFootprintForBacktestInput
@@ -1215,6 +1196,7 @@ bool tradeSetupVisible = tradeState == TRADE_SETUP and not na(setupBar) and not 
 bool tradeActiveVisible = tradeInFlightNow and not na(entryPrice) and not na(activeStopPrice) and not na(tp1Price) and not na(tp2Price) and not na(tp3Price) and not na(tp4Price) and not na(tp5Price)
 bool tradeProjectionVisible = tradeSetupVisible or tradeActiveVisible
 bool showTradeLevels = showTradeLabelsInput and tradeProjectionVisible
+bool showFibLabelsNow = showFibLevelLabelsInput and not showTradeLevels
 float tradeLabelEntryPrice = tradeActiveVisible ? entryPrice : tradeSetupVisible ? entryLevel : na
 float tradeLabelSlPrice = tradeActiveVisible ? activeStopPrice : tradeSetupVisible ? slLevel : na
 float tradeLabelTp1Price = tradeActiveVisible ? tp1Price : tradeSetupVisible ? tp1Level : na
@@ -1358,6 +1340,8 @@ float effectivePT2    = tradeFibFrozen ? snapPT2    : pT2
 float effectivePT3    = tradeFibFrozen ? snapPT3    : pT3
 float effectivePT4    = tradeFibFrozen ? snapPT4    : pT4
 float effectivePT5    = tradeFibFrozen ? snapPT5    : pT5
+float effectiveZoneFillUpper = math.max(effectiveP382, effectiveP618)
+float effectiveZoneFillLower = math.min(effectiveP382, effectiveP618)
 int effectiveDrawLeftBar = tradeFibFrozen ? snapDrawLeftBar : drawLeftBar
 
 drawAnchoredLine(line id, bool visible, float price, color col, int width_, int leftBar) =>
@@ -1409,22 +1393,22 @@ drawAnchoredLine(lineT5,    true, effectivePT5,    fibTargetColorInput,         
 float tradeSlVisualLevel = tradeLabelSlPrice
 
 if barstate.islastconfirmedhistory
-    _fibLblZero := setFibLevelLabel(_fibLblZero, showFibLevelLabelsInput, pZero, "0", fibAnchorColorInput)
+    _fibLblZero := setFibLevelLabel(_fibLblZero, showFibLabelsNow, effectivePZero, "0", fibAnchorColorInput)
     _fibLblNeg236 := setFibLevelLabel(_fibLblNeg236, false, pNeg236, "-.236", fibStopColorInput)
-    _fibLbl236 := setFibLevelLabel(_fibLbl236, showFibLevelLabelsInput, p236, ".236", fibRetracementColorInput)
-    _fibLbl382 := setFibLevelLabel(_fibLbl382, showFibLevelLabelsInput, p382, ".382", fibRetracementAccentColorInput)
-    _fibLblPivot := setFibLevelLabel(_fibLblPivot, showFibLevelLabelsInput, pPivot, ".500", fibAnchorColorInput)
-    _fibLbl618 := setFibLevelLabel(_fibLbl618, showFibLevelLabelsInput, p618, ".618", fibRetracementAccentColorInput)
-    _fibLbl786 := setFibLevelLabel(_fibLbl786, showFibLevelLabelsInput, p786, ".786", fibRetracementColorInput)
-    _fibLblOne := setFibLevelLabel(_fibLblOne, showFibLevelLabelsInput, pOne, "1.000", fibAnchorColorInput)
-    _fibLblT1 := setFibLevelLabel(_fibLblT1, showFibLevelLabelsInput, pT1, "T1", fibTargetColorInput)
-    _fibLbl1382 := setFibLevelLabel(_fibLbl1382, showFibLevelLabelsInput, p1382, "1.382", fibRetracementColorInput)
-    _fibLbl150 := setFibLevelLabel(_fibLbl150, showFibLevelLabelsInput, p150, "1.500", fibRetracementColorInput)
-    _fibLblT2 := setFibLevelLabel(_fibLblT2, showFibLevelLabelsInput, pT2, "T2", fibTargetColorInput)
-    _fibLbl1786 := setFibLevelLabel(_fibLbl1786, showFibLevelLabelsInput, p1786, "1.786", fibRetracementColorInput)
-    _fibLblT3 := setFibLevelLabel(_fibLblT3, showFibLevelLabelsInput, pT3, "T3", fibTargetColorInput)
-    _fibLblT4 := setFibLevelLabel(_fibLblT4, showFibLevelLabelsInput, pT4, "T4", fibTargetColorInput)
-    _fibLblT5 := setFibLevelLabel(_fibLblT5, showFibLevelLabelsInput, pT5, "T5", fibTargetColorInput)
+    _fibLbl236 := setFibLevelLabel(_fibLbl236, showFibLabelsNow, effectiveP236, ".236", fibRetracementColorInput)
+    _fibLbl382 := setFibLevelLabel(_fibLbl382, showFibLabelsNow, effectiveP382, ".382", fibRetracementAccentColorInput)
+    _fibLblPivot := setFibLevelLabel(_fibLblPivot, showFibLabelsNow, effectivePPivot, ".500", fibAnchorColorInput)
+    _fibLbl618 := setFibLevelLabel(_fibLbl618, showFibLabelsNow, effectiveP618, ".618", fibRetracementAccentColorInput)
+    _fibLbl786 := setFibLevelLabel(_fibLbl786, showFibLabelsNow, effectiveP786, ".786", fibRetracementColorInput)
+    _fibLblOne := setFibLevelLabel(_fibLblOne, showFibLabelsNow, effectivePOne, "1.000", fibAnchorColorInput)
+    _fibLblT1 := setFibLevelLabel(_fibLblT1, showFibLabelsNow, effectivePT1, "T1", fibTargetColorInput)
+    _fibLbl1382 := setFibLevelLabel(_fibLbl1382, showFibLabelsNow, effectiveP1382, "1.382", fibRetracementColorInput)
+    _fibLbl150 := setFibLevelLabel(_fibLbl150, showFibLabelsNow, effectiveP150, "1.500", fibRetracementColorInput)
+    _fibLblT2 := setFibLevelLabel(_fibLblT2, showFibLabelsNow, effectivePT2, "T2", fibTargetColorInput)
+    _fibLbl1786 := setFibLevelLabel(_fibLbl1786, showFibLabelsNow, effectiveP1786, "1.786", fibRetracementColorInput)
+    _fibLblT3 := setFibLevelLabel(_fibLblT3, showFibLabelsNow, effectivePT3, "T3", fibTargetColorInput)
+    _fibLblT4 := setFibLevelLabel(_fibLblT4, showFibLabelsNow, effectivePT4, "T4", fibTargetColorInput)
+    _fibLblT5 := setFibLevelLabel(_fibLblT5, showFibLabelsNow, effectivePT5, "T5", fibTargetColorInput)
 
 if barstate.islast and showTradeLevels and not na(_lblEntry) and not na(_lblSl) and not na(_lblT1) and not na(_lblT2) and not na(_lblT3) and not na(_lblT4) and not na(_lblT5) and not na(tradeProjectionEntryPrice) and not na(tradeSlVisualLevel) and not na(tradeProjectionTp1Price) and not na(tradeProjectionTp2Price) and not na(tradeProjectionTp3Price) and not na(tradeProjectionTp4Price) and not na(tradeProjectionTp5Price)
     label.set_xy(_lblEntry, tradeLabelX, tradeProjectionEntryPrice)
@@ -1478,11 +1462,11 @@ else if barstate.islast
     label.set_color(_lblT4, color(na))
     label.set_color(_lblT5, color(na))
 
-if not na(zoneFillUpper) and not na(zoneFillLower)
-    box.set_left(zoneBox, drawLeftBar)
+if not na(effectiveZoneFillUpper) and not na(effectiveZoneFillLower)
+    box.set_left(zoneBox, effectiveDrawLeftBar)
     box.set_right(zoneBox, bar_index)
-    box.set_top(zoneBox, zoneFillUpper)
-    box.set_bottom(zoneBox, zoneFillLower)
+    box.set_top(zoneBox, effectiveZoneFillUpper)
+    box.set_bottom(zoneBox, effectiveZoneFillLower)
     box.set_bgcolor(zoneBox, color.new(fibPivotColorInput, zoneFillTransparencyInput))
     box.set_border_color(zoneBox, color.new(fibPivotColorInput, 100))
 else
