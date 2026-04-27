@@ -188,6 +188,10 @@ showFatigueInput = input.bool(true, "Show Fatigue Markers", group = GRP_EXHAUST,
     tooltip = "Detects momentum fatigue with chart markers.\n◆ Bearish Exhaustion: weakening in overbought zone\n◆ Bullish Exhaustion: strengthening in oversold zone")
 fatigueBarsInput = input.int(4, "Confirmation Bars", minval = 1, maxval = 5, group = GRP_EXHAUST,
     tooltip = "Consecutive bars of weakening/strengthening needed.\n1=fast, 3=balanced, 5=very strict")
+showGasOutInput = input.bool(true, "Show Delta Gas-Out", group = GRP_EXHAUST,
+    tooltip = "Plots translucent white gas-out diamonds when footprint cumulative delta decelerates against its signed direction.")
+gasOutOffsetInput = input.float(10.0, "Gas-Out Offset", minval = 2.0, maxval = 20.0, step = 0.5, group = GRP_EXHAUST,
+    tooltip = "Vertical offset applied to gas-out diamonds so they remain readable above/below the oscillator trace.")
 
 // ══════════════════════════════════════════════════════════
 // INPUTS — KNN Bias
@@ -712,9 +716,9 @@ color reversalColor = bullReversalSignal ? bullColorInput : bearColorInput
 plotshape(reversalY, "Confirmed Reversal", shape.diamond, location.absolute, reversalColor, size = size.normal)
 plotshape(lowConvictionSignal ? sigVal : na, "Low Conviction Signal", shape.circle, location.absolute, WARBIRD_YELLOW, size = size.tiny)
 float fatigueY = fatObSignal ? math.min(100.0, oscVal + 6.0) : fatOsSignal ? math.max(0.0, oscVal - 6.0) : na
-color fatigueColor = fatObSignal ? bearColorInput : bullColorInput
+color fatigueColor = color.new(color.white, 50)
 plotshape(fatigueY, "Momentum Fatigue", shape.diamond, location.absolute, fatigueColor, size = size.small)
-float gasOutY = showFatigueInput and gasOutBull ? math.min(100.0, oscVal + 10.0) : showFatigueInput and gasOutBear ? math.max(0.0, oscVal - 10.0) : na
+float gasOutY = showGasOutInput and gasOutBull ? math.min(100.0, oscVal + gasOutOffsetInput) : showGasOutInput and gasOutBear ? math.max(0.0, oscVal - gasOutOffsetInput) : na
 plotshape(gasOutY, "Delta Gas-Out", shape.diamond, location.absolute, color.new(color.white, 50), size = size.small)
 
 color obLineCol  = color.new(bullColorInput, 50)
@@ -806,6 +810,8 @@ bool knnAlertBull     = alKnnInput and knnFlipBull and alertReady
 bool knnAlertBear     = alKnnInput and knnFlipBear and alertReady
 bool fatigueAlertOb   = alFatigueInput and fatObSignal and alertReady
 bool fatigueAlertOs   = alFatigueInput and fatOsSignal and alertReady
+bool gasOutAlertBull  = alFatigueInput and showGasOutInput and gasOutBull and alertReady
+bool gasOutAlertBear  = alFatigueInput and showGasOutInput and gasOutBear and alertReady
 
 alertcondition(tradeTriggerBull, "NFE Bull Trigger", "NFE Bull Trigger | {{ticker}} | {{interval}} | Close {{close}}")
 alertcondition(tradeTriggerBear, "NFE Bear Trigger", "NFE Bear Trigger | {{ticker}} | {{interval}} | Close {{close}}")
@@ -815,6 +821,8 @@ alertcondition(knnAlertBull, "NFE KNN Bull Flip", "NFE KNN Bull Flip | {{ticker}
 alertcondition(knnAlertBear, "NFE KNN Bear Flip", "NFE KNN Bear Flip | {{ticker}} | {{interval}} | Close {{close}}")
 alertcondition(fatigueAlertOb, "NFE OB Fatigue", "NFE OB Fatigue | {{ticker}} | {{interval}} | Close {{close}}")
 alertcondition(fatigueAlertOs, "NFE OS Fatigue", "NFE OS Fatigue | {{ticker}} | {{interval}} | Close {{close}}")
+alertcondition(gasOutAlertBull, "NFE Delta Gas-Out Bull", "NFE Delta Gas-Out Bull | {{ticker}} | {{interval}} | Close {{close}}")
+alertcondition(gasOutAlertBear, "NFE Delta Gas-Out Bear", "NFE Delta Gas-Out Bear | {{ticker}} | {{interval}} | Close {{close}}")
 
 if tradeTriggerBull
     string jsonMsg = '{"signal":"bull_cross","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"sig":' + sigStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + ',"conf":' + confValStr + ',"knn_conf":' + knnConfStr + '}'
@@ -874,6 +882,16 @@ if fatigueAlertOb
 if fatigueAlertOs
     string jsonMsg = '{"signal":"os_fatigue","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"vf":' + vfJsonStr + ',"vf_available":' + vfAvailJson + ',"conf":' + confValStr + ',"bars":' + str.tostring(fatigueBarsInput) + '}'
     string textMsg = "NFE OS Fatigue | " + symbolLabel + " " + tf + " | Osc " + oscStr + " | " + str.tostring(fatigueBarsInput) + " bars strengthening | Conf " + confValStr
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
+
+if gasOutAlertBull
+    string jsonMsg = '{"signal":"delta_gasout_bull","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"delta_slope":' + str.tostring(deltaSlope, "#.####") + ',"vf_available":' + vfAvailJson + '}'
+    string textMsg = "NFE Delta Gas-Out Bull | " + symbolLabel + " " + tf + " | Osc " + oscStr + " | DeltaSlope " + str.tostring(deltaSlope, "#.####")
+    alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
+
+if gasOutAlertBear
+    string jsonMsg = '{"signal":"delta_gasout_bear","ticker":"' + symbolJson + '","tf":"' + tf + '","price":' + priceStr + ',"osc":' + oscStr + ',"delta_slope":' + str.tostring(deltaSlope, "#.####") + ',"vf_available":' + vfAvailJson + '}'
+    string textMsg = "NFE Delta Gas-Out Bear | " + symbolLabel + " " + tf + " | Osc " + oscStr + " | DeltaSlope " + str.tostring(deltaSlope, "#.####")
     alert(webhookInput ? jsonMsg : textMsg, alert.freq_once_per_bar_close)
 
 if knnAlertBull
