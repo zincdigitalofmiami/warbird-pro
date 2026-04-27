@@ -91,8 +91,9 @@ Primary metrics:
     `nexus_fp_*` fields; CSV exports, local OHLCV parquet, and synthetic
     body/wick delta are invalid tuning evidence for this surface
 
-`v8-warbird-live.pine` and `v8-warbird-prescreen.pine` remain code-frozen
-legacy baselines. Only approved `input.*` default changes may be made there.
+`v8-warbird-live.pine` and `v8-warbird-prescreen.pine` are retired/removed from
+the active repo surface (2026-04-27). They remain historical lineage only via
+archived documentation.
 
 ## Locked Baseline Checkpoint (2026-04-27)
 

@@ -9,51 +9,6 @@
     "default_study_name": "Warbird Institutional Win Rate and Profit Factor"
   },
   {
-    "key": "supertrend",
-    "name": "SuperTrend Gate",
-    "surface_type": "indicator",
-    "category": "chart-core",
-    "pine_file": "indicators/v9-warbird-trading-system-layout.pine",
-    "profile_module": "scripts.optuna.supertrend_profile",
-    "default_study_name": "SuperTrend Gate Optimization"
-  },
-  {
-    "key": "qfp",
-    "name": "QFP",
-    "surface_type": "indicator",
-    "category": "chart-core",
-    "pine_file": "indicators/v9-warbird-trading-system-layout.pine",
-    "profile_module": "scripts.optuna.qfp_profile",
-    "default_study_name": "QFP Signal Optimization"
-  },
-  {
-    "key": "v9_warbird_trading_system_layout",
-    "name": "Warbird Trading System Layout (v9)",
-    "surface_type": "strategy",
-    "category": "chart-core",
-    "pine_file": "indicators/v9-warbird-trading-system-layout.pine",
-    "profile_module": "scripts.optuna.v9_warbird_trading_system_layout_profile",
-    "default_study_name": "Warbird Trading System Layout Optimization"
-  },
-  {
-    "key": "v8_warbird_live",
-    "name": "Warbird Live (v8)",
-    "surface_type": "indicator",
-    "category": "chart-core",
-    "pine_file": "indicators/v8-warbird-live.pine",
-    "profile_module": "scripts.optuna.v8_warbird_live_profile",
-    "default_study_name": "Warbird Live Signal Optimization"
-  },
-  {
-    "key": "v8_warbird_prescreen",
-    "name": "Warbird Prescreen (v8)",
-    "surface_type": "strategy",
-    "category": "chart-core",
-    "pine_file": "indicators/v8-warbird-prescreen.pine",
-    "profile_module": "scripts.optuna.v8_warbird_prescreen_profile",
-    "default_study_name": "Warbird Prescreen Strategy Optimization"
-  },
-  {
     "key": "v7_warbird_institutional",
     "name": "Warbird Institutional (v7)",
     "surface_type": "indicator",
@@ -66,8 +21,22 @@
     "data_floor": "2020-01-01",
     "label_column": "ml_last_exit_outcome",
     "output_budget": "56/64",
-    "frozen_params": ["fibDeviationManual", "fibDepthManual", "fibThresholdFloorPct", "minFibRangeAtr", "autoTuneZZ"],
-    "tv_only_params": ["retestBars", "fibConfluenceTolPct", "footprintTicksPerRow", "footprintVaPercent", "footprintImbalancePercent", "zeroPrintVolRatio", "stackedImbalanceRows"],
+    "frozen_params": [
+      "fibDeviationManual",
+      "fibDepthManual",
+      "fibThresholdFloorPct",
+      "minFibRangeAtr",
+      "autoTuneZZ"
+    ],
+    "tv_only_params": [
+      "retestBars",
+      "fibConfluenceTolPct",
+      "footprintTicksPerRow",
+      "footprintVaPercent",
+      "footprintImbalancePercent",
+      "zeroPrintVolRatio",
+      "stackedImbalanceRows"
+    ],
     "notes": "Fib geometry frozen per 15m fib-owner freeze (CLAUDE.md 2026-04-14). Objective: composite 0.40xPF + 0.35xWR + 0.25xConsistency. Exhaustion diamond abandoned 2026-04-21."
   },
   {
@@ -114,33 +83,6 @@
     "pine_file": "indicators/fibs-only.pine",
     "profile_module": "scripts.optuna.fibs_only_profile",
     "default_study_name": "Fibs Only Indicator Optimization"
-  },
-  {
-    "key": "nfe_ml",
-    "name": "NFE ML",
-    "surface_type": "indicator",
-    "category": "lower-pane",
-    "pine_file": "indicators/warbird-oscillator-matrix.pine",
-    "profile_module": "scripts.optuna.nfe_ml_profile",
-    "default_study_name": "NFE ML Signal Optimization"
-  },
-  {
-    "key": "ml_rsi_bullvision",
-    "name": "Machine Learning RSI (BullVision)",
-    "surface_type": "indicator",
-    "category": "lower-pane",
-    "pine_file": "indicators/warbird-oscillator-matrix.pine",
-    "profile_module": "scripts.optuna.ml_rsi_bullvision_profile",
-    "default_study_name": "Machine Learning RSI Signal Optimization"
-  },
-  {
-    "key": "warbird_oscillator_matrix",
-    "name": "Warbird Oscillator Matrix",
-    "surface_type": "indicator",
-    "category": "lower-pane",
-    "pine_file": "indicators/warbird-oscillator-matrix.pine",
-    "profile_module": "scripts.optuna.warbird_oscillator_matrix_profile",
-    "default_study_name": "Warbird Oscillator Matrix Optimization"
   },
   {
     "key": "warbird_nexus_ml_rsi",
