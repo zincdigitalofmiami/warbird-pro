@@ -120,7 +120,6 @@ compare_contract_line() {
 compare_contract_line '^int stopFamilyCode =' 'stop_family'
 compare_contract_line '^int setupArchetypeCode =' 'setup_archetype'
 compare_contract_line '^int eventPivotInteractionCode =' 'pivot_interaction'
-compare_contract_line '^float mlExhZScore =' 'exh_z_score'
 compare_contract_line '^bool mlExhZeroPrint =' 'exh_zero_print'
 compare_contract_line '^int mlContConfidenceTier' 'cont_confidence_tier'
 
@@ -147,8 +146,6 @@ check_input_default() {
 check_input_default 'footprintTicksPerRow = input.int\([0-9]+' 'footprintTicksPerRow'
 check_input_default 'footprintVaPercent = input.float\([0-9.]+' 'footprintVaPercent'
 check_input_default 'footprintImbalancePercent = input.float\([0-9.]+' 'footprintImbalancePercent'
-check_input_default 'exhaustionZLen = input.int\([0-9]+' 'exhaustionZLen'
-check_input_default 'exhaustionZThreshold = input.float\([0-9.]+' 'exhaustionZThreshold'
 check_input_default 'zeroPrintVolRatio = input.float\([0-9.]+' 'zeroPrintVolRatio'
 check_input_default 'optImbalanceRows = input.int\([0-9]+' 'optImbalanceRows'
 check_input_default 'optEntryLevelInput = input.string\("[^"]+", "Execution Anchor"' 'optEntryLevelInput_default'

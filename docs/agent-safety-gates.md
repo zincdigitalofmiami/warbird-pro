@@ -85,6 +85,7 @@ When the task touches Pine indicators, strategies, harnesses, or TradingView mec
    - `pine-patterns` skill
    - `tradingview-indicator-contract-audit` skill when contract/audit work is needed
    - `./scripts/guards/pine-lint.sh`
+   - `./scripts/guards/check-fib-scanner-guardrails.sh`
    - `./scripts/guards/check-contamination.sh`
    - `./scripts/guards/check-indicator-strategy-parity.sh` when both the indicator and strategy are in scope
 2. Treat `pinescript-server`, TradingView CLI, or chart-capable MCP flows as optional only after confirming they are actually configured in the active Codex profile.
@@ -113,8 +114,9 @@ Run the required gates for the files you actually touched.
 If any touched file ends in `.pine`:
 
 1. `./scripts/guards/pine-lint.sh <each touched .pine file>`
-2. `./scripts/guards/check-contamination.sh`
-3. `npm run build`
+2. `./scripts/guards/check-fib-scanner-guardrails.sh`
+3. `./scripts/guards/check-contamination.sh`
+4. `npm run build`
 
 If either of these files is touched:
 
@@ -123,7 +125,7 @@ If either of these files is touched:
 
 Also run:
 
-4. `./scripts/guards/check-indicator-strategy-parity.sh`
+5. `./scripts/guards/check-indicator-strategy-parity.sh`
 
 ### Next.js / API / Shared TS Work
 

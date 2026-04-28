@@ -27,6 +27,16 @@ if [ $lint_status -ne 0 ]; then
   exit 0
 fi
 
+# Fib scanner regression guard (repo-wide): block known wide-fib anti-pattern.
+fib_guard_output=$(bash scripts/guards/check-fib-scanner-guardrails.sh 2>&1)
+fib_guard_status=$?
+
+if [ $fib_guard_status -ne 0 ]; then
+  jq -cn --arg fp "$fp" --arg out "$fib_guard_output" \
+    '{hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:("Fib scanner guard FAILED after editing " + $fp + ". The banned pivot-window/barssince fibHtfSnapshot pattern was detected. Fix before continuing:\n\n" + $out)}, decision:"block", reason:"fib scanner guard failed — see additionalContext"}'
+  exit 0
+fi
+
 # v8 prescreen parity check — blocks hand-rolled drift between live and prescreen
 case "$fp" in
   */v8-warbird-live.pine|*/v8-warbird-prescreen.pine)

@@ -49,9 +49,9 @@ PARAMETER_GROUPS: tuple[tuple[str, ...], ...] = (
         "Zero-Print Volume Ratio",
     ),
     (
-        "Exhaustion Z Length",
-        "Exhaustion Z Threshold",
         "Extension ATR Tolerance",
+        "Exhaustion Swing Lookback",
+        "Exhaustion Cooldown Bars",
     ),
     (
         "Gate Shorts In Bull Trend",
@@ -118,15 +118,6 @@ def parameter_constraint_violations(params: dict[str, Any]) -> list[str]:
         # otherwise the setup gate can hard-reject nearly every candidate.
         if float(max_setup_stop_atr) + 1e-9 < float(atr_stop_mult):
             issues.append("max_setup_stop_below_atr_stop")
-
-    z_len = params.get("Exhaustion Z Length")
-    z_threshold = params.get("Exhaustion Z Threshold")
-    ext_tol = params.get("Extension ATR Tolerance")
-    if z_len is not None and z_threshold is not None and ext_tol is not None:
-        if z_len <= 14 and z_threshold <= 2.2 and ext_tol >= 0.12:
-            issues.append("exhaustion_gate_too_permissive")
-        if z_len >= 30 and z_threshold >= 2.8 and ext_tol <= 0.08:
-            issues.append("exhaustion_gate_too_sparse")
 
     ticks_per_row = params.get("Footprint Ticks Per Row")
     zero_ratio = params.get("Zero-Print Volume Ratio")
@@ -859,36 +850,59 @@ def calculate_trade_metrics(
                 bucket["exit"] = parsed
 
     closed_trades: list[dict[str, Any]] = []
+    incomplete_pairs: list[int] = []
+    forced_open_exits: list[int] = []
     for trade_id, pair in sorted(by_trade.items()):
         entry = pair.get("entry")
         exit_row = pair.get("exit")
-        if not entry and not exit_row:
+        if entry is None and exit_row is None:
             continue
-        anchor = entry if entry is not None else exit_row
-        if anchor is None:
+        # Fail closed: the tuner must never score unresolved positions.
+        if entry is None or exit_row is None:
+            incomplete_pairs.append(trade_id)
             continue
-        result_row = exit_row if exit_row is not None else entry
-        if result_row is None:
+        # Strategy Tester uses Signal=Open for forced end-of-window closes.
+        # These rows can create synthetic equity spikes and contaminate tuning.
+        if exit_row["signal"].strip().lower() == "open":
+            forced_open_exits.append(trade_id)
             continue
-        excursion_row = entry if entry is not None else exit_row
-        if excursion_row is None:
-            continue
-        side = "long" if "long" in anchor["type"].lower() else "short"
-        net_pnl = result_row["net_pnl"]
-        cumulative_pnl = result_row["cumulative_pnl"]
-        exit_time = result_row["time"]
-        adverse_excursion = excursion_row["adverse_excursion"]
+        side = "long" if "long" in entry["type"].lower() else "short"
+        net_pnl = exit_row["net_pnl"]
+        cumulative_pnl = exit_row["cumulative_pnl"]
+        exit_time = exit_row["time"]
+        adverse_excursion = entry["adverse_excursion"]
         closed_trades.append(
             {
                 "trade_id": trade_id,
                 "side": side,
-                "entry_time": entry["time"] if entry else exit_time,
+                "entry_time": entry["time"],
                 "exit_time": exit_time,
                 "net_pnl": net_pnl,
                 "cumulative_pnl": cumulative_pnl,
                 "adverse_excursion": adverse_excursion,
             }
         )
+
+    if incomplete_pairs or forced_open_exits:
+        detail_parts: list[str] = []
+        if incomplete_pairs:
+            sample = ", ".join(str(trade_id) for trade_id in incomplete_pairs[:10])
+            suffix = "..." if len(incomplete_pairs) > 10 else ""
+            detail_parts.append(
+                f"incomplete entry/exit pairs={len(incomplete_pairs)} [{sample}{suffix}]"
+            )
+        if forced_open_exits:
+            sample = ", ".join(str(trade_id) for trade_id in forced_open_exits[:10])
+            suffix = "..." if len(forced_open_exits) > 10 else ""
+            detail_parts.append(
+                f"forced-open exits={len(forced_open_exits)} [{sample}{suffix}]"
+            )
+        raise ValueError(
+            "TradingView CSV contains unresolved/open trades; rerun export with all "
+            "positions closed and no Signal=Open rows. "
+            + "; ".join(detail_parts)
+        )
+
     return summarize_closed_trades(
         closed_trades,
         initial_capital=initial_capital,

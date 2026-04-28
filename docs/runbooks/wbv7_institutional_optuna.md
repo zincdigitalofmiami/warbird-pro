@@ -167,8 +167,6 @@ swept from a single CSV export.  They require the full CDP automation path
 | `footprintImbalancePercent` | Changes imbalance detection threshold |
 | `zeroPrintVolRatio` | Changes zero-print detection floor |
 | `stackedImbalanceRows` | Changes how many extreme rows are scanned |
-| `exhaustionZLen` | Changes the Z-score lookback for exhaustion probe |
-| `exhaustionZThreshold` | Changes `mlExhZExtreme` — affects diamond gate |
 | `exhaustionLevelAtrTol` | Changes ATR tolerance for fib extension tagging |
 
 ### Frozen params (CLAUDE.md 15m fib-owner freeze 2026-04-14)

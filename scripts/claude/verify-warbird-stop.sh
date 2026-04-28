@@ -131,6 +131,11 @@ if (( NEED_PINE )); then
     fi
   done
 
+  if ! ./scripts/guards/check-fib-scanner-guardrails.sh >/tmp/warbird-stop-fib-guard.log 2>&1; then
+    tail -40 /tmp/warbird-stop-fib-guard.log >&2 || true
+    block "Fib scanner guard failed. The banned pivot-window/barssince fibHtfSnapshot pattern was detected."
+  fi
+
   if ! ./scripts/guards/check-contamination.sh >/tmp/warbird-stop-contamination.log 2>&1; then
     tail -40 /tmp/warbird-stop-contamination.log >&2 || true
     block "Contamination check failed. Fix the issue or report STATUS: INCOMPLETE."

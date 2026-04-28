@@ -4,7 +4,7 @@
 // ══════════════════════════════════════════════════════════
 // Author:  Kirk Musick
 // Version: 1.2.5-optuna-footprint — Nexus footprint/multi-mode lane
-// Defaults restored to Optuna Fast 5m Signal Quality April 25 trial #357 after expanded #492 visual rejection.
+// Defaults set to Optuna winner from study "Warbird Nexus ML Fast 5m Signal Quality 2026-04-27 ACTIVE" (trial #936).
 // Signal-quality research only; not a production trade/P&L champion.
 
 indicator(
@@ -42,12 +42,12 @@ const color WARBIRD_NEUTRAL = #888888
 // ══════════════════════════════════════════════════════════
 // INPUTS — Main Settings
 // ══════════════════════════════════════════════════════════
-lengthInput = input.int(34, "Engine Period", minval = 2, maxval = 200, group = GRP_MAIN,
+lengthInput = input.int(21, "Engine Period", minval = 2, maxval = 200, group = GRP_MAIN,
     tooltip = "Core lookback for the AMF engine.\n" +
               "• 8–12: responsive, more signals, suited for scalping\n" +
               "• 18: balanced 5m Nexus starting point\n" +
               "• 20–50: smooth, fewer signals, suited for swing")
-sourceInput = input.source(open, "Source", group = GRP_MAIN,
+sourceInput = input.source(close, "Source", group = GRP_MAIN,
     tooltip = "Price source for calculations.\nClose = standard | HLC3 = smoother | OHLC4 = smoothest")
 smoothTypeInput = input.string("SMA", "Smoothing",
     options = ["EMA", "SMA", "DEMA", "TEMA", "WMA", "VWMA"],
@@ -75,9 +75,9 @@ modeInput = input.string("5m", "Mode",
 // ══════════════════════════════════════════════════════════
 // INPUTS — Signal Line
 // ══════════════════════════════════════════════════════════
-sigLenInput = input.int(8, "Signal Period", minval = 1, maxval = 50, group = GRP_MAIN,
+sigLenInput = input.int(3, "Signal Period", minval = 1, maxval = 50, group = GRP_MAIN,
     tooltip = "Smoothing period for the trigger line.\nKeep below Engine Period for clean crossovers.\n5m start: 6")
-sigTypeInput = input.string("EMA", "Signal Smoothing",
+sigTypeInput = input.string("WMA", "Signal Smoothing",
     options = ["EMA", "SMA", "DEMA", "WMA"],
     group = GRP_MAIN,
     tooltip = "Smoothing method for the signal/trigger line.\nEMA recommended for responsive crossovers.")
@@ -104,9 +104,9 @@ bearColorInput = input.color(WARBIRD_BEAR, "Bear", inline = "colors", group = GR
 // ══════════════════════════════════════════════════════════
 // INPUTS — Zones
 // ══════════════════════════════════════════════════════════
-obInput = input.float(71.84351171357757, "Overbought Level", minval = 55.0, maxval = 95.0, step = 0.1, group = GRP_ZONES,
+obInput = input.float(80.0, "Overbought Level", minval = 55.0, maxval = 95.0, step = 0.1, group = GRP_ZONES,
     tooltip = "Upper threshold for overbought zone.\n5m start: 75")
-osInput = input.float(19.58825492875482, "Oversold Level", minval = 5.0, maxval = 45.0, step = 0.1, group = GRP_ZONES,
+osInput = input.float(20.0, "Oversold Level", minval = 5.0, maxval = 45.0, step = 0.1, group = GRP_ZONES,
     tooltip = "Lower threshold for oversold zone.\n5m start: 25")
 obAlphaInput = input.int(20, "OB Fill Opacity", minval = 0, maxval = 100, group = GRP_ZONES,
     tooltip = "Opacity of the overbought zone fill. 0=invisible, 100=solid")
@@ -120,19 +120,19 @@ showVfInput = input.bool(true, "Show Volume Flow", group = GRP_VOL,
     tooltip = "Renders a volatility-normalized volume flow overlay.\nGreen fill = net buying pressure\nRed fill = net selling pressure")
 vfAlphaInput = input.int(18, "Volume Flow Opacity", minval = 0, maxval = 100, group = GRP_VOL,
     tooltip = "Fill opacity for volume flow. Keep 10–25 so oscillator line stays visible.")
-vfBodyWeightInput = input.float(0.70, "Bar Delta Weight", minval = 0.0, maxval = 1.0, step = 0.01, group = GRP_VOL,
+vfBodyWeightInput = input.float(0.6631974508906335, "Bar Delta Weight", minval = 0.0, maxval = 1.0, step = 0.01, group = GRP_VOL,
     tooltip = "Weight applied to the current footprint bar delta.\nThe remaining weight uses rolling footprint delta. No candle-body proxy is used.")
-vfFastLenMultInput = input.float(0.60, "Fast Length Mult", minval = 0.1, maxval = 3.0, step = 0.01, group = GRP_VOL,
+vfFastLenMultInput = input.float(0.6802314590916128, "Fast Length Mult", minval = 0.1, maxval = 3.0, step = 0.01, group = GRP_VOL,
     tooltip = "Fast EMA length multiplier for volume-flow smoothing.")
-vfSlowLenMultInput = input.float(1.40, "Slow Length Mult", minval = 0.1, maxval = 4.0, step = 0.01, group = GRP_VOL,
+vfSlowLenMultInput = input.float(1.6990999096945485, "Slow Length Mult", minval = 0.1, maxval = 4.0, step = 0.01, group = GRP_VOL,
     tooltip = "Slow EMA length multiplier for volume-flow smoothing.")
-vfFastBlendWeightInput = input.float(0.60, "Fast Blend Weight", minval = 0.0, maxval = 1.0, step = 0.01, group = GRP_VOL,
+vfFastBlendWeightInput = input.float(0.7262305792365417, "Fast Blend Weight", minval = 0.0, maxval = 1.0, step = 0.01, group = GRP_VOL,
     tooltip = "Blend weight for fast volume-flow smoothing.\nSlow weight is 1 - Fast Blend Weight.")
-vfPeakLenMultInput = input.float(4.0, "Peak Length Mult", minval = 1.0, maxval = 8.0, step = 0.1, group = GRP_VOL,
+vfPeakLenMultInput = input.float(2.0194133734163886, "Peak Length Mult", minval = 1.0, maxval = 8.0, step = 0.1, group = GRP_VOL,
     tooltip = "Lookback multiplier used to normalize volume-flow amplitude.")
-vfSignalThresholdInput = input.float(50.0, "Signal Threshold", minval = 50.0, maxval = 80.0, step = 0.1, group = GRP_VOL,
+vfSignalThresholdInput = input.float(56.12558548619829, "Signal Threshold", minval = 50.0, maxval = 80.0, step = 0.1, group = GRP_VOL,
     tooltip = "Volume-flow event threshold.\nBear threshold is calculated as 100 - this value.")
-vfGateThresholdInput = input.float(50.0, "Confirmation Threshold", minval = 50.0, maxval = 80.0, step = 0.1, group = GRP_VOL,
+vfGateThresholdInput = input.float(55.23727679785865, "Confirmation Threshold", minval = 50.0, maxval = 80.0, step = 0.1, group = GRP_VOL,
     tooltip = "Volume-flow confirmation threshold for optional filters.\nBear threshold is calculated as 100 - this value.")
 
 // ══════════════════════════════════════════════════════════
@@ -142,10 +142,10 @@ footprintTicksPerRowInput = input.int(4, "Footprint Ticks Per Row", minval = 1, 
     tooltip = "Row size for TradingView request.footprint(). Used for real ask/bid footprint volume, not OHLCV reconstruction.")
 footprintVaPercentInput = input.float(50.0, "Footprint VA %", minval = 1.0, maxval = 100.0, step = 1.0, group = GRP_DELTA)
 footprintImbalancePercentInput = input.float(195.0, "Footprint Imbalance %", minval = 100.0, maxval = 1000.0, step = 10.0, group = GRP_DELTA)
-deltaLookbackInput = input.int(10, "Delta Lookback", minval = 3, maxval = 20, group = GRP_DELTA)
+deltaLookbackInput = input.int(8, "Delta Lookback", minval = 3, maxval = 20, group = GRP_DELTA)
 deltaSlopeLenInput = input.int(5, "Delta Slope Length", minval = 2, maxval = 10, group = GRP_DELTA)
-deltaFlipThresholdInput = input.float(0.10, "Delta Flip Threshold", minval = 0.05, maxval = 0.40, step = 0.01, group = GRP_DELTA)
-gasoutThreshInput = input.float(0.05, "Gas-Out Threshold", minval = 0.01, maxval = 0.20, step = 0.01, group = GRP_DELTA)
+deltaFlipThresholdInput = input.float(0.11315260585015585, "Delta Flip Threshold", minval = 0.05, maxval = 0.40, step = 0.01, group = GRP_DELTA)
+gasoutThreshInput = input.float(0.14849537227921106, "Gas-Out Threshold", minval = 0.01, maxval = 0.20, step = 0.01, group = GRP_DELTA)
 
 // ══════════════════════════════════════════════════════════
 // INPUTS — Regime Detection
@@ -186,7 +186,7 @@ divMaxAgeInput = input.int(60, "Max Pivot Age (bars)", minval = 20, maxval = 500
 // ══════════════════════════════════════════════════════════
 showFatigueInput = input.bool(true, "Show Fatigue Markers", group = GRP_EXHAUST,
     tooltip = "Detects momentum fatigue with chart markers.\n◆ Bearish Exhaustion: weakening in overbought zone\n◆ Bullish Exhaustion: strengthening in oversold zone")
-fatigueBarsInput = input.int(4, "Confirmation Bars", minval = 1, maxval = 5, group = GRP_EXHAUST,
+fatigueBarsInput = input.int(2, "Confirmation Bars", minval = 1, maxval = 5, group = GRP_EXHAUST,
     tooltip = "Consecutive bars of weakening/strengthening needed.\n1=fast, 3=balanced, 5=very strict")
 fatigueMarkerColorInput = input.color(color.new(WARBIRD_YELLOW, 20), "Fatigue Color", inline = "exh_colors", group = GRP_EXHAUST)
 gasOutMarkerColorInput = input.color(color.new(color.white, 50), "Gas-Out Color", inline = "exh_colors", group = GRP_EXHAUST)
@@ -200,17 +200,17 @@ gasOutOffsetInput = input.float(10.0, "Gas-Out Offset", minval = 2.0, maxval = 2
 // ══════════════════════════════════════════════════════════
 knnShowInput = input.bool(true, "Show KNN Panel", group = GRP_KNN,
     tooltip = "K-Nearest Neighbors directional bias panel.\nFinds similar historical patterns and votes on direction.\n\nFeatures used:\nM: momentum position | V: volume flow | E: efficiency ratio | X: signal cross state")
-knnKInput = input.int(6, "Neighbors (K)", minval = 3, maxval = 15, group = GRP_KNN,
+knnKInput = input.int(4, "Neighbors (K)", minval = 3, maxval = 15, group = GRP_KNN,
     tooltip = "Number of similar bars to vote.\n3=fast, 5=balanced, 10+=conservative")
-knnWindowInput = input.int(184, "Training Window", minval = 50, maxval = 400, step = 1, group = GRP_KNN,
+knnWindowInput = input.int(265, "Training Window", minval = 50, maxval = 400, step = 1, group = GRP_KNN,
     tooltip = "How many past bars to learn from.\n50=short memory, 120=balanced, 300+=long memory")
-knnBullThresholdInput = input.float(58.0, "Bull Threshold", minval = 50.0, maxval = 80.0, step = 0.1, group = GRP_KNN,
+knnBullThresholdInput = input.float(63.19994264546248, "Bull Threshold", minval = 50.0, maxval = 80.0, step = 0.1, group = GRP_KNN,
     tooltip = "KNN value needed to classify bullish bias.")
-knnBearThresholdInput = input.float(42.0, "Bear Threshold", minval = 20.0, maxval = 50.0, step = 0.1, group = GRP_KNN,
+knnBearThresholdInput = input.float(38.92478941476169, "Bear Threshold", minval = 20.0, maxval = 50.0, step = 0.1, group = GRP_KNN,
     tooltip = "KNN value needed to classify bearish bias.")
-knnAtrLabelThresholdInput = input.float(0.15, "ATR Label Threshold", minval = 0.01, maxval = 1.0, step = 0.01, group = GRP_KNN,
+knnAtrLabelThresholdInput = input.float(0.2853355154470515, "ATR Label Threshold", minval = 0.01, maxval = 1.0, step = 0.01, group = GRP_KNN,
     tooltip = "ATR fraction required to label the last bar as directionally bullish or bearish.")
-knnRecencyBoostInput = input.float(0.10, "Recency Boost", minval = 0.0, maxval = 0.5, step = 0.01, group = GRP_KNN,
+knnRecencyBoostInput = input.float(0.21466180340100494, "Recency Boost", minval = 0.0, maxval = 0.5, step = 0.01, group = GRP_KNN,
     tooltip = "Small distance discount for more recent neighbors.")
 knnPosInput = input.string("Bottom Right", "Panel Position",
     options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left"],
@@ -226,21 +226,21 @@ knnSizeInput = input.string("Small", "Panel Text Size",
 // ══════════════════════════════════════════════════════════
 showConfluenceInput = input.bool(true, "Show Confluence Meter", group = GRP_CONF,
     tooltip = "Weighted composite score 0–100 from all subsystems.\nAbove 70 = strong bullish confluence\nBelow 30 = strong bearish confluence\nShown as a thin line on the oscillator pane.")
-confHighInput = input.float(68.45691338188404, "High Confluence", minval = 55.0, maxval = 90.0, group = GRP_CONF,
+confHighInput = input.float(72.94319595150738, "High Confluence", minval = 55.0, maxval = 90.0, group = GRP_CONF,
     tooltip = "Threshold above which confluence is considered strongly bullish.\nUsed for alerts and dashboard coloring.")
-confLowInput = input.float(30.868639925029193, "Low Confluence", minval = 10.0, maxval = 45.0, group = GRP_CONF,
+confLowInput = input.float(31.1118099079117, "Low Confluence", minval = 10.0, maxval = 45.0, group = GRP_CONF,
     tooltip = "Threshold below which confluence is considered strongly bearish.")
-confOscBullThresholdInput = input.float(55.0, "Osc Bull Vote", minval = 50.0, maxval = 70.0, step = 0.1, group = GRP_CONF,
+confOscBullThresholdInput = input.float(57.51232323254229, "Osc Bull Vote", minval = 50.0, maxval = 70.0, step = 0.1, group = GRP_CONF,
     tooltip = "Oscillator level that contributes one bullish confluence vote.")
-confOscBearThresholdInput = input.float(45.0, "Osc Bear Vote", minval = 30.0, maxval = 50.0, step = 0.1, group = GRP_CONF,
+confOscBearThresholdInput = input.float(46.02496948360107, "Osc Bear Vote", minval = 30.0, maxval = 50.0, step = 0.1, group = GRP_CONF,
     tooltip = "Oscillator level that contributes one bearish confluence vote.")
-confVfBullThresholdInput = input.float(55.0, "VF Bull Vote", minval = 50.0, maxval = 70.0, step = 0.1, group = GRP_CONF,
+confVfBullThresholdInput = input.float(61.54911689983617, "VF Bull Vote", minval = 50.0, maxval = 70.0, step = 0.1, group = GRP_CONF,
     tooltip = "Volume-flow level that contributes one bullish confluence vote.")
-confVfBearThresholdInput = input.float(45.0, "VF Bear Vote", minval = 30.0, maxval = 50.0, step = 0.1, group = GRP_CONF,
+confVfBearThresholdInput = input.float(46.632496703988025, "VF Bear Vote", minval = 30.0, maxval = 50.0, step = 0.1, group = GRP_CONF,
     tooltip = "Volume-flow level that contributes one bearish confluence vote.")
-confErThresholdInput = input.float(0.30, "ER Trend Vote", minval = 0.05, maxval = 0.80, step = 0.01, group = GRP_CONF,
+confErThresholdInput = input.float(0.3962452944939945, "ER Trend Vote", minval = 0.05, maxval = 0.80, step = 0.01, group = GRP_CONF,
     tooltip = "Efficiency-ratio threshold used by the confluence trend vote.")
-confSmoothLenInput = input.int(3, "Confluence Smoothing", minval = 1, maxval = 20, group = GRP_CONF,
+confSmoothLenInput = input.int(6, "Confluence Smoothing", minval = 1, maxval = 20, group = GRP_CONF,
     tooltip = "EMA smoothing length for the confluence meter.")
 
 // ══════════════════════════════════════════════════════════
@@ -706,17 +706,19 @@ p_sig = plot(sigVal, "Signal Line", LINE_SUBTLE, linewidth = 1, display = displa
 
 bool crossUp   = ta.crossover(oscVal, sigVal)
 bool crossDown = ta.crossunder(oscVal, sigVal)
-bool bullPrimaryReversal = crossUp and isWarmedUp and oscVal < 50.0 and knnIsBull
-bool bearPrimaryReversal = crossDown and isWarmedUp and oscVal > 50.0 and knnIsBear
+bool bullCandidateCross = crossUp and isWarmedUp and oscVal < 50.0
+bool bearCandidateCross = crossDown and isWarmedUp and oscVal > 50.0
+bool bullPrimaryReversal = bullCandidateCross and knnIsBull
+bool bearPrimaryReversal = bearCandidateCross and knnIsBear
 bool bullReversalSignal = bullPrimaryReversal and deltaBullConfirm
 bool bearReversalSignal = bearPrimaryReversal and deltaBearConfirm
-bool lowConvictionSignal = isWarmedUp and ((crossUp and oscVal < 50.0 and not bullPrimaryReversal) or (crossDown and oscVal > 50.0 and not bearPrimaryReversal))
+bool lowConvictionSignal = (bullCandidateCross and not bullReversalSignal) or (bearCandidateCross and not bearReversalSignal)
 float crossDotY = showCrossDotsInput and (crossUp or crossDown) ? sigVal : na
 color crossDotColor = crossUp ? bullColorInput : bearColorInput
 plotshape(crossDotY, "Cross Dot", shape.circle, location.absolute, crossDotColor, size = size.tiny)
 
-float reversalY = bullPrimaryReversal ? math.max(0.0, oscVal - 8.0) : bearPrimaryReversal ? math.min(100.0, oscVal + 8.0) : na
-color reversalColor = bullPrimaryReversal ? bullColorInput : bearPrimaryReversal ? bearColorInput : na
+float reversalY = bullReversalSignal ? math.max(0.0, oscVal - 8.0) : bearReversalSignal ? math.min(100.0, oscVal + 8.0) : na
+color reversalColor = bullReversalSignal ? bullColorInput : bearReversalSignal ? bearColorInput : na
 plotshape(reversalY, "Confirmed Reversal", shape.diamond, location.absolute, reversalColor, size = size.large)
 plotshape(lowConvictionSignal ? sigVal : na, "Low Conviction Signal", shape.circle, location.absolute, WARBIRD_YELLOW, size = size.tiny)
 float fatigueY = fatObSignal ? math.min(100.0, oscVal + 6.0) : fatOsSignal ? math.max(0.0, oscVal - 6.0) : na
@@ -762,8 +764,8 @@ bool wCrossDown = crossDown and isWarmedUp
 
 string trendStr    = oscVal > 60.0 ? "Bullish" : oscVal < 40.0 ? "Bearish" : "Neutral"
 color  trendCol    = oscVal > 60.0 ? BULL_TEXT : oscVal < 40.0 ? BEAR_TEXT : NEUTRAL_TEXT
-string signalStr   = wCrossUp ? "Bull Cross" : wCrossDown ? "Bear Cross" : oscVal >= effOB ? "Overbought" : oscVal <= effOS ? "Oversold" : "—"
-color  signalCol   = wCrossUp ? BULL_TEXT : wCrossDown ? BEAR_TEXT : oscVal >= effOB ? BULL_TEXT : oscVal <= effOS ? BEAR_TEXT : TEXT_COLOR
+string signalStr   = bullReversalSignal ? "Bull Reversal Confirmed" : bearReversalSignal ? "Bear Reversal Confirmed" : wCrossUp ? "Bull Cross (Unconfirmed)" : wCrossDown ? "Bear Cross (Unconfirmed)" : oscVal >= effOB ? "Overbought" : oscVal <= effOS ? "Oversold" : "—"
+color  signalCol   = bullReversalSignal ? BULL_TEXT : bearReversalSignal ? BEAR_TEXT : (wCrossUp or wCrossDown) ? NEUTRAL_TEXT : oscVal >= effOB ? BULL_TEXT : oscVal <= effOS ? BEAR_TEXT : TEXT_COLOR
 string strengthStr = oscVal >= 70.0 or oscVal <= 30.0 ? "Strong" : oscVal >= 60.0 or oscVal <= 40.0 ? "Medium" : "Weak"
 color  strengthCol = oscVal >= 70.0 or oscVal <= 30.0 ? BULL_TEXT : oscVal >= 60.0 or oscVal <= 40.0 ? NEUTRAL_TEXT : TEXT_MUTED
 string vfStr       = not volumeAvailable ? "N/A" : vfCalcVal > vfSignalThresholdInput ? "Inflow" : vfCalcVal < vfSignalBearThreshold ? "Outflow" : "Neutral"

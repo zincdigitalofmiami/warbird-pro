@@ -5,6 +5,7 @@ Read and follow `AGENTS.md` at the repository root.
 - **Canonical docs index:** `/Volumes/Satechi Hub/warbird-pro/docs/INDEX.md`
 - **Active architecture plan:** `/Volumes/Satechi Hub/warbird-pro/docs/MASTER_PLAN.md` — Warbird Indicator-Only AG Plan v6
 - **Indicator contract:** `/Volumes/Satechi Hub/warbird-pro/docs/contracts/pine_indicator_ag_contract.md`
+- **Claude phased guardrails:** `/Volumes/Satechi Hub/warbird-pro/docs/runbooks/claude_rogue_proof_phase_contract.md`
 - **Repo:** github.com/zincdigitalofmiami/warbird-pro
 
 ## Current Status
@@ -79,6 +80,10 @@ training/modeling unless the user explicitly approves it.
 - In `indicators/v7-warbird-institutional-backtest-strategy.pine`, fib core is
   protected scope and must not be changed without explicit approval plus
   before/after evidence.
+- Repo-wide fib scanner ban: never reintroduce the pivot-window
+  `fibHtfSnapshot` variant using `ta.barssince(...)` with
+  `pivotHighInWindow` / `pivotLowInWindow`; this pattern is known to cause
+  wide-fib regressions.
 - No TradingView Pine Editor push without explicit approval.
 - Use 15m behavior as the baseline reference when evaluating 5m tuning changes.
 - Commission floor for MES Strategy Tester evidence: $1.00/side.
@@ -96,9 +101,10 @@ Before committing any `.pine` edit:
 
 1. pine-facade compile check
 2. `./scripts/guards/pine-lint.sh <file>`
-3. `./scripts/guards/check-contamination.sh`
-4. `npm run build`
-5. `./scripts/guards/check-indicator-strategy-parity.sh` when v7 indicator /
+3. `./scripts/guards/check-fib-scanner-guardrails.sh`
+4. `./scripts/guards/check-contamination.sh`
+5. `npm run build`
+6. `./scripts/guards/check-indicator-strategy-parity.sh` when v7 indicator /
    strategy coupling is touched
 
 For docs-only work, run `npm run lint` and `npm run build` before pushing when

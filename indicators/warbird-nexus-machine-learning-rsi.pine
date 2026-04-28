@@ -35,14 +35,14 @@ INDICATOR_VERSION = "v1.2.2"
 // ══════════════════════════════════════════════════════════
 // INPUTS — Main Settings
 // ══════════════════════════════════════════════════════════
-lengthInput = input.int(18, "Engine Period", minval = 2, maxval = 200, group = GRP_MAIN,
+lengthInput = input.int(21, "Engine Period", minval = 2, maxval = 200, group = GRP_MAIN,
     tooltip = "Core lookback for the AMF engine.\n" +
               "• 8–12: responsive, more signals, suited for scalping\n" +
               "• 18: balanced 5m Nexus starting point\n" +
               "• 20–50: smooth, fewer signals, suited for swing")
 sourceInput = input.source(close, "Source", group = GRP_MAIN,
     tooltip = "Price source for calculations.\nClose = standard | HLC3 = smoother | OHLC4 = smoothest")
-smoothTypeInput = input.string("DEMA", "Smoothing",
+smoothTypeInput = input.string("SMA", "Smoothing",
     options = ["EMA", "SMA", "DEMA", "TEMA", "WMA", "VWMA"],
     group = GRP_MAIN,
     tooltip = "Smoothing algorithm for the oscillator core.\n" +
@@ -64,9 +64,9 @@ presetInput = input.string("Default", "Preset",
 // ══════════════════════════════════════════════════════════
 // INPUTS — Signal Line
 // ══════════════════════════════════════════════════════════
-sigLenInput = input.int(6, "Signal Period", minval = 1, maxval = 50, group = GRP_MAIN,
+sigLenInput = input.int(3, "Signal Period", minval = 1, maxval = 50, group = GRP_MAIN,
     tooltip = "Smoothing period for the trigger line.\nKeep below Engine Period for clean crossovers.\n5m start: 6")
-sigTypeInput = input.string("EMA", "Signal Smoothing",
+sigTypeInput = input.string("WMA", "Signal Smoothing",
     options = ["EMA", "SMA", "DEMA", "WMA"],
     group = GRP_MAIN,
     tooltip = "Smoothing method for the signal/trigger line.\nEMA recommended for responsive crossovers.")
@@ -93,9 +93,9 @@ bearColorInput = input.color(#FF5252, "Bear", inline = "colors", group = GRP_COL
 // ══════════════════════════════════════════════════════════
 // INPUTS — Zones
 // ══════════════════════════════════════════════════════════
-obInput = input.float(75.0, "Overbought Level", minval = 55.0, maxval = 95.0, step = 1.0, group = GRP_ZONES,
+obInput = input.float(80.0, "Overbought Level", minval = 55.0, maxval = 95.0, step = 1.0, group = GRP_ZONES,
     tooltip = "Upper threshold for overbought zone.\n5m start: 75")
-osInput = input.float(25.0, "Oversold Level", minval = 5.0, maxval = 45.0, step = 1.0, group = GRP_ZONES,
+osInput = input.float(20.0, "Oversold Level", minval = 5.0, maxval = 45.0, step = 1.0, group = GRP_ZONES,
     tooltip = "Lower threshold for oversold zone.\n5m start: 25")
 obAlphaInput = input.int(20, "OB Fill Opacity", minval = 0, maxval = 100, group = GRP_ZONES,
     tooltip = "Opacity of the overbought zone fill. 0=invisible, 100=solid")
@@ -157,9 +157,9 @@ fatigueBarsInput = input.int(2, "Confirmation Bars", minval = 1, maxval = 5, gro
 // ══════════════════════════════════════════════════════════
 knnShowInput = input.bool(true, "Show KNN Panel", group = GRP_KNN,
     tooltip = "K-Nearest Neighbors directional bias panel.\nFinds similar historical patterns and votes on direction.\n\nFeatures used:\nM: momentum position | V: volume flow | E: efficiency ratio | X: signal cross state")
-knnKInput = input.int(7, "Neighbors (K)", minval = 3, maxval = 15, group = GRP_KNN,
+knnKInput = input.int(4, "Neighbors (K)", minval = 3, maxval = 15, group = GRP_KNN,
     tooltip = "Number of similar bars to vote.\n3=fast, 5=balanced, 10+=conservative")
-knnWindowInput = input.int(180, "Training Window", minval = 50, maxval = 400, step = 10, group = GRP_KNN,
+knnWindowInput = input.int(265, "Training Window", minval = 50, maxval = 400, step = 10, group = GRP_KNN,
     tooltip = "How many past bars to learn from.\n50=short memory, 120=balanced, 300+=long memory")
 knnPosInput = input.string("Bottom Right", "Panel Position",
     options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left"],
@@ -175,9 +175,9 @@ knnSizeInput = input.string("Small", "Panel Text Size",
 // ══════════════════════════════════════════════════════════
 showConfluenceInput = input.bool(true, "Show Confluence Meter", group = GRP_CONF,
     tooltip = "Weighted composite score 0–100 from all subsystems.\nAbove 70 = strong bullish confluence\nBelow 30 = strong bearish confluence\nShown as a thin line on the oscillator pane.")
-confHighInput = input.float(65.0, "High Confluence", minval = 55.0, maxval = 90.0, group = GRP_CONF,
+confHighInput = input.float(72.94319595150738, "High Confluence", minval = 55.0, maxval = 90.0, group = GRP_CONF,
     tooltip = "Threshold above which confluence is considered strongly bullish.\nUsed for alerts and dashboard coloring.")
-confLowInput = input.float(35.0, "Low Confluence", minval = 10.0, maxval = 45.0, group = GRP_CONF,
+confLowInput = input.float(31.1118099079117, "Low Confluence", minval = 10.0, maxval = 45.0, group = GRP_CONF,
     tooltip = "Threshold below which confluence is considered strongly bearish.")
 
 // ══════════════════════════════════════════════════════════

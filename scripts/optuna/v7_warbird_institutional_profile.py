@@ -30,7 +30,7 @@ TV-only params (require Pine re-run, not swept here)
 -----------------------------------------------------
 retestBars, fibConfluenceTolPct, footprintTicksPerRow, footprintVaPercent,
 footprintImbalancePercent, zeroPrintVolRatio, stackedImbalanceRows,
-exhaustionZLen, exhaustionZThreshold, exhaustionLevelAtrTol.
+exhaustionLevelAtrTol.
 See docs/runbooks/wbv7_institutional_optuna.md for CDP sweep instructions.
 
 Runner interface

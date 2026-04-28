@@ -23,7 +23,7 @@
 // Footprint (chart):    request.footprint()              = 1 call
 // TOTAL:                                                 = 6 request.* paths
 //
-// PLOT BUDGET: 53 plot = 53/64 (11 headroom); label.new slots are outside 64-slot counter
+// PLOT BUDGET: 51 plot = 51/64 (13 headroom); label.new slots are outside 64-slot counter
 // TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed.
 // Momentum Oscillators (5 plots: ml_vf_bull, ml_vf_bear, ml_nfe, ml_rsi_knn, ml_confluence) added 2026-04-20.
 strategy("Warbird Pro Optuna Backtest", shorttitle="WB Opt BT", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100, pyramiding=0, process_orders_on_close=false, use_bar_magnifier=true, fill_orders_on_standard_ohlc=true, slippage=1, default_qty_type=strategy.fixed, default_qty_value=1, initial_capital=50000, currency=currency.USD, margin_long=25, margin_short=25, commission_type=strategy.commission.cash_per_contract, commission_value=1.00)
@@ -47,6 +47,8 @@ float fibDeviationManual = input.float(4.0, "ZigZag Deviation (manual)",
   minval=0.5, maxval=20.0, step=0.5, group=groupFibEngine,
   tooltip="Only used when Auto-tune is OFF.")
 float fibConfluenceTolPct = input.float(0.05, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupFibEngine)
+float htfConfTolPctInput = input.float(0.15, "HTF Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupFibEngine,
+  tooltip="Price tolerance for 15m level confluence checks against 1H/4H/1D fib ladders.")
 float fibThresholdFloorPct = input.float(0.50, "ZigZag Threshold Floor (%)", minval=0.0, maxval=5.0, step=0.05, group=groupFibEngine,
   tooltip="Minimum percent move required by the ZigZag after ATR scaling.")
 int fibPivotRightRoomBars = input.int(4, "Pivot Right Room (bars)", minval=1, maxval=20, group=groupFibEngine,
@@ -58,6 +60,22 @@ bool useParentFibTimeframe = input.bool(false, "Use Parent Fib Timeframe", group
   tooltip="OFF keeps fib ownership on the chart timeframe. ON uses Parent Fib Timeframe ownership (equal or higher timeframe; lower timeframe selections are ignored).")
 string fibAnchorTimeframe = input.timeframe("5", "Parent Fib Timeframe", group=groupFibEngine,
   tooltip="Fib owner when Use Parent Fib Timeframe is ON. Equal timeframe applies scanner logic natively; higher timeframe projects parent ladders.")
+bool enableCustomFibRatios = input.bool(false, "Enable Custom Fib Ratios", group=groupFibEngine,
+  tooltip="OFF keeps canonical Warbird fib geometry. ON lets you tune each retracement/extension ratio directly from settings.")
+float fibRatio236Input = input.float(0.236, "Custom .236", minval=0.05, maxval=0.95, step=0.001, group=groupFibEngine)
+float fibRatio382Input = input.float(0.382, "Custom .382", minval=0.05, maxval=0.95, step=0.001, group=groupFibEngine)
+float fibRatio500Input = input.float(0.500, "Custom .500", minval=0.05, maxval=0.95, step=0.001, group=groupFibEngine)
+float fibRatio618Input = input.float(0.618, "Custom .618", minval=0.05, maxval=0.95, step=0.001, group=groupFibEngine)
+float fibRatio786Input = input.float(0.786, "Custom .786", minval=0.05, maxval=0.99, step=0.001, group=groupFibEngine)
+float fibRatioT1Input = input.float(1.236, "Custom T1", minval=1.01, maxval=4.0, step=0.001, group=groupFibEngine)
+float fibRatio1272Input = input.float(1.272, "Custom 1.272", minval=1.01, maxval=4.0, step=0.001, group=groupFibEngine)
+float fibRatio1382Input = input.float(1.382, "Custom 1.382", minval=1.01, maxval=4.0, step=0.001, group=groupFibEngine)
+float fibRatio1500Input = input.float(1.500, "Custom 1.500", minval=1.01, maxval=4.0, step=0.001, group=groupFibEngine)
+float fibRatioT2Input = input.float(1.618, "Custom T2", minval=1.01, maxval=4.0, step=0.001, group=groupFibEngine)
+float fibRatio1786Input = input.float(1.786, "Custom 1.786", minval=1.01, maxval=4.0, step=0.001, group=groupFibEngine)
+float fibRatioT3Input = input.float(2.000, "Custom T3", minval=1.01, maxval=6.0, step=0.001, group=groupFibEngine)
+float fibRatioT4Input = input.float(2.236, "Custom T4", minval=1.01, maxval=6.0, step=0.001, group=groupFibEngine)
+float fibRatioT5Input = input.float(2.618, "Custom T5", minval=1.01, maxval=8.0, step=0.001, group=groupFibEngine)
 
 int _chartTfSec = timeframe.in_seconds(timeframe.period)
 int _parentTfSec = timeframe.in_seconds(fibAnchorTimeframe)
@@ -97,6 +115,38 @@ float FIB_W1786 = 1.786  // intermediate waypoint
 float FIB_T3    = 2.0
 float FIB_T4    = 2.236
 float FIB_T5    = 2.618
+
+float fibRatio236 = enableCustomFibRatios ? fibRatio236Input : FIB_236
+float fibRatio382 = enableCustomFibRatios ? fibRatio382Input : FIB_382
+float fibRatio500 = enableCustomFibRatios ? fibRatio500Input : FIB_PIVOT
+float fibRatio618 = enableCustomFibRatios ? fibRatio618Input : FIB_618
+float fibRatio786 = enableCustomFibRatios ? fibRatio786Input : FIB_786
+float fibRatioT1 = enableCustomFibRatios ? fibRatioT1Input : FIB_T1
+float fibRatio1272 = enableCustomFibRatios ? fibRatio1272Input : FIB_1272
+float fibRatio1382 = enableCustomFibRatios ? fibRatio1382Input : FIB_W1382
+float fibRatio1500 = enableCustomFibRatios ? fibRatio1500Input : FIB_W150
+float fibRatioT2 = enableCustomFibRatios ? fibRatioT2Input : FIB_T2
+float fibRatio1786 = enableCustomFibRatios ? fibRatio1786Input : FIB_W1786
+float fibRatioT3 = enableCustomFibRatios ? fibRatioT3Input : FIB_T3
+float fibRatioT4 = enableCustomFibRatios ? fibRatioT4Input : FIB_T4
+float fibRatioT5 = enableCustomFibRatios ? fibRatioT5Input : FIB_T5
+
+const int FIB_IDX_NEG236 = 0
+const int FIB_IDX_ZERO = 1
+const int FIB_IDX_236 = 2
+const int FIB_IDX_382 = 3
+const int FIB_IDX_500 = 4
+const int FIB_IDX_618 = 5
+const int FIB_IDX_786 = 6
+const int FIB_IDX_1000 = 7
+const int FIB_IDX_T1 = 8
+const int FIB_IDX_1382 = 9
+const int FIB_IDX_1500 = 10
+const int FIB_IDX_T2 = 11
+const int FIB_IDX_1786 = 12
+const int FIB_IDX_T3 = 13
+const int FIB_IDX_T4 = 14
+const int FIB_IDX_T5 = 15
 
 // Colors (TradingView settings defaults)
 color COLOR_ANCHOR             = #FFFFFF    // white — 0, .5, 1 levels
@@ -154,6 +204,8 @@ float footprintVaPercent = input.float(50.0, "Footprint VA %", minval=1.0, maxva
 float footprintImbalancePercent = input.float(195.0, "Footprint Imbalance %", minval=100.0, maxval=1000.0, step=10.0, group=groupFootprint)
 float exhaustionLevelAtrTol = input.float(0.10, "Extension ATR Tolerance", minval=0.01, maxval=0.50, step=0.01, group=groupFootprint)
 float zeroPrintVolRatio = input.float(0.10, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
+float fibTouchTolPtsInput = input.float(2.0, "Fib Touch Tolerance (pts)", minval=0.25, maxval=20.0, step=0.25, group=groupFootprint,
+  tooltip="Point tolerance used by fib-touch footprint delta tagging.")
 int exhaustionSwingLookbackBarsInput = input.int(10, "Exhaustion Swing Lookback", minval=3, maxval=50, group=groupFootprint,
   tooltip="Bars used for swing-high/swing-low exhaustion checks. Default 10 preserves current behavior.")
 int exhaustionCooldownBarsInput = input.int(8, "Exhaustion Cooldown Bars", minval=1, maxval=50, group=groupFootprint,
@@ -169,6 +221,8 @@ bool requireFootprintForBacktestInput = input.bool(false, "Require Footprint For
 string groupViz = "Visuals"
 int targetLookbackBars = input.int(40, "Target Line Lookback Bars", minval=5, maxval=500, group=groupViz)
 bool extendLevelsRight = input.bool(true, "Extend Levels Right", group=groupViz)
+int fibLadderRightSpanBarsInput = input.int(10, "Fib Ladder Right Span (bars)", minval=0, maxval=500, group=groupViz,
+  tooltip="Horizontal span of the fib ladder to the right of the current bar when Extend Levels Right is ON. Decoupled from trade label offset. Default 10 preserves prior ladder width.")
 bool useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window", group=groupViz)
 bool showEma9Input = input.bool(true, "Show EMA 9", inline="ema9", group=groupViz)
 color ema9ColorInput = input.color(#FFFFFF, "", inline="ema9", group=groupViz)
@@ -340,7 +394,7 @@ float fvgBearDist = (not na(nearestFvgBearMid) and atr14 > 0) ? (nearestFvgBearM
 //=====================
 // HTF FIB CONFLUENCE (1H, 4H, Daily)
 //=====================
-float htfConfTolPct = 0.15
+float htfConfTolPct = htfConfTolPctInput
 
 [htf1hHigh, htf1hLow] = request.security(syminfo.tickerid, "60", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [htf4hHigh, htf4hLow] = request.security(syminfo.tickerid, "240", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
@@ -353,17 +407,17 @@ float htf1dRange = nz(htf1dHigh - htf1dLow)
 htfFibPrice(float htfHigh, float htfLow, float htfRng, float ratio) =>
     htfRng <= 0 ? na : htfLow + htfRng * ratio
 
-float htf1hP382 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_382)
-float htf1hP500 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_PIVOT)
-float htf1hP618 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_618)
+float htf1hP382 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, fibRatio382)
+float htf1hP500 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, fibRatio500)
+float htf1hP618 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, fibRatio618)
 
-float htf4hP382 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_382)
-float htf4hP500 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_PIVOT)
-float htf4hP618 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_618)
+float htf4hP382 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, fibRatio382)
+float htf4hP500 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, fibRatio500)
+float htf4hP618 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, fibRatio618)
 
-float htf1dP382 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_382)
-float htf1dP500 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_PIVOT)
-float htf1dP618 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_618)
+float htf1dP382 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, fibRatio382)
+float htf1dP500 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, fibRatio500)
+float htf1dP618 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, fibRatio618)
 
 htfConfluenceCheck(float level15m, float currentFibRange) =>
     if na(level15m) or na(currentFibRange) or currentFibRange <= 0
@@ -529,21 +583,53 @@ fibPrice(float ratio) =>
     fibRange <= 0 ? na : (fibBase + fibDir * fibRange * ratio)
 
 float pZero   = fibPrice(FIB_ZERO)
-float pNeg236 = fibPrice(-FIB_236)
-float p236    = fibPrice(FIB_236)
-float p382    = fibPrice(FIB_382)
-float pPivot  = fibPrice(FIB_PIVOT)
-float p618    = fibPrice(FIB_618)
-float p786    = fibPrice(FIB_786)
+float pNeg236 = fibPrice(-fibRatio236)
+float p236    = fibPrice(fibRatio236)
+float p382    = fibPrice(fibRatio382)
+float pPivot  = fibPrice(fibRatio500)
+float p618    = fibPrice(fibRatio618)
+float p786    = fibPrice(fibRatio786)
 float pOne    = fibPrice(FIB_ONE)
-float pT1     = fibPrice(FIB_T1)
-float p1382   = fibPrice(FIB_W1382)
-float p150    = fibPrice(FIB_W150)
-float pT2     = fibPrice(FIB_T2)
-float p1786   = fibPrice(FIB_W1786)
-float pT3     = fibPrice(FIB_T3)
-float pT4     = fibPrice(FIB_T4)
-float pT5     = fibPrice(FIB_T5)
+float pT1     = fibPrice(fibRatioT1)
+float p1382   = fibPrice(fibRatio1382)
+float p150    = fibPrice(fibRatio1500)
+float pT2     = fibPrice(fibRatioT2)
+float p1786   = fibPrice(fibRatio1786)
+float pT3     = fibPrice(fibRatioT3)
+float pT4     = fibPrice(fibRatioT4)
+float pT5     = fibPrice(fibRatioT5)
+
+fibLevelByIndex(int idx) =>
+    idx == FIB_IDX_NEG236 ? pNeg236 :
+      idx == FIB_IDX_ZERO ? pZero :
+      idx == FIB_IDX_236 ? p236 :
+      idx == FIB_IDX_382 ? p382 :
+      idx == FIB_IDX_500 ? pPivot :
+      idx == FIB_IDX_618 ? p618 :
+      idx == FIB_IDX_786 ? p786 :
+      idx == FIB_IDX_1000 ? pOne :
+      idx == FIB_IDX_T1 ? pT1 :
+      idx == FIB_IDX_1382 ? p1382 :
+      idx == FIB_IDX_1500 ? p150 :
+      idx == FIB_IDX_T2 ? pT2 :
+      idx == FIB_IDX_1786 ? p1786 :
+      idx == FIB_IDX_T3 ? pT3 :
+      idx == FIB_IDX_T4 ? pT4 :
+      idx == FIB_IDX_T5 ? pT5 : na
+
+fibLevelOffset(int baseIdx, int forwardSteps) =>
+    if na(baseIdx)
+        na
+    else
+        int offsetIdx = baseIdx + forwardSteps
+        int clampedIdx = int(math.max(float(FIB_IDX_NEG236), math.min(float(FIB_IDX_T5), float(offsetIdx))))
+        fibLevelByIndex(clampedIdx)
+
+entryAnchorHitTriggered(float level, bool wantLong) =>
+    float prevClose = nz(close[1], close)
+    wantLong
+      ? (not na(level) and low <= level and close >= level and prevClose <= level)
+      : (not na(level) and high >= level and close <= level and prevClose >= level)
 
 float entryZoneUpper = math.max(pPivot, p786)
 float entryZoneLower = math.min(pPivot, p786)
@@ -570,7 +656,7 @@ float fpDelta = fpAvailable ? footprint.delta(reqFootprint) : na
 // FOOTPRINT DELTA AT FIB TOUCHES
 //=====================
 float barRange = high - low
-float volDeltaTolPts = 2.0
+float volDeltaTolPts = fibTouchTolPtsInput
 
 fibTouchCheck(float level) =>
     not na(level) and math.abs(close - level) <= volDeltaTolPts
@@ -810,16 +896,14 @@ float footprintDelta = fpDelta
 volume_row pocRow = fpAvailable ? footprint.poc(reqFootprint) : na
 float pocRowVol = not na(pocRow) ? volume_row.total_volume(pocRow) : na
 
-float p1272 = fibPrice(FIB_1272)
+float p1272 = fibPrice(fibRatio1272)
 float exhaustionTol = atr14 * exhaustionLevelAtrTol
 bool exhAt1272 = not na(p1272) and (dir == 1 ? high >= p1272 - exhaustionTol : low <= p1272 + exhaustionTol)
 bool exhAt1618 = not na(pT2) and (dir == 1 ? high >= pT2 - exhaustionTol : low <= pT2 + exhaustionTol)
 bool mlExhGeomConfluence = isValid and confirmed and (exhAt1272 or exhAt1618)
 float exhaustionTriggerPrice = exhAt1618 ? pT2 : exhAt1272 ? p1272 : (dir == 1 ? high : low)
 
-// Z-score removed from active exhaustion contract. Keep export fields as placeholders.
-float mlExhZScore = na
-bool mlExhZExtreme = false
+// Z-score removed from active exhaustion contract.
 
 // Footprint row-level evidence (ML exports + diamond enrichment)
 volume_row triggerRow = fpAvailable and not na(exhaustionTriggerPrice) ? footprint.get_row_by_price(reqFootprint, exhaustionTriggerPrice) : na
@@ -943,6 +1027,10 @@ var int lastExhTriggerDir = 0
 var int lastTier1ExhBar = na
 var int lastTier1ExhDir = 0
 var int mlContConfidenceTier = 0
+var int lastConsumedLongEntryIdx = na
+var int lastConsumedShortEntryIdx = na
+var int lastConsumedAnchorHighTime = na
+var int lastConsumedAnchorLowTime = na
 int cooldownLen = cooldownBarsInput
 int barsSinceExit = not na(lastExitBar) ? bar_index - lastExitBar : 999
 bool cooldownActive = barsSinceExit < cooldownLen
@@ -952,28 +1040,38 @@ int backtestExitTargetIndex = backtestExitTargetInput == "TP5" ? 5 : backtestExi
 roundToTick(float price) =>
     na(price) ? na : math.round(price / syminfo.mintick) * syminfo.mintick
 
-float optEntryRatio = optEntryLevelInput == "0.500" ? FIB_PIVOT : optEntryLevelInput == "0.786" ? FIB_786 : FIB_618
 int stopFamilyCode = 3  // ATR-only contract retained for downstream export compatibility.
 
-// entryLevel stays on the fib-defined execution line. The indicator overlay should follow that line,
-// not the accept-bar close, so the visual remains anchored to the actual setup logic.
-float entryLevel = fibPrice(optEntryRatio)
+// Execution contract: use the configured anchor only.
+int executionAnchorIdx = optEntryLevelInput == "0.500" ? FIB_IDX_500 : optEntryLevelInput == "0.786" ? FIB_IDX_786 : FIB_IDX_618
+float executionAnchorRatio = optEntryLevelInput == "0.500" ? fibRatio500 : optEntryLevelInput == "0.786" ? fibRatio786 : fibRatio618
+float executionAnchorPrice = fibPrice(executionAnchorRatio)
+bool longEntryLevelTriggeredRaw = entryAnchorHitTriggered(executionAnchorPrice, true)
+bool shortEntryLevelTriggeredRaw = entryAnchorHitTriggered(executionAnchorPrice, false)
+float longEntryLevelRaw = executionAnchorPrice
+float shortEntryLevelRaw = executionAnchorPrice
+int longEntryIdxRaw = executionAnchorIdx
+int shortEntryIdxRaw = executionAnchorIdx
+bool sameConsumedAnchor = not na(lastConsumedAnchorHighTime) and not na(lastConsumedAnchorLowTime) and anchorHighTime == lastConsumedAnchorHighTime and anchorLowTime == lastConsumedAnchorLowTime
+bool longEntryLevelFresh = longEntryLevelTriggeredRaw and (not sameConsumedAnchor or na(lastConsumedLongEntryIdx) or (not na(longEntryIdxRaw) and longEntryIdxRaw != lastConsumedLongEntryIdx))
+bool shortEntryLevelFresh = shortEntryLevelTriggeredRaw and (not sameConsumedAnchor or na(lastConsumedShortEntryIdx) or (not na(shortEntryIdxRaw) and shortEntryIdxRaw != lastConsumedShortEntryIdx))
+bool entryAnchorBullTrigger = confirmed and dir == 1 and longEntryLevelFresh
+bool entryAnchorBearTrigger = confirmed and dir == -1 and shortEntryLevelFresh
+int entryLevelIdx = dir == 1 ? longEntryIdxRaw : shortEntryIdxRaw
+float entryLevel = dir == 1 ? longEntryLevelRaw : shortEntryLevelRaw
 float slLevel    = not isValid or na(entryLevel) ? na : roundToTick(fibBull ? entryLevel - atr14 * optStopAtrMult : entryLevel + atr14 * optStopAtrMult)
-float tp1Level   = pT1
-float tp2Level   = pT2
-float tp3Level   = pT3
-float tp4Level   = pT4
-float tp5Level   = pT5
+float tp1Level   = fibLevelOffset(entryLevelIdx, 1)
+float tp2Level   = fibLevelOffset(entryLevelIdx, 2)
+float tp3Level   = fibLevelOffset(entryLevelIdx, 3)
+float tp4Level   = fibLevelOffset(entryLevelIdx, 4)
+float tp5Level   = fibLevelOffset(entryLevelIdx, 5)
 
 // Stop geometry is exported for AG and diagnostics, but not used as a live Pine gate.
 float slDistPts = math.abs(entryLevel - slLevel)
 float slDistAtr = atr14 > 0 ? slDistPts / atr14 : 0.0
 bool trendBiasLong = ema9 > ema21 and close >= ema50 and close >= vwapVal
 bool trendBiasShort = ema9 < ema21 and close <= ema50 and close <= vwapVal
-// 5m execution gates on the selected fib anchor/reclaim, not on a broad .500-.786 zone touch.
 bool entryZoneTouched = not na(entryZoneUpper) and not na(entryZoneLower) and high >= entryZoneLower and low <= entryZoneUpper
-bool entryAnchorBullTrigger = confirmed and not na(entryLevel) and low <= entryLevel and close >= entryLevel
-bool entryAnchorBearTrigger = confirmed and not na(entryLevel) and high >= entryLevel and close <= entryLevel
 float localBreakHigh = ta.highest(high, valueReclaimBreakoutLookbackBarsInput)[1]
 float localBreakLow = ta.lowest(low, valueReclaimBreakoutLookbackBarsInput)[1]
 bool footprintLongTrigger = fpAvailable and fpDeltaBullish and (pocNearLow or mlExhAbsorption or mlExhZeroPrint or stackedBuyImbalance)
@@ -986,28 +1084,40 @@ bool microTrendLong = trendBiasLong or (ema9 >= ema21 and vwapCode >= 0)
 bool microTrendShort = trendBiasShort or (ema9 <= ema21 and vwapCode <= 0)
 bool footprintValueReclaimLong = useMicroValueReclaimInput and footprintLongTrigger and not na(pocPrice) and close >= pocPrice and (low <= pocPrice or close > localBreakHigh or vwapCode >= 0)
 bool footprintValueReclaimShort = useMicroValueReclaimInput and footprintShortTrigger and not na(pocPrice) and close <= pocPrice and (high >= pocPrice or close < localBreakLow or vwapCode <= 0)
+float gateVfBodyNorm = barRange > syminfo.mintick ? (close - open) / barRange : 0.0
+float gateVfVolMean = ta.sma(volume, vfLenInput)
+float gateVfVolStd = ta.stdev(volume, vfLenInput)
+float gateVfVolZ = gateVfVolStd > 0 ? (volume - gateVfVolMean) / gateVfVolStd : 0.0
+float gateVfBull = math.max(0.0, math.min(100.0, 50.0 + gateVfBodyNorm * vfFlowWeight + gateVfVolZ * vfVolWeight))
+float gateVfBear = math.max(0.0, math.min(100.0, 50.0 - gateVfBodyNorm * vfFlowWeight - gateVfVolZ * vfVolWeight))
+float gateNfe = ta.ema(ta.rsi(close, nfeLenInput), 3)
+float gateRsiKnn = f_rsi_knn(rsi14, rsiKnnWindow)
+float gateConfluence = math.max(0.0, math.min(100.0, (gateNfe + (gateVfBull - gateVfBear + 100.0) * 0.5 + gateRsiKnn) / 3.0))
+bool momentumOscLongAligned = gateVfBull >= gateVfBear and gateNfe >= 50 and gateRsiKnn >= 50 and gateConfluence >= 50
+bool momentumOscShortAligned = gateVfBear >= gateVfBull and gateNfe <= 50 and gateRsiKnn <= 50 and gateConfluence <= 50
+bool volumeFlowLongAligned = not fpAvailable or fpDeltaBullish
+bool volumeFlowShortAligned = not fpAvailable or fpDeltaBearish
 bool longTargetRoom = not na(tp1Level) and close < tp1Level
 bool shortTargetRoom = not na(tp1Level) and close > tp1Level
 bool longPivotSafety = not na(pPivot) and close >= pPivot
 bool shortPivotSafety = not na(pPivot) and close <= pPivot
-bool fibAnchorSetupLong = longPivotSafety and (entryAnchorBullTrigger or footprintValueReclaimLong)
-bool fibAnchorSetupShort = shortPivotSafety and (entryAnchorBearTrigger or footprintValueReclaimShort)
+bool fibAnchorSetupLong = longPivotSafety and entryAnchorBullTrigger
+bool fibAnchorSetupShort = shortPivotSafety and entryAnchorBearTrigger
 bool footprintEntryLong = footprintLongGate and longTargetRoom and fibAnchorSetupLong
 bool footprintEntryShort = footprintShortGate and shortTargetRoom and fibAnchorSetupShort
-bool setupContextLong = dir == 1 and microTrendLong and atrRiskAcceptable and fibAnchorSetupLong
-bool setupContextShort = dir == -1 and microTrendShort and atrRiskAcceptable and fibAnchorSetupShort
+bool setupContextLong = dir == 1 and microTrendLong and momentumOscLongAligned and volumeFlowLongAligned and atrRiskAcceptable and fibAnchorSetupLong
+bool setupContextShort = dir == -1 and microTrendShort and momentumOscShortAligned and volumeFlowShortAligned and atrRiskAcceptable and fibAnchorSetupShort
 bool setupContextActive = setupContextLong or setupContextShort
 bool longTriggerCore = setupContextLong and footprintEntryLong
 bool shortTriggerCore = setupContextShort and footprintEntryShort
 bool longTriggerEvent = longTriggerCore and (oneShotEvent ? not longTriggerCore[1] : true)
 bool shortTriggerEvent = shortTriggerCore and (oneShotEvent ? not shortTriggerCore[1] : true)
-bool directBacktestLongEvent = dir == 1 and entryAnchorBullTrigger and longPivotSafety
-bool directBacktestShortEvent = dir == -1 and entryAnchorBearTrigger and shortPivotSafety
+bool directBacktestLongEvent = dir == 1 and entryAnchorBullTrigger and longPivotSafety and momentumOscLongAligned and volumeFlowLongAligned and footprintLongGate and longTargetRoom
+bool directBacktestShortEvent = dir == -1 and entryAnchorBearTrigger and shortPivotSafety and momentumOscShortAligned and volumeFlowShortAligned and footprintShortGate and shortTargetRoom and not bullishTrendBlocksShorts
 bool directBacktestLongTrigger = backtestFibAnchorOnlyInput and atrRiskAcceptable and directBacktestLongEvent and (oneShotEvent ? not directBacktestLongEvent[1] : true)
 bool directBacktestShortTrigger = backtestFibAnchorOnlyInput and atrRiskAcceptable and directBacktestShortEvent and (oneShotEvent ? not directBacktestShortEvent[1] : true)
 bool entryLongTrigger = backtestFibAnchorOnlyInput ? directBacktestLongTrigger : (longTriggerEvent and not ladderInvalidated)
 bool entryShortTrigger = backtestFibAnchorOnlyInput ? directBacktestShortTrigger : (shortTriggerEvent and not ladderInvalidated and not bullishTrendBlocksShorts)
-bool setupSeedActive = backtestFibAnchorOnlyInput ? (directBacktestLongTrigger or directBacktestShortTrigger) : setupContextActive
 bool setupLadderAllowed = backtestFibAnchorOnlyInput or not ladderInvalidated
 
 if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or entryLongTrigger or entryShortTrigger)
@@ -1016,7 +1126,9 @@ if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or b
 if enableDebugLogs and confirmed and setupContextActive
     log.info(str.format("WBDBG_GATE bar={0} dir={1} fpAvail={2} fpFallback={3} fpL={4} fpS={5} fpGateL={6} fpGateS={7} anchorL={8} anchorS={9} reclaimL={10} reclaimS={11} roomL={12} roomS={13} longCore={14} shortCore={15}", bar_index, dir, fpAvailable, footprintBacktestFallback, footprintLongTrigger, footprintShortTrigger, footprintLongGate, footprintShortGate, entryAnchorBullTrigger, entryAnchorBearTrigger, footprintValueReclaimLong, footprintValueReclaimShort, longTargetRoom, shortTargetRoom, longTriggerCore, shortTriggerCore))
 
-bool tradeSetupWasActive = tradeState == TRADE_SETUP
+float prevStrategyPosSize = nz(strategy.position_size[1], 0.0)
+bool longFillEdge = strategy.position_size > 0 and prevStrategyPosSize <= 0
+bool shortFillEdge = strategy.position_size < 0 and prevStrategyPosSize >= 0
 if confirmed
     if exhaustionSignalDir != 0
         lastExhTriggerBar := bar_index
@@ -1025,11 +1137,12 @@ if confirmed
             lastTier1ExhBar := bar_index
             lastTier1ExhDir := exhaustionSignalDir
 
-    if tradeState == TRADE_NONE and setupSeedActive and not cooldownActive and setupLadderAllowed
+    bool armSetupLong = tradeState == TRADE_NONE and entryLongTrigger and not cooldownActive and setupLadderAllowed
+    bool armSetupShort = tradeState == TRADE_NONE and entryShortTrigger and not cooldownActive and setupLadderAllowed
+    if armSetupLong or armSetupShort
         tradeState := TRADE_SETUP
         setupBar := bar_index
-
-    if tradeState == TRADE_SETUP and (entryLongTrigger or entryShortTrigger)
+        tradeDir := armSetupLong ? 1 : -1
         entryPrice := entryLevel
         slPrice := slLevel
         tp1Price := tp1Level
@@ -1038,10 +1151,24 @@ if confirmed
         tp4Price := tp4Level
         tp5Price := tp5Level
         entryAtr := atr14
-        tradeDir  := dir      // lock direction here — anchor may shift by exit bar
+        entryBar := na
         highestTargetHit := 0
+        lastConsumedAnchorHighTime := anchorHighTime
+        lastConsumedAnchorLowTime := anchorLowTime
+        if tradeDir == 1
+            lastConsumedLongEntryIdx := entryLevelIdx
+            strategy.cancel("Short")
+        else if tradeDir == -1
+            lastConsumedShortEntryIdx := entryLevelIdx
+            strategy.cancel("Long")
+
+    bool setupReadyForFill = tradeState == TRADE_SETUP and not na(setupBar) and bar_index > setupBar
+    bool longSetupFilled = setupReadyForFill and tradeDir == 1 and longFillEdge
+    bool shortSetupFilled = setupReadyForFill and tradeDir == -1 and shortFillEdge
+    if longSetupFilled or shortSetupFilled
         tradeState := TRADE_ACTIVE
         entryBar := bar_index
+        entryPrice := strategy.position_avg_price
 
     bool tradeInFlight = tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
 
@@ -1078,28 +1205,27 @@ if confirmed
     if canResolveTrade
         if tradeDir == 1
             int targetHitNow = high >= tp5Price ? 5 : high >= tp4Price ? 4 : high >= tp3Price ? 3 : high >= tp2Price ? 2 : high >= tp1Price ? 1 : 0
-            if low <= activeTradeStopPrice
-                tradeState := TRADE_STOPPED
-            else if targetHitNow > highestTargetHit
+            if targetHitNow > highestTargetHit
                 highestTargetHit := targetHitNow
                 tradeState := targetHitNow == 5 ? TRADE_HIT_TP5 : targetHitNow == 4 ? TRADE_HIT_TP4 : targetHitNow == 3 ? TRADE_HIT_TP3 : targetHitNow == 2 ? TRADE_HIT_TP2 : TRADE_HIT_TP1
         else
             int targetHitNow = low <= tp5Price ? 5 : low <= tp4Price ? 4 : low <= tp3Price ? 3 : low <= tp2Price ? 2 : low <= tp1Price ? 1 : 0
-            if high >= activeTradeStopPrice
-                tradeState := TRADE_STOPPED
-            else if targetHitNow > highestTargetHit
+            if targetHitNow > highestTargetHit
                 highestTargetHit := targetHitNow
                 tradeState := targetHitNow == 5 ? TRADE_HIT_TP5 : targetHitNow == 4 ? TRADE_HIT_TP4 : targetHitNow == 3 ? TRADE_HIT_TP3 : targetHitNow == 2 ? TRADE_HIT_TP2 : TRADE_HIT_TP1
 
     if tradeState == TRADE_SETUP and not na(setupBar) and bar_index - setupBar > setupExpiryBars
         lastExitOutcome := 4  // EXPIRED — setup timed out, no fill
         tradeState := TRADE_EXPIRED
+        strategy.cancel("Long")
+        strategy.cancel("Short")
 
-    bool selectedTargetResolved = highestTargetHit >= backtestExitTargetIndex and highestTargetHit > 0
-    bool tradeResolved = tradeState == TRADE_STOPPED or tradeState == TRADE_EXPIRED or selectedTargetResolved
+    bool brokerFlatAfterTrade = tradeInFlight and strategy.position_size == 0 and not na(entryBar) and bar_index > entryBar
+    bool selectedTargetResolved = brokerFlatAfterTrade and highestTargetHit >= backtestExitTargetIndex and highestTargetHit > 0
+    bool tradeResolved = tradeState == TRADE_EXPIRED or brokerFlatAfterTrade
     if tradeResolved
-        // Resolve outcome BEFORE resetting state — if a trade stopped after TP1-TP4, preserve the highest target reached.
-        lastExitOutcome := tradeState == TRADE_EXPIRED ? 4 : highestTargetHit == 5 ? 7 : highestTargetHit == 4 ? 6 : highestTargetHit == 3 ? 5 : highestTargetHit == 2 ? 2 : highestTargetHit == 1 ? 1 : 3
+        // Resolve outcome BEFORE resetting state.
+        lastExitOutcome := tradeState == TRADE_EXPIRED ? 4 : selectedTargetResolved ? (highestTargetHit == 5 ? 7 : highestTargetHit == 4 ? 6 : highestTargetHit == 3 ? 5 : highestTargetHit == 2 ? 2 : highestTargetHit == 1 ? 1 : 3) : 3
         lastExitBar := bar_index
         tradeState := TRADE_NONE
         entryPrice := na
@@ -1121,30 +1247,37 @@ float backtestTargetPrice = na
 if tradeInFlightNow
     backtestTargetPrice := backtestExitTargetIndex == 5 ? tp5Price : backtestExitTargetIndex == 4 ? tp4Price : backtestExitTargetIndex == 3 ? tp3Price : backtestExitTargetIndex == 2 ? tp2Price : tp1Price
 
-// Fire TradingView Strategy Tester orders exactly on state-machine activation edges.
-bool setupLevelsValid = not na(slLevel) and not na(tp1Level) and not na(tp2Level) and not na(tp3Level) and not na(tp4Level) and not na(tp5Level)
+// Fire TradingView Strategy Tester orders from the setup-pending -> fill -> active lifecycle.
+bool setupLevelsValid = tradeState == TRADE_SETUP and not na(entryPrice) and not na(slPrice) and not na(tp1Price) and not na(tp2Price) and not na(tp3Price) and not na(tp4Price) and not na(tp5Price)
 bool activeTradeLevelsValid = tradeInFlightNow and not na(activeStopPrice) and not na(tp1Price) and not na(tp2Price) and not na(tp3Price) and not na(tp4Price) and not na(tp5Price)
 bool levelsValid = setupLevelsValid or activeTradeLevelsValid
 bool canTradeBar = levelsValid and confirmed
-float strategyStop = not na(activeStopPrice) ? activeStopPrice : slLevel
-bool exitOrdersArmed = tradeInFlightNow and not na(entryBar)
-bool strategyLongArm = confirmed and tradeState == TRADE_ACTIVE and entryBar == bar_index and tradeDir == 1
-bool strategyShortArm = confirmed and tradeState == TRADE_ACTIVE and entryBar == bar_index and tradeDir == -1
+bool exitTargetArmed = tradeInFlightNow and not na(entryBar) and bar_index > entryBar and strategy.position_size != 0
+float strategyTarget = exitTargetArmed ? backtestTargetPrice : na
+bool strategyLongArm = confirmed and tradeState == TRADE_SETUP and tradeDir == 1 and not na(setupBar) and bar_index > setupBar and strategy.position_size <= 0 and not na(entryPrice)
+bool strategyShortArm = confirmed and tradeState == TRADE_SETUP and tradeDir == -1 and not na(setupBar) and bar_index > setupBar and strategy.position_size >= 0 and not na(entryPrice)
 
-if strategyLongArm and canTradeBar and strategy.position_size <= 0
-    strategy.entry("Long", strategy.long, qty=1, comment="WB_LONG")
+if tradeState != TRADE_SETUP
+    strategy.cancel("Long")
+    strategy.cancel("Short")
 
-if strategyShortArm and canTradeBar and strategy.position_size >= 0
-    strategy.entry("Short", strategy.short, qty=1, comment="WB_SHORT")
+if strategyLongArm and canTradeBar
+    strategy.cancel("Short")
+    strategy.entry("Long", strategy.long, qty=1, limit=entryPrice, comment="WB_LONG_LMT")
 
-if (strategy.position_size > 0 or strategyLongArm) and canTradeBar and exitOrdersArmed and not na(strategyStop) and not na(backtestTargetPrice)
-    strategy.exit("Long TP", "Long", stop=strategyStop, limit=backtestTargetPrice, qty=1)
+if strategyShortArm and canTradeBar
+    strategy.cancel("Long")
+    strategy.entry("Short", strategy.short, qty=1, limit=entryPrice, comment="WB_SHORT_LMT")
 
-if (strategy.position_size < 0 or strategyShortArm) and canTradeBar and exitOrdersArmed and not na(strategyStop) and not na(backtestTargetPrice)
-    strategy.exit("Short TP", "Short", stop=strategyStop, limit=backtestTargetPrice, qty=1)
+if strategy.position_size > 0 and canTradeBar and exitTargetArmed and not na(strategyTarget) and not na(activeStopPrice)
+    strategy.exit("Long EXIT", "Long", limit=strategyTarget, stop=activeStopPrice, qty=1)
 
-if not tradeInFlightNow and strategy.position_size != 0
-    strategy.close_all(comment="WB_STATE_SYNC")
+if strategy.position_size < 0 and canTradeBar and exitTargetArmed and not na(strategyTarget) and not na(activeStopPrice)
+    strategy.exit("Short EXIT", "Short", limit=strategyTarget, stop=activeStopPrice, qty=1)
+
+if not tradeInFlightNow
+    strategy.cancel("Long EXIT")
+    strategy.cancel("Short EXIT")
 
 // Turnover surface (execution churn): absolute contract delta per bar and notional equivalent.
 float turnoverContractsBar = math.abs(strategy.position_size - nz(strategy.position_size[1], 0.0))
@@ -1160,18 +1293,18 @@ fibLineStyle = f_line_style(fibLineStyleInput)
 tradeLabelSize = f_label_size(tradeLabelSizeInput)
 
 bool tradeVisible = tradeState == TRADE_SETUP or tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
-bool tradeSetupVisible = tradeState == TRADE_SETUP and not na(setupBar) and not na(entryLevel) and not na(slLevel) and not na(tp1Level) and not na(tp2Level) and not na(tp3Level) and not na(tp4Level) and not na(tp5Level)
+bool tradeSetupVisible = tradeState == TRADE_SETUP and not na(setupBar) and not na(entryPrice) and not na(slPrice) and not na(tp1Price) and not na(tp2Price) and not na(tp3Price) and not na(tp4Price) and not na(tp5Price)
 bool tradeActiveVisible = tradeInFlightNow and not na(entryPrice) and not na(activeStopPrice) and not na(tp1Price) and not na(tp2Price) and not na(tp3Price) and not na(tp4Price) and not na(tp5Price)
 bool tradeProjectionVisible = tradeSetupVisible or tradeActiveVisible
 bool showTradeLevels = showTradeLabelsInput and tradeProjectionVisible
 bool showFibLabelsNow = showFibLevelLabelsInput and not showTradeLevels
-float tradeLabelEntryPrice = tradeActiveVisible ? entryPrice : tradeSetupVisible ? entryLevel : na
-float tradeLabelSlPrice = tradeActiveVisible ? activeStopPrice : tradeSetupVisible ? slLevel : na
-float tradeLabelTp1Price = tradeActiveVisible ? tp1Price : tradeSetupVisible ? tp1Level : na
-float tradeLabelTp2Price = tradeActiveVisible ? tp2Price : tradeSetupVisible ? tp2Level : na
-float tradeLabelTp3Price = tradeActiveVisible ? tp3Price : tradeSetupVisible ? tp3Level : na
-float tradeLabelTp4Price = tradeActiveVisible ? tp4Price : tradeSetupVisible ? tp4Level : na
-float tradeLabelTp5Price = tradeActiveVisible ? tp5Price : tradeSetupVisible ? tp5Level : na
+float tradeLabelEntryPrice = tradeActiveVisible ? entryPrice : tradeSetupVisible ? entryPrice : na
+float tradeLabelSlPrice = tradeActiveVisible ? activeStopPrice : tradeSetupVisible ? slPrice : na
+float tradeLabelTp1Price = tradeActiveVisible ? tp1Price : tradeSetupVisible ? tp1Price : na
+float tradeLabelTp2Price = tradeActiveVisible ? tp2Price : tradeSetupVisible ? tp2Price : na
+float tradeLabelTp3Price = tradeActiveVisible ? tp3Price : tradeSetupVisible ? tp3Price : na
+float tradeLabelTp4Price = tradeActiveVisible ? tp4Price : tradeSetupVisible ? tp4Price : na
+float tradeLabelTp5Price = tradeActiveVisible ? tp5Price : tradeSetupVisible ? tp5Price : na
 // The institutional chart surface now relies only on the canonical fib ladder.
 // Trade labels appear only when a setup qualifies or a trade is live.
 
@@ -1222,8 +1355,11 @@ var label _fibLblT5 = na
 var table webWatermarkTable = table.new(position.middle_center, 2, 1, bgcolor=color.new(color.black, 100), border_color=color.new(color.black, 100), border_width=0, frame_color=color.new(color.black, 100), frame_width=0)
 
 int fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
-int anchorLeftBar = int(math.max(0, na(anchorHighBar) or na(anchorLowBar) ? fallbackLeftBar : math.min(anchorHighBar, anchorLowBar)))
-int drawLeftBar = useConfluenceAnchorSpan ? anchorLeftBar : fallbackLeftBar
+bool anchorBarsReady = not na(anchorHighBar) and not na(anchorLowBar)
+int anchorStartBar = anchorBarsReady ? int(math.max(0, math.min(anchorHighBar, anchorLowBar))) : fallbackLeftBar
+int drawLeftBarBase = useConfluenceAnchorSpan ? anchorStartBar : fallbackLeftBar
+int drawLeftBar = int(math.max(drawLeftBarBase, anchorStartBar))
+int drawRightBar = extendLevelsRight ? bar_index + fibLadderRightSpanBarsInput : bar_index
 int tradeLabelX = bar_index + tradeLabelOffsetBarsInput
 var float tradeProjectionEntryPrice = na
 var float tradeProjectionSlPrice = na
@@ -1311,12 +1447,13 @@ float effectivePT5    = tradeFibFrozen ? snapPT5    : pT5
 float effectiveZoneFillUpper = math.max(effectiveP382, effectiveP618)
 float effectiveZoneFillLower = math.min(effectiveP382, effectiveP618)
 int effectiveDrawLeftBar = tradeFibFrozen ? snapDrawLeftBar : drawLeftBar
+effectiveDrawLeftBar := int(math.max(effectiveDrawLeftBar, anchorStartBar))
 
 drawAnchoredLine(line id, bool visible, float price, color col, int width_, int leftBar) =>
     if visible and not na(price)
-        int rightBar = extendLevelsRight ? bar_index + tradeLabelOffsetBarsInput : bar_index
-        line.set_xy1(id, leftBar, price)
-        line.set_xy2(id, rightBar, price)
+        int clampedLeftBar = int(math.max(leftBar, anchorStartBar))
+        line.set_xy1(id, clampedLeftBar, price)
+        line.set_xy2(id, drawRightBar, price)
         line.set_color(id, col)
         line.set_width(id, width_)
         line.set_style(id, fibLineStyle)
@@ -1342,7 +1479,7 @@ setFibLevelLabel(label idIn, bool visible, float price, string levelName, color 
     id
 
 drawAnchoredLine(lineZero,  true, effectivePZero,  fibAnchorColorInput,             fibAnchorWidthInput,             effectiveDrawLeftBar)
-drawAnchoredLine(lineNeg236, false, pNeg236, fibStopColorInput,            fibStopWidthInput,               drawLeftBar)
+drawAnchoredLine(lineNeg236, false, pNeg236, fibStopColorInput,            fibStopWidthInput,               effectiveDrawLeftBar)
 drawAnchoredLine(line236,   true, effectiveP236,   fibRetracementColorInput,        fibRetracementWidthInput,        effectiveDrawLeftBar)
 drawAnchoredLine(line382,   true, effectiveP382,   fibRetracementAccentColorInput,  fibRetracementAccentWidthInput,  effectiveDrawLeftBar)
 drawAnchoredLine(linePivot, true, effectivePPivot, fibAnchorColorInput,             fibPivotWidthInput,              effectiveDrawLeftBar)
@@ -1432,7 +1569,7 @@ else if barstate.islast
 
 if not na(effectiveZoneFillUpper) and not na(effectiveZoneFillLower)
     box.set_left(zoneBox, effectiveDrawLeftBar)
-    box.set_right(zoneBox, bar_index)
+    box.set_right(zoneBox, drawRightBar)
     box.set_top(zoneBox, effectiveZoneFillUpper)
     box.set_bottom(zoneBox, effectiveZoneFillLower)
     box.set_bgcolor(zoneBox, color.new(fibPivotColorInput, zoneFillTransparencyInput))
@@ -1530,8 +1667,6 @@ plot(liqSweepBull ? 1.0 : liqSweepBear ? -1.0 : 0.0, "ml_liq_sweep", display=dis
 
 // ── FOOTPRINT EXHAUSTION ──
 plot(mlExhGeomConfluence ? 1.0 : 0.0, "ml_exh_geom_confluence", display=display.none, editable=false)
-plot(mlExhZScore, "ml_exh_z_score", display=display.none, editable=false)
-plot(mlExhZExtreme ? 1.0 : 0.0, "ml_exh_z_extreme", display=display.none, editable=false)
 plot(mlExhDeltaDiv ? 1.0 : 0.0, "ml_exh_delta_div", display=display.none, editable=false)
 plot(mlExhAbsorption ? 1.0 : 0.0, "ml_exh_absorption", display=display.none, editable=false)
 plot(mlExhZeroPrint ? 1.0 : 0.0, "ml_exh_zero_print", display=display.none, editable=false)
@@ -1546,4 +1681,4 @@ plot(0.0, "ml_reversal_warning_in_trade", display=display.none, editable=false)
 // ── BACKTEST VARIANT NOTE ──
 // Removed non-essential hidden export plots (ICT/session/macro/momentum) to stay under
 // TradingView's true 64-slot output budget in strategy mode.
-// ── PLOT BUDGET (EST.): 53 plot = 53/64 ──
+// ── PLOT BUDGET (EST.): 51 plot = 51/64 ──

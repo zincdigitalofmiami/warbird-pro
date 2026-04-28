@@ -196,9 +196,10 @@ Required gates after any `.pine` edit:
 
 1. pine-facade compile check
 2. `./scripts/guards/pine-lint.sh <file>`
-3. `./scripts/guards/check-contamination.sh`
-4. `npm run build`
-5. parity guard when v7 indicator/strategy coupling is touched
+3. `./scripts/guards/check-fib-scanner-guardrails.sh`
+4. `./scripts/guards/check-contamination.sh`
+5. `npm run build`
+6. parity guard when v7 indicator/strategy coupling is touched
 
 ### Phase 6 — Promotion
 
@@ -233,6 +234,10 @@ Any Pine addition must be priced before code is written.
   `fibHtfSnapshot`, `fibZzSource`, anchor ownership transitions, fib ladder
   construction (`fibPrice` + canonical levels), and trade-fib freeze snapshot
   logic are protected scope.
+- Banned regression pattern (repo-wide): do not use the pivot-window
+  `fibHtfSnapshot` variant with `ta.barssince(...)` and
+  `pivotHighInWindow` / `pivotLowInWindow`; it has repeatedly produced wide-fib
+  failures.
 - No strategy result is trusted without TradingView export/CDP evidence.
 - No champion is accepted without IS/OOS or walk-forward-style review.
 - Commission floor is $1.00/side for MES.

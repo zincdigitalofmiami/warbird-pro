@@ -22,6 +22,8 @@ approved.
   - TradingView/Pine settings sweep workflow
 - `docs/runbooks/wbv7_institutional_optuna.md`
   - v7 institutional indicator Optuna workflow
+- `docs/runbooks/claude_rogue_proof_phase_contract.md`
+  - fail-closed phased tuning guardrails for Claude execution
 - `CLAUDE.md`
   - current operational truth
 - `docs/agent-safety-gates.md`

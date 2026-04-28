@@ -2,6 +2,24 @@
 
 Read this file before any work.
 
+## Repo Location & Source of Truth
+
+The authoritative warbird-pro repository is the **local clone** at:
+
+```
+/Volumes/Satechi Hub/warbird-pro/
+```
+
+This local path is the source of truth for every code, file, script, study DB,
+runbook, `.remember/` note, and migration question. ALWAYS read or grep the
+local clone first. The GitHub remote (`github.com/zincdigitalofmiami/warbird-pro`)
+is secondary — use it only for PRs, Issues, Actions, and remote-only state.
+
+This rule applies to every Claude surface: Claude Code on the Mac, claude.ai
+web, and claude.ai mobile. claude.ai sessions must use Desktop Commander to
+reach the Satechi Hub mount. If tooling can't reach the local mount, surface
+the blocker — do NOT silently substitute GitHub web fetch as source of truth.
+
 ## Agent Bootstrap
 
 This root `AGENTS.md` is the workspace instruction surface. `.github/copilot-instructions.md`
@@ -115,6 +133,10 @@ context, or agent-facing notes pointing at an older trigger or training surface.
   locked (checkpoint 2026-04-27). Do not modify `fibHtfSnapshot`,
   `fibZzSource`, anchor ownership transitions, fib ladder math, or trade fib
   freeze/snapshot internals without explicit approval and before/after evidence.
+- Repo-wide fib scanner guardrail (locked 2026-04-28): never reintroduce the
+  pivot-window `fibHtfSnapshot` variant that uses `ta.barssince(...)` and
+  `pivotHighInWindow` / `pivotLowInWindow`. That pattern is banned due to
+  repeated wide-fib regressions.
 - Pine budget baselines verified 2026-04-26:
   - `v7-warbird-institutional.pine`: 58/64 output calls
   - `v7-warbird-strategy.pine`: 60/64 output calls
@@ -128,9 +150,10 @@ If any `.pine` file is touched, run:
 
 1. pine-facade compile check
 2. `./scripts/guards/pine-lint.sh <file>`
-3. `./scripts/guards/check-contamination.sh`
-4. `npm run build`
-5. `./scripts/guards/check-indicator-strategy-parity.sh` when v7 indicator /
+3. `./scripts/guards/check-fib-scanner-guardrails.sh`
+4. `./scripts/guards/check-contamination.sh`
+5. `npm run build`
+6. `./scripts/guards/check-indicator-strategy-parity.sh` when v7 indicator /
    strategy coupling is touched
 
 ### Backtesting And Modeling
