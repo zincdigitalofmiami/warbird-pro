@@ -23,51 +23,63 @@ Authoritative scored evaluation modes are:
 - `TV_MCP_STRICT` (CDP automation path)
 Deprecated/legacy modes are non-authoritative.
 
-## Active Search Surface
+## Active Search Surface — Phased
 
-Canonical space file:
-- `scripts/ag/strategy_tuning_space.json`
-- active profile: `mes5m_agfit_v1`
-- runtime context: `CME_MINI:MES1!` on `5m`
+The 5m main-fib campaign is run as four sequential 1,000-trial Optuna phases,
+each with its own search-space JSON. The legacy single-pass file
+`scripts/ag/strategy_tuning_space.json` is kept as a baseline reference and
+must NOT be used for the phased campaign. Always pass `--space` explicitly.
 
-Tunable non-frozen knobs in this profile:
-- `Execution Anchor`
-- `Acceptance Retest Window (bars)`
-- `ATR Stop Multiplier`
-- `Max Setup Stop ATR`
-- `Gate Shorts In Bull Trend`
-- `Short Gate ADX Floor`
-- `Footprint Ticks Per Row`
-- `Footprint VA %`
-- `Footprint Imbalance %`
-- `Imbalance Rows`
-- `Exhaustion Z Length`
-- `Exhaustion Z Threshold`
-- `Extension ATR Tolerance`
-- `Zero-Print Volume Ratio`
+| Phase | Profile | Space file | Scope |
+|---|---|---|---|
+| 1 | `mes5m_phase1_trend_vwap_ma_liqsweep` | `scripts/ag/strategy_tuning_space.phase1.json` | trend / VWAP / MA / liquidity sweep |
+| 2 | `mes5m_phase2_momentum` | `scripts/ag/strategy_tuning_space.phase2.json` | VF Window / VF Candle Weight / VF Volume Weight / NFE Length / RSI KNN Window |
+| 3 | `mes5m_phase3_footprint_exhaustion` | `scripts/ag/strategy_tuning_space.phase3.json` | Ticks / VA / Imbalance% / Extension ATR Tol / Zero-Print / Swing Lookback / Cooldown / Imbalance Rows |
+| 4 | `mes5m_phase4_entry_risk` | `scripts/ag/strategy_tuning_space.phase4.json` | Execution Anchor / ATR Stop Multiplier / Max Setup Stop ATR / Acceptance Retest Window |
 
-Locked controls in this profile intentionally keep fib architecture/structure
-internals unchanged during tuning (for example ZigZag/fib-threshold internals,
-confluence span, visual/debug knobs, and other non-trade-list controls).
+Runtime context for every phase: `CME_MINI:MES1!` on `5m`, Bar Magnifier ON,
+commission `$1.00`/side, slippage `1` tick, capital `$50,000`.
 
-### Scope Note: Missing Knobs
+Locked controls in every phase intentionally keep fib architecture / structure
+internals unchanged (ZigZag/fib-threshold internals, confluence span,
+visual/debug knobs, and other non-trade-list controls).
 
-The 5m turnover brief references MA-family selectors, MA-length controls,
-liquidity-sweep lookback, and exhaustion cooldown/lookback knobs. Those are not
-currently present on the **shared CDP dual-surface intersection** required by
-`tv_auto_tune.py` preflight (strategy + institutional indicator schemas).
+### Phase 0 — Pine Schema Parity
 
-Do not hand-wave these as tuned. If these knobs are required for the active
-campaign, add them to the shared Pine surfaces first, then expand this search
-space.
+Before Phase 1 may run, both shared Pine surfaces must expose the Phase 1 / 3
+knobs that did not previously exist:
+
+- `Use MA Trend Filter` (bool)
+- `MA Family` (string)
+- `MA Fast Length` (int)
+- `MA Slow Length` (int)
+- `Use VWAP Gate` (bool)
+- `Liquidity Sweep Lookback` (int)
+- `Exhaustion Swing Lookback` (int)
+- `Exhaustion Cooldown Bars` (int)
+
+Files: `indicators/v7-warbird-strategy.pine`,
+`indicators/v7-warbird-institutional.pine`.
+
+Phase 0 also fixes the `Max Setup Stop ATR` Pine `minval` from `2.5` to `1.0`
+so the Phase 4 search range (1.0–3.5) is not silently floor-rejected by the
+input parser.
+
+Phase 0 is a Pine edit and requires explicit per-session approval per CLAUDE.md
+and `docs/runbooks/claude_rogue_proof_phase_contract.md`.
 
 ## Files
 
-- Search space: [scripts/ag/strategy_tuning_space.json](scripts/ag/strategy_tuning_space.json)
-- CLI: [scripts/ag/tune_strategy_params.py](scripts/ag/tune_strategy_params.py)
-- CDP automation: [scripts/ag/tv_auto_tune.py](scripts/ag/tv_auto_tune.py)
+- Phase 1 space: [scripts/ag/strategy_tuning_space.phase1.json](../../scripts/ag/strategy_tuning_space.phase1.json)
+- Phase 2 space: [scripts/ag/strategy_tuning_space.phase2.json](../../scripts/ag/strategy_tuning_space.phase2.json)
+- Phase 3 space: [scripts/ag/strategy_tuning_space.phase3.json](../../scripts/ag/strategy_tuning_space.phase3.json)
+- Phase 4 space: [scripts/ag/strategy_tuning_space.phase4.json](../../scripts/ag/strategy_tuning_space.phase4.json)
+- Legacy single-pass baseline: [scripts/ag/strategy_tuning_space.json](../../scripts/ag/strategy_tuning_space.json)
+- Cohort banding: [scripts/ag/band_phase_winners.py](../../scripts/ag/band_phase_winners.py)
+- Suggester / leaderboard CLI: [scripts/ag/tune_strategy_params.py](../../scripts/ag/tune_strategy_params.py)
+- CDP automation: [scripts/ag/tv_auto_tune.py](../../scripts/ag/tv_auto_tune.py)
 - Local tables: `warbird_strategy_tuning_batches`, `warbird_strategy_tuning_trials`
-- Migrations: [local_warehouse/migrations/008_strategy_tuning_trials.sql](local_warehouse/migrations/008_strategy_tuning_trials.sql), [009](local_warehouse/migrations/009_strategy_tuning_evaluation_mode.sql)
+- Migrations: [local_warehouse/migrations/008_strategy_tuning_trials.sql](../../local_warehouse/migrations/008_strategy_tuning_trials.sql), [009](../../local_warehouse/migrations/009_strategy_tuning_evaluation_mode.sql)
 - Suggested configs: `artifacts/tuning/suggestions/<timestamp>/trial_*.json`
 - JSONL fallback: `artifacts/tuning/strategy_trials.jsonl` (use `--storage jsonl`)
 
@@ -129,8 +141,8 @@ python scripts/ag/tune_strategy_params.py record \
 
 ## Acceptance And Promotion Gates
 
-Before champion promotion:
-- Complete **1,000 authoritative trials** for the active 5m campaign.
+Before advancing to the next phase OR promoting a champion:
+- Complete **1,000 authoritative trials** for the current phase.
 - Preserve frozen fib/structure scope (no frozen-control mutation).
 - Validate sample adequacy and directional balance.
 - Validate rolling-window/yearly stability.
@@ -147,14 +159,72 @@ The tuner rejects unstable combinations to keep search efficient:
 - shallow row depth with extreme imbalance (`Footprint Imbalance % >= 325` and `Imbalance Rows < 2`)
 - inverted stop caps (`Max Setup Stop ATR` below `ATR Stop Multiplier`)
 
-## Repeatable 5m Protocol
+## Phased 5m Protocol
 
-1. Generate `--count 50` suggestions from `mes5m_agfit_v1`.
-2. Execute batch via `TV_MCP_STRICT` (preferred) or `CSV_FULL` fallback.
-3. Inspect leaderboard and reject unstable/one-sided candidates.
-4. Repeat until 1,000 authoritative trials are complete.
-5. Promote finalist cohort into AG multi-fold/bagging, then walk-forward and SHAP.
-6. Recommend Pine settings/build changes only after evidence is complete.
+Each phase = **20 batches × 50 trials = 1,000 authoritative trials**.
+Phases run sequentially; phase N+1 cannot start until phase N has cleared the
+acceptance and OOS gates and the carry-forward banding step has produced
+phase N+1's banded space.
+
+### Per-phase loop (repeat 20 times)
+
+```bash
+PHASE=1   # 1, 2, 3, or 4
+SPACE=scripts/ag/strategy_tuning_space.phase${PHASE}.json
+
+# Generate 50 suggestions for the current phase
+python scripts/ag/tune_strategy_params.py --space "$SPACE" suggest --count 50
+
+# Execute the batch via CDP (TV_MCP_STRICT). Hand-fall to CSV_FULL only if CDP is down.
+python scripts/ag/tv_auto_tune.py --space "$SPACE" run \
+    --batch-dir artifacts/tuning/suggestions/<timestamp>/
+
+# Inspect leaderboard for the current phase
+python scripts/ag/tune_strategy_params.py --space "$SPACE" leaderboard --top 20
+```
+
+Repeat the suggest -> run -> leaderboard loop until 1,000 authoritative
+(`TV_MCP_STRICT` or `CSV_FULL`) trials are recorded against the phase's
+profile name. Suggestions adapt from the freshly-recorded leaderboard each
+loop, which is why the cadence is 20 × 50 rather than one 1,000-suggestion
+emission.
+
+### Carry-forward gate (between phases)
+
+After the 1,000-trial phase clears its OOS / walk-forward gate:
+
+```bash
+python scripts/ag/band_phase_winners.py \
+    --from-space scripts/ag/strategy_tuning_space.phase${PHASE}.json \
+    --to-space   scripts/ag/strategy_tuning_space.phase$((PHASE + 1)).json \
+    --top 20 \
+    --storage postgres
+```
+
+Banding rules:
+- numeric: median ± clipped IQR (or MAD when IQR collapses), clipped to the
+  prior-phase original min/max
+- int with discrete values: retain only values within the IQR/MAD window,
+  preserving at least one value
+- categorical / bool: retain top 1–2 modes, with a minority retained only when
+  its support is `>=15%` of the cohort
+
+The banding script writes a sidecar manifest
+(`<phase{N+1}>.banding-manifest.json`) recording the contributing trial ids,
+per-knob statistics, and the kept domain. The manifest is the audit trail —
+do not advance to phase N+1 without reviewing it.
+
+After banding, run a fresh 50-suggestion smoke batch on the phase N+1 space
+to confirm the suggester still produces valid configs before opening the full
+20×50 loop.
+
+### Phase 0 (Pine schema parity, one-time)
+
+Phase 0 is not an Optuna run; it is the Pine input add required to expose
+Phase 1 / 3 knobs on both shared surfaces. See the "Active Search Surface —
+Phased" section above for the input list. Phase 0 must clear the full Pine
+verification pipeline (pine-facade, pine-lint, contamination, npm build,
+parity guard) before Phase 1 may begin.
 
 ## Storage Model
 

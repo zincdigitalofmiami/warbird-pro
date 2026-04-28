@@ -21,7 +21,7 @@
 // Footprint (chart):    request.footprint()              = 1 call
 // TOTAL:                                                 = 5 request.* paths
 //
-// PLOT BUDGET: 55 plot + 3 alertcondition = 58/64 (6 headroom); 9 label.new slots (var+entry) — outside 64-slot counter
+// PLOT BUDGET: 53 plot + 3 alertcondition = 56/64 (8 headroom); 9 label.new slots (var+entry) — outside 64-slot counter
 // TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed.
 // Momentum Oscillators (5 plots: ml_vf_bull, ml_vf_bear, ml_nfe, ml_rsi_knn, ml_confluence) added 2026-04-20.
 //@version=6
@@ -111,19 +111,38 @@ string optEntryLevelInput = input.string("0.618", "Execution Anchor", options=["
   tooltip="Optuna-tuned execution line. The same fib ratio is used in both directions via fibPrice().")
 float optStopAtrMult = input.float(1.5, "ATR Stop Multiplier", minval=1.0, maxval=3.5, step=0.1, group=groupStops,
   tooltip="Single-family ATR stop. This replaces all stop-family branching and continuation widening.")
-float optMaxRiskAtr = input.float(3.0, "Max Setup Stop ATR", minval=2.5, maxval=4.5, step=0.25, group=groupStops,
-  tooltip="Reject setup triggers whose ATR stop is too wide versus current volatility.")
+float optMaxRiskAtr = input.float(3.0, "Max Setup Stop ATR", minval=1.0, maxval=4.5, step=0.25, group=groupStops,
+  tooltip="Reject setup triggers whose ATR stop is too wide versus current volatility. Phase 4 search range 1.0-3.5; minval lowered from 2.5 to match.")
 
 string groupFootprint = "Footprint Exhaustion"
 int footprintTicksPerRow = input.int(4, "Footprint Ticks Per Row", minval=1, group=groupFootprint)
 float footprintVaPercent = input.float(50.0, "Footprint VA %", minval=1.0, maxval=100.0, step=1.0, group=groupFootprint)
 float footprintImbalancePercent = input.float(195.0, "Footprint Imbalance %", minval=100.0, maxval=1000.0, step=10.0, group=groupFootprint)
-int exhaustionZLen = input.int(10, "Exhaustion Z Length", minval=10, maxval=100, group=groupFootprint)
-float exhaustionZThreshold = input.float(2.0, "Exhaustion Z Threshold", minval=1.0, maxval=5.0, step=0.1, group=groupFootprint)
 float exhaustionLevelAtrTol = input.float(0.10, "Extension ATR Tolerance", minval=0.01, maxval=0.50, step=0.01, group=groupFootprint)
 float zeroPrintVolRatio = input.float(0.10, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
 int optImbalanceRows = input.int(2, "Imbalance Rows", minval=1, maxval=3, group=groupFootprint,
   tooltip="Minimum consecutive extreme rows with same-side imbalance required for a live entry trigger.")
+int exhaustionSwingLookbackBarsInput = input.int(10, "Exhaustion Swing Lookback", minval=3, maxval=50, group=groupFootprint,
+  tooltip="Bars used for swing-high/swing-low detection in exhaustion gates. Phase 3 tunable.")
+int exhaustionCooldownBarsInput = input.int(8, "Exhaustion Cooldown Bars", minval=1, maxval=50, group=groupFootprint,
+  tooltip="Bars to suppress repeat exhaustion events after a trigger. Phase 3 tunable.")
+
+//=====================
+// PHASE 0 — TREND / MA / VWAP / LIQ SWEEP GATE INPUTS (Phase 1 search surface)
+// Inputs default OFF so live behavior is unchanged unless the toggles are flipped
+// by the operator or the Optuna campaign.
+//=====================
+string groupTrendMaGate = "Trend / MA / VWAP / Liq Sweep"
+bool useMaTrendFilter = input.bool(false, "Use MA Trend Filter", group=groupTrendMaGate,
+  tooltip="When ON, requires MA-trend alignment for entries (long: maFast > maSlow AND close > maFast; short: inverse).")
+string maFamily = input.string("EMA", "MA Family", options=["EMA", "SMA", "WMA", "HMA", "VWMA", "DEMA", "TEMA", "RMA"], group=groupTrendMaGate,
+  tooltip="Moving-average family used by the MA Trend Filter.")
+int maFastLen = input.int(21, "MA Fast Length", minval=2, maxval=200, group=groupTrendMaGate)
+int maSlowLen = input.int(50, "MA Slow Length", minval=5, maxval=400, group=groupTrendMaGate)
+bool useVwapGate = input.bool(false, "Use VWAP Gate", group=groupTrendMaGate,
+  tooltip="When ON, requires close-vs-VWAP alignment for entries (long: close > VWAP; short: close < VWAP).")
+int liqSweepLookbackBarsInput = input.int(10, "Liquidity Sweep Lookback", minval=3, maxval=200, group=groupTrendMaGate,
+  tooltip="Bars used to define swing high/low for liquidity-sweep detection. Phase 1 tunable.")
 
 //=====================
 // VISUALS (colors/widths locked to spec — see constants above)
@@ -272,7 +291,7 @@ bool isEventDay = isNFPDay or isFOMCDay or isCPIDay
 // Bull sweep: price wicks below prior swing low, closes back above — stop hunt below
 // Bear sweep: price wicks above prior swing high, closes back below — stop hunt above
 //=====================
-int swingLookback = 10
+int swingLookback = liqSweepLookbackBarsInput
 float swingHigh = ta.highest(high, swingLookback)[1]
 float swingLow = ta.lowest(low, swingLookback)[1]
 bool liqSweepBull = low < swingLow and close > swingLow   // swept below, closed back inside
@@ -634,6 +653,19 @@ f_rsi_knn(float src, int window) =>
         sumV += src[i] * w
     sumW > 0 ? sumV / sumW : src
 
+// PHASE 0 — MA family helper. Used by the optional MA Trend Filter gate.
+maValue(float src, simple int len, simple string family) =>
+    switch family
+        "EMA"  => ta.ema(src, len)
+        "SMA"  => ta.sma(src, len)
+        "WMA"  => ta.wma(src, len)
+        "HMA"  => ta.hma(src, len)
+        "VWMA" => ta.vwma(src, len)
+        "RMA"  => ta.rma(src, len)
+        "DEMA" => 2.0 * ta.ema(src, len) - ta.ema(ta.ema(src, len), len)
+        "TEMA" => 3.0 * ta.ema(src, len) - 3.0 * ta.ema(ta.ema(src, len), len) + ta.ema(ta.ema(ta.ema(src, len), len), len)
+        => ta.ema(src, len)
+
 // NYSE Advance-Decline issues (daily breadth): leading exhaustion signal for MES
 // Rising MES + falling AD = breadth divergence (exhaustion). Falling MES + rising AD = accumulation.
 float adLineRaw   = request.security("USI:ADD", "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
@@ -775,12 +807,7 @@ bool exhAt1618 = not na(pT2) and (dir == 1 ? high >= pT2 - exhaustionTol : low <
 bool mlExhGeomConfluence = isValid and confirmed and (exhAt1272 or exhAt1618)
 float exhaustionTriggerPrice = exhAt1618 ? pT2 : exhAt1272 ? p1272 : (dir == 1 ? high : low)
 
-// Z-score (ML export only — NOT a gate)
-float exhaustionProbePrice = dir == 1 ? high : low
-float exhaustionMean = ta.sma(close, exhaustionZLen)
-float exhaustionStd = ta.stdev(close, exhaustionZLen)
-float mlExhZScore = exhaustionStd > 0 ? (exhaustionProbePrice - exhaustionMean) / exhaustionStd : 0.0
-bool mlExhZExtreme = math.abs(mlExhZScore) >= exhaustionZThreshold
+// Z-score removed from active exhaustion contract.
 
 // Footprint row-level evidence (hidden export enrichment)
 volume_row triggerRow = fpAvailable and not na(exhaustionTriggerPrice) ? footprint.get_row_by_price(reqFootprint, exhaustionTriggerPrice) : na
@@ -799,13 +826,13 @@ bool mlExhZeroPrint = mlExhFootprintAvailable and not na(extremeRowVolRatio) and
 int footprintEvidenceCount = (mlExhDeltaDiv ? 1 : 0) + (mlExhAbsorption ? 1 : 0) + (mlExhZeroPrint ? 1 : 0)
 
 // ── SWING EXTREME ───────────────────────────────────────────────────────
-bool isSwingHighBar = high >= ta.highest(high, 10)
-bool isSwingLowBar = low <= ta.lowest(low, 10)
+bool isSwingHighBar = high >= ta.highest(high, exhaustionSwingLookbackBarsInput)
+bool isSwingLowBar = low <= ta.lowest(low, exhaustionSwingLookbackBarsInput)
 
-// ── COOLDOWN: 8 bars (2 hours on 15m) ──────────────────────────────────
+// ── COOLDOWN (Phase 3 tunable) ─────────────────────────────────────────
 var int lastBearExhTriggerBar = na
 var int lastBullExhTriggerBar = na
-int exhCooldown = 8
+int exhCooldown = exhaustionCooldownBarsInput
 bool bearCooldownOk = na(lastBearExhTriggerBar) or bar_index - lastBearExhTriggerBar >= exhCooldown
 bool bullCooldownOk = na(lastBullExhTriggerBar) or bar_index - lastBullExhTriggerBar >= exhCooldown
 
@@ -930,6 +957,14 @@ float slDistPts = math.abs(entryLevel - slLevel)
 float slDistAtr = atr14 > 0 ? slDistPts / atr14 : 0.0
 bool trendBiasLong = ema9 > ema21 and close >= ema50 and close >= vwapVal
 bool trendBiasShort = ema9 < ema21 and close <= ema50 and close <= vwapVal
+
+// PHASE 0 — soft MA + VWAP gates. Default OFF so live behavior is unchanged.
+float maFastValue = useMaTrendFilter ? maValue(close, maFastLen, maFamily) : na
+float maSlowValue = useMaTrendFilter ? maValue(close, maSlowLen, maFamily) : na
+bool maGatePassLong  = (not useMaTrendFilter) or (not na(maFastValue) and not na(maSlowValue) and maFastValue > maSlowValue and close > maFastValue)
+bool maGatePassShort = (not useMaTrendFilter) or (not na(maFastValue) and not na(maSlowValue) and maFastValue < maSlowValue and close < maFastValue)
+bool vwapGatePassLong  = (not useVwapGate) or close > vwapVal
+bool vwapGatePassShort = (not useVwapGate) or close < vwapVal
 bool entryZoneTouched = not na(entryZoneUpper) and not na(entryZoneLower) and high >= entryZoneLower and low <= entryZoneUpper
 bool entryAnchorBullTrigger = confirmed and not na(entryLevel) and low <= entryLevel and close >= entryLevel
 bool entryAnchorBearTrigger = confirmed and not na(entryLevel) and high >= entryLevel and close <= entryLevel
@@ -943,8 +978,8 @@ bool longTriggerCore = setupContextLong and entryAnchorBullTrigger and footprint
 bool shortTriggerCore = setupContextShort and entryAnchorBearTrigger and footprintShortTrigger
 bool longTriggerEvent = longTriggerCore and (oneShotEvent ? not longTriggerCore[1] : true)
 bool shortTriggerEvent = shortTriggerCore and (oneShotEvent ? not shortTriggerCore[1] : true)
-bool entryLongTrigger = longTriggerEvent and not ladderInvalidated
-bool entryShortTrigger = shortTriggerEvent and not ladderInvalidated and not bullishTrendBlocksShorts
+bool entryLongTrigger = longTriggerEvent and not ladderInvalidated and maGatePassLong and vwapGatePassLong
+bool entryShortTrigger = shortTriggerEvent and not ladderInvalidated and not bullishTrendBlocksShorts and maGatePassShort and vwapGatePassShort
 
 if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or entryLongTrigger or entryShortTrigger)
     log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} longTrig={5} shortTrig={6} shortGate={7} fpCount={8} setupCtx={9}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, entryLongTrigger, entryShortTrigger, bullishTrendBlocksShorts, footprintEvidenceCount, setupContextActive))
@@ -1115,13 +1150,16 @@ var label _fibLblT4 = na
 var label _fibLblT5 = na
 
 int fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
-int anchorLeftBar = int(math.max(0, na(anchorHighBar) or na(anchorLowBar) ? fallbackLeftBar : math.min(anchorHighBar, anchorLowBar)))
-int drawLeftBar = useConfluenceAnchorSpan ? anchorLeftBar : fallbackLeftBar
+bool anchorBarsReady = not na(anchorHighBar) and not na(anchorLowBar)
+int anchorStartBar = anchorBarsReady ? int(math.max(0, math.min(anchorHighBar, anchorLowBar))) : fallbackLeftBar
+int drawLeftBarBase = useConfluenceAnchorSpan ? anchorStartBar : fallbackLeftBar
+int drawLeftBar = int(math.max(drawLeftBarBase, anchorStartBar))
 
 drawAnchoredLine(line id, bool visible, float price, color col, int width_, int leftBar) =>
     if visible and not na(price)
+        int clampedLeftBar = int(math.max(leftBar, anchorStartBar))
         int rightBar = extendLevelsRight ? bar_index + tradeLabelOffsetBarsInput : bar_index
-        line.set_xy1(id, leftBar, price)
+        line.set_xy1(id, clampedLeftBar, price)
         line.set_xy2(id, rightBar, price)
         line.set_color(id, col)
         line.set_width(id, width_)
@@ -1130,11 +1168,11 @@ drawAnchoredLine(line id, bool visible, float price, color col, int width_, int 
     else
         line.set_color(id, color(na))
 
-setFibLevelLabel(label idIn, bool visible, float price, string text, color col) =>
+setFibLevelLabel(label idIn, bool visible, float price, string txt, color col) =>
     label id = idIn
     if visible and isValid and not na(price)
         int labelX = bar_index + tradeLabelOffsetBarsInput
-        string labelText = text + "  " + str.tostring(price, format.mintick)
+        string labelText = txt + "  " + str.tostring(price, format.mintick)
         if na(id)
             id := label.new(labelX, price, labelText, style=label.style_label_left, color=color.new(color.black, tradeLabelBgTransparencyInput), textcolor=col, size=tradeLabelSize)
         label.set_xy(id, labelX, price)
@@ -1327,8 +1365,6 @@ plot(liqSweepBull ? 1.0 : liqSweepBear ? -1.0 : 0.0, "ml_liq_sweep", display=dis
 
 // ── FOOTPRINT EXHAUSTION ──
 plot(mlExhGeomConfluence ? 1.0 : 0.0, "ml_exh_geom_confluence", display=display.none, editable=false)
-plot(mlExhZScore, "ml_exh_z_score", display=display.none, editable=false)
-plot(mlExhZExtreme ? 1.0 : 0.0, "ml_exh_z_extreme", display=display.none, editable=false)
 plot(mlExhDeltaDiv ? 1.0 : 0.0, "ml_exh_delta_div", display=display.none, editable=false)
 plot(mlExhAbsorption ? 1.0 : 0.0, "ml_exh_absorption", display=display.none, editable=false)
 plot(mlExhZeroPrint ? 1.0 : 0.0, "ml_exh_zero_print", display=display.none, editable=false)
@@ -1366,7 +1402,7 @@ plot(mlNfe,        "ml_nfe",         display=display.none, editable=false)
 plot(mlRsiKnn,     "ml_rsi_knn",     display=display.none, editable=false)
 plot(mlConfluence, "ml_confluence",  display=display.none, editable=false)
 
-// ── PLOT BUDGET: 55 plot + 3 alertcondition = 58/64 (6 headroom) ──
+// ── PLOT BUDGET: 53 plot + 3 alertcondition = 56/64 (8 headroom) ──
 
 //=====================
 // ALERTS

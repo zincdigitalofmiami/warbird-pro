@@ -1,0 +1,154 @@
+{
+  "profile_name": "mes5m_phase3_footprint_exhaustion",
+  "phase": 3,
+  "phase_label": "footprint / exhaustion",
+  "carries_from_phase": 2,
+  "advances_to_phase": 4,
+  "signature_exclude_locked_parameters": [
+    "Anchor Span = Active Fib Window",
+    "Confluence Tolerance (%)",
+    "Extend Levels Right",
+    "Show Footprint Audit Table",
+    "Target Line Lookback Bars"
+  ],
+  "locked_parameters": {
+    "Anchor Span = Active Fib Window": true,
+    "Auto-tune ZigZag by Timeframe": false,
+    "Confluence Tolerance (%)": 0.05,
+    "Extend Levels Right": true,
+    "Min Fib Range (ATR)": 0.5,
+    "One-shot event markers/alerts": true,
+    "Rejection = wick into zone then close back out": true,
+    "Show Footprint Audit Table": false,
+    "Target Line Lookback Bars": 40,
+    "ZigZag Depth (manual)": 12,
+    "ZigZag Deviation (manual)": 3.0,
+    "ZigZag Threshold Floor (%)": 0.3
+  },
+  "phase_carry_placeholders": {
+    "_comment": "band_phase_winners.py fills these in from phase 1+2 top cohorts.",
+    "Use MA Trend Filter": "PHASE_BAND",
+    "MA Family": "PHASE_BAND",
+    "MA Fast Length": "PHASE_BAND",
+    "MA Slow Length": "PHASE_BAND",
+    "Use VWAP Gate": "PHASE_BAND",
+    "Liquidity Sweep Lookback": "PHASE_BAND",
+    "Gate Shorts In Bull Trend": "PHASE_BAND",
+    "Short Gate ADX Floor": "PHASE_BAND",
+    "VF Window": "PHASE_BAND",
+    "VF Candle Weight": "PHASE_BAND",
+    "VF Volume Weight": "PHASE_BAND",
+    "NFE Length": "PHASE_BAND",
+    "RSI KNN Window": "PHASE_BAND"
+  },
+  "objective": {
+    "trade_count_bounds": {
+      "max": 2200,
+      "min": 300,
+      "target": 900
+    },
+    "profit_factor_range": {
+      "floor": 0.9,
+      "target": 1.6,
+      "realism_cap": 2.4
+    },
+    "expectancy_per_trade": {
+      "floor": 0.0,
+      "target": 18.0,
+      "negative_penalty": 0.35
+    },
+    "return_over_drawdown": {
+      "floor": 0.25,
+      "target": 1.5
+    },
+    "footprint_cohort": {
+      "min_score": 0.45,
+      "min_trades": 120
+    },
+    "rolling_window_stability": {
+      "max_score_stddev": 0.18,
+      "min_score": 0.45,
+      "min_trades_per_window": 75,
+      "target_positive_windows": 0.75,
+      "window_count": 4
+    },
+    "yearly_consistency": {
+      "max_dominance": 0.55,
+      "min_score": 0.45,
+      "target_positive_ratio": 0.67
+    },
+    "suspicious_perfection": {
+      "profit_factor": 2.25,
+      "return_over_drawdown": 3.5
+    },
+    "side_profit_factor_floor": {
+      "long": 0.95,
+      "short": 0.95
+    },
+    "weights": {
+      "profit_factor": 0.23,
+      "expectancy": 0.12,
+      "trade_density": 0.12,
+      "directional_balance": 0.08,
+      "regime_coverage": 0.06,
+      "outcome_diversity": 0.04,
+      "drawdown_efficiency": 0.14,
+      "rolling_stability": 0.12,
+      "footprint_stability": 0.05,
+      "yearly_consistency": 0.04,
+      "realism_gate_penalty": 0.4,
+      "instability_penalty": 0.55
+    }
+  },
+  "runtime_context": {
+    "bar_magnifier": true,
+    "commission_per_contract_usd": 1.0,
+    "initial_capital": 50000,
+    "report_window": "FULL",
+    "slippage_ticks": 1,
+    "symbol": "CME_MINI:MES1!",
+    "timeframe": "5"
+  },
+  "search_parameters": {
+    "Footprint Ticks Per Row": {
+      "type": "int",
+      "values": [2, 4, 6, 8]
+    },
+    "Footprint VA %": {
+      "max": 80,
+      "min": 50,
+      "step": 5,
+      "type": "float"
+    },
+    "Footprint Imbalance %": {
+      "max": 400,
+      "min": 175,
+      "step": 25,
+      "type": "float"
+    },
+    "Imbalance Rows": {
+      "type": "int",
+      "values": [1, 2, 3]
+    },
+    "Zero-Print Volume Ratio": {
+      "max": 0.18,
+      "min": 0.05,
+      "step": 0.01,
+      "type": "float"
+    },
+    "Extension ATR Tolerance": {
+      "max": 0.18,
+      "min": 0.06,
+      "step": 0.01,
+      "type": "float"
+    },
+    "Exhaustion Swing Lookback": {
+      "type": "int",
+      "values": [5, 7, 10, 14, 20, 30, 50]
+    },
+    "Exhaustion Cooldown Bars": {
+      "type": "int",
+      "values": [1, 3, 5, 8, 13, 21, 34]
+    }
+  }
+}

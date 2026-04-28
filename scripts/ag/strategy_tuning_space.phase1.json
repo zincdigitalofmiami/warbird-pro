@@ -1,0 +1,129 @@
+{
+  "profile_name": "mes5m_phase1_trend_vwap_ma_liqsweep",
+  "phase": 1,
+  "phase_label": "trend / VWAP / MA / liquidity sweep",
+  "carries_from_phase": null,
+  "advances_to_phase": 2,
+  "signature_exclude_locked_parameters": [
+    "Anchor Span = Active Fib Window",
+    "Confluence Tolerance (%)",
+    "Extend Levels Right",
+    "Show Footprint Audit Table",
+    "Target Line Lookback Bars"
+  ],
+  "locked_parameters": {
+    "Anchor Span = Active Fib Window": true,
+    "Auto-tune ZigZag by Timeframe": false,
+    "Confluence Tolerance (%)": 0.05,
+    "Extend Levels Right": true,
+    "Min Fib Range (ATR)": 0.5,
+    "One-shot event markers/alerts": true,
+    "Rejection = wick into zone then close back out": true,
+    "Show Footprint Audit Table": false,
+    "Target Line Lookback Bars": 40,
+    "ZigZag Depth (manual)": 12,
+    "ZigZag Deviation (manual)": 3.0,
+    "ZigZag Threshold Floor (%)": 0.3
+  },
+  "objective": {
+    "trade_count_bounds": {
+      "max": 2200,
+      "min": 300,
+      "target": 900
+    },
+    "profit_factor_range": {
+      "floor": 0.9,
+      "target": 1.6,
+      "realism_cap": 2.4
+    },
+    "expectancy_per_trade": {
+      "floor": 0.0,
+      "target": 18.0,
+      "negative_penalty": 0.35
+    },
+    "return_over_drawdown": {
+      "floor": 0.25,
+      "target": 1.5
+    },
+    "footprint_cohort": {
+      "min_score": 0.45,
+      "min_trades": 120
+    },
+    "rolling_window_stability": {
+      "max_score_stddev": 0.18,
+      "min_score": 0.45,
+      "min_trades_per_window": 75,
+      "target_positive_windows": 0.75,
+      "window_count": 4
+    },
+    "yearly_consistency": {
+      "max_dominance": 0.55,
+      "min_score": 0.45,
+      "target_positive_ratio": 0.67
+    },
+    "suspicious_perfection": {
+      "profit_factor": 2.25,
+      "return_over_drawdown": 3.5
+    },
+    "side_profit_factor_floor": {
+      "long": 0.95,
+      "short": 0.95
+    },
+    "weights": {
+      "profit_factor": 0.23,
+      "expectancy": 0.12,
+      "trade_density": 0.12,
+      "directional_balance": 0.08,
+      "regime_coverage": 0.06,
+      "outcome_diversity": 0.04,
+      "drawdown_efficiency": 0.14,
+      "rolling_stability": 0.12,
+      "footprint_stability": 0.05,
+      "yearly_consistency": 0.04,
+      "realism_gate_penalty": 0.4,
+      "instability_penalty": 0.55
+    }
+  },
+  "runtime_context": {
+    "bar_magnifier": true,
+    "commission_per_contract_usd": 1.0,
+    "initial_capital": 50000,
+    "report_window": "FULL",
+    "slippage_ticks": 1,
+    "symbol": "CME_MINI:MES1!",
+    "timeframe": "5"
+  },
+  "search_parameters": {
+    "Use MA Trend Filter": {
+      "type": "bool"
+    },
+    "MA Family": {
+      "type": "string",
+      "values": ["EMA", "SMA", "WMA", "HMA", "VWMA", "DEMA", "TEMA", "RMA"]
+    },
+    "MA Fast Length": {
+      "type": "int",
+      "values": [5, 8, 9, 13, 20, 21, 34, 50]
+    },
+    "MA Slow Length": {
+      "type": "int",
+      "values": [20, 34, 50, 89, 100, 144, 200]
+    },
+    "Use VWAP Gate": {
+      "type": "bool"
+    },
+    "Liquidity Sweep Lookback": {
+      "type": "int",
+      "values": [5, 8, 13, 20, 34, 50]
+    },
+    "Gate Shorts In Bull Trend": {
+      "type": "bool"
+    },
+    "Short Gate ADX Floor": {
+      "max": 24,
+      "min": 10,
+      "step": 1,
+      "type": "float"
+    }
+  }
+}

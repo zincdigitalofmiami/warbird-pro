@@ -32,7 +32,7 @@
 // Footprint (chart):    request.footprint()              = 1 call
 // TOTAL:                                                 = 6 request.* paths
 //
-// PLOT BUDGET: 55 plot + 2 plotshape = 57/64 (7 headroom)
+// PLOT BUDGET: 58 plot = 58/64 (6 headroom)
 //@version=6
 strategy("Warbird v7 Strategy", shorttitle="WB7 Strat", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100, pyramiding=0, process_orders_on_close=false, use_bar_magnifier=true, slippage=1, default_qty_type=strategy.fixed, default_qty_value=1, initial_capital=50000, currency=currency.USD, commission_type=strategy.commission.cash_per_contract, commission_value=1.00)
 import TradingView/ZigZag/7 as zigzag
@@ -124,7 +124,7 @@ string optEntryLevelInput = input.string("0.618", "Execution Anchor", options=["
   tooltip="Optuna-tuned execution line. The same fib ratio is used in both directions via fibPrice().")
 float optStopAtrMult = input.float(1.5, "ATR Stop Multiplier", minval=1.0, maxval=3.5, step=0.1, group=groupStops,
   tooltip="Single-family ATR stop. This replaces all stop-family branching and continuation widening.")
-float optMaxRiskAtr = input.float(3.0, "Max Setup Stop ATR", minval=2.5, maxval=4.5, step=0.25, group=groupStops,
+float optMaxRiskAtr = input.float(3.0, "Max Setup Stop ATR", minval=1.0, maxval=4.5, step=0.25, group=groupStops,
   tooltip="Reject setup triggers whose ATR stop is too wide versus current volatility.")
 float continuationHoldStopAtrMult = input.float(1.0, "Tier 1 Hold Stop ATR", minval=1.0, maxval=4.0, step=0.25, group=groupStops,
   tooltip="When a same-direction Tier 1 continuation signal fires during an active trade, temporarily widen the stop to entry +/- ATR x this multiplier for the configured hold bars.")
@@ -155,13 +155,27 @@ string groupFootprint = "Footprint Exhaustion"
 int footprintTicksPerRow = input.int(4, "Footprint Ticks Per Row", minval=1, group=groupFootprint)
 float footprintVaPercent = input.float(50.0, "Footprint VA %", minval=1.0, maxval=100.0, step=1.0, group=groupFootprint)
 float footprintImbalancePercent = input.float(195.0, "Footprint Imbalance %", minval=100.0, maxval=1000.0, step=10.0, group=groupFootprint)
-int exhaustionZLen = input.int(10, "Exhaustion Z Length", minval=10, maxval=100, group=groupFootprint)
-float exhaustionZThreshold = input.float(2.0, "Exhaustion Z Threshold", minval=1.0, maxval=5.0, step=0.1, group=groupFootprint)
 float exhaustionLevelAtrTol = input.float(0.10, "Extension ATR Tolerance", minval=0.01, maxval=0.50, step=0.01, group=groupFootprint)
 float zeroPrintVolRatio = input.float(0.10, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
 int optImbalanceRows = input.int(2, "Imbalance Rows", minval=1, maxval=3, group=groupFootprint,
   tooltip="Minimum consecutive extreme rows with same-side imbalance required for a live entry trigger.")
 int continuationHoldBars = input.int(3, "Tier 1 Hold Bars", minval=0, maxval=20, group=groupFootprint)
+int exhaustionSwingLookbackBarsInput = input.int(10, "Exhaustion Swing Lookback", minval=3, maxval=50, group=groupFootprint,
+  tooltip="Lookback bars for swing-extreme detection. Gates when exhaustion can fire.")
+int exhaustionCooldownBarsInput = input.int(8, "Exhaustion Cooldown Bars", minval=1, maxval=50, group=groupFootprint,
+  tooltip="Minimum bars between consecutive exhaustion signals in the same direction.")
+
+string groupTrendMaGate = "Trend / MA / VWAP / Liq Sweep"
+bool useMaTrendFilter = input.bool(false, "Use MA Trend Filter", group=groupTrendMaGate,
+  tooltip="When enabled, entry triggers require price above (long) or below (short) MA fast AND fast > slow MA.")
+string maFamily = input.string("EMA", "MA Family", options=["EMA", "SMA", "WMA", "HMA", "VWMA", "DEMA", "TEMA", "RMA"], group=groupTrendMaGate,
+  tooltip="Moving average type used for the trend filter.")
+int maFastLen = input.int(21, "MA Fast Length", minval=2, maxval=200, group=groupTrendMaGate)
+int maSlowLen = input.int(50, "MA Slow Length", minval=5, maxval=400, group=groupTrendMaGate)
+bool useVwapGate = input.bool(false, "Use VWAP Gate", group=groupTrendMaGate,
+  tooltip="When enabled, long entries require close above VWAP, shorts require close below VWAP.")
+int liqSweepLookbackBarsInput = input.int(10, "Liquidity Sweep Lookback", minval=3, maxval=200, group=groupTrendMaGate,
+  tooltip="Lookback bars for liquidity sweep swing high/low detection.")
 
 
 //=====================
@@ -265,7 +279,7 @@ bool isEventDay = isNFPDay or isFOMCDay or isCPIDay
 // Bull sweep: price wicks below prior swing low, closes back above — stop hunt below
 // Bear sweep: price wicks above prior swing high, closes back below — stop hunt above
 //=====================
-int swingLookback = 10
+int swingLookback = liqSweepLookbackBarsInput
 float swingHigh = ta.highest(high, swingLookback)[1]
 float swingLow = ta.lowest(low, swingLookback)[1]
 bool liqSweepBull = low < swingLow and close > swingLow   // swept below, closed back inside
@@ -470,14 +484,9 @@ fibZzUpdate(float deviationPct, int depthBars, float thresholdFloorPct) =>
     bool activeExhAt1272 = activeValid and not na(activeP1272) and (activeFibBull ? high >= activeP1272 - activeExhaustionTol : low <= activeP1272 + activeExhaustionTol)
     bool activeExhAt1618 = activeValid and not na(activePT2) and (activeFibBull ? high >= activePT2 - activeExhaustionTol : low <= activePT2 + activeExhaustionTol)
     bool activeGeomConfluence = activeValid and barstate.isconfirmed and (activeExhAt1272 or activeExhAt1618)
-    float activeProbePrice = activeFibBull ? high : low
-    float activeExhaustionMean = ta.sma(close, exhaustionZLen)
-    float activeExhaustionStd = ta.stdev(close, exhaustionZLen)
-    float activeExhaustionZScore = activeExhaustionStd > 0 ? (activeProbePrice - activeExhaustionMean) / activeExhaustionStd : 0.0
-    bool activeDirectional = activeFibBull ? activeExhaustionZScore >= exhaustionZThreshold : activeExhaustionZScore <= -exhaustionZThreshold
     int activeHourEt = hour(time, "America/New_York")
     bool activeSessionValid = activeHourEt != 17
-    int projectedExhaustionDir = activeSessionValid and activeGeomConfluence and activeDirectional ? (activeFibBull ? -1 : 1) : 0
+    int projectedExhaustionDir = activeSessionValid and activeGeomConfluence ? (activeFibBull ? -1 : 1) : 0
     int projectedExhaustionTime = projectedExhaustionDir != 0 ? time_close : na
     [newPivot, pivotHighPrice, pivotLowPrice, pivotHighTime, pivotLowTime, swingDir, projectedExhaustionDir, projectedExhaustionTime]
 
@@ -505,14 +514,9 @@ fibHtfSnapshot(float deviationPct, int depthBars, float thresholdFloorPct) =>
     bool activeExhAt1272 = activeValid and not na(activeP1272) and (activeFibBull ? high >= activeP1272 - activeExhaustionTol : low <= activeP1272 + activeExhaustionTol)
     bool activeExhAt1618 = activeValid and not na(activePT2) and (activeFibBull ? high >= activePT2 - activeExhaustionTol : low <= activePT2 + activeExhaustionTol)
     bool activeGeomConfluence = barstate.isconfirmed and (activeExhAt1272 or activeExhAt1618)
-    float activeProbePrice = activeFibBull ? high : low
-    float activeExhaustionMean = ta.sma(close, exhaustionZLen)
-    float activeExhaustionStd = ta.stdev(close, exhaustionZLen)
-    float activeExhaustionZScore = activeExhaustionStd > 0 ? (activeProbePrice - activeExhaustionMean) / activeExhaustionStd : 0.0
-    bool activeDirectional = activeFibBull ? activeExhaustionZScore >= exhaustionZThreshold : activeExhaustionZScore <= -exhaustionZThreshold
     int activeHourEt = hour(time, "America/New_York")
     bool activeSessionValid = activeHourEt != 17
-    int projectedExhaustionDir = activeSessionValid and activeGeomConfluence and activeDirectional ? (activeFibBull ? -1 : 1) : 0
+    int projectedExhaustionDir = activeSessionValid and activeGeomConfluence ? (activeFibBull ? -1 : 1) : 0
     int projectedExhaustionTime = projectedExhaustionDir != 0 ? time_close : na
     [newPivot, lastHigh, lastLow, lastHighTime, lastLowTime, swingDir, projectedExhaustionDir, projectedExhaustionTime]
 
@@ -699,6 +703,18 @@ f_rsi_knn(float src, int window) =>
         sumV += src[i] * w
     sumW > 0 ? sumV / sumW : src
 
+maValue(float src, simple int len, simple string family) =>
+    switch family
+        "EMA"  => ta.ema(src, len)
+        "SMA"  => ta.sma(src, len)
+        "WMA"  => ta.wma(src, len)
+        "HMA"  => ta.hma(src, len)
+        "VWMA" => ta.vwma(src, len)
+        "RMA"  => ta.rma(src, len)
+        "DEMA" => 2.0 * ta.ema(src, len) - ta.ema(ta.ema(src, len), len)
+        "TEMA" => 3.0 * ta.ema(src, len) - 3.0 * ta.ema(ta.ema(src, len), len) + ta.ema(ta.ema(ta.ema(src, len), len), len)
+        => ta.ema(src, len)
+
 // NYSE Advance-Decline issues (daily breadth): leading exhaustion signal for MES
 // Rising MES + falling AD = breadth divergence (exhaustion). Falling MES + rising AD = accumulation.
 float adLineRaw   = request.security("USI:ADD", "D", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
@@ -734,6 +750,13 @@ bool bullishTrendBlocksShorts = gateShortsInBullTrend and (
     ema100 > nz(ema100[1], ema100) and
     vwapCode >= 0 and
     adSlopeNorm >= 0)
+
+float maFastValue = useMaTrendFilter ? maValue(close, maFastLen, maFamily) : na
+float maSlowValue = useMaTrendFilter ? maValue(close, maSlowLen, maFamily) : na
+bool maGatePassLong  = (not useMaTrendFilter) or (not na(maFastValue) and not na(maSlowValue) and maFastValue > maSlowValue and close > maFastValue)
+bool maGatePassShort = (not useMaTrendFilter) or (not na(maFastValue) and not na(maSlowValue) and maFastValue < maSlowValue and close < maFastValue)
+bool vwapGatePassLong  = (not useVwapGate) or close > vwapVal
+bool vwapGatePassShort = (not useVwapGate) or close < vwapVal
 
 //=====================
 // STRUCTURE CONDITIONS (direction-aware)
@@ -818,9 +841,9 @@ if isValid
 
 //=====================
 // FOOTPRINT EXHAUSTION (full v6 footprint path)
-// Geometry + signed Z-score + footprint divergence.
+// Geometry + footprint divergence.
 // Tier 1 requires live footprint confirmation.
-// Tier 2 is geometry + statistics only when footprint is unavailable.
+// Tier 2 is geometry-only when footprint is unavailable.
 //=====================
 float p1272 = fibPrice(FIB_1272)
 float exhaustionTol = atr14 * exhaustionLevelAtrTol
@@ -829,12 +852,7 @@ bool exhAt1618 = not na(pT2) and (dir == 1 ? high >= pT2 - exhaustionTol : low <
 bool mlExhGeomConfluence = isValid and confirmed and (exhAt1272 or exhAt1618)
 float exhaustionTriggerPrice = exhAt1618 ? pT2 : exhAt1272 ? p1272 : na
 
-float exhaustionProbePrice = dir == 1 ? high : low
-float exhaustionMean = ta.sma(close, exhaustionZLen)
-float exhaustionStd = ta.stdev(close, exhaustionZLen)
-float mlExhZScore = exhaustionStd > 0 ? (exhaustionProbePrice - exhaustionMean) / exhaustionStd : 0.0
-bool mlExhZExtreme = math.abs(mlExhZScore) >= exhaustionZThreshold
-bool exhZDirectional = dir == 1 ? mlExhZScore >= exhaustionZThreshold : mlExhZScore <= -exhaustionZThreshold
+// Z-score removed from active exhaustion contract.
 
 int hourEt = hour(time, "America/New_York")
 bool mlExhSessionValid = hourEt != 17
@@ -923,12 +941,24 @@ bool executionFibShortTouch = executionFibValid and high >= executionFibPivot - 
 bool scalpLongReady = useFootprintScalpEntries and confirmed and structureLongOk and footprintHeatLong and executionFibLongTouch and (provenBullishPattern or wickRejectBull or vwapCode == 2)
 bool scalpShortReady = useFootprintScalpEntries and confirmed and structureShortOk and footprintHeatShort and executionFibShortTouch and (provenBearishPattern or wickRejectBear or vwapCode == -2)
 
-bool tier1Exhaustion = mlExhSessionValid and mlExhGeomConfluence and exhZDirectional and mlExhFootprintAvailable and footprintEvidenceCount >= 2 and not stackedImbalance
-bool tier2Exhaustion = mlExhSessionValid and mlExhGeomConfluence and exhZDirectional and not mlExhFootprintAvailable
+bool isSwingHighBar = high >= ta.highest(high, exhaustionSwingLookbackBarsInput)
+bool isSwingLowBar  = low  <= ta.lowest(low,  exhaustionSwingLookbackBarsInput)
+var int lastBearExhBar = na
+var int lastBullExhBar = na
+int exhCooldown = exhaustionCooldownBarsInput
+bool bearExhCoolOk = na(lastBearExhBar) or bar_index - lastBearExhBar >= exhCooldown
+bool bullExhCoolOk = na(lastBullExhBar) or bar_index - lastBullExhBar >= exhCooldown
+
+bool tier1Exhaustion = mlExhSessionValid and mlExhGeomConfluence and mlExhFootprintAvailable and footprintEvidenceCount >= 2 and not stackedImbalance
+bool tier2Exhaustion = mlExhSessionValid and mlExhGeomConfluence and not mlExhFootprintAvailable
 int mlExhConfidenceTier = tier1Exhaustion ? 1 : tier2Exhaustion ? 2 : 0
-bool bearishExhaustion = confirmed and dir == 1 and mlExhConfidenceTier > 0
-bool bullishExhaustion = confirmed and dir == -1 and mlExhConfidenceTier > 0
+bool bearishExhaustion = confirmed and dir == 1 and mlExhConfidenceTier > 0 and isSwingHighBar and bearExhCoolOk
+bool bullishExhaustion = confirmed and dir == -1 and mlExhConfidenceTier > 0 and isSwingLowBar and bullExhCoolOk
 int exhaustionSignalDir = bearishExhaustion ? -1 : bullishExhaustion ? 1 : 0
+if bearishExhaustion
+    lastBearExhBar := bar_index
+if bullishExhaustion
+    lastBullExhBar := bar_index
 
 //=====================
 // TRADE STATE MACHINE (setup -> active -> TP progress -> final resolution)
@@ -1038,8 +1068,8 @@ bool priceAtFibLevel = isValid and confirmed and (
     math.abs(close - pOne) <= fibTouchTol)
 bool validArchetype = setupArchetypeCode == 1 or setupArchetypeCode == 2 or setupArchetypeCode == 3 or setupArchetypeCode == 5
 bool candidateSetup = priceAtFibLevel and validArchetype
-bool entryLongTrigger  = ((acceptEvent and longConfirmed) or scalpLongReady) and dir == 1 and atrRiskAcceptable and not ladderInvalidated and htfWallLongOk and not projectedHtfTradesSuppressed
-bool entryShortTrigger = ((acceptEvent and shortConfirmed) or scalpShortReady) and dir == -1 and atrRiskAcceptable and not ladderInvalidated and not bullishTrendBlocksShorts and htfWallShortOk and not projectedHtfTradesSuppressed
+bool entryLongTrigger  = ((acceptEvent and longConfirmed) or scalpLongReady) and dir == 1 and atrRiskAcceptable and not ladderInvalidated and htfWallLongOk and not projectedHtfTradesSuppressed and maGatePassLong and vwapGatePassLong
+bool entryShortTrigger = ((acceptEvent and shortConfirmed) or scalpShortReady) and dir == -1 and atrRiskAcceptable and not ladderInvalidated and not bullishTrendBlocksShorts and htfWallShortOk and not projectedHtfTradesSuppressed and maGatePassShort and vwapGatePassShort
 
 if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or entryLongTrigger or entryShortTrigger)
     log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} longTrig={5} shortTrig={6} shortGate={7} fpCount={8} htfLong={9} htfShort={10} wallLong={11} wallShort={12}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, entryLongTrigger, entryShortTrigger, bullishTrendBlocksShorts, footprintEvidenceCount, htfTrendLongOk, htfTrendShortOk, htfWallLongOk, htfWallShortOk))
@@ -1229,8 +1259,8 @@ if barstate.islast
         table.cell(footprintAuditTable, 1, 1, yesNo(mlExhFootprintAvailable), text_color=color.white, bgcolor=mlExhFootprintAvailable ? color.new(color.green, 0) : color.new(color.red, 0))
         table.cell(footprintAuditTable, 0, 2, "Signal Tier", text_color=color.white)
         table.cell(footprintAuditTable, 1, 2, str.tostring(mlExhConfidenceTier), text_color=color.white)
-        table.cell(footprintAuditTable, 0, 3, "At Ext / Z / In Trade", text_color=color.white)
-        table.cell(footprintAuditTable, 1, 3, str.format("{0} / {1} / {2}", yesNo(mlExhGeomConfluence), yesNo(exhZDirectional), yesNo(tradeInFlightNow)), text_color=color.white)
+        table.cell(footprintAuditTable, 0, 3, "At Ext / FP / In Trade", text_color=color.white)
+        table.cell(footprintAuditTable, 1, 3, str.format("{0} / {1} / {2}", yesNo(mlExhGeomConfluence), yesNo(mlExhFootprintAvailable), yesNo(tradeInFlightNow)), text_color=color.white)
         table.cell(footprintAuditTable, 0, 4, "Bar Delta / Level", text_color=color.white)
         table.cell(footprintAuditTable, 1, 4, str.format("{0} / {1}", fmtFloat(footprintDelta), fmtFloat(triggerRowDelta)), text_color=color.white)
         table.cell(footprintAuditTable, 0, 5, "POC Vol / Edge Vol", text_color=color.white)
@@ -1241,8 +1271,8 @@ if barstate.islast
         table.cell(footprintAuditTable, 1, 7, str.format("{0} / {1}", yesNo(showBearishExhaustion), yesNo(showBullishExhaustion)), text_color=color.white)
         table.cell(footprintAuditTable, 0, 8, "Delta / Absorb / Zero / Count", text_color=color.white)
         table.cell(footprintAuditTable, 1, 8, str.format("{0} / {1} / {2} / {3}", yesNo(mlExhDeltaDiv), yesNo(mlExhAbsorption), yesNo(mlExhZeroPrint), str.tostring(footprintEvidenceCount)), text_color=color.white)
-        table.cell(footprintAuditTable, 0, 9, "Probe Price / Z", text_color=color.white)
-        table.cell(footprintAuditTable, 1, 9, str.format("{0} / {1}", fmtFloat(exhaustionProbePrice), fmtFloat(mlExhZScore)), text_color=color.white)
+        table.cell(footprintAuditTable, 0, 9, "Trigger Price / FP Delta", text_color=color.white)
+        table.cell(footprintAuditTable, 1, 9, str.format("{0} / {1}", fmtFloat(exhaustionTriggerPrice), fmtFloat(footprintDelta)), text_color=color.white)
         table.cell(footprintAuditTable, 0, 10, "FP Start / End", text_color=color.white)
         table.cell(footprintAuditTable, 1, 10, str.format("{0}\n{1}", fmtTime(fpFirstAvailTime), fmtTime(fpLastAvailTime)), text_color=color.white)
         table.cell(footprintAuditTable, 0, 11, "FP Bars / Coverage", text_color=color.white)
@@ -1402,8 +1432,6 @@ plot(liqSweepBull ? 1.0 : liqSweepBear ? -1.0 : 0.0, "ml_liq_sweep", display=dis
 
 // ── FOOTPRINT EXHAUSTION ──
 plot(mlExhGeomConfluence ? 1.0 : 0.0, "ml_exh_geom_confluence", display=display.none, editable=false)
-plot(mlExhZScore, "ml_exh_z_score", display=display.none, editable=false)
-plot(mlExhZExtreme ? 1.0 : 0.0, "ml_exh_z_extreme", display=display.none, editable=false)
 plot(mlExhDeltaDiv ? 1.0 : 0.0, "ml_exh_delta_div", display=display.none, editable=false)
 plot(mlExhAbsorption ? 1.0 : 0.0, "ml_exh_absorption", display=display.none, editable=false)
 plot(mlExhZeroPrint ? 1.0 : 0.0, "ml_exh_zero_print", display=display.none, editable=false)
@@ -1443,7 +1471,7 @@ plot(mlNfe,        "ml_nfe",         display=display.none, editable=false)
 plot(mlRsiKnn,     "ml_rsi_knn",     display=display.none, editable=false)
 plot(mlConfluence, "ml_confluence",  display=display.none, editable=false)
 
-// ── PLOT BUDGET: 55 plot + 2 plotshape = 57/64 (7 headroom) ──
+// ── PLOT BUDGET: 58 plot = 58/64 (6 headroom) ──
 
 //=====================
 // STRATEGY EXECUTION
