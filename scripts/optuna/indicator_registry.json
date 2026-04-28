@@ -49,6 +49,49 @@
     "default_study_name": "Warbird Strategy Optimization"
   },
   {
+    "key": "v7_warbird_strategy_5m",
+    "name": "Warbird Strategy (v7) 5m Main Engine",
+    "surface_type": "strategy",
+    "category": "chart-core",
+    "pine_file": "indicators/v7-warbird-strategy.pine",
+    "profile_module": "scripts.optuna.v7_warbird_strategy_profile",
+    "default_study_name": "Warbird Strategy 5m Main Engine Optimization",
+    "symbol": "MES1!",
+    "timeframe": "5",
+    "notes": "Primary 5m strategy tuning namespace for the indicator-only plan. Uses TradingView/Pine evidence with fib architecture and structure controls frozen."
+  },
+  {
+    "key": "v7_warbird_institutional_5m",
+    "name": "Warbird Institutional (v7) 5m Main Fib",
+    "surface_type": "indicator",
+    "category": "chart-core",
+    "pine_file": "indicators/v7-warbird-institutional.pine",
+    "profile_module": "scripts.optuna.v7_warbird_institutional_profile",
+    "default_study_name": "Warbird Institutional 5m Main Fib Optimization",
+    "symbol": "MES1!",
+    "timeframe": "5",
+    "data_floor": "2020-01-01",
+    "label_column": "ml_last_exit_outcome",
+    "output_budget": "58/64",
+    "frozen_params": [
+      "fibDeviationManual",
+      "fibDepthManual",
+      "fibThresholdFloorPct",
+      "minFibRangeAtr",
+      "autoTuneZZ"
+    ],
+    "tv_only_params": [
+      "retestBars",
+      "fibConfluenceTolPct",
+      "footprintTicksPerRow",
+      "footprintVaPercent",
+      "footprintImbalancePercent",
+      "zeroPrintVolRatio",
+      "stackedImbalanceRows"
+    ],
+    "notes": "5m main-fib indicator card. Distinct namespace from the 15m v7_warbird_institutional study which is preserved for later. Pairs with v7_warbird_strategy_5m via parity guard. Goal: highest WR + PF with lowest SL."
+  },
+  {
     "key": "v6_warbird_complete",
     "name": "Warbird Complete (v6)",
     "surface_type": "indicator",
@@ -91,7 +134,7 @@
     "category": "lower-pane",
     "pine_file": "indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine",
     "profile_module": "scripts.optuna.warbird_nexus_ml_rsi_profile",
-    "default_study_name": "Warbird Nexus ML Fast 5m Signal Quality April 25",
+    "default_study_name": "Warbird Nexus ML Fast 5m Signal Quality 2026-04-27 ACTIVE",
     "symbol": "MES1!",
     "timeframe": "5",
     "notes": "Nexus footprint lane. Optimizes Nexus indicator settings only from manifest-backed TradingView/Pine request.footprint() snapshots containing nexus_fp_available, nexus_fp_bar_delta, and nexus_fp_total_volume. CSV exports, local OHLCV parquet, and synthetic body/wick delta are invalid for this lane."

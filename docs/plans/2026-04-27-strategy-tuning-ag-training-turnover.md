@@ -14,6 +14,7 @@
   - 1h deprioritized
 - Current directive: run a **full-surface 5m optimization** on the main fib engine + main strategy, with Optuna responsible for selecting best settings across the full tuning surface.
 - Hard freeze: **fib architecture and structure are not to be touched** (no code edits to fib core/structure logic; no Optuna mutation of frozen fib-architecture controls).
+- 2026-04-27 safety hotfix (non-repaint contract): setup-phase ladder/entry is now frozen at `TRADE_SETUP` seed and released on resolution/expiry. This is a stability fix for repeatable tuning evidence, not a tunable surface expansion.
 
 ## 2) Guardrails (Non-Negotiable)
 
@@ -37,6 +38,7 @@ Keep fib architecture and structure logic unchanged in tuning and implementation
 - anchor ownership/state transitions for fib legs
 - canonical fib ladder construction (`fibPrice` + canonical ratios/targets)
 - trade-time fib freeze surfaces (`snapP*`, `effectiveP*`, draw-span freeze behavior)
+- setup-phase lock behavior for execution direction + entry/SL/TP levels (freeze at `TRADE_SETUP`, print at confirmed trigger)
 - structure semantics and state-machine primitives (`breakInDir`, `acceptInDir`, `rejectAtZone`, `breakAgainst`, event edge logic)
 
 ### Tunable — 5m Primary Search Surface

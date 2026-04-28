@@ -199,8 +199,14 @@ class TestScoreTrial:
         assert result["objective_score"] is None
 
     def test_perfect_balanced_sample_scores_high(self):
-        m = _balanced_metrics(total=375, years=6, net=2000.0, dd_pct=8.0)
-        result = tsp.score_trial(m, _default_objective())
+        objective = _default_objective()
+        m = _balanced_metrics(
+            total=objective["trade_count_bounds"]["target"],
+            years=6,
+            net=2000.0,
+            dd_pct=8.0,
+        )
+        result = tsp.score_trial(m, objective)
         assert result["objective_score"] is not None
         assert result["objective_score"] >= 0.6
         c = result["components"]
@@ -572,7 +578,7 @@ class TestCLIStructure:
     def test_tuning_space_json_valid(self):
         space_path = Path(__file__).parent / "strategy_tuning_space.json"
         space = json.loads(space_path.read_text())
-        assert space["profile_name"] == "mes15m_agfit_v3"
+        assert space["profile_name"] == "mes5m_agfit_v1"
         w = space["objective"]["weights"]
         expected_keys = {
             "profit_factor",
@@ -627,19 +633,35 @@ class TestSearchSpaceConstraints:
         assert "Extend Levels Right" not in filtered
         assert "ZigZag Depth (manual)" in filtered
 
-    def test_parameter_constraints_catch_overwide_hold(self):
+    def test_parameter_constraints_catch_shallow_imbalance_rows(self):
         params = {
-            "Tier 1 Hold Bars": 5,
-            "Tier 1 Hold Stop ATR": 2.25,
             "Exhaustion Z Length": 20,
             "Exhaustion Z Threshold": 2.5,
             "Extension ATR Tolerance": 0.1,
             "Footprint Ticks Per Row": 4,
             "Zero-Print Volume Ratio": 0.1,
-            "Footprint Imbalance %": 300,
-            "Extreme Rows To Inspect": 3,
+            "Footprint Imbalance %": 350,
+            "Imbalance Rows": 1,
         }
-        assert "hold_logic_overwide" in tsp.parameter_constraint_violations(params)
+        assert "imbalance_window_too_shallow" in tsp.parameter_constraint_violations(
+            params
+        )
+
+    def test_parameter_constraints_catch_inverted_stop_caps(self):
+        params = {
+            "ATR Stop Multiplier": 3.2,
+            "Max Setup Stop ATR": 2.75,
+            "Exhaustion Z Length": 20,
+            "Exhaustion Z Threshold": 2.5,
+            "Extension ATR Tolerance": 0.1,
+            "Footprint Ticks Per Row": 4,
+            "Zero-Print Volume Ratio": 0.1,
+            "Footprint Imbalance %": 250,
+            "Imbalance Rows": 2,
+        }
+        assert "max_setup_stop_below_atr_stop" in tsp.parameter_constraint_violations(
+            params
+        )
 
     def test_generate_suggestions_emits_only_valid_configs(self):
         space = json.loads(
@@ -855,6 +877,36 @@ class TestJsonlHistorySesBothModes:
             assert "csv-001" in ids, "CSV_FULL trial missing"
             assert "cdp-001" in ids, "TV_MCP_STRICT trial missing"
             assert "pending-001" not in ids, "PENDING trial should be excluded"
+        finally:
+            ledger.unlink(missing_ok=True)
+
+    def test_load_history_jsonl_filters_by_profile(self):
+        import tempfile
+
+        ledger = Path(tempfile.mktemp(suffix=".jsonl"))
+        try:
+            tsp.append_trial_jsonl(
+                ledger,
+                {
+                    "trial_id": "p5-001",
+                    "profile": "mes5m_agfit_v1",
+                    "evaluation_mode": "TV_MCP_STRICT",
+                    "search_parameters": {"Execution Anchor": "0.618"},
+                },
+            )
+            tsp.append_trial_jsonl(
+                ledger,
+                {
+                    "trial_id": "p15-001",
+                    "profile": "mes15m_agfit_v3",
+                    "evaluation_mode": "TV_MCP_STRICT",
+                    "search_parameters": {"Execution Anchor": "0.786"},
+                },
+            )
+            args = argparse.Namespace(storage="jsonl", ledger=str(ledger), db_dsn="")
+            trials = tsp.load_history(args, "mes5m_agfit_v1")
+            ids = {t["trial_id"] for t in trials}
+            assert ids == {"p5-001"}
         finally:
             ledger.unlink(missing_ok=True)
 

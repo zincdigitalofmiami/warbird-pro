@@ -1,5 +1,5 @@
 {
-  "profile_name": "mes15m_agfit_v3",
+  "profile_name": "mes5m_agfit_v1",
   "signature_exclude_locked_parameters": [
     "Anchor Span = Active Fib Window",
     "Confluence Tolerance (%)",
@@ -8,12 +8,10 @@
     "Target Line Lookback Bars"
   ],
   "locked_parameters": {
-    "Acceptance Retest Window (bars)": 6,
     "Anchor Span = Active Fib Window": true,
     "Auto-tune ZigZag by Timeframe": false,
     "Confluence Tolerance (%)": 0.05,
     "Extend Levels Right": true,
-    "Fallback Stop Family": "ATR_1_0",
     "Min Fib Range (ATR)": 0.5,
     "One-shot event markers/alerts": true,
     "Rejection = wick into zone then close back out": true,
@@ -21,13 +19,13 @@
     "Target Line Lookback Bars": 40,
     "ZigZag Depth (manual)": 12,
     "ZigZag Deviation (manual)": 3.0,
-    "ZigZag Threshold Floor (%)": 0.30
+    "ZigZag Threshold Floor (%)": 0.3
   },
   "objective": {
     "trade_count_bounds": {
-      "max": 900,
-      "min": 220,
-      "target": 375
+      "max": 2200,
+      "min": 300,
+      "target": 900
     },
     "profit_factor_range": {
       "floor": 0.9,
@@ -45,12 +43,12 @@
     },
     "footprint_cohort": {
       "min_score": 0.45,
-      "min_trades": 60
+      "min_trades": 120
     },
     "rolling_window_stability": {
       "max_score_stddev": 0.18,
       "min_score": 0.45,
-      "min_trades_per_window": 40,
+      "min_trades_per_window": 75,
       "target_positive_windows": 0.75,
       "window_count": 4
     },
@@ -78,7 +76,7 @@
       "rolling_stability": 0.12,
       "footprint_stability": 0.05,
       "yearly_consistency": 0.04,
-      "realism_gate_penalty": 0.40,
+      "realism_gate_penalty": 0.4,
       "instability_penalty": 0.55
     }
   },
@@ -89,33 +87,43 @@
     "report_window": "FULL",
     "slippage_ticks": 1,
     "symbol": "CME_MINI:MES1!",
-    "timeframe": "15"
+    "timeframe": "5"
   },
   "search_parameters": {
+    "Acceptance Retest Window (bars)": {
+      "type": "int",
+      "values": [1, 2, 3, 4, 6]
+    },
+    "ATR Stop Multiplier": {
+      "max": 3.5,
+      "min": 1.0,
+      "step": 0.1,
+      "type": "float"
+    },
+    "Execution Anchor": {
+      "type": "string",
+      "values": ["0.500", "0.618", "0.786"]
+    },
     "Exhaustion Z Length": {
       "type": "int",
       "values": [10, 14, 20, 30]
     },
     "Exhaustion Z Threshold": {
-      "max": 2.6,
+      "max": 2.8,
       "min": 1.8,
       "step": 0.2,
       "type": "float"
     },
     "Extension ATR Tolerance": {
-      "max": 0.12,
+      "max": 0.14,
       "min": 0.08,
       "step": 0.01,
       "type": "float"
     },
-    "Extreme Rows To Inspect": {
-      "type": "int",
-      "values": [2, 3, 4]
-    },
     "Footprint Imbalance %": {
-      "max": 300,
-      "min": 175,
-      "step": 20,
+      "max": 350,
+      "min": 200,
+      "step": 25,
       "type": "float"
     },
     "Footprint Ticks Per Row": {
@@ -123,28 +131,28 @@
       "values": [4, 6]
     },
     "Footprint VA %": {
-      "max": 70,
-      "min": 45,
+      "max": 80,
+      "min": 55,
       "step": 5,
       "type": "float"
     },
     "Gate Shorts In Bull Trend": {
       "type": "bool"
     },
-    "Short Gate ADX Floor": {
-      "max": 20,
-      "min": 8,
-      "step": 1,
-      "type": "float"
-    },
-    "Tier 1 Hold Bars": {
+    "Imbalance Rows": {
       "type": "int",
-      "values": [2, 3, 4, 5]
+      "values": [1, 2, 3]
     },
-    "Tier 1 Hold Stop ATR": {
-      "max": 2.0,
+    "Max Setup Stop ATR": {
+      "max": 3.5,
       "min": 1.0,
       "step": 0.25,
+      "type": "float"
+    },
+    "Short Gate ADX Floor": {
+      "max": 24,
+      "min": 10,
+      "step": 1,
       "type": "float"
     },
     "Zero-Print Volume Ratio": {

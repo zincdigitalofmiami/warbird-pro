@@ -27,7 +27,7 @@ DEFAULT_SURVIVAL_STOP_USD = -37.50
 DEFAULT_DB_DSN = os.environ.get(
     "WARBIRD_PG_DSN", "host=127.0.0.1 port=5432 dbname=warbird"
 )
-# TV tick archive boundary for MES1! 15m — bars before this date rarely have footprint data.
+# TV footprint archive boundary for MES1! strategy exports used by this tuner.
 # Operator can override per session via --footprint-available-from on the `record` command.
 DEFAULT_FOOTPRINT_AVAILABLE_FROM = "2024-01-01"
 # Minimum CSV start date: 2020-01-01 per v5 training-data floor.
@@ -36,10 +36,16 @@ DEFAULT_ROLLING_WINDOW_COUNT = 4
 
 PARAMETER_GROUPS: tuple[tuple[str, ...], ...] = (
     (
+        "Execution Anchor",
+        "Acceptance Retest Window (bars)",
+        "ATR Stop Multiplier",
+        "Max Setup Stop ATR",
+    ),
+    (
         "Footprint Ticks Per Row",
         "Footprint VA %",
         "Footprint Imbalance %",
-        "Extreme Rows To Inspect",
+        "Imbalance Rows",
         "Zero-Print Volume Ratio",
     ),
     (
@@ -50,11 +56,6 @@ PARAMETER_GROUPS: tuple[tuple[str, ...], ...] = (
     (
         "Gate Shorts In Bull Trend",
         "Short Gate ADX Floor",
-    ),
-    (
-        "Fallback Stop Family",
-        "Tier 1 Hold Bars",
-        "Tier 1 Hold Stop ATR",
     ),
 )
 
@@ -110,11 +111,13 @@ def filter_signature_locked_params(
 def parameter_constraint_violations(params: dict[str, Any]) -> list[str]:
     issues: list[str] = []
 
-    hold_bars = params.get("Tier 1 Hold Bars")
-    hold_atr = params.get("Tier 1 Hold Stop ATR")
-    if hold_bars is not None and hold_atr is not None:
-        if hold_bars >= 5 and hold_atr > 2.0:
-            issues.append("hold_logic_overwide")
+    atr_stop_mult = params.get("ATR Stop Multiplier")
+    max_setup_stop_atr = params.get("Max Setup Stop ATR")
+    if atr_stop_mult is not None and max_setup_stop_atr is not None:
+        # Max setup stop must not sit below the configured ATR stop multiplier,
+        # otherwise the setup gate can hard-reject nearly every candidate.
+        if float(max_setup_stop_atr) + 1e-9 < float(atr_stop_mult):
+            issues.append("max_setup_stop_below_atr_stop")
 
     z_len = params.get("Exhaustion Z Length")
     z_threshold = params.get("Exhaustion Z Threshold")
@@ -128,12 +131,12 @@ def parameter_constraint_violations(params: dict[str, Any]) -> list[str]:
     ticks_per_row = params.get("Footprint Ticks Per Row")
     zero_ratio = params.get("Zero-Print Volume Ratio")
     imbalance = params.get("Footprint Imbalance %")
-    rows_to_inspect = params.get("Extreme Rows To Inspect")
+    rows_to_inspect = params.get("Imbalance Rows")
     if ticks_per_row is not None and zero_ratio is not None:
         if ticks_per_row >= 6 and zero_ratio > 0.14:
             issues.append("zero_print_too_loose_for_row_size")
     if imbalance is not None and rows_to_inspect is not None:
-        if imbalance >= 325 and rows_to_inspect < 3:
+        if imbalance >= 325 and rows_to_inspect < 2:
             issues.append("imbalance_window_too_shallow")
 
     return issues
@@ -1408,7 +1411,9 @@ def generate_suggestions(
                 if domain.name in seen_names:
                     continue
                 seen_names.add(domain.name)
-                params[domain.name] = neighbor_choice(domain, params[domain.name], rng)
+                params[domain.name] = neighbor_choice(
+                    domain, params.get(domain.name), rng
+                )
             if has_valid_parameter_structure(params):
                 return params
         return fallback
@@ -1489,7 +1494,12 @@ def load_history(args: argparse.Namespace, profile: str) -> list[dict[str, Any]]
     if args.storage == "postgres":
         with connect_db(args.db_dsn) as conn:
             return fetch_db_trials(conn, profile)
-    return load_trials_jsonl_csv_full(Path(args.ledger))
+    trials = load_trials_jsonl_csv_full(Path(args.ledger))
+    return [
+        trial
+        for trial in trials
+        if trial.get("profile") == profile or trial.get("profile_name") == profile
+    ]
 
 
 def command_suggest(args: argparse.Namespace) -> int:
