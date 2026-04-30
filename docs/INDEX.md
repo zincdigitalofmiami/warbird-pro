@@ -1,6 +1,6 @@
 # Warbird Documentation Index
 
-**Date:** 2026-04-27
+**Date:** 2026-04-29
 **Status:** Active Documentation Authority
 **Active Plan:** Warbird Indicator-Only AG Plan v6
 
@@ -26,12 +26,13 @@ reopened with evidence.
 2. `docs/contracts/README.md`
 3. `docs/contracts/pine_indicator_ag_contract.md`
 4. `docs/runbooks/README.md`
-5. `docs/contracts/schema_migration_policy.md`
-6. `docs/cloud_scope.md`
-7. `WARBIRD_MODEL_SPEC.md`
-8. `CLAUDE.md`
-9. `docs/agent-safety-gates.md`
-10. `Powerdrill/reports/2026-04-06-powerdrill-findings.md`
+5. `docs/runbooks/startup_repo_review.md` - required fresh-chat/start-of-day read-only initialization
+6. `docs/contracts/schema_migration_policy.md`
+7. `docs/cloud_scope.md`
+8. `WARBIRD_MODEL_SPEC.md`
+9. `CLAUDE.md`
+10. `docs/agent-safety-gates.md`
+11. `Powerdrill/reports/2026-04-06-powerdrill-findings.md`
 
 ## Authority Split
 
@@ -45,6 +46,8 @@ reopened with evidence.
   - the only cloud-whitelist authority
 - `docs/runbooks/README.md`
   - the operational runbook index
+- `docs/runbooks/startup_repo_review.md`
+  - required fresh-chat/start-of-day read-only initialization report checklist
 - `CLAUDE.md`
   - current operational truth and runtime status
 - `WARBIRD_MODEL_SPEC.md`
@@ -57,6 +60,11 @@ reopened with evidence.
 - **Local `warbird` PG17 warehouse** = legacy/reference unless explicitly reopened
 - **Cloud Supabase** = runtime/support only, not training truth
 - Active artifacts: `artifacts/tuning/` and `scripts/optuna/workspaces/<indicator_key>/`
+
+## Startup Review Records
+
+- `docs/runbooks/2026-04-29-startup-repo-review-initialization.md`
+  - initial startup repo review findings and permanence record
 
 ## Historical Material
 

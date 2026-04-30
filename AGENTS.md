@@ -33,10 +33,28 @@ is a thin redirector only; do not expand it into a competing source.
 4. `docs/contracts/README.md`
 5. `docs/contracts/pine_indicator_ag_contract.md`
 6. `docs/runbooks/README.md`
-7. `docs/cloud_scope.md`
-8. `WARBIRD_MODEL_SPEC.md`
-9. `CLAUDE.md`
-10. `docs/agent-safety-gates.md`
+7. `docs/runbooks/startup_repo_review.md`
+8. `docs/cloud_scope.md`
+9. `WARBIRD_MODEL_SPEC.md`
+10. `CLAUDE.md`
+11. `docs/agent-safety-gates.md`
+
+### Startup / Start-of-Day Review
+
+At the start of every fresh chat, start of day, context reset, or resumed
+session where current repo state is unknown, perform the read-only startup
+repo review before planning or implementation.
+
+Use `docs/runbooks/startup_repo_review.md` as the checklist. The review must
+inspect the local authority docs, recent commit history and diffs, working tree
+state, stashes, branch/worktree landscape, and key project surfaces. Report the
+current architecture, recent direction, active WIP, notable inconsistencies,
+and areas that appear stable vs. in flux.
+
+The startup review is inspection-only: do not modify files, stage/commit,
+install dependencies, run builds/tests/training, or touch Pine during this
+initialization pass unless the user separately asks for implementation after
+the review.
 
 ## Active Plan
 

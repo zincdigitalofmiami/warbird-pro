@@ -51,8 +51,9 @@ settings, or runbooks.
 - `alertcondition` presence (institutional has 3, strategy has 0)
 - Strategy-only `strategy()` declaration with Bar Magnifier / commission / slippage pins
 - Trigger-family equivalence across all wrappers. The backtest wrapper can run a
-  direct fib-anchor Optuna path, while the live institutional indicator uses the
-  anchor-reclaim plus footprint gate path.
+  fib-entry-mode Optuna path (`Any Side Fib` default, `Configured Anchor`
+  optional), while the live institutional indicator uses the anchor-reclaim plus
+  footprint gate path.
 
 ## Closure Note: Trigger Divergence (reconciled 2026-04-26)
 

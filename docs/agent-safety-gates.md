@@ -25,6 +25,11 @@ Resolve instruction conflicts in this exact order:
 
 If a task touches one specific phase or checkpoint, reread that exact active-plan section before editing.
 
+Fresh chats, start-of-day sessions, context resets, and resumed sessions with
+unknown repo state must run `docs/runbooks/startup_repo_review.md` before
+task-specific preflight. That startup review is read-only and must not modify
+files, run builds/tests/training, stage/commit, or touch Pine.
+
 ## 2. Model Policy
 
 Default Claude Code model policy for this repo:
@@ -48,10 +53,12 @@ Every substantive task must run in this order:
 
 Before editing:
 
-1. Run `git status --short`
-2. Discover the touched surface with `rg --files` / `rg -n`
-3. Read the governing docs for the touched surface
-4. Inventory:
+1. If this is a fresh chat, start of day, context reset, or unknown repo state,
+   complete `docs/runbooks/startup_repo_review.md` first.
+2. Run `git status --short`
+3. Discover the touched surface with `rg --files` / `rg -n`
+4. Read the governing docs for the touched surface
+5. Inventory:
    - impacted code paths
    - impacted tables / routes / scripts / indicators
    - verification gates

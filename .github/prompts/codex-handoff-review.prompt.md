@@ -14,6 +14,9 @@ Requirements:
 - If the surface touches datasets, features, training, labels, targets, leakage risk, or financial model validity, also load [point-in-time-ml-audit](../skills/point-in-time-ml-audit/SKILL.md).
 - Use [cross-skill-routing](../skills/repo-truth-audit/references/cross-skill-routing.md) to decide which evidence layers are mandatory.
 - Read the relevant repo truth first instead of trusting docs blindly.
+- For a fresh chat, start of day, context reset, or unknown repo state, run
+  `docs/runbooks/startup_repo_review.md` first and include the resulting repo
+  state in the handoff.
 - Identify what Codex last did, what the review found, and the exact next actions.
 - Name exact files, commands, branches, refs, blockers, and proofs required.
 - Prefer runtime truth over status markdown when they disagree.

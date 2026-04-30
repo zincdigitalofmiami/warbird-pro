@@ -1,6 +1,6 @@
 # Warbird Runbooks
 
-**Date:** 2026-04-27
+**Date:** 2026-04-29
 **Status:** Active Runbook Index
 
 The active runbooks support indicator-only Pine modeling.
@@ -18,6 +18,8 @@ approved.
 
 ## Active
 
+- `docs/runbooks/startup_repo_review.md`
+  - required fresh-chat/start-of-day read-only repo initialization and report checklist
 - `docs/runbooks/strategy_tuning.md`
   - TradingView/Pine settings sweep workflow
 - `docs/runbooks/wbv7_institutional_optuna.md`

@@ -5,10 +5,23 @@ Read and follow `AGENTS.md` at the repository root.
 - **Canonical docs index:** `/Volumes/Satechi Hub/warbird-pro/docs/INDEX.md`
 - **Active architecture plan:** `/Volumes/Satechi Hub/warbird-pro/docs/MASTER_PLAN.md` — Warbird Indicator-Only AG Plan v6
 - **Indicator contract:** `/Volumes/Satechi Hub/warbird-pro/docs/contracts/pine_indicator_ag_contract.md`
+- **Startup review runbook:** `/Volumes/Satechi Hub/warbird-pro/docs/runbooks/startup_repo_review.md`
 - **Claude phased guardrails:** `/Volumes/Satechi Hub/warbird-pro/docs/runbooks/claude_rogue_proof_phase_contract.md`
 - **Repo:** github.com/zincdigitalofmiami/warbird-pro
 
 ## Current Status
+
+### Required Startup Review
+
+Fresh chats, start-of-day sessions, context resets, and resumed sessions with
+unknown repo state must begin with the read-only startup repo review in
+`docs/runbooks/startup_repo_review.md`.
+
+That review establishes current truth from the local clone before any planning
+or implementation. It must inspect authority docs, recent commits/diffs,
+working tree status, stashes, branches/worktrees, and key project surfaces, then
+report current architecture, WIP, inconsistencies, and stable vs. in-flux areas.
+Do not run builds/tests/training or modify files during the startup review.
 
 ### Active Contract
 

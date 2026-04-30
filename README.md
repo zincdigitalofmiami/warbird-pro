@@ -24,13 +24,28 @@ Use these in order:
 
 1. `AGENTS.md`
 2. `docs/INDEX.md`
-3. `docs/MASTER_PLAN.md`
-4. `docs/contracts/pine_indicator_ag_contract.md`
-5. `WARBIRD_MODEL_SPEC.md`
-6. `CLAUDE.md`
+3. `docs/runbooks/startup_repo_review.md`
+4. `docs/MASTER_PLAN.md`
+5. `docs/contracts/pine_indicator_ag_contract.md`
+6. `WARBIRD_MODEL_SPEC.md`
+7. `CLAUDE.md`
 
 Historical warehouse, macro, and cloud-ingestion plans are reference-only unless
 explicitly reopened.
+
+## Agent Startup Review
+
+Every fresh chat, start-of-day session, context reset, or resumed session with
+unknown repo state starts with the read-only startup repo review in
+`docs/runbooks/startup_repo_review.md`.
+
+This review inspects local docs, recent commits/diffs, working tree status,
+stashes, branches/worktrees, and key project surfaces before any planning or
+implementation. It does not modify files, run builds/tests/training, or touch
+Pine unless the user separately asks for implementation afterward.
+
+The initialization record is
+`docs/runbooks/2026-04-29-startup-repo-review-initialization.md`.
 
 ## Active Architecture
 
