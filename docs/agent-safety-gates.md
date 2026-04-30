@@ -94,7 +94,7 @@ When the task touches Pine indicators, strategies, harnesses, or TradingView mec
    - `./scripts/guards/pine-lint.sh`
    - `./scripts/guards/check-fib-scanner-guardrails.sh`
    - `./scripts/guards/check-contamination.sh`
-   - `./scripts/guards/check-indicator-strategy-parity.sh` when both the indicator and strategy are in scope
+   - `./scripts/guards/check-indicator-strategy-parity.sh` only if a strategy harness is explicitly reopened and coupled to Warbird Pro
 2. Treat `pinescript-server`, TradingView CLI, or chart-capable MCP flows as optional only after confirming they are actually configured in the active Codex profile.
 3. Do not treat tool presence, slash-command names, or plan references as proof that a Pine / TradingView tool is really installed.
 4. Repo guard scripts remain the hard completion gates, and Deep Backtesting or live-chart validation remain manual unless a real chart-capable tool is installed and verified.
@@ -125,14 +125,9 @@ If any touched file ends in `.pine`:
 3. `./scripts/guards/check-contamination.sh`
 4. `npm run build`
 
-If either of these files is touched:
-
-- `indicators/v7-warbird-institutional.pine`
-- `indicators/v7-warbird-strategy.pine`
-
-Also run:
-
-5. `./scripts/guards/check-indicator-strategy-parity.sh`
+`./scripts/guards/check-indicator-strategy-parity.sh` is inactive while no
+strategy harness exists. Run it only if Kirk explicitly reopens a strategy
+harness coupled to Warbird Pro.
 
 ### Next.js / API / Shared TS Work
 
@@ -192,9 +187,8 @@ Stop and report blockers if any are true:
 4. Runtime validation is required but unavailable.
 5. The assistant cannot prove that the claimed file edits exist.
 6. The assistant cannot prove that verification commands actually passed.
-7. The task proposes changing backtest fib-core code in
-   `indicators/v7-warbird-institutional-backtest-strategy.pine` without
-   explicit approval and before/after evidence.
+7. The task proposes changing Warbird Pro fib anchor ownership or ladder math
+   without explicit approval and before/after evidence.
 
 When blocked, report:
 

@@ -46,6 +46,8 @@ Rules:
 - Shared mixed-indicator SQLite DBs are retired. Historical mixed DBs belong in `archive/`.
 - Legacy `data/*optuna*` directories are deprecated and should stay empty.
 - Study names are operator-facing titles in `optuna-dashboard`. Use clear words with spaces that state the study purpose. Do not use snake_case, version labels, or generic names such as `<indicator>_study`.
+- `warbird_pro` is the only active main chart indicator key and maps to
+  `indicators/warbird-pro-indicator.pine`.
 - `warbird_nexus_ml_rsi` is footprint-only: use the TradingView/Pine
   `request.footprint()` parquet + manifest. Do not use CSV exports, plain OHLCV
   parquet, Databento bars, or synthetic body/wick delta for that lane.

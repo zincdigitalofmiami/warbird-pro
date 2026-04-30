@@ -1,26 +1,18 @@
 [
   {
-    "key": "wb7",
-    "name": "WB7 Institutional",
+    "key": "warbird_pro",
+    "name": "Warbird Pro",
     "surface_type": "indicator",
     "category": "chart-core",
-    "pine_file": "indicators/v7-warbird-institutional.pine",
-    "profile_module": "scripts.optuna.wb7_profile",
-    "default_study_name": "Warbird Institutional Win Rate and Profit Factor"
-  },
-  {
-    "key": "v7_warbird_institutional",
-    "name": "Warbird Institutional (v7)",
-    "surface_type": "indicator",
-    "category": "chart-core",
-    "pine_file": "indicators/v7-warbird-institutional.pine",
-    "profile_module": "scripts.optuna.v7_warbird_institutional_profile",
-    "default_study_name": "Warbird Institutional Signal Optimization",
+    "pine_file": "indicators/warbird-pro-indicator.pine",
+    "profile_module": "scripts.optuna.warbird_pro_profile",
+    "default_study_name": "Warbird Pro 5m Main Indicator Optimization",
     "symbol": "MES1!",
-    "timeframe": "15",
+    "timeframe": "5",
     "data_floor": "2020-01-01",
     "label_column": "ml_last_exit_outcome",
     "output_budget": "56/64",
+    "trigger_family": "LIVE_ANCHOR_FOOTPRINT",
     "frozen_params": [
       "fibDeviationManual",
       "fibDepthManual",
@@ -35,97 +27,9 @@
       "footprintVaPercent",
       "footprintImbalancePercent",
       "zeroPrintVolRatio",
-      "stackedImbalanceRows"
+      "optImbalanceRows"
     ],
-    "notes": "Fib geometry frozen per 15m fib-owner freeze (CLAUDE.md 2026-04-14). Objective: composite 0.40xPF + 0.35xWR + 0.25xConsistency. Exhaustion diamond abandoned 2026-04-21."
-  },
-  {
-    "key": "v7_warbird_strategy",
-    "name": "Warbird Strategy (v7)",
-    "surface_type": "strategy",
-    "category": "chart-core",
-    "pine_file": "indicators/v7-warbird-strategy.pine",
-    "profile_module": "scripts.optuna.v7_warbird_strategy_profile",
-    "default_study_name": "Warbird Strategy Optimization"
-  },
-  {
-    "key": "v7_warbird_strategy_5m",
-    "name": "Warbird Strategy (v7) 5m Main Engine",
-    "surface_type": "strategy",
-    "category": "chart-core",
-    "pine_file": "indicators/v7-warbird-strategy.pine",
-    "profile_module": "scripts.optuna.v7_warbird_strategy_profile",
-    "default_study_name": "Warbird Strategy 5m Main Engine Optimization",
-    "symbol": "MES1!",
-    "timeframe": "5",
-    "notes": "Primary 5m strategy tuning namespace for the indicator-only plan. Uses TradingView/Pine evidence with fib architecture and structure controls frozen."
-  },
-  {
-    "key": "v7_warbird_institutional_5m",
-    "name": "Warbird Institutional (v7) 5m Main Fib",
-    "surface_type": "indicator",
-    "category": "chart-core",
-    "pine_file": "indicators/v7-warbird-institutional.pine",
-    "profile_module": "scripts.optuna.v7_warbird_institutional_profile",
-    "default_study_name": "Warbird Institutional 5m Main Fib Optimization",
-    "symbol": "MES1!",
-    "timeframe": "5",
-    "data_floor": "2020-01-01",
-    "label_column": "ml_last_exit_outcome",
-    "output_budget": "58/64",
-    "frozen_params": [
-      "fibDeviationManual",
-      "fibDepthManual",
-      "fibThresholdFloorPct",
-      "minFibRangeAtr",
-      "autoTuneZZ"
-    ],
-    "tv_only_params": [
-      "retestBars",
-      "fibConfluenceTolPct",
-      "footprintTicksPerRow",
-      "footprintVaPercent",
-      "footprintImbalancePercent",
-      "zeroPrintVolRatio",
-      "stackedImbalanceRows"
-    ],
-    "notes": "5m main-fib indicator card. Distinct namespace from the 15m v7_warbird_institutional study which is preserved for later. Pairs with v7_warbird_strategy_5m via parity guard. Goal: highest WR + PF with lowest SL."
-  },
-  {
-    "key": "v6_warbird_complete",
-    "name": "Warbird Complete (v6)",
-    "surface_type": "indicator",
-    "category": "legacy",
-    "pine_file": "indicators/v6-warbird-complete.pine",
-    "profile_module": "scripts.optuna.v6_warbird_complete_profile",
-    "default_study_name": "Warbird Complete Indicator Optimization"
-  },
-  {
-    "key": "v6_warbird_complete_strategy",
-    "name": "Warbird Complete Strategy (v6)",
-    "surface_type": "strategy",
-    "category": "legacy",
-    "pine_file": "indicators/v6-warbird-complete-strategy.pine",
-    "profile_module": "scripts.optuna.v6_warbird_complete_strategy_profile",
-    "default_study_name": "Warbird Complete Strategy Optimization"
-  },
-  {
-    "key": "v2_warbird_unified",
-    "name": "Warbird Unified (v2)",
-    "surface_type": "indicator",
-    "category": "legacy",
-    "pine_file": "indicators/v2-warbird-unified.pine",
-    "profile_module": "scripts.optuna.v2_warbird_unified_profile",
-    "default_study_name": "Warbird Unified Indicator Optimization"
-  },
-  {
-    "key": "fibs_only",
-    "name": "Fibs Only",
-    "surface_type": "indicator",
-    "category": "experimental",
-    "pine_file": "indicators/fibs-only.pine",
-    "profile_module": "scripts.optuna.fibs_only_profile",
-    "default_study_name": "Fibs Only Indicator Optimization"
+    "notes": "Canonical main chart indicator as of 2026-04-30. Fib anchor ownership and ladder math are protected. Retired v7/strategy/backtest/fib-only Pine variants are not active tuning surfaces."
   },
   {
     "key": "warbird_nexus_ml_rsi",
@@ -137,6 +41,7 @@
     "default_study_name": "Warbird Nexus ML Fast 5m Signal Quality 2026-04-27 ACTIVE",
     "symbol": "MES1!",
     "timeframe": "5",
+    "trigger_family": "NEXUS_FOOTPRINT_DELTA",
     "notes": "Nexus footprint lane. Optimizes Nexus indicator settings only from manifest-backed TradingView/Pine request.footprint() snapshots containing nexus_fp_available, nexus_fp_bar_delta, and nexus_fp_total_volume. CSV exports, local OHLCV parquet, and synthetic body/wick delta are invalid for this lane."
   }
 ]

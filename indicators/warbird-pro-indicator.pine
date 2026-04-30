@@ -1,9 +1,8 @@
-//@version=6
 // This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © Kirk / ZINC Digital
-// Warbird Pro Indicator — MES Fib Structure + AG Contract Surface (extracted from backtest strategy)
+// Warbird Pro  — MES Fib Structure + Optuna Contract Surface
 // Base: v6-warbird-complete.pine (2026-03-26)
-// Upgrade: v6 migration + 5 target extensions + AG hidden export surface
+// Upgrade: v6 migration + 5 target extensions + hidden export surface
 // Date: 2026-04-13
 //
 // NO-REPAINT AUDIT:
@@ -18,25 +17,22 @@
 // HTF fib (1H):        [high, low] tuple                 = 1 call
 // HTF fib (4H):        [high, low] tuple                 = 1 call
 // HTF fib (1D):        [high, low] tuple                 = 1 call
-// Parent fib override: request.security(fibAnchorTimeframe) = 1 conditional call
 // NYSE A-D Line (D):   close                             = 1 call
 // Footprint (chart):    request.footprint()              = 1 call
-// TOTAL:                                                 = 6 request.* paths
+// TOTAL:                                                 = 5 request.* paths
 //
-// PLOT BUDGET: 47 plot = 47/64 (17 headroom); label.new slots are outside 64-slot counter
-// TA Core Pack exports (7 plots) are AG server-side computable — cut candidates if slots needed.
+// PLOT BUDGET: 53 plot + 3 alertcondition = 56/64 (8 headroom); 9 label.new slots (var+entry) — outside 64-slot counter
+// TA Core Pack exports (7 plots) are offline-computable — cut candidates if slots needed.
 // Momentum Oscillators (5 plots: ml_vf_bull, ml_vf_bear, ml_nfe, ml_rsi_knn, ml_confluence) added 2026-04-20.
-indicator("Warbird Pro Indicator", shorttitle="WB Pro", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100)
+//@version=6
+indicator("Warbird Pro", shorttitle="WB ", overlay=true, max_lines_count=200, max_labels_count=200, max_boxes_count=100)
 import TradingView/ZigZag/7 as zigzag
-
-const int DRAW_HISTORY_BARS = 5000
-max_bars_back(time, DRAW_HISTORY_BARS)
 
 //=====================
 // FIBONACCI ENGINE SETTINGS
 //=====================
 string groupFibEngine = "Fibonacci Engine"
-bool autoTuneZZ = input.bool(true, "Auto-tune ZigZag by Timeframe", group=groupFibEngine,
+bool autoTuneZZ = input.bool(false, "Auto-tune ZigZag by Timeframe", group=groupFibEngine,
   tooltip="ON: 4H+ uses Deviation=4/Depth=20, 1H uses Deviation=3.5/Depth=15, 15m uses Deviation=4/Depth=20, below 15m uses Deviation=3/Depth=15. Turn OFF to set values manually.")
 float fibDeviationManual = input.float(4.0, "ZigZag Deviation (manual)",
   minval=0.5, maxval=20.0, step=0.5, group=groupFibEngine,
@@ -47,32 +43,15 @@ int fibDepthManual = input.int(20, "ZigZag Depth (manual)",
 float fibConfluenceTolPct = input.float(0.05, "Confluence Tolerance (%)", minval=0.01, maxval=2.00, step=0.01, group=groupFibEngine)
 float fibThresholdFloorPct = input.float(0.50, "ZigZag Threshold Floor (%)", minval=0.0, maxval=5.0, step=0.05, group=groupFibEngine,
   tooltip="Minimum percent move required by the ZigZag after ATR scaling.")
-int fibPivotRightRoomBars = input.int(4, "Pivot Right Room (parent bars)", minval=1, maxval=20, group=groupFibEngine,
-  tooltip="Bars after a candidate parent pivot before the fib leg may re-anchor. This keeps anchors off the latest bar while allowing the most recent confirmed major leg.")
-int fibRecentLegLookbackBars = input.int(20, "Recent Leg Lookback (parent bars)", minval=5, maxval=120, group=groupFibEngine,
-  tooltip="Parent bars scanned for the active major move after excluding Pivot Right Room. On the 15m parent, 20 bars is the last 5 hours.")
 float minFibRangeAtr = input.float(0.5, "Min Fib Range (ATR)", minval=0.5, maxval=10.0, step=0.1, group=groupFibEngine)
-float directLockMaxRecentRangeMult = input.float(1.50, "Direct Lock Max Range / Recent Leg", minval=1.0, maxval=5.0, step=0.05, group=groupFibEngine,
-  tooltip="Direct fib-anchor backtests may only lock a native chart ladder when its range is no wider than this multiple of the recent native leg range. This prevents stale wide legs from becoming frozen trade ladders.")
-bool useParentFibTimeframe = input.bool(false, "Use Parent Fib Timeframe", group=groupFibEngine,
-  tooltip="OFF (default) keeps fibs native to the chart timeframe (5m canonical, matches the live indicator). Turn ON to anchor fibs to a higher parent timeframe.")
-string fibAnchorTimeframe = input.timeframe("15", "Parent Fib Timeframe", group=groupFibEngine,
-  tooltip="The parent fib owner. Use 15 for the current Warbird contract. Turn Use Parent Fib Timeframe OFF to let the chart timeframe own the fib ladder.")
 
-int _chartTfSec = timeframe.in_seconds(timeframe.period)
-int _parentTfSec = timeframe.in_seconds(fibAnchorTimeframe)
-bool useFibAnchorTimeframeOverride = useParentFibTimeframe and fibAnchorTimeframe != timeframe.period and _parentTfSec > _chartTfSec
-string fibCalcTimeframe = useFibAnchorTimeframeOverride ? fibAnchorTimeframe : timeframe.period
-int _tfSec = timeframe.in_seconds(fibCalcTimeframe)
+int _tfSec = timeframe.in_seconds()
 float fibDeviation = autoTuneZZ
   ? (_tfSec >= 14400 ? 4.0 : _tfSec >= 3600 ? 3.5 : _tfSec >= 900 ? 4.0 : 3.0)
   : fibDeviationManual
 int fibDepth = autoTuneZZ
   ? (_tfSec >= 14400 ? 20 : _tfSec >= 3600 ? 15 : _tfSec >= 900 ? 20 : 15)
   : fibDepthManual
-
-barsForMinutes(float minutes, int fallbackBars) =>
-    _chartTfSec > 0 ? int(math.max(1.0, math.round(minutes * 60.0 / _chartTfSec))) : fallbackBars
 
 //=====================
 // CANONICAL FIB LEVELS (from lib/fibonacci.ts + FibLinesPrimitive.ts)
@@ -132,19 +111,9 @@ string optEntryLevelInput = input.string("0.618", "Execution Anchor", options=["
   tooltip="Optuna-tuned execution line. The same fib ratio is used in both directions via fibPrice().")
 float optStopAtrMult = input.float(1.5, "ATR Stop Multiplier", minval=1.0, maxval=3.5, step=0.1, group=groupStops,
   tooltip="Single-family ATR stop. This replaces all stop-family branching and continuation widening.")
-float optMaxRiskAtr = input.float(3.0, "Max Setup Stop ATR", minval=2.5, maxval=4.5, step=0.25, group=groupStops,
-  tooltip="Reject setup triggers whose ATR stop is too wide versus current volatility.")
+float optMaxRiskAtr = input.float(3.0, "Max Setup Stop ATR", minval=1.0, maxval=4.5, step=0.25, group=groupStops,
+  tooltip="Reject setup triggers whose ATR stop is too wide versus current volatility. Phase 4 search range 1.0-3.5; minval lowered from 2.5 to match.")
 
-string groupExecution = "Execution / Safety"
-int cooldownBarsInput = input.int(0, "Post-Exit Cooldown Bars", minval=0, maxval=50, group=groupExecution,
-  tooltip="0 disables the hard time cooldown. Use this only for deliberate anti-cluster testing; otherwise it suppresses valid continuation and reclaim entries.")
-int setupExpiryMinutesInput = input.int(180, "Setup Expiry Minutes", minval=15, maxval=720, step=15, group=groupExecution)
-bool useMicroValueReclaimInput = input.bool(true, "Use 5m Value-Reclaim Trigger", group=groupExecution,
-  tooltip="Adds a subordinate footprint POC/value reclaim trigger while keeping the parent fib direction and risk gates intact.")
-bool backtestFibAnchorOnlyInput = input.bool(true, "Backtest Fib Anchor Hits Directly", group=groupExecution,
-  tooltip="ON makes Strategy Tester entries fire from the selected fib execution anchor hit/reclaim. This is the Optuna line-hit backtest path and bypasses footprint/context gates.")
-string backtestExitTargetInput = input.string("TP1", "Backtest Exit Target", options=["TP1", "TP2", "TP3", "TP4", "TP5"], group=groupExecution,
-  tooltip="Single-ticket Strategy Tester target. Each signal opens one contract and exits at the selected locked fib target.")
 string groupFootprint = "Footprint Exhaustion"
 int footprintTicksPerRow = input.int(4, "Footprint Ticks Per Row", minval=1, group=groupFootprint)
 float footprintVaPercent = input.float(50.0, "Footprint VA %", minval=1.0, maxval=100.0, step=1.0, group=groupFootprint)
@@ -153,8 +122,27 @@ float exhaustionLevelAtrTol = input.float(0.10, "Extension ATR Tolerance", minva
 float zeroPrintVolRatio = input.float(0.10, "Zero-Print Volume Ratio", minval=0.01, maxval=1.00, step=0.01, group=groupFootprint)
 int optImbalanceRows = input.int(2, "Imbalance Rows", minval=1, maxval=3, group=groupFootprint,
   tooltip="Minimum consecutive extreme rows with same-side imbalance required for a live entry trigger.")
-bool requireFootprintForBacktestInput = input.bool(false, "Require Footprint For Backtest Entries", group=groupFootprint,
-  tooltip="OFF lets the strategy backtest selected 5m fib-anchor/reclaim entries when TradingView does not provide request.footprint() history. If footprint data is available, entries still require footprint confirmation.")
+int exhaustionSwingLookbackBarsInput = input.int(10, "Exhaustion Swing Lookback", minval=3, maxval=50, group=groupFootprint,
+  tooltip="Bars used for swing-high/swing-low detection in exhaustion gates. Phase 3 tunable.")
+int exhaustionCooldownBarsInput = input.int(8, "Exhaustion Cooldown Bars", minval=1, maxval=50, group=groupFootprint,
+  tooltip="Bars to suppress repeat exhaustion events after a trigger. Phase 3 tunable.")
+
+//=====================
+// PHASE 0 — TREND / MA / VWAP / LIQ SWEEP GATE INPUTS (Phase 1 search surface)
+// Inputs default OFF so live behavior is unchanged unless the toggles are flipped
+// by the operator or the Optuna campaign.
+//=====================
+string groupTrendMaGate = "Trend / MA / VWAP / Liq Sweep"
+bool useMaTrendFilter = input.bool(false, "Use MA Trend Filter", group=groupTrendMaGate,
+  tooltip="When ON, requires MA-trend alignment for entries (long: maFast > maSlow AND close > maFast; short: inverse).")
+string maFamily = input.string("EMA", "MA Family", options=["EMA", "SMA", "WMA", "HMA", "VWMA", "DEMA", "TEMA", "RMA"], group=groupTrendMaGate,
+  tooltip="Moving-average family used by the MA Trend Filter.")
+int maFastLen = input.int(21, "MA Fast Length", minval=2, maxval=200, group=groupTrendMaGate)
+int maSlowLen = input.int(50, "MA Slow Length", minval=5, maxval=400, group=groupTrendMaGate)
+bool useVwapGate = input.bool(false, "Use VWAP Gate", group=groupTrendMaGate,
+  tooltip="When ON, requires close-vs-VWAP alignment for entries (long: close > VWAP; short: close < VWAP).")
+int liqSweepLookbackBarsInput = input.int(10, "Liquidity Sweep Lookback", minval=3, maxval=200, group=groupTrendMaGate,
+  tooltip="Bars used to define swing high/low for liquidity-sweep detection. Phase 1 tunable.")
 
 //=====================
 // VISUALS (colors/widths locked to spec — see constants above)
@@ -190,10 +178,6 @@ color fibTargetColorInput = input.color(color.new(COLOR_TARGET, 50), "Targets", 
 int fibTargetWidthInput = input.int(WIDTH_TARGET, "", minval=1, maxval=5, inline="fib_target", group=groupViz)
 bool showFibLevelLabelsInput = input.bool(false, "Show Fib Level Labels", group=groupViz)
 bool showTradeLabelsInput = input.bool(true, "Show Entry / SL / Target Labels", group=groupViz)
-bool showSlProjectionLineInput = input.bool(true, "Show SL Projection Line", group=groupViz,
-  tooltip="ON draws the ATR SL line only after a trade activates. OFF keeps labels/settings without the horizontal stop line.")
-bool showEntryMarkersInput = input.bool(false, "Show Entry Arrow Markers", group=groupViz,
-  tooltip="OFF avoids redundant lower-chart entry arrows while Strategy Tester order markers still show fills.")
 int tradeLabelOffsetBarsInput = input.int(10, "Trade Label Offset (bars)", minval=0, maxval=20, group=groupViz)
 string tradeLabelSizeInput = input.string("Normal", "Trade Label Size", options=["Tiny", "Small", "Normal", "Large"], group=groupViz)
 color tradeLabelTextColorInput = input.color(color.white, "Trade Label Text", inline="label_text", group=groupViz)
@@ -202,12 +186,6 @@ color entryLabelColorInput = input.color(COLOR_ENTRY_LABEL, "Entry Label", inlin
 color stopLabelColorInput = input.color(COLOR_STOP, "SL Label", inline="label_levels", group=groupViz)
 color targetLabelColorInput = input.color(color.new(COLOR_TARGET, 50), "Target Label", inline="label_levels", group=groupViz)
 int zoneFillTransparencyInput = input.int(80, "Zone Fill Alpha", minval=0, maxval=100, group=groupViz)
-
-string groupBrand = "Warbird Web Watermark"
-bool showWebWatermarkInput = input.bool(true, "Show Warbird Watermark", group=groupBrand,
-  tooltip="Pine cannot render the SVG logo directly, so this uses a centered text watermark matching the web chart brand colors.")
-color webWatermarkWarbirdColorInput = input.color(color.new(#FFFFFF, 78), "Warbird", inline="wm", group=groupBrand)
-color webWatermarkProColorInput = input.color(color.new(#FF0000, 72), "Pro", inline="wm", group=groupBrand)
 
 string groupDebug = "Debug Diagnostics"
 bool enableDebugLogs = input.bool(false, "Enable Debug Logs", group=groupDebug, tooltip="Temporary state tracing for regime/probability diagnostics.")
@@ -227,7 +205,7 @@ f_label_size(string sizeName) =>
 
 //=====================
 // REGIME DETECTION (from session-checkpoint research: ADX/ER/VIX-vol)
-// These are computed values for sidebar + AG features, NOT chart markers
+// These are computed values for sidebar + offline features, NOT chart markers
 //=====================
 
 // --- ADX(14) + signed DI spread + ADX slope ---
@@ -267,14 +245,6 @@ float ema100 = ta.ema(close, 100)
 [_macdFast, _macdSlow, macdHist] = ta.macd(close, 12, 26, 9)
 float rsi14 = ta.rsi(close, 14)
 float atr14 = ta.atr(14)
-// NOTE: barSpreadXVol, OBV, MFI use standard volume — kept as AG exports only.
-// AG computes these server-side from Databento tick data. Pine exports are placeholders.
-// Footprint delta is the canonical volume truth for all live indicator decisions.
-float barSpreadXVol = (high - low) * volume
-float obvChangeRaw = nz(ta.change(close))
-float _obvDelta = obvChangeRaw > 0 ? volume : obvChangeRaw < 0 ? -volume : 0.0
-float obvVal = ta.cum(_obvDelta)
-float mfi14 = ta.mfi(hlc3, 14)
 
 //=====================
 // OPENING RANGE (first 30 min of RTH: 8:30-9:00 CT)
@@ -308,8 +278,8 @@ float orDistNorm = (orLocked and not na(orMid) and atr14 > 0) ? (close - orMid) 
 // FOMC: 8x/year, always a Wednesday — approximate 2nd or 3rd Wed of month (dayofmonth 8-21)
 // CPI:  usually 2nd Tuesday of month (dayofmonth 8-14)
 // Zero security calls. Correctly identifies ~80% of high-impact macro days.
-// For exact dates, join FRED economic calendar server-side in the AG pipeline.
-// Data floor: 2018-01-01. Pre-2018 data excluded from AG training (regime mismatch).
+// For exact dates, use a manually curated economic calendar outside this model surface.
+// Data floor: 2018-01-01. Pre-2018 data is excluded from active tuning.
 //=====================
 bool isNFPDay   = dayofweek == dayofweek.friday    and dayofmonth <= 7
 bool isFOMCDay  = dayofweek == dayofweek.wednesday and dayofmonth >= 8 and dayofmonth <= 21
@@ -321,11 +291,32 @@ bool isEventDay = isNFPDay or isFOMCDay or isCPIDay
 // Bull sweep: price wicks below prior swing low, closes back above — stop hunt below
 // Bear sweep: price wicks above prior swing high, closes back below — stop hunt above
 //=====================
-int swingLookback = 10
+int swingLookback = liqSweepLookbackBarsInput
 float swingHigh = ta.highest(high, swingLookback)[1]
 float swingLow = ta.lowest(low, swingLookback)[1]
 bool liqSweepBull = low < swingLow and close > swingLow   // swept below, closed back inside
 bool liqSweepBear = high > swingHigh and close < swingHigh // swept above, closed back inside
+
+//=====================
+// CHANGE OF CHARACTER (CHoCH) — ICT methodology
+// Bullish CHoCH: price was making lower lows, then closes above the last swing high
+// Bearish CHoCH: price was making higher highs, then closes below the last swing low
+// Uses pivot-based swing detection (5-bar left/right)
+//=====================
+int chochPivotLen = 5
+float pvtHi = ta.pivothigh(high, chochPivotLen, chochPivotLen)
+float pvtLo = ta.pivotlow(low, chochPivotLen, chochPivotLen)
+
+var float lastPvtHi = na
+var float lastPvtLo = na
+if not na(pvtHi)
+    lastPvtHi := pvtHi
+if not na(pvtLo)
+    lastPvtLo := pvtLo
+
+// CHoCH fires on confirmed bar close through the opposite swing
+bool chochBull = not na(lastPvtHi) and close > lastPvtHi and close[1] <= lastPvtHi
+bool chochBear = not na(lastPvtLo) and close < lastPvtLo and close[1] >= lastPvtLo
 
 //=====================
 // FAIR VALUE GAP (FVG) — ICT methodology
@@ -357,7 +348,6 @@ float fvgBearDist = (not na(nearestFvgBearMid) and atr14 > 0) ? (nearestFvgBearM
 //=====================
 // HTF FIB CONFLUENCE (1H, 4H, Daily)
 //=====================
-string groupHTF = "HTF Confluence"
 float htfConfTolPct = 0.15
 
 [htf1hHigh, htf1hLow] = request.security(syminfo.tickerid, "60", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
@@ -414,16 +404,16 @@ htfConfluenceCheck(float level15m, float currentFibRange) =>
 //=====================
 // AUTO FIB ENGINE — ZigZag confirmed pivots (non-repainting)
 //=====================
-fibZzUpdate(float deviationPct, int depthBars, float thresholdFloorPct) =>
-    var fibSettings = zigzag.Settings.new(deviationPct, depthBars, color(na), false, false, false, false, "Absolute", true)
-    var zigzag.ZigZag fibZZ = zigzag.newInstance(fibSettings)
+fibZzUpdate() =>
+    var fibSettings = zigzag.Settings.new(fibDeviation, fibDepth, color(na), false, false, false, false, "Absolute", true)
+    var fibZZ = zigzag.newInstance(fibSettings)
     zigzag.Pivot lastPvt = na
-    fibSettings.devThreshold := math.max(ta.atr(10) / close * 100 * deviationPct, thresholdFloorPct)
+    fibSettings.devThreshold := math.max(ta.atr(10) / close * 100 * fibDeviation, fibThresholdFloorPct)
     bool newPivot = false
     float pivotHighPrice = na
     float pivotLowPrice = na
-    int pivotHighTime = na
-    int pivotLowTime = na
+    int pivotHighBar = na
+    int pivotLowBar = na
     int swingDir = 0  // +1 = up-swing (low→high, bullish), -1 = down-swing (high→low, bearish), 0 = flat/no pivot
     if fibZZ.update()
         lastPvt := fibZZ.lastPivot()
@@ -435,202 +425,27 @@ fibZzUpdate(float deviationPct, int depthBars, float thresholdFloorPct) =>
             pivotLowPrice  := math.min(startP, endP)
             swingDir := endP > startP ? 1 : endP < startP ? -1 : 0
             if startP >= endP
-                pivotHighTime := lastPvt.start.time
-                pivotLowTime  := lastPvt.end.time
+                pivotHighBar := lastPvt.start.index
+                pivotLowBar  := lastPvt.end.index
             else
-                pivotHighTime := lastPvt.end.time
-                pivotLowTime  := lastPvt.start.time
-    [newPivot, pivotHighPrice, pivotLowPrice, pivotHighTime, pivotLowTime, swingDir]
+                pivotHighBar := lastPvt.end.index
+                pivotLowBar  := lastPvt.start.index
+    [newPivot, pivotHighPrice, pivotLowPrice, pivotHighBar, pivotLowBar, swingDir]
 
-fibHtfSnapshot(float deviationPct, int lookbackBars, int rightRoomBars, float thresholdFloorPct) =>
-    int legRightBars = math.max(1, rightRoomBars)
-    int legLookbackBars = math.max(5, lookbackBars)
-    float shiftedHigh = high[legRightBars]
-    float shiftedLow = low[legRightBars]
-    float recentHigh = ta.highest(shiftedHigh, legLookbackBars)
-    float recentLow = ta.lowest(shiftedLow, legLookbackBars)
-    int recentHighOffset = ta.highestbars(shiftedHigh, legLookbackBars)
-    int recentLowOffset = ta.lowestbars(shiftedLow, legLookbackBars)
-    float candidateAtrSeries = ta.atr(10)        // CW10003 fix: extracted to function top-level (every-bar consistency)
-    var float legHigh = na
-    var float legLow = na
-    var int legHighTime = na
-    var int legLowTime = na
-    var int legDir = 0
-    bool newPivot = false
-    if not na(recentHigh) and not na(recentLow) and recentHigh > recentLow and not na(recentHighOffset) and not na(recentLowOffset)
-        int highBarsBack = legRightBars - recentHighOffset
-        int lowBarsBack = legRightBars - recentLowOffset
-        int candidateHighTime = time[highBarsBack]
-        int candidateLowTime = time[lowBarsBack]
-        float candidateRange = recentHigh - recentLow
-        float refPrice = math.max(math.abs(recentLow), syminfo.mintick)
-        float movePct = candidateRange / refPrice * 100.0
-        float candidateClose = close[legRightBars]
-        float candidateAtr = candidateAtrSeries[legRightBars]
-        float dynThreshold = not na(candidateAtr) and candidateClose != 0 ? math.max(candidateAtr / candidateClose * 100.0 * deviationPct, thresholdFloorPct) : thresholdFloorPct
-        if movePct >= dynThreshold
-            int candidateDir = candidateHighTime > candidateLowTime ? 1 : candidateLowTime > candidateHighTime ? -1 : 0
-            bool changedLeg = na(legHighTime) or na(legLowTime) or candidateHighTime != legHighTime or candidateLowTime != legLowTime or recentHigh != legHigh or recentLow != legLow
-            if changedLeg
-                legHigh := recentHigh
-                legLow := recentLow
-                legHighTime := candidateHighTime
-                legLowTime := candidateLowTime
-                legDir := candidateDir
-                newPivot := true
-    [newPivot, legHigh, legLow, legHighTime, legLowTime, legDir]
-
-fibZzSource() =>
-    if useFibAnchorTimeframeOverride
-        request.security(syminfo.tickerid, fibAnchorTimeframe, fibHtfSnapshot(fibDeviation, fibRecentLegLookbackBars, fibPivotRightRoomBars, fibThresholdFloorPct), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-    else
-        fibZzUpdate(fibDeviation, fibDepth, fibThresholdFloorPct)
-
-[zzNewPivot, zzHighPrice, zzLowPrice, zzHighTime, zzLowTime, zzSwingDir] = fibZzSource()
-
-float structuralPivotHigh = ta.pivothigh(high, fibPivotRightRoomBars, fibPivotRightRoomBars)
-float structuralPivotLow = ta.pivotlow(low, fibPivotRightRoomBars, fibPivotRightRoomBars)
-int structuralPivotTime = time[fibPivotRightRoomBars]
-float structuralRetraceWindowLow = ta.lowest(low, fibPivotRightRoomBars + 1)
-float structuralRetraceWindowHigh = ta.highest(high, fibPivotRightRoomBars + 1)
-float structuralMinRange = minFibRangeAtr * nz(atr14, syminfo.mintick)
-var float structuralBullBasePrice = na
-var int structuralBullBaseTime = na
-var float structuralBullTerminalPrice = na
-var int structuralBullTerminalTime = na
-var bool structuralBullRetraced = false
-var float structuralBearBasePrice = na
-var int structuralBearBaseTime = na
-var float structuralBearTerminalPrice = na
-var int structuralBearTerminalTime = na
-var bool structuralBearRetraced = false
-
-if not na(structuralPivotLow)
-    bool replaceBullBase = na(structuralBullBaseTime) or na(structuralBullTerminalTime) or structuralPivotLow < structuralBullBasePrice
-    if replaceBullBase
-        structuralBullBasePrice := structuralPivotLow
-        structuralBullBaseTime := structuralPivotTime
-        structuralBullTerminalPrice := na
-        structuralBullTerminalTime := na
-        structuralBullRetraced := false
-
-if not na(structuralPivotHigh)
-    bool replaceBearBase = na(structuralBearBaseTime) or na(structuralBearTerminalTime) or structuralPivotHigh > structuralBearBasePrice
-    if replaceBearBase
-        structuralBearBasePrice := structuralPivotHigh
-        structuralBearBaseTime := structuralPivotTime
-        structuralBearTerminalPrice := na
-        structuralBearTerminalTime := na
-        structuralBearRetraced := false
-
-if not na(structuralPivotHigh) and not na(structuralBullBaseTime) and structuralPivotTime > structuralBullBaseTime and na(structuralBullTerminalTime)
-    float bullStructuralRange = structuralPivotHigh - structuralBullBasePrice
-    if bullStructuralRange >= structuralMinRange
-        structuralBullTerminalPrice := structuralPivotHigh
-        structuralBullTerminalTime := structuralPivotTime
-        float bullStructural786 = structuralBullBasePrice + bullStructuralRange * FIB_786
-        structuralBullRetraced := not na(structuralRetraceWindowLow) and structuralRetraceWindowLow <= bullStructural786
-
-if not na(structuralPivotLow) and not na(structuralBearBaseTime) and structuralPivotTime > structuralBearBaseTime and na(structuralBearTerminalTime)
-    float bearStructuralRange = structuralBearBasePrice - structuralPivotLow
-    if bearStructuralRange >= structuralMinRange
-        structuralBearTerminalPrice := structuralPivotLow
-        structuralBearTerminalTime := structuralPivotTime
-        float bearStructural786 = structuralBearBasePrice - bearStructuralRange * FIB_786
-        structuralBearRetraced := not na(structuralRetraceWindowHigh) and structuralRetraceWindowHigh >= bearStructural786
-
-if not na(structuralBullTerminalTime) and not structuralBullRetraced
-    float bullLockedRange = structuralBullTerminalPrice - structuralBullBasePrice
-    float bullLocked786 = structuralBullBasePrice + bullLockedRange * FIB_786
-    if bullLockedRange > 0 and low <= bullLocked786
-        structuralBullRetraced := true
-
-if not na(structuralBearTerminalTime) and not structuralBearRetraced
-    float bearLockedRange = structuralBearBasePrice - structuralBearTerminalPrice
-    float bearLocked786 = structuralBearBasePrice - bearLockedRange * FIB_786
-    if bearLockedRange > 0 and high >= bearLocked786
-        structuralBearRetraced := true
-
-var float firstStructuralHigh = na
-var float firstStructuralLow = na
-var int firstStructuralHighTime = na
-var int firstStructuralLowTime = na
-var float firstStructuralBasePrice = na
-var int firstStructuralBaseTime = na
-var float firstStructuralTerminalPrice = na
-var int firstStructuralTerminalTime = na
-var int firstStructuralDir = na
-var bool firstStructuralRetraced = false
+[zzNewPivot, zzHighPrice, zzLowPrice, zzHighBar, zzLowBar, zzSwingDir] = fibZzUpdate()
 
 var float fibAnchorHigh = na
 var float fibAnchorLow = na
-var int anchorHighTime = na
-var int anchorLowTime = na
+var int anchorHighBar = na
+var int anchorLowBar = na
 var int lastBreakBar = na
-bool htfSnapshotReady = not na(zzHighPrice) and not na(zzLowPrice) and not na(zzHighTime) and not na(zzLowTime) and zzHighPrice > zzLowPrice and zzHighTime != zzLowTime
-bool sourceAnchorChanged = useFibAnchorTimeframeOverride
-  ? htfSnapshotReady and ((na(anchorHighTime) or zzHighTime != anchorHighTime) or (na(anchorLowTime) or zzLowTime != anchorLowTime))
-  : zzNewPivot
 
-bool firstStructuralReady = not na(firstStructuralHigh) and not na(firstStructuralLow) and not na(firstStructuralHighTime) and not na(firstStructuralLowTime) and not na(firstStructuralDir)
-if firstStructuralReady and not firstStructuralRetraced
-    float lockedRange = firstStructuralHigh - firstStructuralLow
-    float locked786 = firstStructuralDir == 1 ? firstStructuralLow + lockedRange * FIB_786 : firstStructuralHigh - lockedRange * FIB_786
-    bool retracedIntoLockedLeg = lockedRange > 0 and (firstStructuralDir == 1 ? low <= locked786 : high >= locked786)
-    if retracedIntoLockedLeg
-        firstStructuralRetraced := true
-
-bool anchorSnapshotChanged = false
-if sourceAnchorChanged and htfSnapshotReady and zzSwingDir != 0
-    int candidateDir = zzSwingDir
-    float candidateBasePrice = candidateDir == 1 ? zzLowPrice : zzHighPrice
-    int candidateBaseTime = candidateDir == 1 ? zzLowTime : zzHighTime
-    float candidateTerminalPrice = candidateDir == 1 ? zzHighPrice : zzLowPrice
-    int candidateTerminalTime = candidateDir == 1 ? zzHighTime : zzLowTime
-    bool noLockedStructuralLeg = not firstStructuralReady
-    bool directionChanged = firstStructuralReady and candidateDir != firstStructuralDir
-    bool baseChanged = firstStructuralReady and (candidateBaseTime != firstStructuralBaseTime or candidateBasePrice != firstStructuralBasePrice)
-    bool terminalExpanded = firstStructuralReady and (candidateDir == 1 ? candidateTerminalPrice > firstStructuralTerminalPrice : candidateTerminalPrice < firstStructuralTerminalPrice)
-    bool sameBaseExpansionAllowed = firstStructuralReady and not directionChanged and not baseChanged and terminalExpanded and not firstStructuralRetraced
-    if noLockedStructuralLeg or directionChanged or baseChanged or sameBaseExpansionAllowed
-        bool useBullStructuralTerminal = candidateDir == 1 and not na(structuralBullBaseTime) and not na(structuralBullTerminalTime) and (candidateBaseTime == structuralBullBaseTime or math.abs(candidateBasePrice - structuralBullBasePrice) <= syminfo.mintick) and structuralBullTerminalTime <= candidateTerminalTime
-        bool useBearStructuralTerminal = candidateDir == -1 and not na(structuralBearBaseTime) and not na(structuralBearTerminalTime) and (candidateBaseTime == structuralBearBaseTime or math.abs(candidateBasePrice - structuralBearBasePrice) <= syminfo.mintick) and structuralBearTerminalTime <= candidateTerminalTime
-        float acceptedHigh = useBullStructuralTerminal ? structuralBullTerminalPrice : useBearStructuralTerminal ? structuralBearBasePrice : zzHighPrice
-        float acceptedLow = useBullStructuralTerminal ? structuralBullBasePrice : useBearStructuralTerminal ? structuralBearTerminalPrice : zzLowPrice
-        int acceptedHighTime = useBullStructuralTerminal ? structuralBullTerminalTime : useBearStructuralTerminal ? structuralBearBaseTime : zzHighTime
-        int acceptedLowTime = useBullStructuralTerminal ? structuralBullBaseTime : useBearStructuralTerminal ? structuralBearTerminalTime : zzLowTime
-        float acceptedTerminalPrice = useBullStructuralTerminal ? structuralBullTerminalPrice : useBearStructuralTerminal ? structuralBearTerminalPrice : candidateTerminalPrice
-        int acceptedTerminalTime = useBullStructuralTerminal ? structuralBullTerminalTime : useBearStructuralTerminal ? structuralBearTerminalTime : candidateTerminalTime
-        firstStructuralHigh := acceptedHigh
-        firstStructuralLow := acceptedLow
-        firstStructuralHighTime := acceptedHighTime
-        firstStructuralLowTime := acceptedLowTime
-        firstStructuralBasePrice := candidateBasePrice
-        firstStructuralBaseTime := candidateBaseTime
-        firstStructuralTerminalPrice := acceptedTerminalPrice
-        firstStructuralTerminalTime := acceptedTerminalTime
-        firstStructuralDir := candidateDir
-        firstStructuralRetraced := useBullStructuralTerminal ? structuralBullRetraced : useBearStructuralTerminal ? structuralBearRetraced : false
-        anchorSnapshotChanged := true
-
-if anchorSnapshotChanged
-    fibAnchorHigh := firstStructuralHigh
-    fibAnchorLow  := firstStructuralLow
-    anchorHighTime := firstStructuralHighTime
-    anchorLowTime  := firstStructuralLowTime
+if zzNewPivot
+    fibAnchorHigh := zzHighPrice
+    fibAnchorLow  := zzLowPrice
+    anchorHighBar := zzHighBar
+    anchorLowBar  := zzLowBar
     lastBreakBar  := na
-
-anchorBarFromTime(int anchorTime) =>
-    if na(anchorTime) or _chartTfSec <= 0
-        int(na)
-    else
-        float elapsedBars = float(time - anchorTime) / (float(_chartTfSec) * 1000.0)
-        int barsAgo = int(math.min(float(DRAW_HISTORY_BARS), math.max(0.0, math.round(elapsedBars))))
-        int(math.max(0, bar_index - barsAgo))
-
-int anchorHighBar = anchorBarFromTime(anchorHighTime)
-int anchorLowBar = anchorBarFromTime(anchorLowTime)
 
 // Pre-compute rolling high/low at each confluence period at global scope.
 // ta.highest/ta.lowest require a compile-time-constant length — they cannot
@@ -670,14 +485,6 @@ if not na(fibAnchorHigh) and not na(fibAnchorLow)
 float fibRange = fibAnchorHigh - fibAnchorLow
 float minFibRange = minFibRangeAtr * atr14
 bool isValid = not na(fibAnchorHigh) and not na(fibAnchorLow) and fibRange >= minFibRange
-
-// Keep trade ladders frozen after entry, but reject stale oversized native legs
-// before they can become the direct-anchor snapshot source.
-float directLockRecentHigh = ta.highest(high[fibPivotRightRoomBars], fibRecentLegLookbackBars)
-float directLockRecentLow = ta.lowest(low[fibPivotRightRoomBars], fibRecentLegLookbackBars)
-float directLockRecentRange = directLockRecentHigh - directLockRecentLow
-bool directLockNativeRangeTight = not useFibAnchorTimeframeOverride and isValid and not na(directLockRecentRange) and directLockRecentRange > 0 and fibRange <= directLockRecentRange * directLockMaxRecentRangeMult
-bool directLockQualityOk = useFibAnchorTimeframeOverride or directLockNativeRangeTight
 
 float fibMidpoint = fibAnchorLow + fibRange * 0.5
 float fibHystBand = fibRange * 0.02
@@ -735,7 +542,6 @@ int htfConfTotal = htfConfPivot + htfConf382 + htfConf618
 footprint reqFootprint = request.footprint(footprintTicksPerRow, footprintVaPercent, footprintImbalancePercent)
 bool fpAvailable = not na(reqFootprint)
 float fpDelta = fpAvailable ? footprint.delta(reqFootprint) : na
-float fpDeltaAbs = fpAvailable and not na(fpDelta) ? math.abs(fpDelta) : na
 
 //=====================
 // FOOTPRINT DELTA AT FIB TOUCHES
@@ -814,8 +620,8 @@ bool fpDeltaConfirmLong  = fpAvailable and not na(fpDelta) and fpDelta > 0
 bool fpDeltaConfirmShort = fpAvailable and not na(fpDelta) and fpDelta < 0
 
 // Wick rejection at fib zone: price pierces zone then closes back outside
-bool wickRejectBull = not na(zoneLower) and low < zoneLower and close > zoneLower and close[1] >= zoneLower and bullishCandle
-bool wickRejectBear = not na(zoneUpper) and high > zoneUpper and close < zoneUpper and close[1] <= zoneUpper and bearishCandle
+bool wickRejectBull = not na(zoneLower) and low < zoneLower and close > zoneLower and bullishCandle
+bool wickRejectBear = not na(zoneUpper) and high > zoneUpper and close < zoneUpper and bearishCandle
 
 // Combined confirmation: footprint delta + (proven pattern OR wick rejection OR sweep)
 bool longConfirmed = (fpDeltaConfirmLong or not fpAvailable) and (
@@ -846,6 +652,19 @@ f_rsi_knn(float src, int window) =>
         sumW += w
         sumV += src[i] * w
     sumW > 0 ? sumV / sumW : src
+
+// PHASE 0 — MA family helper. Used by the optional MA Trend Filter gate.
+maValue(float src, simple int len, simple string family) =>
+    switch family
+        "EMA"  => ta.ema(src, len)
+        "SMA"  => ta.sma(src, len)
+        "WMA"  => ta.wma(src, len)
+        "HMA"  => ta.hma(src, len)
+        "VWMA" => ta.vwma(src, len)
+        "RMA"  => ta.rma(src, len)
+        "DEMA" => 2.0 * ta.ema(src, len) - ta.ema(ta.ema(src, len), len)
+        "TEMA" => 3.0 * ta.ema(src, len) - 3.0 * ta.ema(ta.ema(src, len), len) + ta.ema(ta.ema(ta.ema(src, len), len), len)
+        => ta.ema(src, len)
 
 // NYSE Advance-Decline issues (daily breadth): leading exhaustion signal for MES
 // Rising MES + falling AD = breadth divergence (exhaustion). Falling MES + rising AD = accumulation.
@@ -988,14 +807,11 @@ bool exhAt1618 = not na(pT2) and (dir == 1 ? high >= pT2 - exhaustionTol : low <
 bool mlExhGeomConfluence = isValid and confirmed and (exhAt1272 or exhAt1618)
 float exhaustionTriggerPrice = exhAt1618 ? pT2 : exhAt1272 ? p1272 : (dir == 1 ? high : low)
 
-// Z-score removed from active exhaustion contract. Keep export fields as placeholders.
-float mlExhZScore = na
-bool mlExhZExtreme = false
+// Z-score removed from active exhaustion contract.
 
-// Footprint row-level evidence (ML exports + diamond enrichment)
+// Footprint row-level evidence (hidden export enrichment)
 volume_row triggerRow = fpAvailable and not na(exhaustionTriggerPrice) ? footprint.get_row_by_price(reqFootprint, exhaustionTriggerPrice) : na
 volume_row extremeRow = fpAvailable ? footprint.get_row_by_price(reqFootprint, close > open ? high : low) : na
-float triggerRowDelta = not na(triggerRow) ? volume_row.delta(triggerRow) : na
 float extremeRowVol = not na(extremeRow) ? volume_row.total_volume(extremeRow) : na
 float extremeRowVolRatio = not na(pocRowVol) and pocRowVol > 0 and not na(extremeRowVol) ? extremeRowVol / pocRowVol : na
 
@@ -1010,15 +826,15 @@ bool mlExhZeroPrint = mlExhFootprintAvailable and not na(extremeRowVolRatio) and
 int footprintEvidenceCount = (mlExhDeltaDiv ? 1 : 0) + (mlExhAbsorption ? 1 : 0) + (mlExhZeroPrint ? 1 : 0)
 
 // ── SWING EXTREME ───────────────────────────────────────────────────────
-bool isSwingHighBar = high >= ta.highest(high, 10)
-bool isSwingLowBar = low <= ta.lowest(low, 10)
+bool isSwingHighBar = high >= ta.highest(high, exhaustionSwingLookbackBarsInput)
+bool isSwingLowBar = low <= ta.lowest(low, exhaustionSwingLookbackBarsInput)
 
-// ── COOLDOWN: 8 bars (2 hours on 15m) ──────────────────────────────────
-var int lastBearDiamondBar = na
-var int lastBullDiamondBar = na
-int exhCooldown = 8
-bool bearCooldownOk = na(lastBearDiamondBar) or bar_index - lastBearDiamondBar >= exhCooldown
-bool bullCooldownOk = na(lastBullDiamondBar) or bar_index - lastBullDiamondBar >= exhCooldown
+// ── COOLDOWN (Phase 3 tunable) ─────────────────────────────────────────
+var int lastBearExhTriggerBar = na
+var int lastBullExhTriggerBar = na
+int exhCooldown = exhaustionCooldownBarsInput
+bool bearCooldownOk = na(lastBearExhTriggerBar) or bar_index - lastBearExhTriggerBar >= exhCooldown
+bool bullCooldownOk = na(lastBullExhTriggerBar) or bar_index - lastBullExhTriggerBar >= exhCooldown
 
 int hourEt = hour(time, "America/New_York")
 bool mlExhSessionValid = hourEt != 17
@@ -1054,7 +870,7 @@ if fpAvailable
 bool stackedBuyImbalance = stackedBuyCount >= optImbalanceRows
 bool stackedSellImbalance = stackedSellCount >= optImbalanceRows
 
-// ── DIAMOND TRIGGER ─────────────────────────────────────────────────────
+// ── EXHAUSTION TELEMETRY ────────────────────────────────────────────────
 // THREE REQUIREMENTS, all mandatory:
 //   1. PROVEN candlestick pattern (backtester validated on MES 15m)
 //   2. FOOTPRINT DELTA confirms direction (buyers/sellers won the bar)
@@ -1075,9 +891,9 @@ int mlExhConfidenceTier = bullishExhaustion or bearishExhaustion ? 1 : 0
 int exhaustionSignalDir = bearishExhaustion ? -1 : bullishExhaustion ? 1 : 0
 
 if confirmed and bearishExhaustion
-    lastBearDiamondBar := bar_index
+    lastBearExhTriggerBar := bar_index
 if confirmed and bullishExhaustion
-    lastBullDiamondBar := bar_index
+    lastBullExhTriggerBar := bar_index
 
 //=====================
 // TRADE STATE MACHINE (setup -> active -> TP progress -> final resolution)
@@ -1105,8 +921,9 @@ var float entryAtr = na
 var int setupBar = na
 var int entryBar = na
 var int lastExitBar = na
+var int lastExitDir = 0       // direction of last completed trade — for contrarian CHoCH
 var int tradeDir = 0          // direction captured at SETUP→ACTIVE (safe: not affected by anchor updates at exit)
-// AG LABEL SOURCE: 0=none, 1=TP1_HIT, 2=TP2_HIT, 3=STOPPED, 4=EXPIRED, 5=TP3_HIT, 6=TP4_HIT, 7=TP5_HIT
+// EXPORT LABEL SOURCE: 0=none, 1=TP1_HIT, 2=TP2_HIT, 3=STOPPED, 4=EXPIRED, 5=TP3_HIT, 6=TP4_HIT, 7=TP5_HIT
 // This remains the resolved-path export. trade_state can stay in TP1-TP4 progress while the trade is still live.
 var int lastExitOutcome = 0
 var int highestTargetHit = 0   // 0=none, 1=TP1, 2=TP2, 3=TP3, 4=TP4, 5=TP5
@@ -1115,11 +932,9 @@ var int lastExhTriggerDir = 0
 var int lastTier1ExhBar = na
 var int lastTier1ExhDir = 0
 var int mlContConfidenceTier = 0
-int cooldownLen = cooldownBarsInput
+int cooldownLen = 8 // bars to wait after exit (8 × 15m = 2h minimum; 4 was too short — consecutive entries corrupt training samples)
 int barsSinceExit = not na(lastExitBar) ? bar_index - lastExitBar : 999
 bool cooldownActive = barsSinceExit < cooldownLen
-int setupExpiryBars = barsForMinutes(float(setupExpiryMinutesInput), 12)
-int backtestExitTargetIndex = backtestExitTargetInput == "TP5" ? 5 : backtestExitTargetInput == "TP4" ? 4 : backtestExitTargetInput == "TP3" ? 3 : backtestExitTargetInput == "TP2" ? 2 : 1
 
 roundToTick(float price) =>
     na(price) ? na : math.round(price / syminfo.mintick) * syminfo.mintick
@@ -1137,62 +952,38 @@ float tp3Level   = pT3
 float tp4Level   = pT4
 float tp5Level   = pT5
 
-// Stop geometry is exported for AG and diagnostics, but not used as a live Pine gate.
+// Stop geometry is exported for Optuna diagnostics, but not used as a live Pine gate.
 float slDistPts = math.abs(entryLevel - slLevel)
 float slDistAtr = atr14 > 0 ? slDistPts / atr14 : 0.0
 bool trendBiasLong = ema9 > ema21 and close >= ema50 and close >= vwapVal
 bool trendBiasShort = ema9 < ema21 and close <= ema50 and close <= vwapVal
-// 5m execution gates on the selected fib anchor/reclaim, not on a broad .500-.786 zone touch.
+
+// PHASE 0 — soft MA + VWAP gates. Default OFF so live behavior is unchanged.
+float maFastValue = useMaTrendFilter ? maValue(close, maFastLen, maFamily) : na
+float maSlowValue = useMaTrendFilter ? maValue(close, maSlowLen, maFamily) : na
+bool maGatePassLong  = (not useMaTrendFilter) or (not na(maFastValue) and not na(maSlowValue) and maFastValue > maSlowValue and close > maFastValue)
+bool maGatePassShort = (not useMaTrendFilter) or (not na(maFastValue) and not na(maSlowValue) and maFastValue < maSlowValue and close < maFastValue)
+bool vwapGatePassLong  = (not useVwapGate) or close > vwapVal
+bool vwapGatePassShort = (not useVwapGate) or close < vwapVal
 bool entryZoneTouched = not na(entryZoneUpper) and not na(entryZoneLower) and high >= entryZoneLower and low <= entryZoneUpper
 bool entryAnchorBullTrigger = confirmed and not na(entryLevel) and low <= entryLevel and close >= entryLevel
 bool entryAnchorBearTrigger = confirmed and not na(entryLevel) and high >= entryLevel and close <= entryLevel
-bool entryZoneRejectBullLive = not na(entryZoneLower) and low < entryZoneLower and close >= entryZoneLower and bullishCandle
-bool entryZoneRejectBearLive = not na(entryZoneUpper) and high > entryZoneUpper and close <= entryZoneUpper and bearishCandle
-float localBreakHigh = ta.highest(high, 6)[1]
-float localBreakLow = ta.lowest(low, 6)[1]
-bool footprintLongTrigger = fpAvailable and fpDeltaBullish and (pocNearLow or mlExhAbsorption or mlExhZeroPrint or stackedBuyImbalance)
-bool footprintShortTrigger = fpAvailable and fpDeltaBearish and (pocNearHigh or mlExhAbsorption or mlExhZeroPrint or stackedSellImbalance)
-bool footprintBacktestFallback = not fpAvailable and not requireFootprintForBacktestInput
-bool footprintLongGate = footprintLongTrigger or footprintBacktestFallback
-bool footprintShortGate = footprintShortTrigger or footprintBacktestFallback
-bool sweepLongTrigger = entryZoneTouched and liqSweepBull
-bool sweepShortTrigger = entryZoneTouched and liqSweepBear
+bool footprintLongTrigger = fpAvailable and fpDeltaBullish and stackedBuyImbalance
+bool footprintShortTrigger = fpAvailable and fpDeltaBearish and stackedSellImbalance
 bool atrRiskAcceptable = not na(slLevel) and atr14 > 0 and slDistAtr <= optMaxRiskAtr
-bool microTrendLong = trendBiasLong or (ema9 >= ema21 and vwapCode >= 0)
-bool microTrendShort = trendBiasShort or (ema9 <= ema21 and vwapCode <= 0)
-bool footprintValueReclaimLong = useMicroValueReclaimInput and footprintLongTrigger and not na(pocPrice) and close >= pocPrice and (low <= pocPrice or close > localBreakHigh or vwapCode >= 0)
-bool footprintValueReclaimShort = useMicroValueReclaimInput and footprintShortTrigger and not na(pocPrice) and close <= pocPrice and (high >= pocPrice or close < localBreakLow or vwapCode <= 0)
-bool longTargetRoom = not na(tp1Level) and close < tp1Level
-bool shortTargetRoom = not na(tp1Level) and close > tp1Level
-bool longPivotSafety = not na(pPivot) and close >= pPivot
-bool shortPivotSafety = not na(pPivot) and close <= pPivot
-bool fibAnchorSetupLong = longPivotSafety and (entryAnchorBullTrigger or footprintValueReclaimLong)
-bool fibAnchorSetupShort = shortPivotSafety and (entryAnchorBearTrigger or footprintValueReclaimShort)
-bool footprintEntryLong = footprintLongGate and longTargetRoom and fibAnchorSetupLong
-bool footprintEntryShort = footprintShortGate and shortTargetRoom and fibAnchorSetupShort
-bool setupContextLong = dir == 1 and microTrendLong and atrRiskAcceptable and fibAnchorSetupLong
-bool setupContextShort = dir == -1 and microTrendShort and atrRiskAcceptable and fibAnchorSetupShort
+bool setupContextLong = dir == 1 and trendBiasLong and entryZoneTouched and atrRiskAcceptable
+bool setupContextShort = dir == -1 and trendBiasShort and entryZoneTouched and atrRiskAcceptable
 bool setupContextActive = setupContextLong or setupContextShort
-bool longTriggerCore = setupContextLong and footprintEntryLong
-bool shortTriggerCore = setupContextShort and footprintEntryShort
+bool longTriggerCore = setupContextLong and entryAnchorBullTrigger and footprintLongTrigger
+bool shortTriggerCore = setupContextShort and entryAnchorBearTrigger and footprintShortTrigger
 bool longTriggerEvent = longTriggerCore and (oneShotEvent ? not longTriggerCore[1] : true)
 bool shortTriggerEvent = shortTriggerCore and (oneShotEvent ? not shortTriggerCore[1] : true)
-bool directBacktestLongEvent = directLockQualityOk and dir == 1 and entryAnchorBullTrigger and longPivotSafety
-bool directBacktestShortEvent = directLockQualityOk and dir == -1 and entryAnchorBearTrigger and shortPivotSafety
-bool directBacktestLongTrigger = backtestFibAnchorOnlyInput and atrRiskAcceptable and directBacktestLongEvent and (oneShotEvent ? not directBacktestLongEvent[1] : true)
-bool directBacktestShortTrigger = backtestFibAnchorOnlyInput and atrRiskAcceptable and directBacktestShortEvent and (oneShotEvent ? not directBacktestShortEvent[1] : true)
-bool entryLongTrigger = backtestFibAnchorOnlyInput ? directBacktestLongTrigger : (longTriggerEvent and not ladderInvalidated)
-bool entryShortTrigger = backtestFibAnchorOnlyInput ? directBacktestShortTrigger : (shortTriggerEvent and not ladderInvalidated and not bullishTrendBlocksShorts)
-bool setupSeedActive = backtestFibAnchorOnlyInput ? (directBacktestLongTrigger or directBacktestShortTrigger) : setupContextActive
-bool setupLadderAllowed = backtestFibAnchorOnlyInput or not ladderInvalidated
+bool entryLongTrigger = longTriggerEvent and not ladderInvalidated and maGatePassLong and vwapGatePassLong
+bool entryShortTrigger = shortTriggerEvent and not ladderInvalidated and not bullishTrendBlocksShorts and maGatePassShort and vwapGatePassShort
 
 if enableDebugLogs and barstate.isconfirmed and (acceptEvent or rejectEvent or breakAgainstEvent or entryLongTrigger or entryShortTrigger)
     log.info(str.format("WBDBG_EVENT bar={0} dir={1} accept={2} reject={3} breakAgainst={4} longTrig={5} shortTrig={6} shortGate={7} fpCount={8} setupCtx={9}", bar_index, dir, acceptEvent, rejectEvent, breakAgainstEvent, entryLongTrigger, entryShortTrigger, bullishTrendBlocksShorts, footprintEvidenceCount, setupContextActive))
 
-if enableDebugLogs and confirmed and setupContextActive
-    log.info(str.format("WBDBG_GATE bar={0} dir={1} fpAvail={2} fpFallback={3} fpL={4} fpS={5} fpGateL={6} fpGateS={7} anchorL={8} anchorS={9} reclaimL={10} reclaimS={11} roomL={12} roomS={13} longCore={14} shortCore={15}", bar_index, dir, fpAvailable, footprintBacktestFallback, footprintLongTrigger, footprintShortTrigger, footprintLongGate, footprintShortGate, entryAnchorBullTrigger, entryAnchorBearTrigger, footprintValueReclaimLong, footprintValueReclaimShort, longTargetRoom, shortTargetRoom, longTriggerCore, shortTriggerCore))
-
-bool tradeSetupWasActive = tradeState == TRADE_SETUP
 if confirmed
     if exhaustionSignalDir != 0
         lastExhTriggerBar := bar_index
@@ -1201,7 +992,7 @@ if confirmed
             lastTier1ExhBar := bar_index
             lastTier1ExhDir := exhaustionSignalDir
 
-    if tradeState == TRADE_NONE and setupSeedActive and not cooldownActive and setupLadderAllowed
+    if tradeState == TRADE_NONE and setupContextActive and not cooldownActive and not ladderInvalidated
         tradeState := TRADE_SETUP
         setupBar := bar_index
 
@@ -1267,15 +1058,15 @@ if confirmed
                 highestTargetHit := targetHitNow
                 tradeState := targetHitNow == 5 ? TRADE_HIT_TP5 : targetHitNow == 4 ? TRADE_HIT_TP4 : targetHitNow == 3 ? TRADE_HIT_TP3 : targetHitNow == 2 ? TRADE_HIT_TP2 : TRADE_HIT_TP1
 
-    if tradeState == TRADE_SETUP and not na(setupBar) and bar_index - setupBar > setupExpiryBars
+    if tradeState == TRADE_SETUP and not na(setupBar) and bar_index - setupBar > 12
         lastExitOutcome := 4  // EXPIRED — setup timed out, no fill
         tradeState := TRADE_EXPIRED
 
-    bool selectedTargetResolved = highestTargetHit >= backtestExitTargetIndex and highestTargetHit > 0
-    bool tradeResolved = tradeState == TRADE_STOPPED or tradeState == TRADE_EXPIRED or selectedTargetResolved
+    bool tradeResolved = tradeState == TRADE_STOPPED or tradeState == TRADE_EXPIRED or tradeState == TRADE_HIT_TP5
     if tradeResolved
         // Resolve outcome BEFORE resetting state — if a trade stopped after TP1-TP4, preserve the highest target reached.
         lastExitOutcome := tradeState == TRADE_EXPIRED ? 4 : highestTargetHit == 5 ? 7 : highestTargetHit == 4 ? 6 : highestTargetHit == 3 ? 5 : highestTargetHit == 2 ? 2 : highestTargetHit == 1 ? 1 : 3
+        lastExitDir := tradeDir  // use direction locked at entry, not current dir (anchor may have shifted)
         lastExitBar := bar_index
         tradeState := TRADE_NONE
         entryPrice := na
@@ -1290,28 +1081,26 @@ if confirmed
         entryBar := na
         highestTargetHit := 0
 
-bool tradeSetupEndedNow = tradeSetupWasActive and tradeState != TRADE_SETUP
 bool tradeInFlightNow = tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
 float activeStopPrice = tradeInFlightNow ? slPrice : na
-
 float mlExhBarsSinceTrigger = not na(lastExhTriggerBar) ? float(bar_index - lastExhTriggerBar) : na
 fibLineStyle = f_line_style(fibLineStyleInput)
 tradeLabelSize = f_label_size(tradeLabelSizeInput)
 
+// Contrarian reversal setup: CHoCH fires opposite to last completed trade direction
+// within 10 bars of exit. Flags mean-reversion opportunity after TP2 tag or SL stop-out.
+// Offline analysis decides whether to act — this is a feature, not an entry trigger.
+bool contrChoch = barsSinceExit > 0 and barsSinceExit <= 10 and (
+    (lastExitDir == 1  and chochBear) or
+    (lastExitDir == -1 and chochBull))
+
 bool tradeVisible = tradeState == TRADE_SETUP or tradeState == TRADE_ACTIVE or tradeState == TRADE_HIT_TP1 or tradeState == TRADE_HIT_TP2 or tradeState == TRADE_HIT_TP3 or tradeState == TRADE_HIT_TP4
-bool tradeSetupVisible = tradeState == TRADE_SETUP and not na(setupBar) and not na(entryLevel) and not na(slLevel) and not na(tp1Level) and not na(tp2Level) and not na(tp3Level) and not na(tp4Level) and not na(tp5Level)
-bool tradeActiveVisible = tradeInFlightNow and not na(entryPrice) and not na(activeStopPrice) and not na(tp1Price) and not na(tp2Price) and not na(tp3Price) and not na(tp4Price) and not na(tp5Price)
-bool tradeProjectionVisible = tradeSetupVisible or tradeActiveVisible
-bool showTradeLevels = showTradeLabelsInput and tradeProjectionVisible
-float tradeLabelEntryPrice = tradeActiveVisible ? entryPrice : tradeSetupVisible ? entryLevel : na
-float tradeLabelSlPrice = tradeActiveVisible ? activeStopPrice : tradeSetupVisible ? slLevel : na
-float tradeLabelTp1Price = tradeActiveVisible ? tp1Price : tradeSetupVisible ? tp1Level : na
-float tradeLabelTp2Price = tradeActiveVisible ? tp2Price : tradeSetupVisible ? tp2Level : na
-float tradeLabelTp3Price = tradeActiveVisible ? tp3Price : tradeSetupVisible ? tp3Level : na
-float tradeLabelTp4Price = tradeActiveVisible ? tp4Price : tradeSetupVisible ? tp4Level : na
-float tradeLabelTp5Price = tradeActiveVisible ? tp5Price : tradeSetupVisible ? tp5Level : na
+bool tradeSetupVisible = tradeState == TRADE_SETUP and not na(setupBar) and not na(slLevel)
+bool tradeProjectionVisible = tradeSetupVisible or (tradeInFlightNow and not na(entryPrice))
+bool showTradeLevels = showTradeLabelsInput and tradeInFlightNow and not na(entryPrice)
 // The institutional chart surface now relies only on the canonical fib ladder.
-// Trade labels appear only when a setup qualifies or a trade is live.
+// Trade labels use the locked trade snapshot after activation. The ATR stop line
+// is limited to setup/active state and starts at setupBar/entryBar.
 
 //=====================
 // DRAW ALL FIB LEVELS
@@ -1332,6 +1121,8 @@ var line line1786  = line.new(bar_index, close, bar_index, close, color=color(na
 var line lineT3    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 var line lineT4    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 var line lineT5    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line lineActiveSl = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+
 var box zoneBox = box.new(bar_index, close, bar_index, close, bgcolor=color(na), border_color=color(na))
 
 var label _lblEntry = label.new(bar_index, close, "", style=label.style_label_left, color=color(na), textcolor=color.new(color.white, 20), size=size.small)
@@ -1357,101 +1148,18 @@ var label _fibLbl1786 = na
 var label _fibLblT3 = na
 var label _fibLblT4 = na
 var label _fibLblT5 = na
-var table webWatermarkTable = table.new(position.middle_center, 2, 1, bgcolor=color.new(color.black, 100), border_color=color.new(color.black, 100), border_width=0, frame_color=color.new(color.black, 100), frame_width=0)
 
 int fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
-int anchorLeftBar = int(math.max(0, na(anchorHighBar) or na(anchorLowBar) ? fallbackLeftBar : math.min(anchorHighBar, anchorLowBar)))
-int drawLeftBar = useConfluenceAnchorSpan ? anchorLeftBar : fallbackLeftBar
-int tradeLabelX = bar_index + tradeLabelOffsetBarsInput
-var float tradeProjectionEntryPrice = na
-var float tradeProjectionSlPrice = na
-var float tradeProjectionTp1Price = na
-var float tradeProjectionTp2Price = na
-var float tradeProjectionTp3Price = na
-var float tradeProjectionTp4Price = na
-var float tradeProjectionTp5Price = na
-tradeProjectionEntryPrice := tradeLabelEntryPrice
-tradeProjectionSlPrice := tradeLabelSlPrice
-tradeProjectionTp1Price := tradeLabelTp1Price
-tradeProjectionTp2Price := tradeLabelTp2Price
-tradeProjectionTp3Price := tradeLabelTp3Price
-tradeProjectionTp4Price := tradeLabelTp4Price
-tradeProjectionTp5Price := tradeLabelTp5Price
-
-var float snapPZero = na
-var float snapP236 = na
-var float snapP382 = na
-var float snapPPivot = na
-var float snapP618 = na
-var float snapP786 = na
-var float snapPOne = na
-var float snapP1382 = na
-var float snapP150 = na
-var float snapP1786 = na
-var float snapPT1 = na
-var float snapPT2 = na
-var float snapPT3 = na
-var float snapPT4 = na
-var float snapPT5 = na
-var int snapDrawLeftBar = na
-bool snapCaptureEdge = tradeInFlightNow and not tradeInFlightNow[1]
-bool snapReleaseEdge = not tradeInFlightNow and tradeInFlightNow[1]
-if snapCaptureEdge
-    snapPZero := pZero
-    snapP236 := p236
-    snapP382 := p382
-    snapPPivot := pPivot
-    snapP618 := p618
-    snapP786 := p786
-    snapPOne := pOne
-    snapP1382 := p1382
-    snapP150 := p150
-    snapP1786 := p1786
-    snapPT1 := pT1
-    snapPT2 := pT2
-    snapPT3 := pT3
-    snapPT4 := pT4
-    snapPT5 := pT5
-    snapDrawLeftBar := drawLeftBar
-else if snapReleaseEdge
-    snapPZero := na
-    snapP236 := na
-    snapP382 := na
-    snapPPivot := na
-    snapP618 := na
-    snapP786 := na
-    snapPOne := na
-    snapP1382 := na
-    snapP150 := na
-    snapP1786 := na
-    snapPT1 := na
-    snapPT2 := na
-    snapPT3 := na
-    snapPT4 := na
-    snapPT5 := na
-    snapDrawLeftBar := na
-bool tradeFibFrozen = tradeInFlightNow and not na(snapPZero)
-float effectivePZero  = tradeFibFrozen ? snapPZero  : pZero
-float effectiveP236   = tradeFibFrozen ? snapP236   : p236
-float effectiveP382   = tradeFibFrozen ? snapP382   : p382
-float effectivePPivot = tradeFibFrozen ? snapPPivot : pPivot
-float effectiveP618   = tradeFibFrozen ? snapP618   : p618
-float effectiveP786   = tradeFibFrozen ? snapP786   : p786
-float effectivePOne   = tradeFibFrozen ? snapPOne   : pOne
-float effectiveP1382  = tradeFibFrozen ? snapP1382  : p1382
-float effectiveP150   = tradeFibFrozen ? snapP150   : p150
-float effectiveP1786  = tradeFibFrozen ? snapP1786  : p1786
-float effectivePT1    = tradeFibFrozen ? snapPT1    : pT1
-float effectivePT2    = tradeFibFrozen ? snapPT2    : pT2
-float effectivePT3    = tradeFibFrozen ? snapPT3    : pT3
-float effectivePT4    = tradeFibFrozen ? snapPT4    : pT4
-float effectivePT5    = tradeFibFrozen ? snapPT5    : pT5
-int effectiveDrawLeftBar = tradeFibFrozen ? snapDrawLeftBar : drawLeftBar
+bool anchorBarsReady = not na(anchorHighBar) and not na(anchorLowBar)
+int anchorStartBar = anchorBarsReady ? int(math.max(0, math.min(anchorHighBar, anchorLowBar))) : fallbackLeftBar
+int drawLeftBarBase = useConfluenceAnchorSpan ? anchorStartBar : fallbackLeftBar
+int drawLeftBar = int(math.max(drawLeftBarBase, anchorStartBar))
 
 drawAnchoredLine(line id, bool visible, float price, color col, int width_, int leftBar) =>
     if visible and not na(price)
+        int clampedLeftBar = int(math.max(leftBar, anchorStartBar))
         int rightBar = extendLevelsRight ? bar_index + tradeLabelOffsetBarsInput : bar_index
-        line.set_xy1(id, leftBar, price)
+        line.set_xy1(id, clampedLeftBar, price)
         line.set_xy2(id, rightBar, price)
         line.set_color(id, col)
         line.set_width(id, width_)
@@ -1460,11 +1168,11 @@ drawAnchoredLine(line id, bool visible, float price, color col, int width_, int 
     else
         line.set_color(id, color(na))
 
-setFibLevelLabel(label idIn, bool visible, float price, string levelName, color col) =>
+setFibLevelLabel(label idIn, bool visible, float price, string txt, color col) =>
     label id = idIn
     if visible and isValid and not na(price)
-        int labelX = tradeLabelX
-        string labelText = levelName + "  " + str.tostring(price, format.mintick)
+        int labelX = bar_index + tradeLabelOffsetBarsInput
+        string labelText = txt + "  " + str.tostring(price, format.mintick)
         if na(id)
             id := label.new(labelX, price, labelText, style=label.style_label_left, color=color.new(color.black, tradeLabelBgTransparencyInput), textcolor=col, size=tradeLabelSize)
         label.set_xy(id, labelX, price)
@@ -1477,26 +1185,28 @@ setFibLevelLabel(label idIn, bool visible, float price, string levelName, color 
         id := na
     id
 
-drawAnchoredLine(lineZero,  true, effectivePZero,  fibAnchorColorInput,             fibAnchorWidthInput,             effectiveDrawLeftBar)
+drawAnchoredLine(lineZero,  true, pZero,  fibAnchorColorInput,             fibAnchorWidthInput,             drawLeftBar)
 drawAnchoredLine(lineNeg236, false, pNeg236, fibStopColorInput,            fibStopWidthInput,               drawLeftBar)
-drawAnchoredLine(line236,   true, effectiveP236,   fibRetracementColorInput,        fibRetracementWidthInput,        effectiveDrawLeftBar)
-drawAnchoredLine(line382,   true, effectiveP382,   fibRetracementAccentColorInput,  fibRetracementAccentWidthInput,  effectiveDrawLeftBar)
-drawAnchoredLine(linePivot, true, effectivePPivot, fibAnchorColorInput,             fibPivotWidthInput,              effectiveDrawLeftBar)
-drawAnchoredLine(line618,   true, effectiveP618,   fibRetracementAccentColorInput,  fibRetracementAccentWidthInput,  effectiveDrawLeftBar)
-drawAnchoredLine(line786,   true, effectiveP786,   fibRetracementColorInput,        fibRetracementWidthInput,        effectiveDrawLeftBar)
-drawAnchoredLine(lineOne,   true, effectivePOne,   fibAnchorColorInput,             fibAnchorWidthInput,             effectiveDrawLeftBar)
-drawAnchoredLine(lineT1,    true, effectivePT1,    fibTargetColorInput,             fibTargetWidthInput,             effectiveDrawLeftBar)
-drawAnchoredLine(line1382,  true, effectiveP1382,  fibRetracementColorInput,        fibRetracementWidthInput,        effectiveDrawLeftBar)
-drawAnchoredLine(line150,   true, effectiveP150,   fibRetracementColorInput,        fibRetracementWidthInput,        effectiveDrawLeftBar)
-drawAnchoredLine(lineT2,    true, effectivePT2,    fibTargetColorInput,             fibTargetWidthInput,             effectiveDrawLeftBar)
-drawAnchoredLine(line1786,  true, effectiveP1786,  fibRetracementColorInput,        fibRetracementWidthInput,        effectiveDrawLeftBar)
-drawAnchoredLine(lineT3,    true, effectivePT3,    fibTargetColorInput,             fibTargetWidthInput,             effectiveDrawLeftBar)
-drawAnchoredLine(lineT4,    true, effectivePT4,    fibTargetColorInput,             fibTargetWidthInput,             effectiveDrawLeftBar)
-drawAnchoredLine(lineT5,    true, effectivePT5,    fibTargetColorInput,             fibTargetWidthInput,             effectiveDrawLeftBar)
+drawAnchoredLine(line236,   true, p236,   fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
+drawAnchoredLine(line382,   true, p382,   fibRetracementAccentColorInput,  fibRetracementAccentWidthInput,  drawLeftBar)
+drawAnchoredLine(linePivot, true, pPivot, fibAnchorColorInput,             fibPivotWidthInput,              drawLeftBar)
+drawAnchoredLine(line618,   true, p618,   fibRetracementAccentColorInput,  fibRetracementAccentWidthInput,  drawLeftBar)
+drawAnchoredLine(line786,   true, p786,   fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
+drawAnchoredLine(lineOne,   true, pOne,   fibAnchorColorInput,             fibAnchorWidthInput,             drawLeftBar)
+drawAnchoredLine(lineT1,    true, pT1,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
+drawAnchoredLine(line1382,  true, p1382,  fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
+drawAnchoredLine(line150,   true, p150,   fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
+drawAnchoredLine(lineT2,    true, pT2,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
+drawAnchoredLine(line1786,  true, p1786,  fibRetracementColorInput,        fibRetracementWidthInput,        drawLeftBar)
+drawAnchoredLine(lineT3,    true, pT3,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
+drawAnchoredLine(lineT4,    true, pT4,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
+drawAnchoredLine(lineT5,    true, pT5,    fibTargetColorInput,             fibTargetWidthInput,             drawLeftBar)
 
-float tradeSlVisualLevel = tradeLabelSlPrice
+float slVisualLevel = tradeInFlightNow ? activeStopPrice : tradeState == TRADE_SETUP ? slLevel : na
+int slLeftBar = tradeInFlightNow and not na(entryBar) ? entryBar : tradeState == TRADE_SETUP and not na(setupBar) ? setupBar : bar_index
+drawAnchoredLine(lineActiveSl, tradeProjectionVisible and not na(slVisualLevel), slVisualLevel, stopLabelColorInput, fibStopWidthInput, slLeftBar)
 
-if barstate.islastconfirmedhistory
+if barstate.islast
     _fibLblZero := setFibLevelLabel(_fibLblZero, showFibLevelLabelsInput, pZero, "0", fibAnchorColorInput)
     _fibLblNeg236 := setFibLevelLabel(_fibLblNeg236, false, pNeg236, "-.236", fibStopColorInput)
     _fibLbl236 := setFibLevelLabel(_fibLbl236, showFibLevelLabelsInput, p236, ".236", fibRetracementColorInput)
@@ -1514,39 +1224,40 @@ if barstate.islastconfirmedhistory
     _fibLblT4 := setFibLevelLabel(_fibLblT4, showFibLevelLabelsInput, pT4, "T4", fibTargetColorInput)
     _fibLblT5 := setFibLevelLabel(_fibLblT5, showFibLevelLabelsInput, pT5, "T5", fibTargetColorInput)
 
-if barstate.islast and showTradeLevels and not na(_lblEntry) and not na(_lblSl) and not na(_lblT1) and not na(_lblT2) and not na(_lblT3) and not na(_lblT4) and not na(_lblT5) and not na(tradeProjectionEntryPrice) and not na(tradeSlVisualLevel) and not na(tradeProjectionTp1Price) and not na(tradeProjectionTp2Price) and not na(tradeProjectionTp3Price) and not na(tradeProjectionTp4Price) and not na(tradeProjectionTp5Price)
-    label.set_xy(_lblEntry, tradeLabelX, tradeProjectionEntryPrice)
-    label.set_text(_lblEntry, "ENTRY " + str.tostring(tradeProjectionEntryPrice, format.mintick))
+if barstate.islast and showTradeLevels and not na(activeStopPrice) and not na(tp1Price) and not na(tp2Price) and not na(tp3Price) and not na(tp4Price) and not na(tp5Price)
+    float slLabelLevel = activeStopPrice
+    label.set_xy(_lblEntry, bar_index + tradeLabelOffsetBarsInput, entryPrice)
+    label.set_text(_lblEntry, "ENTRY " + str.tostring(entryPrice, format.mintick))
     label.set_color(_lblEntry, color.new(entryLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblEntry, tradeLabelTextColorInput)
     label.set_size(_lblEntry, tradeLabelSize)
-    label.set_xy(_lblSl, tradeLabelX, tradeSlVisualLevel)
-    label.set_text(_lblSl, "SL " + str.tostring(tradeSlVisualLevel, format.mintick))
+    label.set_xy(_lblSl, bar_index + tradeLabelOffsetBarsInput, slLabelLevel)
+    label.set_text(_lblSl, "SL " + str.tostring(slLabelLevel, format.mintick))
     label.set_color(_lblSl, color.new(stopLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblSl, tradeLabelTextColorInput)
     label.set_size(_lblSl, tradeLabelSize)
-    label.set_xy(_lblT1, tradeLabelX, tradeProjectionTp1Price)
-    label.set_text(_lblT1, "T1 " + str.tostring(tradeProjectionTp1Price, format.mintick))
+    label.set_xy(_lblT1, bar_index + tradeLabelOffsetBarsInput, tp1Price)
+    label.set_text(_lblT1, "T1 " + str.tostring(tp1Price, format.mintick))
     label.set_color(_lblT1, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT1, tradeLabelTextColorInput)
     label.set_size(_lblT1, tradeLabelSize)
-    label.set_xy(_lblT2, tradeLabelX, tradeProjectionTp2Price)
-    label.set_text(_lblT2, "T2 " + str.tostring(tradeProjectionTp2Price, format.mintick))
+    label.set_xy(_lblT2, bar_index + tradeLabelOffsetBarsInput, tp2Price)
+    label.set_text(_lblT2, "T2 " + str.tostring(tp2Price, format.mintick))
     label.set_color(_lblT2, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT2, tradeLabelTextColorInput)
     label.set_size(_lblT2, tradeLabelSize)
-    label.set_xy(_lblT3, tradeLabelX, tradeProjectionTp3Price)
-    label.set_text(_lblT3, "T3 " + str.tostring(tradeProjectionTp3Price, format.mintick))
+    label.set_xy(_lblT3, bar_index + tradeLabelOffsetBarsInput, tp3Price)
+    label.set_text(_lblT3, "T3 " + str.tostring(tp3Price, format.mintick))
     label.set_color(_lblT3, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT3, tradeLabelTextColorInput)
     label.set_size(_lblT3, tradeLabelSize)
-    label.set_xy(_lblT4, tradeLabelX, tradeProjectionTp4Price)
-    label.set_text(_lblT4, "T4 " + str.tostring(tradeProjectionTp4Price, format.mintick))
+    label.set_xy(_lblT4, bar_index + tradeLabelOffsetBarsInput, tp4Price)
+    label.set_text(_lblT4, "T4 " + str.tostring(tp4Price, format.mintick))
     label.set_color(_lblT4, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT4, tradeLabelTextColorInput)
     label.set_size(_lblT4, tradeLabelSize)
-    label.set_xy(_lblT5, tradeLabelX, tradeProjectionTp5Price)
-    label.set_text(_lblT5, "T5 " + str.tostring(tradeProjectionTp5Price, format.mintick))
+    label.set_xy(_lblT5, bar_index + tradeLabelOffsetBarsInput, tp5Price)
+    label.set_text(_lblT5, "T5 " + str.tostring(tp5Price, format.mintick))
     label.set_color(_lblT5, color.new(targetLabelColorInput, tradeLabelBgTransparencyInput))
     label.set_textcolor(_lblT5, tradeLabelTextColorInput)
     label.set_size(_lblT5, tradeLabelSize)
@@ -1566,6 +1277,11 @@ else if barstate.islast
     label.set_color(_lblT4, color(na))
     label.set_color(_lblT5, color(na))
 
+if entryLongTrigger
+    label.new(bar_index, entryLevel, "▲", style=label.style_label_up, color=color.new(targetLabelColorInput, 20), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
+if entryShortTrigger
+    label.new(bar_index, entryLevel, "▼", style=label.style_label_down, color=color.new(stopLabelColorInput, 20), textcolor=tradeLabelTextColorInput, size=tradeLabelSize, force_overlay=true)
+
 if not na(zoneFillUpper) and not na(zoneFillLower)
     box.set_left(zoneBox, drawLeftBar)
     box.set_right(zoneBox, bar_index)
@@ -1576,21 +1292,10 @@ if not na(zoneFillUpper) and not na(zoneFillLower)
 else
     box.set_bgcolor(zoneBox, color(na))
     box.set_border_color(zoneBox, color(na))
-
-if barstate.islast
-    table.cell(webWatermarkTable, 0, 0, showWebWatermarkInput ? "WARBIRD" : "", text_color=webWatermarkWarbirdColorInput, text_size=size.huge, text_halign=text.align_right, bgcolor=color.new(color.black, 100), text_formatting=text.format_bold)
-    table.cell(webWatermarkTable, 1, 0, showWebWatermarkInput ? "PRO" : "", text_color=webWatermarkProColorInput, text_size=size.huge, text_halign=text.align_left, bgcolor=color.new(color.black, 100))
-plot(showEma9Input ? ema9 : na, "EMA 9", ema9ColorInput, ema9WidthInput)
-plot(showEma21Input ? ema21 : na, "EMA 21", ema21ColorInput, ema21WidthInput)
-plot(showEma50Input ? ema50 : na, "EMA 50", ema50ColorInput, ema50WidthInput)
-plot(showVwapInput ? vwapVal : na, "VWAP", vwapColorInput, vwapWidthInput)
-
-int ema21Dir = f_ema_dir(ema21)
-int ema50Dir = f_ema_dir(ema50)
-int ema200Dir = f_ema_dir(ema200)
-float ema21DistPct = f_ema_dist_pct(ema21)
-float ema50DistPct = f_ema_dist_pct(ema50)
-float ema200DistPct = f_ema_dist_pct(ema200)
+plot(showEma9Input ? ema9 : na, "EMA 9", ema9ColorInput, ema9WidthInput, display=display.all)
+plot(showEma21Input ? ema21 : na, "EMA 21", ema21ColorInput, ema21WidthInput, display=display.all)
+plot(showEma50Input ? ema50 : na, "EMA 50", ema50ColorInput, ema50WidthInput, display=display.all)
+plot(showVwapInput ? vwapVal : na, "VWAP", vwapColorInput, vwapWidthInput, display=display.all)
 
 //=====================
 // MOMENTUM OSCILLATORS (VF + NFE + RSI KNN — ported from Layout surface)
@@ -1609,12 +1314,12 @@ float mlRsiKnn     = f_rsi_knn(rsi14, rsiKnnWindow)
 float mlConfluence = math.max(0.0, math.min(100.0, (mlNfe + (mlVfBull - mlVfBear + 100.0) * 0.5 + mlRsiKnn) / 3.0))
 
 //=====================
-// AG FEATURE EXPORT (Pine-exclusive hidden plots — display=display.none)
-// AG OWNS (server-side computable from Databento OHLCV — not emitted here):
+// OPTUNA FEATURE EXPORT (Pine-exclusive hidden plots — display=display.none)
+// OFFLINE-DERIVABLE (not emitted here):
 //   TA Core Pack (di_spread, adx_slope, er_10, atr_pct, clv, signed_vol, vol_delta),
 //   EMA dist_pct (21/50/200), RVOL, exhaustion_score, range_expansion, efficiency,
 //   event_day (date-based).
-// PINE OWNS (emit here — cannot be reconstructed server-side without Pine state):
+// PINE-ONLY (emit here — cannot be reconstructed offline without Pine state):
 //   fib engine geometry, trade state machine, HTF confluence, structure/ICT, VWAP code,
 //   OR state, NYSE A/D slope.
 //=====================
@@ -1641,17 +1346,10 @@ plot(tradeVisible and tradeState != TRADE_SETUP and not na(entryBar) ? float(bar
 plot(cooldownActive ? 1.0 : 0.0, "ml_cooldown_active", display=display.none, editable=false)
 plot(math.min(float(barsSinceExit), 999.0), "ml_bars_since_exit", display=display.none, editable=false)
 plot(slDistAtr, "ml_sl_dist_atr", display=display.none, editable=false)
-plot(setupContextActive ? 1.0 : 0.0, "ml_setup_context_active", display=display.none, editable=false)
-plot(footprintEntryLong ? 1.0 : 0.0, "ml_footprint_entry_long", display=display.none, editable=false)
-plot(footprintEntryShort ? 1.0 : 0.0, "ml_footprint_entry_short", display=display.none, editable=false)
-plot(entryLongTrigger ? 1.0 : 0.0, "ml_entry_long_trigger", display=display.none, editable=false)
-plot(entryShortTrigger ? 1.0 : 0.0, "ml_entry_short_trigger", display=display.none, editable=false)
 
-// ── TURNOVER ──
-
-// ── AG LABEL SURFACE ──
+// ── LABEL SURFACE ──
 // ml_last_exit_outcome: 0=none, 1=TP1_HIT, 2=TP2_HIT, 3=STOPPED, 4=EXPIRED, 5=TP3_HIT, 6=TP4_HIT, 7=TP5_HIT
-// PRIMARY AG label. trade_state collapses to NONE on the same bar as exit.
+// Primary Optuna label. trade_state collapses to NONE on the same bar as exit.
 plot(float(lastExitOutcome), "ml_last_exit_outcome", display=display.none, editable=false)
 // Price-tag events (fire regardless of trade state — secondary confirmation)
 plot(tagT1Event ? 1.0 : 0.0, "ml_tp1_hit_event", display=display.none, editable=false)
@@ -1667,8 +1365,6 @@ plot(liqSweepBull ? 1.0 : liqSweepBear ? -1.0 : 0.0, "ml_liq_sweep", display=dis
 
 // ── FOOTPRINT EXHAUSTION ──
 plot(mlExhGeomConfluence ? 1.0 : 0.0, "ml_exh_geom_confluence", display=display.none, editable=false)
-plot(mlExhZScore, "ml_exh_z_score", display=display.none, editable=false)
-plot(mlExhZExtreme ? 1.0 : 0.0, "ml_exh_z_extreme", display=display.none, editable=false)
 plot(mlExhDeltaDiv ? 1.0 : 0.0, "ml_exh_delta_div", display=display.none, editable=false)
 plot(mlExhAbsorption ? 1.0 : 0.0, "ml_exh_absorption", display=display.none, editable=false)
 plot(mlExhZeroPrint ? 1.0 : 0.0, "ml_exh_zero_print", display=display.none, editable=false)
@@ -1678,9 +1374,41 @@ plot(mlExhSessionValid ? 1.0 : 0.0, "ml_exh_session_valid", display=display.none
 plot(mlExhBarsSinceTrigger, "ml_exh_bars_since_trigger", display=display.none, editable=false)
 plot(float(mlContConfidenceTier), "ml_cont_confidence_tier", display=display.none, editable=false)
 plot(float(na), "ml_cont_bars_since_trigger", display=display.none, editable=false)
-plot(0.0, "ml_reversal_warning_in_trade", display=display.none, editable=false)
+plot(mlExhConfidenceTier > 0 and tradeInFlightNow and exhaustionSignalDir != tradeDir ? 1.0 : 0.0, "ml_reversal_warning_in_trade", display=display.none, editable=false)
 
-// ── BACKTEST VARIANT NOTE ──
-// Removed non-essential hidden export plots (ICT/session/macro/momentum) to stay under
-// TradingView's true 64-slot output budget in strategy mode.
-// ── PLOT BUDGET (EST.): 53 plot = 53/64 ──
+// ── STRUCTURE / ICT ──
+plot(chochBull ? 1.0 : chochBear ? -1.0 : 0.0, "ml_choch", display=display.none, editable=false)
+// PIT NOTE: chochBull/chochBear fire at bar N+5 (ta.pivothigh rightbars=5).
+// The offline pipeline MUST timestamp these at the emit bar, not the pivot bar, to avoid 5-bar forward shift.
+plot(fvgBullDist, "ml_fvg_bull_dist", display=display.none, editable=false)
+plot(fvgBearDist, "ml_fvg_bear_dist", display=display.none, editable=false)
+plot(contrChoch ? 1.0 : 0.0, "ml_contrarian_choch", display=display.none, editable=false)
+
+// ── SESSION / TIMING ──
+plot(float(orState), "ml_or_state", display=display.none, editable=false)
+plot(orDistNorm, "ml_or_dist_norm", display=display.none, editable=false)
+
+// ── ES EXECUTION QUALITY (Pine-native session anchor) ──
+plot(float(vwapCode), "ml_vwap_code", display=display.none, editable=false)
+
+// ── MACRO CONTEXT ──
+// ml_adline_slope: NYSE A-D daily slope via security call. Lag by 1 day in offline preprocessing.
+plot(adSlopeNorm, "ml_adline_slope", display=display.none, editable=false)
+
+// ── MOMENTUM OSCILLATORS ──
+plot(mlVfBull,     "ml_vf_bull",     display=display.none, editable=false)
+plot(mlVfBear,     "ml_vf_bear",     display=display.none, editable=false)
+plot(mlNfe,        "ml_nfe",         display=display.none, editable=false)
+plot(mlRsiKnn,     "ml_rsi_knn",     display=display.none, editable=false)
+plot(mlConfluence, "ml_confluence",  display=display.none, editable=false)
+
+// ── PLOT BUDGET: 53 plot + 3 alertcondition = 56/64 (8 headroom) ──
+
+//=====================
+// ALERTS
+// Kept: ENTRY LONG, ENTRY SHORT, PIVOT BREAK (.50 reversal warning)
+// All other alerts moved to dashboard (dashboard handles operator notifications)
+//=====================
+alertcondition(entryLongTrigger, "WARBIRD ENTRY LONG", "Warbird long entry trigger. Close={{close}}")
+alertcondition(entryShortTrigger, "WARBIRD ENTRY SHORT", "Warbird short entry trigger. Close={{close}}")
+alertcondition(breakAgainstEvent, "PIVOT BREAK (against)", "Broke pivot against AutoFib direction. Close={{close}}")

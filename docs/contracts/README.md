@@ -1,6 +1,6 @@
 # Warbird Contracts
 
-**Date:** 2026-04-27
+**Date:** 2026-04-30
 **Status:** Active Interface Authority
 
 This directory is the only interface authority for Warbird payloads,
@@ -22,9 +22,10 @@ Ignore interface definitions in old plans, scratch notes, and historical decisio
 - `ag_local_training_schema.md`
 - `v7_interface_divergence.md`
 
-`pine_indicator_ag_contract.md` is the active modeling contract.
+`pine_indicator_ag_contract.md` is the active modeling contract
+(legacy filename).
 `ag_local_training_schema.md` is superseded reference for the retired warehouse
-AG plan and must not drive active modeling unless explicitly reopened.
+plan and must not drive active modeling unless explicitly reopened.
 
 ## Iteration Rule
 
@@ -34,9 +35,11 @@ criteria, update the affected contract Markdown before another agent relies on
 the result. Historical contract text must be clearly marked superseded instead
 of left ambiguous.
 
-Current lock checkpoint (2026-04-27): backtest fib core in
-`indicators/v7-warbird-institutional-backtest-strategy.pine` is protected
-scope while 5m tuning iterates.
+Current lock checkpoint (2026-04-30): Warbird Pro is the only active main chart
+indicator. Nexus is retained. The removed v7 strategy/backtest/fib-only Pine
+variants are historical only unless explicitly reopened. Fib anchor ownership
+and ladder math in `indicators/warbird-pro-indicator.pine` are protected while
+5m tuning iterates.
 
 ## Working Rule
 

@@ -1,5 +1,9 @@
 # WB v7 Institutional — Optuna Runbook
 
+**Status:** Superseded on 2026-04-30 by the Warbird Pro single-indicator
+surface. This file is historical lineage only. Do not use it for active tuning
+unless Kirk explicitly reopens the old v7 institutional indicator.
+
 **Indicator:** `indicators/v7-warbird-institutional.pine`
 **Profile:** `scripts/optuna/v7_warbird_institutional_profile.py`
 **Study DB:** `scripts/optuna/workspaces/v7_warbird_institutional/study.db`
@@ -8,7 +12,7 @@
 
 **Contract:** Active indicator-only modeling. The TradingView/Pine export is the
 ground truth. Do not join FRED, macro, cross-asset, Databento-ingestion,
-Supabase, or local `ag_training` data into this workflow.
+Supabase, or local legacy warehouse (`ag_training`) data into this workflow.
 
 ---
 
@@ -156,7 +160,7 @@ consistency_score = (years 2020–2025 with PF ≥ 1.0) / 6
 
 These parameters change Pine's state machine output and cannot be correctly
 swept from a single CSV export.  They require the full CDP automation path
-(`scripts/ag/tv_auto_tune.py`).
+(`scripts/ag/tv_auto_tune.py`, legacy path name).
 
 | Parameter | Why TV-only |
 |---|---|
@@ -250,4 +254,4 @@ sanity checks (run `--start 2025-01-01` as OOS verification):
 | `scripts/optuna/workspaces/v7_warbird_institutional/export.csv` | TV CSV export (manual, one-time) |
 | `scripts/optuna/workspaces/v7_warbird_institutional/top5.json` | Auto-written after each run |
 | `indicators/v7-warbird-institutional.pine` | Source indicator (DO NOT EDIT without approval) |
-| `docs/contracts/ag_local_training_schema.md` | AG feature contract |
+| `docs/contracts/ag_local_training_schema.md` | Legacy warehouse feature contract |

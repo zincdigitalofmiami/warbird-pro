@@ -1,6 +1,6 @@
 # Warbird Model Spec — Indicator-Only v6
 
-**Date:** 2026-04-27
+**Date:** 2026-04-30
 **Status:** Active, subordinate to `docs/MASTER_PLAN.md`
 
 ## Contract
@@ -16,7 +16,7 @@ train from external data stacks.
 Tuning and training are ongoing. Current trigger families, settings, thresholds,
 search spaces, labels, and recommended build choices are mutable evidence
 snapshots. They may be revised after new Pine/TradingView exports, Strategy
-Tester evidence, Optuna trials, AutoGluon analysis, or SHAP review.
+Tester evidence, and Optuna trials.
 
 Any accepted model-contract change must update this spec, the Master Plan, the
 active contract docs, and the relevant runbooks before the result is considered
@@ -27,8 +27,6 @@ ready for reuse by another agent.
 Allowed training inputs are only:
 
 - TradingView indicator CSV exports for non-Nexus lanes
-- TradingView Strategy Tester trade exports
-- CDP-read TradingView Strategy Tester data
 - TradingView/Pine `request.footprint()` `nexus_fp_*` snapshots for Nexus ML RSI
 - deterministic features derived from those Pine/TradingView outputs
 
@@ -72,28 +70,29 @@ Primary metrics:
 
 ## Active Pine Surfaces
 
-- `indicators/v7-warbird-institutional.pine`
-  - live indicator work surface
-  - live entry trigger: `entryLongTrigger` / `entryShortTrigger` from fib
-    execution-anchor reclaim plus footprint confirmation
-- `indicators/v7-warbird-strategy.pine`
-  - Strategy Tester and export-compatibility surface
-  - strategy entry trigger: `acceptEvent` plus confirmation, or optional
-    footprint scalp path, with risk/ladder/HTF/suppression gates
-- `indicators/v7-warbird-institutional-backtest-strategy.pine`
-  - Optuna/backtest wrapper for direct fib-anchor tests
-  - default backtest trigger: direct selected fib execution-anchor hit/reclaim
-    when `Backtest Fib Anchor Hits Directly` is enabled
+- `indicators/warbird-pro-indicator.pine`
+  - only active main chart indicator
+  - live entry trigger: `entryLongTrigger` / `entryShortTrigger` from the
+    selected fib execution-anchor reclaim plus setup context, footprint
+    confirmation, ladder validity, optional MA/VWAP gates, and the bullish-trend
+    short gate
+- `indicators/warbird-nexus-machine-learning-rsi.pine`
+  - retained Nexus lower-pane support surface
 - `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
-  - Nexus lower-pane footprint-delta research surface
+  - retained Nexus lower-pane footprint-delta research/tuning surface
   - active trigger family: `NEXUS_FOOTPRINT_DELTA`
   - footprint delta must come from TradingView/Pine `request.footprint()`
     `nexus_fp_*` fields; CSV exports, local OHLCV parquet, and synthetic
     body/wick delta are invalid tuning evidence for this surface
 
-`v8-warbird-live.pine` and `v8-warbird-prescreen.pine` are retired/removed from
-the active repo surface (2026-04-27). They remain historical lineage only via
-archived documentation.
+Retired/removed Pine variants are historical lineage only:
+
+- `indicators/v7-warbird-institutional.pine`
+- `indicators/v7-warbird-strategy.pine`
+- `indicators/v7-warbird-institutional-backtest-strategy.pine`
+- `indicators/fibs-only.pine`
+- `v8-warbird-live.pine`
+- `v8-warbird-prescreen.pine`
 
 ## Locked Baseline Checkpoint (2026-04-27)
 
@@ -105,18 +104,19 @@ Operator checkpoint summary from TradingView strategy snapshots:
 
 Policy from this checkpoint:
 
-- 15m behavior is the reference baseline for fib and structure semantics.
-- 5m is the active tuning lane.
-- Backtest fib core in
-  `indicators/v7-warbird-institutional-backtest-strategy.pine` is frozen until
-  explicitly reopened with approval and before/after evidence.
+- 15m behavior remains a historical reference baseline for fib and structure
+  semantics.
+- 5m remains the active tuning lane.
+- The protected fib core now lives in
+  `indicators/warbird-pro-indicator.pine`. No strategy/backtest Pine harness is
+  active unless Kirk explicitly reopens one.
 
-Protected fib-core scope:
+Protected fib-core scope in `indicators/warbird-pro-indicator.pine`:
 
-- `fibHtfSnapshot` and `fibZzSource`
-- anchor ownership transitions (`fibAnchorHigh/Low`, anchor times, snapshot-change logic)
+- ZigZag/fib anchor ownership transitions (`fibAnchorHigh/Low`, anchor bars,
+  `fibZzUpdate()`, `fibBull`)
 - fib ladder math (`fibPrice`, canonical retracement/extension level construction)
-- trade-time fib freeze/snapshot surfaces (`snapP*`, `effectiveP*`, frozen draw span)
+- active fib draw span and level construction
 
 Allowed tuning scope while locked:
 
@@ -135,7 +135,6 @@ Admitted feature families:
 - Pine `ml_*` hidden exports
 - Nexus `nexus_fp_*` footprint fields from TradingView/Pine
   `request.footprint()`
-- TradingView Strategy Tester trade fields
 - OHLCV columns included in the TradingView export
 - deterministic columns computed only from the same Pine export
 
@@ -154,8 +153,8 @@ Labels resolve from Pine/TradingView outputs only.
 Allowed labels:
 
 - trade profit/loss
-- TP/SL or Strategy Tester exit reason where exported
 - Pine state outcomes such as `ml_last_exit_outcome`
+- TP/SL-style state outcomes emitted by the active Pine indicator
 - derived binary or multiclass labels computed from exported Pine trade/state
   fields
 
@@ -164,8 +163,8 @@ available in the Pine/TradingView output.
 
 ## Explainability
 
-SHAP or equivalent importance analysis is used to explain settings and build
-choices, not to publish a live server model.
+Feature-importance analysis from Optuna runs is used to explain settings and
+build choices, not to publish a live server model.
 
 Required explanation outputs:
 
@@ -194,8 +193,8 @@ The promotion artifact is a Pine settings/build brief containing:
 ## Runtime Boundary
 
 Supabase and Databento ingestion may remain for live chart/runtime support, but
-they are not active training sources. Cloud must not receive raw trial data, raw
-labels, raw SHAP, or full research datasets.
+they are not active training sources. Cloud must not receive raw trial data,
+raw labels, or full research datasets.
 
 ## Verification
 
@@ -217,7 +216,7 @@ The following are legacy for active modeling:
 - `ag_fib_stop_variants`
 - `ag_fib_outcomes`
 - `ag_training`
-- local warehouse SHAP lineage tables
+- local warehouse lineage tables
 - FRED/macro feature scope
 - Python reconstruction as canonical training generator
-- server-side AG packet promotion
+- server-side model packet promotion

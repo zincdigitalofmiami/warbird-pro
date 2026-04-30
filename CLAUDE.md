@@ -3,7 +3,7 @@ Read and follow `AGENTS.md` at the repository root.
 ## Quick Reference
 
 - **Canonical docs index:** `/Volumes/Satechi Hub/warbird-pro/docs/INDEX.md`
-- **Active architecture plan:** `/Volumes/Satechi Hub/warbird-pro/docs/MASTER_PLAN.md` — Warbird Indicator-Only AG Plan v6
+- **Active architecture plan:** `/Volumes/Satechi Hub/warbird-pro/docs/MASTER_PLAN.md` — Warbird Indicator-Only Optuna Plan v6, narrowed 2026-04-30 to Warbird Pro + Nexus only
 - **Indicator contract:** `/Volumes/Satechi Hub/warbird-pro/docs/contracts/pine_indicator_ag_contract.md`
 - **Startup review runbook:** `/Volumes/Satechi Hub/warbird-pro/docs/runbooks/startup_repo_review.md`
 - **Claude phased guardrails:** `/Volumes/Satechi Hub/warbird-pro/docs/runbooks/claude_rogue_proof_phase_contract.md`
@@ -25,19 +25,17 @@ Do not run builds/tests/training or modify files during the startup review.
 
 ### Active Contract
 
-Warbird is now an indicator-only PineScript AG modeling project.
+Warbird is now an indicator-only PineScript Optuna modeling project.
 
 This status is a live tuning snapshot. Trigger families, settings, thresholds,
 search spaces, and build recommendations may change as TradingView exports,
-Strategy Tester evidence, Optuna trials, AG analysis, and SHAP review continue.
+Optuna trials continue.
 When that happens, update the active docs before treating the new result as
 agent-ready.
 
 Training/modeling uses Pine/TradingView outputs only:
 
 - TradingView indicator CSV exports for non-Nexus lanes
-- TradingView Strategy Tester trade exports
-- CDP-read Strategy Tester data from local tooling
 - TradingView/Pine `request.footprint()` `nexus_fp_*` snapshots for Nexus ML RSI
 - deterministic features derived from those Pine outputs
 
@@ -46,19 +44,24 @@ Databento feature stacking is admitted into the active modeling dataset.
 
 ### Active Pine Surfaces
 
-- `indicators/v7-warbird-institutional.pine` — live indicator work surface;
+- `indicators/warbird-pro-indicator.pine` — only active main chart indicator;
   trigger family `LIVE_ANCHOR_FOOTPRINT`
-- `indicators/v7-warbird-strategy.pine` — Strategy Tester / export-compatible
-  surface; trigger family `STRATEGY_ACCEPT_SCALP`
-- `indicators/v7-warbird-institutional-backtest-strategy.pine` —
-  Optuna/backtest wrapper; trigger family `BACKTEST_DIRECT_ANCHOR` when
-  `Backtest Fib Anchor Hits Directly` is enabled
+- `indicators/warbird-nexus-machine-learning-rsi.pine` — retained Nexus support lane
+- `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine` —
+  retained Nexus footprint research/tuning lane; trigger family
+  `NEXUS_FOOTPRINT_DELTA`
 
-Budget verification from 2026-04-26:
+Retired/removed Pine variants:
 
-- institutional: 58/64 output calls, 4 `request.security()` + 1 `request.footprint()`
-- v7 strategy: 60/64 output calls, 4 `request.security()` + 1 `request.footprint()`
-- backtest strategy: 53/64 output calls, 4 `request.security()` + 1 `request.footprint()`
+- `indicators/v7-warbird-institutional.pine`
+- `indicators/v7-warbird-strategy.pine`
+- `indicators/v7-warbird-institutional-backtest-strategy.pine`
+- `indicators/fibs-only.pine`
+
+Budget verification from 2026-04-30:
+
+- Warbird Pro: 53 plot calls + 3 alertcondition calls = 56/64 output calls,
+  4 `request.security()` + 1 `request.footprint()`
 
 Checkpoint summary from 2026-04-27 operator TradingView snapshots:
 
@@ -74,14 +77,15 @@ Checkpoint summary from 2026-04-27 operator TradingView snapshots:
 - Nexus ML RSI Optuna must use TradingView/Pine `request.footprint()`
   `nexus_fp_*` evidence. Do not run Nexus tuning from CSV exports, local OHLCV
   parquet, Databento bars, or synthetic body/wick delta.
-- `scripts/ag/train_ag_baseline.py`, local `ag_training`, FRED joins, and SHAP lineage
+- `scripts/ag/train_ag_baseline.py`, local `ag_training`, and FRED-join lineage
   tables are legacy unless explicitly reopened.
 
 ### Current Blocker
 
-Run controlled 5m tuning with fib-core lock preserved and produce
-manifest-backed evidence for any settings recommendation. Do not start
-training/modeling unless the user explicitly approves it.
+Re-baseline `indicators/warbird-pro-indicator.pine` as the single active main
+indicator, keep Nexus intact, and produce manifest-backed evidence for any
+settings recommendation. Do not start training/modeling unless the user
+explicitly approves it.
 
 ## Locked Rules
 
@@ -90,23 +94,23 @@ training/modeling unless the user explicitly approves it.
 - No mock data.
 - No daily-ingestion training dependency.
 - No Pine edits without explicit approval in the current session.
-- In `indicators/v7-warbird-institutional-backtest-strategy.pine`, fib core is
-  protected scope and must not be changed without explicit approval plus
-  before/after evidence.
+- In `indicators/warbird-pro-indicator.pine`, fib anchor ownership and ladder
+  math are protected scope and must not be changed without explicit approval
+  plus before/after evidence.
 - Repo-wide fib scanner ban: never reintroduce the pivot-window
   `fibHtfSnapshot` variant using `ta.barssince(...)` with
   `pivotHighInWindow` / `pivotLowInWindow`; this pattern is known to cause
   wide-fib regressions.
 - No TradingView Pine Editor push without explicit approval.
 - Use 15m behavior as the baseline reference when evaluating 5m tuning changes.
-- Commission floor for MES Strategy Tester evidence: $1.00/side.
-- Slippage floor: 1 tick.
-- Bar Magnifier must be enabled when reported results depend on intrabar stop or
-  target behavior.
+- If a strategy/backtest harness is explicitly reopened, commission floor for
+  MES evidence is $1.00/side and slippage floor is 1 tick.
+- If a strategy/backtest harness is explicitly reopened, Bar Magnifier must be
+  enabled when reported results depend on intrabar stop or target behavior.
 - Walk-forward or IS/OOS-style validation is required before a champion setting
   is accepted.
 - Cloud Supabase is runtime/support only and must not receive raw training
-  trials, labels, or SHAP artifacts.
+  trials or labels.
 
 ## Pine Verification Pipeline
 
@@ -117,8 +121,8 @@ Before committing any `.pine` edit:
 3. `./scripts/guards/check-fib-scanner-guardrails.sh`
 4. `./scripts/guards/check-contamination.sh`
 5. `npm run build`
-6. `./scripts/guards/check-indicator-strategy-parity.sh` when v7 indicator /
-   strategy coupling is touched
+6. `./scripts/guards/check-indicator-strategy-parity.sh` only if a strategy
+   harness is explicitly reopened and coupled to Warbird Pro
 
 For docs-only work, run `npm run lint` and `npm run build` before pushing when
 the docs claim repo operational truth.

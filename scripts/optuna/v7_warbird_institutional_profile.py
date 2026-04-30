@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Warbird v7 Institutional — standalone Optuna profile.
+Warbird Pro — standalone Optuna profile.
 
-Optimizes v7 Warbird Institutional Pine indicator parameters against a
+Optimizes Warbird Pro Pine indicator parameters against a
 TradingView CSV export.  Fully standalone — no shared strategy code.
 
 Architecture
 ------------
 1. load_data()
-   - Reads scripts/optuna/workspaces/v7_warbird_institutional/export.csv (TV CSV export)
-   - Merges with data/mes_15m.parquet for OHLCV ground truth
+   - Reads scripts/optuna/workspaces/warbird_pro/export.csv (TV CSV export)
+   - Uses OHLCV columns from the TradingView export itself
    - Precomputes ATR(14), EMA(100), DMI(14) for filter/simulation use
 
 2. run_backtest(df, params, start_date)
@@ -31,7 +31,7 @@ TV-only params (require Pine re-run, not swept here)
 retestBars, fibConfluenceTolPct, footprintTicksPerRow, footprintVaPercent,
 footprintImbalancePercent, zeroPrintVolRatio, stackedImbalanceRows,
 exhaustionLevelAtrTol.
-See docs/runbooks/wbv7_institutional_optuna.md for CDP sweep instructions.
+See docs/runbooks/strategy_tuning.md for active tuning instructions.
 
 Runner interface
 ----------------
@@ -58,9 +58,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.optuna.paths import workspace_dir
 
-OPTUNA_DIR = workspace_dir("v7_warbird_institutional")
+OPTUNA_DIR = workspace_dir("warbird_pro")
 CSV_PATH   = OPTUNA_DIR / "export.csv"
-OHLCV_PATH = REPO_ROOT / "data" / "mes_15m.parquet"
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -715,7 +714,7 @@ def _parse_tv_csv(path: Path) -> pd.DataFrame:
 
 def load_data() -> pd.DataFrame:
     """
-    Load the TV CSV export and merge with mes_15m.parquet OHLCV.
+    Load the TV CSV export, including OHLCV from that same export.
 
     Precomputes: ATR(14), EMA(100), DMI(14) — required for stop re-simulation
     and short-gate filter.
@@ -725,34 +724,34 @@ def load_data() -> pd.DataFrame:
     TV CSV export instructions
     --------------------------
     1. Open TradingView Desktop
-    2. Load indicators/v7-warbird-institutional.pine on MES1! 15m chart
+    2. Load indicators/warbird-pro-indicator.pine on MES1! 15m chart
     3. Pine Editor → Export CSV (or Script → Export Data to CSV)
-    4. Save to: scripts/optuna/workspaces/v7_warbird_institutional/export.csv
+    4. Save to: scripts/optuna/workspaces/warbird_pro/export.csv
     """
     if not CSV_PATH.exists():
         raise FileNotFoundError(
             f"\n\nTV CSV export not found:\n  {CSV_PATH}\n\n"
             "To generate:\n"
             "  1. Open TradingView Desktop\n"
-            "  2. Load indicators/v7-warbird-institutional.pine on MES1! 15m\n"
+            "  2. Load indicators/warbird-pro-indicator.pine on MES1! 15m\n"
             "  3. Pine Editor → Export → Export CSV\n"
             f"  4. Save to {CSV_PATH}\n"
-            "See docs/runbooks/wbv7_institutional_optuna.md for full instructions.\n"
+            "See docs/runbooks/strategy_tuning.md for full instructions.\n"
         )
 
-    if not OHLCV_PATH.exists():
-        raise FileNotFoundError(f"OHLCV parquet not found: {OHLCV_PATH}")
-
     csv_df = _parse_tv_csv(CSV_PATH)
+    required_ohlcv = ("open", "high", "low", "close", "volume")
+    missing_ohlcv = [c for c in required_ohlcv if c not in csv_df.columns]
+    if missing_ohlcv:
+        raise ValueError(
+            "TV CSV export is missing required OHLCV columns from the same Pine/TradingView export: "
+            + ", ".join(missing_ohlcv)
+        )
 
-    ohlcv = pd.read_parquet(OHLCV_PATH)[["ts", "open", "high", "low", "close", "volume"]].copy()
-
-    # Drop OHLCV columns from CSV (parquet is ground truth)
-    drop_ohlcv = [c for c in ("open", "high", "low", "close", "volume") if c in csv_df.columns]
-    merged = ohlcv.merge(
-        csv_df.drop(columns=drop_ohlcv, errors="ignore"),
-        on="ts",
-        how="left",
+    merged = (
+        csv_df.copy()
+        .sort_values("ts")
+        .reset_index(drop=True)
     )
 
     merged = (

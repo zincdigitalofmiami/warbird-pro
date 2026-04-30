@@ -1,6 +1,6 @@
-# Pine Indicator AG Contract
+# Pine Indicator Optuna Contract
 
-**Date:** 2026-04-27
+**Date:** 2026-04-30
 **Status:** Active modeling contract
 
 ## Purpose
@@ -13,8 +13,7 @@ PineScript indicator behavior on TradingView.
 The active contract is allowed to evolve as tuning and training continue.
 Trigger families, settings, thresholds, search spaces, and labels are current
 evidence snapshots. They must be versioned through Markdown updates whenever a
-new TradingView export, Strategy Tester result, Optuna trial set, AG model, or
-SHAP review changes the accepted understanding.
+new TradingView export or Optuna trial set changes the accepted understanding.
 
 Do not reuse an old export or trial without checking that its trigger family and
 settings still match the current contract.
@@ -24,8 +23,6 @@ settings still match the current contract.
 Training rows may come only from:
 
 - TradingView indicator CSV exports for non-Nexus lanes
-- TradingView Strategy Tester trade exports
-- CDP-read Strategy Tester data
 - TradingView/Pine `request.footprint()` `nexus_fp_*` snapshots for
   `NEXUS_FOOTPRINT_DELTA`
 - deterministic columns derived from those Pine/TradingView exports
@@ -37,42 +34,39 @@ No external feature stack is admitted.
 Every modeling run must declare which Pine trigger family produced its rows.
 Do not mix trigger families inside one run.
 
-- `LIVE_ANCHOR_FOOTPRINT`: live institutional trigger from
-  `v7-warbird-institutional.pine`. Entries are
+- `LIVE_ANCHOR_FOOTPRINT`: live Warbird Pro trigger from
+  `indicators/warbird-pro-indicator.pine`. Entries are
   `entryLongTrigger` / `entryShortTrigger`, built from the selected fib
   execution-anchor reclaim, setup context, footprint confirmation, one-shot
   gating, ladder validity, and the bullish-trend short gate.
-- `STRATEGY_ACCEPT_SCALP`: Strategy Tester trigger from
-  `v7-warbird-strategy.pine`. Entries are `acceptEvent` plus confirmation, or
-  the optional footprint scalp path, with risk, ladder, HTF, and suppression
-  gates.
-- `BACKTEST_DIRECT_ANCHOR`: Optuna/backtest wrapper trigger from
-  `v7-warbird-institutional-backtest-strategy.pine` when
-  `Backtest Fib Anchor Hits Directly` is enabled. Entries fire from the selected
-  fib execution-anchor hit/reclaim path and intentionally bypass the full live
-  footprint/context path.
 - `NEXUS_FOOTPRINT_DELTA`: Nexus lower-pane footprint-delta trigger from
-  `warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`. Rows must come
-  from TradingView/Pine `request.footprint()` evidence containing `nexus_fp_*`
-  fields. CSV exports, local OHLCV parquet, Databento bars, and synthetic
-  body/wick delta are not valid tuning evidence for this trigger family.
+  `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`. Rows
+  must come from TradingView/Pine `request.footprint()` evidence containing
+  `nexus_fp_*` fields. CSV exports, local OHLCV parquet, Databento bars, and
+  synthetic body/wick delta are not valid tuning evidence for this trigger
+  family.
 
-`acceptEvent` alone is not the live institutional entry trigger. It is a
-diagnostic/setup-archetype event unless a specific strategy surface uses it as
-part of its own execution path.
+`acceptEvent` alone is not the live Warbird Pro entry trigger. It is a
+diagnostic/setup-archetype event unless a future explicitly reopened strategy
+surface defines it as part of its own execution path.
 
-## Locked Fib Baseline (2026-04-27)
+Retired trigger families are historical only unless Kirk explicitly reopens
+them with a new active strategy/backtest harness:
 
-Backtest fib core in
-`indicators/v7-warbird-institutional-backtest-strategy.pine` is a protected
-baseline. It must remain stable while 5m tuning iterates.
+- `STRATEGY_ACCEPT_SCALP`
+- `BACKTEST_DIRECT_ANCHOR`
+
+## Locked Fib Baseline (2026-04-30)
+
+Warbird Pro fib core in `indicators/warbird-pro-indicator.pine` is the
+protected baseline. It must remain stable while 5m tuning iterates.
 
 Protected scope:
 
-- `fibHtfSnapshot` and `fibZzSource`
+- `fibZzUpdate()` and ZigZag settings semantics
 - anchor ownership/state transition logic for fib legs
 - fib ladder construction via `fibPrice` and canonical fib ratios
-- trade-time fib snapshot/freeze surfaces (`snapP*`, `effectiveP*`, draw span)
+- active fib draw span and chart-level construction
 
 Allowed tuning scope while lock is active:
 
@@ -105,11 +99,10 @@ Every modeling run must record:
 - TradingView symbol
 - timeframe
 - export date range
-- export method (`CSV`, `STRATEGY_TESTER_CSV`, `CDP_REPORT_DATA`,
-  `TV_FOOTPRINT_PARQUET`)
+- export method (`CSV` for Warbird Pro indicator exports, `TV_FOOTPRINT_PARQUET`
+  for Nexus request.footprint snapshots)
 - trigger family
 - Pine input settings
-- Strategy Tester properties where applicable
 - row count and trade count
 - export hash
 - notes on missing or platform-limited fields
