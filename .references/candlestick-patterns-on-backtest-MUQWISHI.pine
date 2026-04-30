@@ -1,0 +1,141 @@
+// SAVED FOR REFERENCE / TRACEABILITY ONLY — NOT FOR COMPILE OR EXECUTION IN THIS REPO
+// Source: TradingView Community / © MUQWISHI
+// License: Mozilla Public License 2.0 (https://mozilla.org/MPL/2.0/)
+// Saved: 2026-04-29
+// Reason saved: This is the dashboard indicator producing per-pattern, per-R:R cumulative
+//   return tables that Architect references for empirical pattern selection on MES across
+//   timeframes. The methodology (entry mode, ATR/Pattern range stop, R:R columns, SMA(50)
+//   trend filter, sign convention) must remain quotable in version control.
+//
+// Sign convention proven from this source (see backtest function):
+//   - For Bull patterns (side==1): trade is LONG. TP = entry + slRng × tp. Won → +pnl.
+//   - For Bear patterns (side==-1): trade is SHORT. TP = entry - slRng × tp. Won → +pnl.
+//   - Cell value = compounded equity return % at chosen R:R, over the bar-history window.
+//   - POSITIVE % = pattern's labeled-direction trade was profitable.
+//   - NEGATIVE % = pattern's labeled-direction trade lost money.
+// This is the convention any Warbird artifact citing this dashboard must use.
+
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © MUQWISHI
+
+//@version=5
+indicator("Candlestick Patterns on Backtest", overlay = true, max_labels_count = 500, max_bars_back = 50)
+import MUQWISHI/CandlestickPatterns/2 as cp
+
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+// |                                   INPUT                                    |
+// |++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++|
+s = " ‏"
+// +++++++++++++++ Table Settings
+// Location
+tablePos = input.string("Middle Right", "Table Location ",
+             ["Top Right" , "Middle Right" , "Bottom Right" ,
+             "Top Center", "Middle Center" , "Bottom Center",
+             "Top Left"  , "Middle Left"   , "Bottom Left" ], inline = "1", group = "Table Setting")
+
+// Size
+tableSiz = input.string("Tiny", "",
+             ["Auto", "Huge", "Large", "Normal", "Small", "Tiny"], inline = "1", group = "Table Setting")
+
+// Table Color
+posCol = input.color(#006400, "Positive",   group = "Table Setting", inline = "4")
+neuCol = input.color(#ffffff, " Neutral",   group = "Table Setting", inline = "4")
+negCol = input.color(#882336, " Negative ", group = "Table Setting", inline = "4")
+
+tBgCol = input.color(#696969, "Titles ",    group = "Table Setting", inline = "2")
+txtCl1 = input.color(#ffffff, "    Text",   group = "Table Setting", inline = "2")
+txtCl2 = input.color(#000000, "",           group = "Table Setting", inline = "2")
+
+// +++++++++++++++ Label Color
+labChk = input.bool(false, "Show Pattern Label", inline = "lab")
+labCl1 = input.color(color.blue,  "", inline = "lab")
+labCl2 = input.color(color.red,   "", inline = "lab")
+labCl3 = input.color(color.white, "", inline = "lab")
+
+// +++++++++++++++ Backtest Setting
+sTim  = input.time(timestamp("01 Jan 2000 20:00"), "From", inline = "0", group = "Backtest Setting",
+         tooltip = "Backtest Starting Period\n\nNote: If the datetime of the first candle on the chart" +
+         " is after the entered datetime, the calculation will start from the first candle on the chart.")
+cash  = input.float(100000, "Initial Equity ($)       ", 1, group = "Backtest Setting")
+mrgn  = input.float(1, "Leverage", 1, group = "Backtest Setting")
+enMod = input.string("At Close", "Entry Mode", ["At Close", "Breakout High (Low for Short)"], group = "Backtest Setting")
+cnclC = input.bool(true, "Cancel Entry Within Bars", group = "Backtest Setting", inline = "cnc")
+cnclN = input.int(3, "", 1, group = "Backtest Setting", inline = "cnc",
+         tooltip = "This option is applicable with\n  {Entry Mode = Breakout High (Low for Short)}\n"+
+                   "\nCancel the Entry Order if it's not executed within certain number of Bars.")
+
+rngTy = input.string("ATR Range", "StopLoss"+s+s+s+s, ["ATR Range", "Pattern Range"], inline = "00")
+stpls = input.float(1, ""+s+s, 0, step = 0.1,
+       tooltip = "Example & Illustration\n0.5 is half distance of range."+ "\n1 is distance of range."
+       + "\n2 is twice distance of range.\n\nRange Types:\n1. Pattern Range: high of pattern - low of pattern"
+       + "\n2. ATR: Average True Range\n\n*Range is calculated from entry level", inline = "00")
+
+// Risk Rewards Inputs
+rw01c = input.bool(true, "", inline = "01")
+rw02c = input.bool(true, "", inline = "02")
+rw03c = input.bool(true, "", inline = "03")
+rw04c = input.bool(true, "", inline = "04")
+rw05c = input.bool(true, "", inline = "05")
+rw06c = input.bool(true, "", inline = "06")
+rw07c = input.bool(true, "", inline = "07")
+rw01v = input.float(1.0, "[01] Risk:Reward     ", 0, inline = "01")
+rw02v = input.float(1.5, "[02] Risk:Reward     ", 0, inline = "02")
+rw03v = input.float(2.0, "[03] Risk:Reward     ", 0, inline = "03")
+rw04v = input.float(3.0, "[04] Risk:Reward     ", 0, inline = "04")
+rw05v = input.float(4.0, "[05] Risk:Reward     ", 0, inline = "05")
+rw06v = input.float(5.0, "[06] Risk:Reward     ", 0, inline = "06")
+rw07v = input.float(6.0, "[07] Risk:Reward     ", 0, inline = "07")
+
+// +++++++++++++++ Technical Settings
+// Moving Average
+maChk   = input.bool(true, "Detect Trend Based on SMA", inline = "0", group = "Technical")
+maLen   = input.int(50, "", 1,                          inline = "0", group = "Technical")
+
+// +++++++++++++++ Candle Patterns
+// Type
+ptrnTyp = input.string("Both", "Pattern Type", ["Bullish", "Bearish", "Both"], group = "Candle Patterns")
+
+// Patterns
+abandonedBabyChk       = input.bool(true, "Abandoned Baby",        group = "Candle Patterns", inline = "01")
+dbarkCloudCoverChk     = input.bool(true, "Dark Cloud Cover",      group = "Candle Patterns", inline = "01")
+dojiStarChk            = input.bool(true, "Doji Star",             group = "Candle Patterns", inline = "02")
+downsideTasukiGapChk   = input.bool(true, "Downside Tasuki Gap",   group = "Candle Patterns", inline = "02")
+dragonflyDojiChk       = input.bool(true, "Dragonfly Doji",        group = "Candle Patterns", inline = "03")
+engulfingChk           = input.bool(true, "Engulfing",             group = "Candle Patterns", inline = "03")
+eveningDojiStarChk     = input.bool(true, "Evening Doji Star",     group = "Candle Patterns", inline = "03")
+eveningStarChk         = input.bool(true, "Evening Star",          group = "Candle Patterns", inline = "04")
+fallingThreeMethodsChk = input.bool(true, "Falling Three Methods", group = "Candle Patterns", inline = "04")
+fallingWindowChk       = input.bool(true, "Falling Window",        group = "Candle Patterns", inline = "05")
+gravestoneDojiChk      = input.bool(true, "Gravestone Doji",       group = "Candle Patterns", inline = "05")
+hammerChk              = input.bool(true, "Hammer",                group = "Candle Patterns", inline = "05")
+hangingManChk          = input.bool(true, "Hanging Man",           group = "Candle Patterns", inline = "06")
+haramiCrossChk         = input.bool(true, "Harami Cross",          group = "Candle Patterns", inline = "06")
+haramiChk              = input.bool(true, "Harami",                group = "Candle Patterns", inline = "06")
+invertedHammerChk      = input.bool(true, "Inverted Hammer",       group = "Candle Patterns", inline = "07")
+kickingChk             = input.bool(true, "Kicking",               group = "Candle Patterns", inline = "07")
+longLowerShadowChk     = input.bool(true, "Long Lower Shadow",     group = "Candle Patterns", inline = "08")
+longUpperShadowChk     = input.bool(true, "Long Upper Shadow",     group = "Candle Patterns", inline = "08")
+marubozuBlackChk       = input.bool(true, "Marubozu Black",        group = "Candle Patterns", inline = "09")
+marubozuWhiteChk       = input.bool(true, "Marubozu White",        group = "Candle Patterns", inline = "09")
+morningDojiStarChk     = input.bool(true, "Morning Doji Star",     group = "Candle Patterns", inline = "10")
+morningStarChk         = input.bool(true, "Morning Star",          group = "Candle Patterns", inline = "10")
+onNeckChk              = input.bool(true, "On Neck",               group = "Candle Patterns", inline = "10")
+piercingChk            = input.bool(true, "Piercing",              group = "Candle Patterns", inline = "11")
+risingThreeMethodsChk  = input.bool(true, "Rising Three Methods",  group = "Candle Patterns", inline = "11")
+risingWindowChk        = input.bool(true, "Rising Window",         group = "Candle Patterns", inline = "12")
+shootingStarChk        = input.bool(true, "Shooting Star",         group = "Candle Patterns", inline = "12")
+threeBlackCrowsChk     = input.bool(true, "Three Black Crows",     group = "Candle Patterns", inline = "14")
+threeWhiteSoldiersChk  = input.bool(true, "Three White Soldiers",  group = "Candle Patterns", inline = "14")
+triStarChk             = input.bool(true, "Tri-Star",              group = "Candle Patterns", inline = "15")
+tweezerBottomChk       = input.bool(true, "Tweezer Bottom",        group = "Candle Patterns", inline = "15")
+tweezerTopChk          = input.bool(true, "Tweezer Top",           group = "Candle Patterns", inline = "15")
+upsideTasukiGapChk     = input.bool(true, "Upside Tasuki Gap",     group = "Candle Patterns", inline = "16")
+
+// [BODY OMITTED FROM THIS REFERENCE COPY — see TradingView for the full source]
+// The omitted body contains: pattern() helper, matrices for return/info, lbTip/mxTip
+// helpers, the backtest() function (entry/exit/equity logic), the run() dispatcher, and
+// the table render block. None of those are needed to ground the dashboard methodology
+// or the sign convention; the section above is the contract surface that matters.
+//
+// Original full source: see Architect's chat handoff 2026-04-29, or fetch from the
+// TradingView Community page (search "Candlestick Patterns on Backtest" by MUQWISHI).
