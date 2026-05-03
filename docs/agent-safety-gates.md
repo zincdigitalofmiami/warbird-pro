@@ -171,6 +171,9 @@ This guard is mandatory for GitHub repository-rule work because it verifies the
 active rulesets, CodeQL/default setup, PR merge state, status checks, and local
 branch drift before an agent retries a protected push or merge.
 
+GitHub is the only active check lane. Vercel Git checks/comments are disabled
+in `vercel.json` (`git.deploymentEnabled: false`, `github.silent: true`).
+
 ## 7. Required Completion Schema
 
 For implementation work, the final response must contain these exact headings:

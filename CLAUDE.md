@@ -149,3 +149,6 @@ Before claiming a branch is ready to push, merge, or unblock through GitHub, run
 This guard checks the active repository rulesets, CodeQL/default setup, PR merge
 state, status checks, and local branch drift. If it fails, report the exact
 GitHub blocker instead of retrying the push or merge.
+
+GitHub is the only check lane. Vercel Git checks/comments are disabled in
+`vercel.json` (`git.deploymentEnabled: false`, `github.silent: true`).

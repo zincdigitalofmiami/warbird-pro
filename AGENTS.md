@@ -243,6 +243,9 @@ If any `.pine` file is touched, run:
 
 - `npm run lint` is the standard lint gate.
 - `npm run build` must pass before every push.
+- GitHub checks are the only active merge lane. Vercel Git checks/comments are
+  disabled by repo config (`vercel.json` uses `git.deploymentEnabled: false`
+  with `github.silent: true`).
 - Before claiming a branch is ready to push, merge, or unblock through GitHub,
   run `./scripts/guards/check-github-merge-readiness.sh`. This guard must
   inspect active repository rulesets, CodeQL/default setup, PR merge state,
