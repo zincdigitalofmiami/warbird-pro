@@ -149,3 +149,12 @@ Before claiming a branch is ready to commit or push, run:
 This local guard runs real checks (lint, build, targeted pytest, and Pine guard
 routing when `.pine` files change). GitHub/Vercel hosted blocking checks are
 disabled; quality enforcement is local-first through Codex/Claude execution.
+
+Before claiming a PR or branch is mergeable or GitHub-unblocked, run:
+
+```bash
+./scripts/guards/check-github-merge-readiness.sh
+```
+
+That remote audit inspects repository rulesets, PR merge state, status checks,
+and branch drift. It does not replace the local quality lane.

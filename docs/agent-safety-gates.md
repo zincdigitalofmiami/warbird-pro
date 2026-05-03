@@ -175,6 +175,13 @@ GitHub/Vercel hosted blocking checks are disabled. Vercel Git rebuilds/comments
 are disabled in `vercel.json` (`git.deploymentEnabled: false`,
 `github.silent: true`) and by disconnected Vercel Git integration.
 
+Before claiming a PR or branch is mergeable or GitHub-unblocked:
+
+1. `./scripts/guards/check-github-merge-readiness.sh`
+
+This remote-state audit checks repository rulesets, PR merge state, status
+checks, and branch drift. It does not replace the local quality lane.
+
 ## 7. Required Completion Schema
 
 For implementation work, the final response must contain these exact headings:

@@ -246,6 +246,9 @@ If any `.pine` file is touched, run:
 - GitHub/Vercel hosted blocking checks are disabled for this repo. All
   pre-commit/pre-push verification must run through the single local lane:
   `./scripts/guards/check-local-quality-lane.sh`.
+- Before claiming a PR or branch is mergeable or GitHub-unblocked, run
+  `./scripts/guards/check-github-merge-readiness.sh` to inspect remote rulesets,
+  PR merge state, status checks, and branch drift.
 - Vercel Git rebuilds/comments are disabled by repo config
   (`vercel.json`: `git.deploymentEnabled: false`, `github.silent: true`) and
   by disconnected Vercel Git integration (`vercel git disconnect`).

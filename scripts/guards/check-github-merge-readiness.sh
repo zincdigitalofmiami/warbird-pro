@@ -24,8 +24,7 @@ Options:
 Checks:
   - GitHub CLI auth and repository resolution.
   - active branch rulesets, including CodeQL code-scanning requirements.
-  - GitHub CodeQL default setup when a ruleset requires CodeQL.
-  - local CodeQL workflow presence.
+  - GitHub CodeQL default setup and local workflow only when a ruleset requires CodeQL.
   - current PR mergeability and status-check rollup when a PR is available.
   - local branch drift that can make PR checks stale.
 USAGE
@@ -154,7 +153,7 @@ if [[ -n "$REPO" ]]; then
     if [[ "$DEFAULT_SETUP_STATE" == "configured" ]]; then
       pass "GitHub CodeQL default setup is configured (${default_languages:-no languages reported})."
     else
-      warn "GitHub CodeQL default setup state is '$DEFAULT_SETUP_STATE'."
+      info "GitHub CodeQL default setup state is '$DEFAULT_SETUP_STATE' (only required when a ruleset requires CodeQL)."
     fi
   else
     fail "could not inspect GitHub CodeQL default setup: $(cat "$tmp_dir/default-setup.err")"
@@ -172,7 +171,7 @@ else
   if [[ "$DEFAULT_SETUP_STATE" == "configured" ]]; then
     pass "local CodeQL workflow file is absent; GitHub default setup is the active CodeQL provider."
   else
-    warn "local CodeQL workflow file is absent; no local CodeQL provider is visible."
+    info "local CodeQL workflow file is absent (only required when a ruleset requires CodeQL and default setup is unavailable)."
   fi
 fi
 
