@@ -18,6 +18,12 @@ new TradingView export or Optuna trial set changes the accepted understanding.
 Do not reuse an old export or trial without checking that its trigger family and
 settings still match the current contract.
 
+V9 lane contract (2026-05-02): `warbird_pro_v9` is a separate Optuna lane over
+the active Warbird Pro rebuild indicator. It does not create a new Pine source,
+does not authorize Pine edits, and does not mutate the canonical fib anchor,
+fib visual, or EMA/MA setup. It admits manifest-backed ES/MES TradingView
+indicator CSV exports only and ignores NQ/MNQ exports.
+
 ## Source Of Truth
 
 Training rows may come only from:
@@ -28,6 +34,11 @@ Training rows may come only from:
 - deterministic columns derived from those Pine/TradingView exports
 
 No external feature stack is admitted.
+
+`warbird_pro_v9` may load ES and MES exports as separate rows from the same
+active Warbird Pro Pine surface. NQ/MNQ rows are ignored. No cross-symbol join,
+NQ leadership feature, Databento join, cloud table, or external feature stack is
+admitted into this lane.
 
 ## Entry Trigger Authority
 
@@ -80,6 +91,20 @@ Allowed tuning scope while lock is active:
 Any proposed fib-core change requires explicit approval plus before/after
 TradingView evidence with manifest coverage.
 
+## Warbird Pro V9 Exit Modeling
+
+The `warbird_pro_v9` lane models ATR/risk exits from existing Warbird Pro rebuild
+entry triggers. It must not treat `-.236` or any negative fib extension as a stop
+family/candidate. If `-.236` is exported, it is context only and may be carried
+as `fib_neg_0236_context`.
+
+Frozen during V9:
+
+- fib anchor ownership and ZigZag settings
+- fib ladder/visual construction
+- EMA/MA setup inputs and visual display
+- Pine source code until promotion approval
+
 ## Explicit Exclusions
 
 The active modeling dataset must not join:
@@ -122,6 +147,7 @@ Valid recommendations:
 - threshold changes
 - stop/target policy changes
 - Pine code-change proposals for explicit approval
+- V9 ATR/risk exit policy recommendations from ES/MES export evidence
 
 Invalid recommendations:
 
@@ -130,6 +156,8 @@ Invalid recommendations:
 - macro/FRED gates
 - daily-ingestion dependencies
 - invisible data joins not present in Pine output
+- V9 promotion based on NQ/MNQ, negative-fib stop candidates, or Pine edits made
+  before explicit promotion approval
 
 ## Validation
 

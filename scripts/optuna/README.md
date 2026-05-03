@@ -48,6 +48,10 @@ Rules:
 - Study names are operator-facing titles in `optuna-dashboard`. Use clear words with spaces that state the study purpose. Do not use snake_case, version labels, or generic names such as `<indicator>_study`.
 - `warbird_pro` is the only active main chart indicator key and maps to
   `indicators/warbird-pro-rebuild-fib-ml.pine`.
+- `warbird_pro_v9` is a separate Warbird Pro experiment lane for ES/MES-only
+  ATR/risk exit modeling. It reuses the active rebuild indicator exports, ignores
+  NQ/MNQ exports, excludes `-.236` as a stop candidate, and keeps `-.236` only
+  as optional context when present in an export.
 - `warbird_nexus_ml_rsi` is footprint-only: use the TradingView/Pine
   `request.footprint()` parquet + manifest. Do not use CSV exports, plain OHLCV
   parquet, Databento bars, or synthetic body/wick delta for that lane.

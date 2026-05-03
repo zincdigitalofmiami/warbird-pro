@@ -22,6 +22,13 @@ support/research Pine lane:
 All other Pine indicator, strategy, backtest, and fib-only variants are retired
 from the active `indicators/` surface.
 
+V9 lane update (2026-05-02): `warbird_pro_v9` is a separate Optuna lane for the
+same active Warbird Pro rebuild indicator. It models ATR/risk exits from
+manifest-backed TradingView exports on ES/MES only, ignores NQ/MNQ exports,
+excludes `-.236` and other negative fib extensions as stop candidates, keeps
+`-.236` only as optional context/export data, and freezes fib anchors, fib
+visuals, and EMA/MA setup until a champion is approved for Pine promotion.
+
 ## Current Contract
 
 - The canonical modeling object is the `Warbird Pro` Pine indicator behavior on
@@ -49,6 +56,8 @@ from the active `indicators/` surface.
   - `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
 - Optimization and modeling tools:
   - `scripts/optuna/`
+  - `scripts/optuna/warbird_pro_v9_profile.py`
+  - `scripts/optuna/workspaces/warbird_pro_v9/`
   - `scripts/ag/tv_auto_tune.py`
   - `scripts/ag/tune_strategy_params.py`
 - Artifacts:
@@ -161,6 +170,8 @@ Permitted modeling questions:
   trade density, and yearly consistency?
 - Which filter/module toggles improve or damage the signal?
 - Which stop/target policy works best inside the current Pine state machine?
+- In the `warbird_pro_v9` lane only, which ATR/risk exit policy works best for
+  existing Warbird Pro rebuild entry triggers across ES/MES exports?
 - Which Pine states or `ml_*` / `nexus_fp_*` exports explain winners versus
   failures?
 - Which settings are robust across IS/OOS windows?
@@ -170,6 +181,7 @@ Prohibited modeling questions:
 - Which macro/FRED/cross-asset feature should gate trades?
 - Which server-side model should score live alerts?
 - Which warehouse feature should be joined into the indicator decision?
+- Which NQ or cross-asset feature should gate V9 entries?
 
 ### Phase 4 - Explainability And Recommendation
 
@@ -237,6 +249,11 @@ budgets must be repriced before any Nexus edit.
   `pivotHighInWindow` / `pivotLowInWindow`; it has repeatedly produced wide-fib
   failures.
 - No settings result is trusted without TradingView indicator export evidence.
+- `warbird_pro_v9` is isolated from `warbird_pro`: it admits ES/MES TradingView
+  exports only, ignores NQ/MNQ, and optimizes ATR/risk exits without touching
+  Pine.
+- `-.236` is removed as a V9 stop candidate. It may remain only as an optional
+  exported context feature.
 - No forced TradingView launch/restart/process-kill automation.
 - Banned methods: `tv_launch`, `launch_tv_debug_mac.sh`,
   `pkill -f TradingView`, `killall TradingView`.

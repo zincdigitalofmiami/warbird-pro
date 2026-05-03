@@ -1,6 +1,15 @@
 #!/usr/bin/env node
 import readline from "node:readline";
-import { evaluate, getTargetInfo } from "../../.tradingview-mcp/src/connection.js";
+
+if (process.env.WB_ALLOW_LEGACY_TV_BRIDGE !== "1") {
+  console.error(
+    "[blocked] tv_bridge_worker.mjs is a legacy MCP bridge path and is disabled by default.\n" +
+      "Use direct CDP flow via scripts/ag/tv_auto_tune.py instead."
+  );
+  process.exit(2);
+}
+
+const { evaluate, getTargetInfo } = await import("../../.tradingview-mcp/src/connection.js");
 
 function normalizeResult(result) {
   if (result && typeof result === "object") {

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -33,9 +34,28 @@ from tv_auto_tune import (  # noqa: E402
     validate_trial_params,
 )
 
+LEGACY_BRIDGE_DEPRECATION_MSG = """\
+[blocked] Legacy TradingView MCP bridge path is disabled by default.
+
+Reason:
+- This path depends on .tradingview-mcp connection internals and has repeatedly
+  caused unstable/wrong-target TradingView sessions.
+- Active repo policy is direct CDP/manual-safe flow, one explicit command at a time.
+
+Use this instead:
+1) python scripts/ag/tv_auto_tune.py preflight
+2) python scripts/ag/tv_auto_tune.py run --batch-dir <dir>
+
+If you intentionally need the legacy bridge for forensic replay, rerun with:
+  --allow-legacy-bridge
+"""
+
 
 class BridgeClient:
-    def __init__(self, repo_root: Path):
+    def __init__(self, repo_root: Path, allow_legacy_bridge: bool):
+        proc_env = dict(os.environ)
+        if allow_legacy_bridge:
+            proc_env["WB_ALLOW_LEGACY_TV_BRIDGE"] = "1"
         self._proc = subprocess.Popen(
             ["node", str(repo_root / "scripts" / "ag" / "tv_bridge_worker.mjs")],
             cwd=repo_root,
@@ -44,6 +64,7 @@ class BridgeClient:
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            env=proc_env,
         )
         self._seq = 0
 
@@ -286,10 +307,14 @@ def build_failed_row(config: dict[str, Any], reason: str, message: str) -> dict[
 
 
 def run(args: argparse.Namespace) -> int:
+    if not args.allow_legacy_bridge:
+        print(LEGACY_BRIDGE_DEPRECATION_MSG, file=sys.stderr)
+        return 2
+
     space = load_json(args.space)
     trial_files = iter_trial_files(args.batch_dir)
 
-    bridge = BridgeClient(REPO_ROOT)
+    bridge = BridgeClient(REPO_ROOT, allow_legacy_bridge=args.allow_legacy_bridge)
     conn = None
     processed = 0
     recorded = 0
@@ -403,7 +428,7 @@ def run(args: argparse.Namespace) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run a phase batch via TradingView bridge (MCP connection.js path) and record authoritative TV_MCP_STRICT trials."
+        description="Legacy TradingView MCP bridge runner. Disabled by default; direct CDP via tv_auto_tune.py is the supported path."
     )
     parser.add_argument("--space", type=Path, required=True)
     parser.add_argument("--batch-dir", type=Path, required=True)
@@ -418,6 +443,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--survival-stop-usd", type=float, default=-37.5)
     parser.add_argument("--required-csv-start", default="2020-01-01")
     parser.add_argument("--footprint-available-from", default="2024-01-01")
+    parser.add_argument(
+        "--allow-legacy-bridge",
+        action="store_true",
+        help="Explicitly allow legacy MCP bridge execution for forensic replay only.",
+    )
     return parser.parse_args()
 
 

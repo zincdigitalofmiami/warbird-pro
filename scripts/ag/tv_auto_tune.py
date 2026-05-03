@@ -1224,7 +1224,9 @@ async def command_preflight_async(args: argparse.Namespace) -> int:
 
     print(
         f"Connecting to TradingView (symbol={runtime_context.get('symbol')} "
-        f"tf={runtime_context.get('timeframe')})..."
+        f"tf={runtime_context.get('timeframe')})...",
+        file=sys.stderr,
+        flush=True,
     )
     ws_url = await find_tv_chart_tab_for_context(runtime_context)
     print(f"CDP: {ws_url[:70]}...")
@@ -1443,7 +1445,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

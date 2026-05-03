@@ -69,6 +69,8 @@ The goal is pure PineScript trading-indicator modeling:
 - promote settings/build changes back into Pine after approval
 - keep `indicators/warbird-pro-rebuild-fib-ml.pine` as the only active main chart
   indicator
+- keep `warbird_pro_v9` as a separate Optuna lane for ES/MES-only ATR/risk exit
+  modeling over active Warbird Pro rebuild exports
 - keep the Nexus Pine files as the only active support/research indicator lane
 - retire and remove all other Pine indicator/strategy variants from the active
   `indicators/` surface
@@ -101,6 +103,9 @@ context, or agent-facing notes pointing at an older trigger or training surface.
   - `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine` —
     Nexus Optuna/footprint evidence lane (retained support/research lane)
 - `scripts/optuna/`: active local optimization workspaces and runner.
+  - `warbird_pro_v9` is isolated from `warbird_pro`; it admits ES/MES
+    TradingView exports only, ignores NQ/MNQ exports, and models ATR/risk exits
+    without Pine edits.
 - `scripts/ag/tv_auto_tune.py`, `scripts/ag/tune_strategy_params.py`: TradingView
   settings-trial helpers retained for Pine-derived modeling.
 - `artifacts/tuning/`: tuning suggestions, exports, and trial artifacts.
@@ -187,6 +192,9 @@ context, or agent-facing notes pointing at an older trigger or training surface.
 - On the first CDP/bridge failure, stop immediately and report the failure.
 - If CDP is unavailable, do not attempt recovery automation; stay read-only
   until the user explicitly requests a manual next step.
+- Legacy MCP bridge path (`scripts/ag/run_phase_batch_via_tv_bridge.py` +
+  `scripts/ag/tv_bridge_worker.mjs`) is disabled by default; use direct CDP
+  flow via `scripts/ag/tv_auto_tune.py`.
 
 ### Pine Verification
 
@@ -211,6 +219,11 @@ If any `.pine` file is touched, run:
 - Do not accept a settings result without indicator export evidence, manifest,
   row count, date range, exact Pine inputs, and the emitted label/export fields
   used by the run.
+- Warbird Pro V9 must not use `-.236` or other negative fib extensions as stop
+  candidates. `-.236` may remain only as a context/export feature while V9
+  models ATR/risk exits.
+- Warbird Pro V9 must ingest ES/MES TradingView exports only and ignore NQ/MNQ
+  exports.
 - Do not start training/modeling unless explicitly asked.
 - Nexus ML RSI Optuna must use TradingView/Pine `request.footprint()`
   `nexus_fp_*` evidence only. Do not tune Nexus from CSV exports, local OHLCV
