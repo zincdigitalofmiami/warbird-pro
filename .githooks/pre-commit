@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Enforce the single local check lane before any commit.
+# Enforce the Codex/Claude-owned Warbird precheck before any commit.
 
 set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 
-echo "INFO: pre-commit gate -> scripts/guards/check-local-quality-lane.sh"
-"$ROOT_DIR/scripts/guards/check-local-quality-lane.sh"
+echo "INFO: pre-commit gate -> scripts/guards/warbird-agent-precheck.sh"
+"$ROOT_DIR/scripts/guards/warbird-agent-precheck.sh" --mode pre-commit

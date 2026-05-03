@@ -161,15 +161,18 @@ Pine indicator-only contract is explicitly updated.
 
 If only docs changed, no build gate is required unless the docs describe a newly claimed operational truth that should have been validated.
 
-### Local Pre-Commit / Pre-Push Work
+### Agent-Owned Local Pre-Commit / Pre-Push Work
 
 Before claiming a branch is ready to commit or push:
 
-1. `./scripts/guards/check-local-quality-lane.sh`
+1. `./scripts/guards/warbird-agent-precheck.sh --mode manual`
 
-This guard is mandatory and is the single quality lane for Codex/Claude. It
-runs lint, build, targeted pytest checks, and Pine guard routing when `.pine`
-files are in scope.
+This guard is mandatory and is the Codex/Claude-owned precheck surface. The
+repo hooks call it automatically on commit and push. It writes an audit log to
+`.git/warbird-prechecks/`, refuses ambiguous working-tree state, runs lint,
+build, targeted pytest checks, contamination guards, TradingView force guards,
+canonical zoo checks, fib scanner checks, syntax checks, a Codex/Claude agent
+review, and Pine guard routing when `.pine` files are in scope.
 
 GitHub/Vercel hosted blocking checks are disabled. Vercel Git rebuilds/comments
 are disabled in `vercel.json` (`git.deploymentEnabled: false`,

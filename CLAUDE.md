@@ -138,17 +138,20 @@ Before committing any `.pine` edit:
 For docs-only work, run `npm run lint` and `npm run build` before pushing when
 the docs claim repo operational truth.
 
-## Local Quality Lane
+## Agent-Owned Local Quality Lane
 
-Before claiming a branch is ready to commit or push, run:
+All commits and pushes must pass the Codex/Claude-owned local gate:
 
 ```bash
-./scripts/guards/check-local-quality-lane.sh
+./scripts/guards/warbird-agent-precheck.sh --mode manual
 ```
 
-This local guard runs real checks (lint, build, targeted pytest, and Pine guard
-routing when `.pine` files change). GitHub/Vercel hosted blocking checks are
-disabled; quality enforcement is local-first through Codex/Claude execution.
+The active `.githooks/pre-commit` and `.githooks/pre-push` hooks call this gate
+automatically. It writes every attempt to `.git/warbird-prechecks/`, refuses
+ambiguous unstaged/untracked state during commits, runs the deterministic local
+quality lane, runs a Codex/Claude agent review, and puts ownership in the
+terminal output. GitHub and Vercel hosted blocking checks remain disabled;
+quality enforcement is local and agent-owned.
 
 Before claiming a PR or branch is mergeable or GitHub-unblocked, run:
 
