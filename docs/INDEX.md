@@ -23,6 +23,12 @@ other Pine variants are historical unless explicitly reopened. 5m/15m tuning
 must preserve the protected Warbird Pro fib anchor ownership and ladder math
 unless explicitly reopened with evidence.
 
+V9 lane lock: `warbird_pro_v9` is a separate Optuna workspace/profile for
+ES/MES-only ATR/risk exit modeling over the active Warbird Pro rebuild exports.
+It ignores NQ/MNQ exports, removes `-.236` as a stop candidate, keeps `-.236`
+only as optional context/export data, and does not authorize Pine edits until a
+champion is approved for promotion.
+
 ## Read Order
 
 1. `docs/MASTER_PLAN.md` — Warbird Indicator-Only Optuna Plan v6
@@ -66,6 +72,8 @@ unless explicitly reopened with evidence.
 - **Local `warbird` PG17 warehouse** = legacy/reference unless explicitly reopened
 - **Cloud Supabase** = runtime/support only, not training truth
 - Active artifacts: `artifacts/tuning/` and `scripts/optuna/workspaces/<indicator_key>/`
+- Active Warbird Pro V9 lane: `scripts/optuna/workspaces/warbird_pro_v9/` and
+  `scripts/optuna/warbird_pro_v9_profile.py`
 
 ## Startup Review Records
 

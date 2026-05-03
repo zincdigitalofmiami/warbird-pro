@@ -117,6 +117,9 @@ These rules are fail-closed:
     `pkill -f TradingView`, and `killall TradingView`.
 11. Live TradingView operations are one explicit command at a time; no retry loops.
 12. On first CDP/bridge failure, stop immediately and report.
+13. Legacy MCP bridge scripts (`scripts/ag/run_phase_batch_via_tv_bridge.py`
+    and `scripts/ag/tv_bridge_worker.mjs`) stay disabled by default; use direct
+    CDP path via `scripts/ag/tv_auto_tune.py`.
 
 ## 6. Verification Matrix
 
