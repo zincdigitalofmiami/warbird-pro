@@ -161,18 +161,19 @@ Pine indicator-only contract is explicitly updated.
 
 If only docs changed, no build gate is required unless the docs describe a newly claimed operational truth that should have been validated.
 
-### GitHub Push / Merge Work
+### Local Pre-Commit / Pre-Push Work
 
-Before claiming a branch is ready to push, merge, or unblock through GitHub:
+Before claiming a branch is ready to commit or push:
 
-1. `./scripts/guards/check-github-merge-readiness.sh`
+1. `./scripts/guards/check-local-quality-lane.sh`
 
-This guard is mandatory for GitHub repository-rule work because it verifies the
-active rulesets, CodeQL/default setup, PR merge state, status checks, and local
-branch drift before an agent retries a protected push or merge.
+This guard is mandatory and is the single quality lane for Codex/Claude. It
+runs lint, build, targeted pytest checks, and Pine guard routing when `.pine`
+files are in scope.
 
-GitHub is the only active check lane. Vercel Git checks/comments are disabled
-in `vercel.json` (`git.deploymentEnabled: false`, `github.silent: true`).
+GitHub/Vercel hosted blocking checks are disabled. Vercel Git rebuilds/comments
+are disabled in `vercel.json` (`git.deploymentEnabled: false`,
+`github.silent: true`) and by disconnected Vercel Git integration.
 
 ## 7. Required Completion Schema
 
