@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Enforce the Codex/Claude-owned Warbird precheck before any commit.
+# Enforce the Codex-owned Warbird precheck before any commit.
 
 set -euo pipefail
 

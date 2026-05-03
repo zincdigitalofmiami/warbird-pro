@@ -140,18 +140,19 @@ the docs claim repo operational truth.
 
 ## Agent-Owned Local Quality Lane
 
-All commits and pushes must pass the Codex/Claude-owned local gate:
+All commits and pushes must pass the Codex-owned local gate:
 
 ```bash
 ./scripts/guards/warbird-agent-precheck.sh --mode manual
 ```
 
 The active `.githooks/pre-commit` and `.githooks/pre-push` hooks call this gate
-automatically. It writes every attempt to `.git/warbird-prechecks/`, refuses
-ambiguous unstaged/untracked state during commits, runs the deterministic local
-quality lane, runs a Codex/Claude agent review, and puts ownership in the
-terminal output. GitHub and Vercel hosted blocking checks remain disabled;
-quality enforcement is local and agent-owned.
+automatically. It writes every attempt to `.git/warbird-prechecks/`.
+Pre-commit runs fast deterministic checks on staged files only. Pre-push
+warns on a dirty tree but checks the committed range being pushed, then runs the
+full local quality lane over `@{upstream}...HEAD`. Hooks must not run Vercel,
+GitHub hosted checks, Claude, or nested Codex reviews. Quality enforcement is
+local.
 
 Before claiming a PR or branch is mergeable or GitHub-unblocked, run:
 

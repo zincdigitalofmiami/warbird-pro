@@ -243,14 +243,16 @@ If any `.pine` file is touched, run:
 
 - `npm run lint` is the standard lint gate.
 - `npm run build` must pass before every push.
-- GitHub/Vercel hosted blocking checks are disabled for this repo. All
-  pre-commit/pre-push verification is owned by Codex or Claude Code through
-  `.githooks/pre-commit` and `.githooks/pre-push`, which call
+- Hosted platform checks are not part of the local gate. Vercel remains outside
+  this precheck path. Codex-owned pre-commit/pre-push verification is enforced
+  through `.githooks/pre-commit` and `.githooks/pre-push`, which call
   `./scripts/guards/warbird-agent-precheck.sh`.
 - `warbird-agent-precheck.sh` must create a `.git/warbird-prechecks/` audit log
-  on every commit/push attempt, refuse ambiguous working-tree state, and run the
-  deterministic local quality lane plus a Codex/Claude agent review before
-  allowing the operation.
+  on every commit/push attempt. Pre-commit runs fast deterministic checks on the
+  staged file set only. Pre-push warns on a dirty tree but checks the committed
+  range being pushed, then runs the full local quality lane over
+  `@{upstream}...HEAD`. Do not run Vercel, GitHub
+  hosted checks, Claude, or nested Codex reviews from git hooks.
 - Before claiming a PR or branch is mergeable or GitHub-unblocked, run
   `./scripts/guards/check-github-merge-readiness.sh` to inspect remote rulesets,
   PR merge state, status checks, and branch drift.

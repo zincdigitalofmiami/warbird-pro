@@ -167,16 +167,19 @@ Before claiming a branch is ready to commit or push:
 
 1. `./scripts/guards/warbird-agent-precheck.sh --mode manual`
 
-This guard is mandatory and is the Codex/Claude-owned precheck surface. The
-repo hooks call it automatically on commit and push. It writes an audit log to
-`.git/warbird-prechecks/`, refuses ambiguous working-tree state, runs lint,
-build, targeted pytest checks, contamination guards, TradingView force guards,
-canonical zoo checks, fib scanner checks, syntax checks, a Codex/Claude agent
-review, and Pine guard routing when `.pine` files are in scope.
+This guard is mandatory and is the Codex-owned local precheck surface. The repo
+hooks call it automatically on commit and push. It writes an audit log to
+`.git/warbird-prechecks/`. Pre-commit checks the staged files only and runs
+fast deterministic protections: whitespace, changed-file syntax, contamination,
+TradingView force-launch, canonical zoo, fib scanner, and Pine compile/lint when
+`.pine` files are staged. Pre-push warns on a dirty tree but checks the
+committed range being pushed, then runs the full local quality lane over
+`@{upstream}...HEAD`, including lint, build, and targeted pytest checks. Git
+hooks must not run Vercel, GitHub hosted checks, Claude, or nested Codex
+reviews.
 
-GitHub/Vercel hosted blocking checks are disabled. Vercel Git rebuilds/comments
-are disabled in `vercel.json` (`git.deploymentEnabled: false`,
-`github.silent: true`) and by disconnected Vercel Git integration.
+Hosted platform checks are not part of the local gate. Vercel remains outside
+this precheck path.
 
 Before claiming a PR or branch is mergeable or GitHub-unblocked:
 
