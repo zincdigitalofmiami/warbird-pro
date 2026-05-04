@@ -1,11 +1,11 @@
 // This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © Kirk / ZINC Digital
 //
-// Warbird Pro Rebuild — Fib Anchor + EMA/MA Gate + ML RSI Filter
+// Warbird Pro Rebuild — Fib Anchor + EMA/MA Gate + RSI Context
 // Source ownership:
 // - Fib engine/ladder visuals: Indicator A (preserved structure contract)
 // - MA gate: Indicator B (SMA + EMA(SMA) crossover family)
-// - ML/filters/visual controls: Indicator C (KNN RSI + filters + table + bar colors)
+// - RSI/filter/visual controls: Indicator C (RSI context + table + bar colors)
 //
 // Design goals:
 // - Keep the fib engine stable and deterministic
@@ -19,7 +19,7 @@
 // - request.security() calls use lookahead_off
 // - ZigZag pivots are consumed only after confirmation from library output
 //@version=6
-indicator("Warbird Pro Rebuild Fib ML", shorttitle="WB Rebuild", overlay=true, max_lines_count=260, max_labels_count=200, max_boxes_count=80)
+indicator("Warbird Pro V9", shorttitle="WB V9", overlay=true, max_lines_count=80, max_labels_count=32, max_boxes_count=8)
 import TradingView/ZigZag/7 as zigzag
 
 //=====================
@@ -75,12 +75,11 @@ int WIDTH_TARGET      = 2
 // SIGNAL LOGIC SETTINGS
 //=====================
 string groupSignal = "Signal Logic"
-int retestBars = input.int(1, "Acceptance Retest Window (bars)", minval=1, maxval=10, group=groupSignal)
+int retestContextBars = 3
 bool rejectWick = input.bool(true, "Rejection Uses Wick", group=groupSignal)
 bool oneShotEvent = input.bool(true, "One-shot Signals", group=groupSignal)
-bool requireAcceptRetest = input.bool(true, "Require Break+Retest Structure", group=groupSignal)
 bool usePatternConfirm = input.bool(true, "Require Winning Candlestick Pattern", group=groupSignal)
-bool useMlFilter = input.bool(true, "Require ML RSI Filter", group=groupSignal)
+bool useMlFilter = input.bool(false, "Require RSI Extreme Gate", group=groupSignal)
 bool useLiquiditySweepConfirm = input.bool(false, "Require Liquidity Sweep Confirm", group=groupSignal)
 bool gateShortsInBullTrend = input.bool(false, "Gate Shorts In Bull Regime", group=groupSignal)
 int signalCooldownBars = input.int(3, "Signal Cooldown Bars", minval=0, maxval=50, group=groupSignal)
@@ -89,6 +88,7 @@ float shortGateRsiFloor = input.float(55.0, "Bull Regime RSI Floor (Short Gate)"
 
 string groupExecution = "Execution Anchor"
 string optEntryLevelInput = input.string("0.618", "Execution Anchor", options=["0.500", "0.618", "0.786"], group=groupExecution)
+float tradeStopAtrMult = input.float(1.50, "Trade Telemetry ATR Stop", minval=0.25, maxval=10.0, step=0.25, group=groupExecution)
 
 string groupExh = "Exhaustion"
 bool useExhaustion = input.bool(true, "Enable Exhaustion Signals", group=groupExh)
@@ -108,40 +108,12 @@ color emaColorInput = input.color(#26A69A, "EMA Color", group=groupMa, inline="e
 int emaWidthInput = input.int(2, "", minval=1, maxval=5, group=groupMa, inline="ema")
 
 //=====================
-// ML RSI + FILTERS (Source C owner)
+// RSI CONTEXT (Source C owner)
 //=====================
-string groupRsi = "ML RSI Base"
+string groupRsi = "RSI Context"
 int rsiLength = input.int(14, "RSI Length", minval=1, group=groupRsi)
-bool useSmoothing = input.bool(true, "Apply RSI Smoothing", group=groupRsi)
-int smoothingLength = input.int(3, "Smoothing Length", minval=1, group=groupRsi)
-string maType = input.string("ALMA", "Smoothing MA Type", options=["SMA", "EMA", "DEMA", "TEMA", "WMA", "VWMA", "SMMA", "HMA", "LSMA", "ALMA"], group=groupRsi)
-int almaSigma = input.int(4, "ALMA Sigma", minval=1, group=groupRsi)
-
-string groupThreshold = "ML RSI Thresholds"
-float rsiOverbought = input.float(70.0, "Overbought", minval=50.0, maxval=100.0, step=0.1, group=groupThreshold)
-float rsiOversold = input.float(30.0, "Oversold", minval=0.0, maxval=50.0, step=0.1, group=groupThreshold)
-
-string groupKnn = "ML KNN"
-bool useKnn = input.bool(true, "Enable KNN", group=groupKnn)
-int knnNeighbors = input.int(5, "K Neighbors", minval=1, maxval=50, group=groupKnn)
-int knnLookback = input.int(100, "KNN Lookback", minval=20, maxval=500, group=groupKnn)
-float knnWeight = input.float(0.4, "KNN Weight", minval=0.0, maxval=1.0, step=0.05, group=groupKnn)
-int featureCount = input.int(3, "Feature Count", minval=1, maxval=5, group=groupKnn)
-
-string groupFilter = "Advanced Filtering"
-bool useFilter = input.bool(true, "Apply Additional Smoothing", group=groupFilter)
-string filterMethod = input.string("Kalman", "Filter Method", options=["None", "Kalman", "DoubleEMA", "ALMA"], group=groupFilter)
-float filterStrength = input.float(0.30, "Filter Strength", minval=0.01, maxval=1.0, step=0.01, group=groupFilter)
-
-//=====================
-// VISUAL SETTINGS (Source C owner)
-//=====================
-string groupVisual = "Visual Settings"
-bool neonEffect = input.bool(true, "Neon Effect", group=groupVisual)
-string colorScheme = input.string("Classic", "Color Palette", options=["Classic", "Deuteranopia", "Protanopia", "Tritanopia", "Monochrome"], group=groupVisual)
-string colorMode = input.string("Trend Following", "Coloring Mode", options=["None", "Trend Following", "Impulse"], group=groupVisual)
-bool showBarColors = input.bool(true, "Color Bars", group=groupVisual)
-int barColorAlpha = input.int(20, "Bar Color Alpha", minval=0, maxval=100, group=groupVisual)
+float rsiOverbought = input.float(75.0, "Bearish Extreme Above", minval=50.0, maxval=100.0, step=0.1, group=groupRsi)
+float rsiOversold = input.float(25.0, "Bullish Extreme Below", minval=0.0, maxval=50.0, step=0.1, group=groupRsi)
 
 string groupTable = "Table"
 bool showMlTable = input.bool(true, "Show ML Table", group=groupTable)
@@ -184,63 +156,6 @@ f_label_size(string sizeName) =>
 f_table_pos(string p) =>
     p == "Top Left" ? position.top_left : p == "Bottom Right" ? position.bottom_right : p == "Bottom Left" ? position.bottom_left : position.top_right
 
-calcMovingAverage(string type, float src, int length, int sigma) =>
-    float result = na
-    if type == "SMA"
-        result := ta.sma(src, length)
-    else if type == "EMA"
-        result := ta.ema(src, length)
-    else if type == "DEMA"
-        float e1 = ta.ema(src, length)
-        float e2 = ta.ema(e1, length)
-        result := 2.0 * e1 - e2
-    else if type == "TEMA"
-        float e1 = ta.ema(src, length)
-        float e2 = ta.ema(e1, length)
-        float e3 = ta.ema(e2, length)
-        result := 3.0 * (e1 - e2) + e3
-    else if type == "WMA"
-        float norm = 0.0
-        float sum = 0.0
-        for i = 0 to length - 1
-            float weight = float(length - i)
-            norm += weight
-            sum += src[i] * weight
-        result := norm > 0 ? sum / norm : src
-    else if type == "VWMA"
-        result := ta.vwma(src, length)
-    else if type == "SMMA"
-        result := ta.rma(src, length)
-    else if type == "HMA"
-        result := ta.hma(src, length)
-    else if type == "LSMA"
-        result := ta.linreg(src, length, 0)
-    else
-        result := ta.alma(src, length, 0.85, float(sigma))
-    result
-
-getMomentum(float source, int length) =>
-    source - source[length]
-
-getVolatility(float source, int length) =>
-    ta.stdev(source, length)
-
-getSlope(float source, int length) =>
-    ta.linreg(source, length, 0) - ta.linreg(source, length, 1)
-
-normalize(float source, int length) =>
-    float maxVal = ta.highest(source, length)
-    float minVal = ta.lowest(source, length)
-    float valueRange = maxVal - minVal
-    valueRange != 0 ? (source - minVal) / valueRange : 0.5
-
-euclideanDistance(array<float> v1, array<float> v2) =>
-    float sum = 0.0
-    int n = math.min(array.size(v1), array.size(v2))
-    for i = 0 to n - 1
-        sum += math.pow(array.get(v1, i) - array.get(v2, i), 2.0)
-    math.sqrt(sum)
-
 //=====================
 // Base metrics
 //=====================
@@ -271,147 +186,12 @@ bool provenBullishPattern = longLowerShadow or dragonflyDoji or risingWindow
 bool provenBearishPattern = longUpperShadow or shootingStar or bearishEngulfing or fallingWindow
 
 //=====================
-// ML RSI core
+// RSI context core
 //=====================
 float baseRsi = ta.rsi(close, rsiLength)
-float smoothedRsi = calcMovingAverage(maType, baseRsi, smoothingLength, almaSigma)
-float standardRsi = useSmoothing ? smoothedRsi : baseRsi
-
-knnEnhancedRsi(float src) =>
-    float enhancedRsi = src
-    float knnDivergence = 0.0
-    int effectiveK = 0
-    float adaptiveOversoldMl = 30.0
-    float adaptiveOverboughtMl = 70.0
-
-    var array<float> overBoughtCandidates = array.new_float()
-    var array<float> overSoldCandidates = array.new_float()
-    array.clear(overBoughtCandidates)
-    array.clear(overSoldCandidates)
-
-    var array<float> currentPoint = array.new_float()
-    array.clear(currentPoint)
-    array.push(currentPoint, normalize(src, knnLookback))
-    if featureCount >= 2
-        array.push(currentPoint, normalize(getMomentum(src, 3), knnLookback))
-    if featureCount >= 3
-        array.push(currentPoint, normalize(getVolatility(src, 10), knnLookback))
-    if featureCount >= 4
-        array.push(currentPoint, normalize(getSlope(src, 5), knnLookback))
-    if featureCount >= 5
-        array.push(currentPoint, normalize(getMomentum(close, 5), knnLookback))
-
-    var array<float> distances = array.new_float()
-    var array<int> indices = array.new_int()
-    array.clear(distances)
-    array.clear(indices)
-
-    for i = 6 to knnLookback
-        if i < bar_index
-            var array<float> historicalPoint = array.new_float()
-            array.clear(historicalPoint)
-            array.push(historicalPoint, normalize(src[i], knnLookback))
-            if featureCount >= 2
-                array.push(historicalPoint, normalize(getMomentum(src[i], 3), knnLookback))
-            if featureCount >= 3
-                array.push(historicalPoint, normalize(getVolatility(src[i], 10), knnLookback))
-            if featureCount >= 4
-                array.push(historicalPoint, normalize(getSlope(src[i], 5), knnLookback))
-            if featureCount >= 5
-                array.push(historicalPoint, normalize(getMomentum(close[i], 5), knnLookback))
-            if array.size(currentPoint) == array.size(historicalPoint)
-                float dist = euclideanDistance(currentPoint, historicalPoint)
-                array.push(distances, dist)
-                array.push(indices, i)
-
-    if array.size(distances) > 1
-        for i = 0 to array.size(distances) - 2
-            for j = 0 to array.size(distances) - 2 - i
-                if array.get(distances, j) > array.get(distances, j + 1)
-                    float tempDist = array.get(distances, j)
-                    array.set(distances, j, array.get(distances, j + 1))
-                    array.set(distances, j + 1, tempDist)
-                    int tempIdx = array.get(indices, j)
-                    array.set(indices, j, array.get(indices, j + 1))
-                    array.set(indices, j + 1, tempIdx)
-
-        float weightedSum = 0.0
-        float weightSum = 0.0
-        effectiveK := math.min(knnNeighbors, array.size(distances))
-        if effectiveK > 0
-            for i = 0 to effectiveK - 1
-                int idx = array.get(indices, i)
-                float dist = array.get(distances, i)
-                float weight = dist < 0.0001 ? 1.0 : 1.0 / dist
-
-                float neighborRsi = src[idx]
-                weightedSum += neighborRsi * weight
-                weightSum += weight
-
-                float futureReturn = close[idx - 5] - close[idx]
-                if futureReturn > close[idx] * 0.02
-                    array.push(overBoughtCandidates, src[idx])
-                if futureReturn < close[idx] * -0.02
-                    array.push(overSoldCandidates, src[idx])
-
-            if weightSum > 0.0
-                float knnRsi = weightedSum / weightSum
-                enhancedRsi := (1.0 - knnWeight) * src + knnWeight * knnRsi
-                enhancedRsi := math.max(0.0, math.min(100.0, enhancedRsi))
-
-                float diffSum = 0.0
-                int cnt = 0
-                for i = 0 to effectiveK - 1
-                    int idx = array.get(indices, i)
-                    diffSum += math.abs(src - src[idx])
-                    cnt += 1
-                knnDivergence := cnt > 0 ? diffSum / cnt : 0.0
-
-    adaptiveOverboughtMl := array.size(overBoughtCandidates) > 0 ? array.avg(overBoughtCandidates) : 70.0
-    adaptiveOversoldMl := array.size(overSoldCandidates) > 0 ? array.avg(overSoldCandidates) : 30.0
-
-    [enhancedRsi, knnDivergence, effectiveK, adaptiveOversoldMl, adaptiveOverboughtMl]
-
-[knnRsi, knnDivergence, kEffective, adaptiveOversoldMl, adaptiveOverboughtMl] = knnEnhancedRsi(standardRsi)
+float finalRsi = baseRsi
 float actualOverbought = rsiOverbought
 float actualOversold = rsiOversold
-float mlRsi = useKnn ? knnRsi : standardRsi
-
-float filteredRsi = switch filterMethod
-    "None" => mlRsi
-    "Kalman" =>
-        var float kfRsi = na
-        kfRsi := na(kfRsi) ? mlRsi : kfRsi + filterStrength * (mlRsi - kfRsi)
-        kfRsi
-    "DoubleEMA" =>
-        int dLenFast = math.max(1, math.round(filterStrength * 10))
-        int dLenSlow = math.max(1, math.round(filterStrength * 5))
-        float ema1 = ta.ema(mlRsi, dLenFast)
-        ta.ema(ema1, dLenSlow)
-    "ALMA" =>
-        int aLen = math.max(1, math.round(filterStrength * 20))
-        ta.alma(mlRsi, aLen, 0.0, 6.0)
-    => mlRsi
-
-float finalRsi = useFilter ? filteredRsi : mlRsi
-
-[bullColor, bearColor] = switch colorScheme
-    "Classic" => [neonEffect ? color.rgb(0, 255, 187) : color.rgb(0, 183, 18), neonEffect ? color.rgb(255, 17, 0) : color.rgb(195, 0, 16)]
-    "Deuteranopia" => [color.rgb(0, 170, 255), color.rgb(255, 204, 0)]
-    "Protanopia" => [color.rgb(0, 170, 230), color.rgb(230, 175, 0)]
-    "Tritanopia" => [color.rgb(255, 112, 0), color.rgb(0, 33, 171)]
-    => [color.rgb(222, 226, 230), color.rgb(73, 80, 87)]
-
-color barBullColor = #0A7884
-color barBearColor = #C60000
-
-color indicatorColor = switch colorMode
-    "None" => na
-    "Trend Following" => finalRsi > 50 ? bullColor : bearColor
-    "Impulse" => finalRsi > actualOverbought ? bullColor : finalRsi < actualOversold ? bearColor : finalRsi < 55 and finalRsi > 45 ? color.white : color.gray
-    => na
-
-barcolor(showBarColors ? color.new(finalRsi > 50 ? barBullColor : barBearColor, barColorAlpha) : na)
 
 //=====================
 // MA crossover (Source B logic family)
@@ -435,12 +215,8 @@ bool liqSweepBear = high > swingHigh and close < swingHigh
 //=====================
 float htfConfTolPct = 0.15
 [htf1hHigh, htf1hLow] = request.security(syminfo.tickerid, "60", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[htf4hHigh, htf4hLow] = request.security(syminfo.tickerid, "240", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[htf1dHigh, htf1dLow] = request.security(syminfo.tickerid, "D", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 float htf1hRange = nz(htf1hHigh - htf1hLow)
-float htf4hRange = nz(htf4hHigh - htf4hLow)
-float htf1dRange = nz(htf1dHigh - htf1dLow)
 
 htfFibPrice(float htfHigh, float htfLow, float htfRng, float ratio) =>
     htfRng <= 0 ? na : htfLow + htfRng * ratio
@@ -448,12 +224,6 @@ htfFibPrice(float htfHigh, float htfLow, float htfRng, float ratio) =>
 float htf1hP382 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_382)
 float htf1hP500 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_PIVOT)
 float htf1hP618 = htfFibPrice(htf1hHigh, htf1hLow, htf1hRange, FIB_618)
-float htf4hP382 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_382)
-float htf4hP500 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_PIVOT)
-float htf4hP618 = htfFibPrice(htf4hHigh, htf4hLow, htf4hRange, FIB_618)
-float htf1dP382 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_382)
-float htf1dP500 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_PIVOT)
-float htf1dP618 = htfFibPrice(htf1dHigh, htf1dLow, htf1dRange, FIB_618)
 
 htfConfluenceCheck(float level15m, float currentFibRange) =>
     if na(level15m) or na(currentFibRange) or currentFibRange <= 0
@@ -466,18 +236,6 @@ htfConfluenceCheck(float level15m, float currentFibRange) =>
         if not na(htf1hP500) and math.abs(level15m - htf1hP500) <= tol
             hits += 1
         if not na(htf1hP618) and math.abs(level15m - htf1hP618) <= tol
-            hits += 1
-        if not na(htf4hP382) and math.abs(level15m - htf4hP382) <= tol
-            hits += 1
-        if not na(htf4hP500) and math.abs(level15m - htf4hP500) <= tol
-            hits += 1
-        if not na(htf4hP618) and math.abs(level15m - htf4hP618) <= tol
-            hits += 1
-        if not na(htf1dP382) and math.abs(level15m - htf1dP382) <= tol
-            hits += 1
-        if not na(htf1dP500) and math.abs(level15m - htf1dP500) <= tol
-            hits += 1
-        if not na(htf1dP618) and math.abs(level15m - htf1dP618) <= tol
             hits += 1
         hits
 
@@ -573,14 +331,21 @@ float zoneLower = math.min(p618, p786)
 float zoneFillUpper = math.max(p382, p618)
 float zoneFillLower = math.min(p382, p618)
 
+float rollingHigh8 = ta.highest(high, 8)
+float rollingHigh21 = ta.highest(high, 21)
+float rollingHigh55 = ta.highest(high, 55)
+float rollingLow8 = ta.lowest(low, 8)
+float rollingLow21 = ta.lowest(low, 21)
+float rollingLow55 = ta.lowest(low, 55)
+
 float confluenceQuality = na
 if isValid
     float anchorRange = fibRange
     float tol = anchorRange * fibConfluenceTolPct * 0.01
     int confHits = 0
-    float[] rH = array.from(ta.highest(high, 8), ta.highest(high, 13), ta.highest(high, 21), ta.highest(high, 34), ta.highest(high, 55))
-    float[] rL = array.from(ta.lowest(low, 8), ta.lowest(low, 13), ta.lowest(low, 21), ta.lowest(low, 34), ta.lowest(low, 55))
-    for i = 0 to 4
+    float[] rH = array.from(rollingHigh8, rollingHigh21, rollingHigh55)
+    float[] rL = array.from(rollingLow8, rollingLow21, rollingLow55)
+    for i = 0 to 2
         float rollingH = array.get(rH, i)
         float rollingL = array.get(rL, i)
         float rollingRange = rollingH - rollingL
@@ -615,7 +380,7 @@ bool breakInDir = zoneReady and confirmed ? (dir == 1 ? close > zoneUpper and cl
 if breakInDir
     lastBreakBar := bar_index
 int barsSinceBreak = na(lastBreakBar) ? int(na) : bar_index - lastBreakBar
-bool acceptInDir = zoneReady and confirmed and not na(barsSinceBreak) and barsSinceBreak > 0 and barsSinceBreak <= retestBars and (dir == 1 ? low <= zoneUpper and close > zoneUpper : high >= zoneLower and close < zoneLower)
+bool acceptInDir = zoneReady and confirmed and not na(barsSinceBreak) and barsSinceBreak > 0 and barsSinceBreak <= retestContextBars and (dir == 1 ? low <= zoneUpper and close > zoneUpper : high >= zoneLower and close < zoneLower)
 bool rejectAtZone = zoneReady and confirmed and (rejectWick ? (dir == 1 ? high >= zoneLower and close < zoneLower : low <= zoneUpper and close > zoneUpper) : (dir == 1 ? close < zoneLower : close > zoneUpper))
 
 bool entryZoneTouched = not na(entryZoneUpper) and not na(entryZoneLower) and high >= entryZoneLower and low <= entryZoneUpper
@@ -624,12 +389,15 @@ float entryLevel = fibPrice(optEntryRatio)
 bool entryAnchorLong = confirmed and not na(entryLevel) and low <= entryLevel and close >= entryLevel
 bool entryAnchorShort = confirmed and not na(entryLevel) and high >= entryLevel and close <= entryLevel
 
-bool mlLongBias = finalRsi > 50 or ta.crossover(finalRsi, actualOversold)
-bool mlShortBias = finalRsi < 50 or ta.crossunder(finalRsi, actualOverbought)
+bool rsiStanceBull = finalRsi <= actualOversold
+bool rsiStanceBear = finalRsi >= actualOverbought
+bool rsiStanceNeutral = not rsiStanceBull and not rsiStanceBear
+bool mlLongBias = rsiStanceBull
+bool mlShortBias = rsiStanceBear
 bool shortGate = gateShortsInBullTrend and maBull and finalRsi >= shortGateRsiFloor
 
-bool longStructureOk = requireAcceptRetest ? (dir == 1 and acceptInDir) : (dir == 1 and (acceptInDir or rejectAtZone))
-bool shortStructureOk = requireAcceptRetest ? (dir == -1 and acceptInDir) : (dir == -1 and (acceptInDir or rejectAtZone))
+bool longStructureOk = dir == 1
+bool shortStructureOk = dir == -1
 bool longPatternOk = not usePatternConfirm or provenBullishPattern
 bool shortPatternOk = not usePatternConfirm or provenBearishPattern
 bool longSweepOk = not useLiquiditySweepConfirm or liqSweepBull
@@ -655,6 +423,70 @@ if entryLongTrigger or entryShortTrigger
 bool extensionTouch = not na(p1272) and not na(pT2) and (dir == 1 ? (high >= p1272 - atr14 * exhaustionLevelAtrTol or high >= pT2 - atr14 * exhaustionLevelAtrTol) : (low <= p1272 + atr14 * exhaustionLevelAtrTol or low <= pT2 + atr14 * exhaustionLevelAtrTol))
 bool exhaustionLong = useExhaustion and confirmed and dir == 1 and extensionTouch and provenBearishPattern and finalRsi >= actualOverbought
 bool exhaustionShort = useExhaustion and confirmed and dir == -1 and extensionTouch and provenBullishPattern and finalRsi <= actualOversold
+
+//=====================
+// Trade state (table + export telemetry)
+//=====================
+var bool tradeActive = false
+var int tradeSide = 0
+var float tradeEntryPrice = na
+var float tradeStopPrice = na
+var float tradeTargetPrice = na
+var int tradeEntryBar = na
+var int tradeClosedCount = 0
+var int tradeWinCount = 0
+var int tradeLossCount = 0
+var int tradeLastExitOutcome = 0  // +1 target, -1 stop, 0 unchanged
+
+float longStopCandidate = not na(entryLevel) ? entryLevel - atr14 * tradeStopAtrMult : na
+float shortStopCandidate = not na(entryLevel) ? entryLevel + atr14 * tradeStopAtrMult : na
+float longTargetCandidate = pT1
+float shortTargetCandidate = pT1
+
+if not tradeActive
+    if entryLongTrigger and not na(entryLevel) and not na(longStopCandidate) and not na(longTargetCandidate)
+        tradeActive := true
+        tradeSide := 1
+        tradeEntryPrice := entryLevel
+        tradeStopPrice := longStopCandidate
+        tradeTargetPrice := longTargetCandidate
+        tradeEntryBar := bar_index
+    else if entryShortTrigger and not na(entryLevel) and not na(shortStopCandidate) and not na(shortTargetCandidate)
+        tradeActive := true
+        tradeSide := -1
+        tradeEntryPrice := entryLevel
+        tradeStopPrice := shortStopCandidate
+        tradeTargetPrice := shortTargetCandidate
+        tradeEntryBar := bar_index
+
+if tradeActive and not na(tradeEntryBar) and bar_index > tradeEntryBar
+    bool stopHit = false
+    bool targetHit = false
+    if tradeSide == 1
+        stopHit := not na(tradeStopPrice) and low <= tradeStopPrice
+        targetHit := not na(tradeTargetPrice) and high >= tradeTargetPrice
+    else if tradeSide == -1
+        stopHit := not na(tradeStopPrice) and high >= tradeStopPrice
+        targetHit := not na(tradeTargetPrice) and low <= tradeTargetPrice
+    if stopHit or targetHit
+        tradeClosedCount += 1
+        if stopHit
+            tradeLossCount += 1
+            tradeLastExitOutcome := -1
+        else
+            tradeWinCount += 1
+            tradeLastExitOutcome := 1
+        tradeActive := false
+        tradeSide := 0
+        tradeEntryPrice := na
+        tradeStopPrice := na
+        tradeTargetPrice := na
+        tradeEntryBar := na
+
+int tradeBarsActive = tradeActive and not na(tradeEntryBar) ? bar_index - tradeEntryBar : 0
+float tradeRiskPoints = tradeActive and not na(tradeEntryPrice) and not na(tradeStopPrice) ? math.abs(tradeEntryPrice - tradeStopPrice) : na
+float tradePnlPoints = tradeActive and not na(tradeEntryPrice) ? (tradeSide == 1 ? close - tradeEntryPrice : tradeEntryPrice - close) : na
+float tradePnlR = tradeActive and not na(tradeRiskPoints) and tradeRiskPoints > 0 ? tradePnlPoints / tradeRiskPoints : na
 
 //=====================
 // Draw fib ladder
@@ -784,63 +616,67 @@ plot(showMaLines ? xMA : na, "MA (SMA)", maColorInput, maWidthInput)
 plot(showMaLines ? xEMA : na, "EMA(on MA)", emaColorInput, emaWidthInput)
 
 //=====================
-// ML table
+// Status table
 //=====================
-string modeUsed = colorMode
-string context = switch colorMode
-    "Trend Following" => finalRsi > 50 ? "Bullish Trend" : "Bearish Trend"
-    "Impulse" => finalRsi > actualOverbought ? "Bullish Impulse" : finalRsi < actualOversold ? "Bearish Impulse" : "None"
-    => "None"
-string mlStatus = useKnn ? "YES" : "NO"
+bool fibTrendBull = isValid and dir == 1 and close >= fibMidpoint
+bool fibTrendBear = isValid and dir == -1 and close <= fibMidpoint
+bool maTrendBull = maBull and close >= xEMA
+bool maTrendBear = maBear and close <= xEMA
+string trendState = maTrendBull and fibTrendBull ? "Bull Trend" : maTrendBear and fibTrendBear ? "Bear Trend" : maTrendBull ? "Bull MA" : maTrendBear ? "Bear MA" : fibTrendBull ? "Bull Fib" : fibTrendBear ? "Bear Fib" : "Neutral"
+string rsiStance = rsiStanceBull ? "Bull Extreme" : rsiStanceBear ? "Bear Extreme" : "Neutral"
+string rsiText = rsiStance + " " + str.tostring(finalRsi, "#.##")
+string liquidityState = liqSweepBull ? "Buy-side Sweep" : liqSweepBear ? "Sell-side Sweep" : "None"
+string liqLevelsText = "Buy " + str.tostring(swingHigh, format.mintick) + " / Sell " + str.tostring(swingLow, format.mintick)
+string tradeStateText = tradeActive ? (tradeSide == 1 ? "Long" : "Short") : "Flat"
+string tradeStatsText = tradeActive ? "R " + str.tostring(tradePnlR, "#.##") + " | Pts " + str.tostring(tradePnlPoints, format.mintick) + " | Bars " + str.tostring(tradeBarsActive) : "Closed " + str.tostring(tradeClosedCount) + " | W " + str.tostring(tradeWinCount) + " | L " + str.tostring(tradeLossCount)
+bool entryAnchorForDir = dir == 1 ? entryAnchorLong : entryAnchorShort
+bool structureForDir = dir == 1 ? longStructureOk : shortStructureOk
+bool patternForDir = dir == 1 ? longPatternOk : shortPatternOk
+bool maForDir = dir == 1 ? maLongOk : maShortOk
+bool rsiForDir = dir == 1 ? mlLongOk : mlShortOk
+string blockedBy = tradeActive ? "In Trade" : not isValid ? "Fib Invalid" : not entryZoneTouched ? "No Fib Touch" : not entryAnchorForDir ? "Awaiting Fib Reclaim" : not structureForDir ? "Structure" : not patternForDir ? "Pattern" : not maForDir ? "MA Gate" : not rsiForDir ? "RSI Gate" : not cooldownOk ? "Cooldown" : shortGate ? "Short Gate" : "None"
+string upcomingTrade = tradeActive ? "None" : longCore ? "Long Ready" : shortCore ? "Short Ready" : entryAnchorLong ? "Long Watch" : entryAnchorShort ? "Short Watch" : "None"
+string entryText = tradeActive ? str.tostring(tradeEntryPrice, format.mintick) : not na(entryLevel) ? str.tostring(entryLevel, format.mintick) : "na"
+string tpSlText = tradeActive ? "TP " + str.tostring(tradeTargetPrice, format.mintick) + " / SL " + str.tostring(tradeStopPrice, format.mintick) : "TP -- / SL --"
 string signalState = entryLongTrigger ? "LONG" : entryShortTrigger ? "SHORT" : exhaustionLong ? "EXH-LONG" : exhaustionShort ? "EXH-SHORT" : "IDLE"
 
 var table mlTable = na
 if barstate.isfirst and showMlTable
-    mlTable := table.new(f_table_pos(tablePositionInput), 2, 6, bgcolor=#160d0db3, border_color=#160d0db3, border_width=1, frame_color=color.white, frame_width=1, force_overlay=true)
+    mlTable := table.new(f_table_pos(tablePositionInput), 2, 6, bgcolor=#000000, border_color=#000000, border_width=1, frame_color=color.white, frame_width=1, force_overlay=true)
 
-if showMlTable and not na(mlTable) and bar_index % 10 == 0
-    table.cell(mlTable, 0, 0, "Mode", text_color=color.white, bgcolor=#160d0db3)
-    table.cell(mlTable, 1, 0, modeUsed, text_color=color.white, bgcolor=#160d0db3)
-    table.cell(mlTable, 0, 1, "Context", text_color=color.white, bgcolor=#160d0db3)
-    table.cell(mlTable, 1, 1, context, text_color=color.white, bgcolor=#160d0db3)
-    table.cell(mlTable, 0, 2, "Machine Learning", text_color=color.white, bgcolor=#160d0db3)
-    table.cell(mlTable, 1, 2, mlStatus, text_color=color.white, bgcolor=#160d0db3)
-    table.cell(mlTable, 0, 3, "OB/OS", text_color=color.white, bgcolor=#160d0db3)
-    table.cell(mlTable, 1, 3, str.tostring(actualOverbought) + " / " + str.tostring(actualOversold), text_color=color.white, bgcolor=color.new(color.black, 70))
-    table.cell(mlTable, 0, 4, "RSI", text_color=color.white, bgcolor=#160d0db3)
-    table.cell(mlTable, 1, 4, str.tostring(finalRsi, "#.##"), text_color=color.white, bgcolor=#160d0db3)
-    table.cell(mlTable, 0, 5, "State", text_color=color.white, bgcolor=#160d0db3)
-    table.cell(mlTable, 1, 5, signalState, text_color=color.white, bgcolor=#160d0db3)
+if showMlTable and not na(mlTable) and barstate.islast
+    table.cell(mlTable, 0, 0, "Trend", text_color=color.white, bgcolor=#000000)
+    table.cell(mlTable, 1, 0, trendState, text_color=color.white, bgcolor=#000000)
+    table.cell(mlTable, 0, 1, "RSI", text_color=color.white, bgcolor=#000000)
+    table.cell(mlTable, 1, 1, rsiText, text_color=color.white, bgcolor=#000000)
+    table.cell(mlTable, 0, 2, "Trade", text_color=color.white, bgcolor=#000000)
+    table.cell(mlTable, 1, 2, tradeStateText, text_color=color.white, bgcolor=#000000)
+    table.cell(mlTable, 0, 3, "Blocked By", text_color=color.white, bgcolor=#000000)
+    table.cell(mlTable, 1, 3, blockedBy, text_color=color.white, bgcolor=#000000)
+    table.cell(mlTable, 0, 4, "TP/SL", text_color=color.white, bgcolor=#000000)
+    table.cell(mlTable, 1, 4, tpSlText, text_color=color.white, bgcolor=#000000)
+    table.cell(mlTable, 0, 5, "Signal", text_color=color.white, bgcolor=#000000)
+    table.cell(mlTable, 1, 5, signalState, text_color=color.white, bgcolor=#000000)
 
 //=====================
 // Hidden Optuna exports
 //=====================
 plot(fibRange, "fib_range", display=display.none, editable=false)
 plot(float(dir), "ml_direction_code", display=display.none, editable=false)
-plot(nz(confluenceQuality), "confluence_quality", display=display.none, editable=false)
-plot(float(htfConfPivot), "htf_conf_pivot", display=display.none, editable=false)
-plot(float(htfConf382), "htf_conf_382", display=display.none, editable=false)
-plot(float(htfConf618), "htf_conf_618", display=display.none, editable=false)
 plot(float(htfConfTotal), "htf_conf_total", display=display.none, editable=false)
 
 plot(finalRsi, "ml_rsi_value", display=display.none, editable=false)
-plot(knnDivergence, "ml_knn_divergence", display=display.none, editable=false)
-plot(float(kEffective), "ml_knn_effective_k", display=display.none, editable=false)
-plot(useKnn ? 1.0 : 0.0, "ml_knn_enabled", display=display.none, editable=false)
-plot(useFilter ? 1.0 : 0.0, "ml_filter_enabled", display=display.none, editable=false)
-plot(actualOverbought, "ml_overbought", display=display.none, editable=false)
-plot(actualOversold, "ml_oversold", display=display.none, editable=false)
-
-plot(xMA, "ml_ma_sma", display=display.none, editable=false)
-plot(xEMA, "ml_ema_of_ma", display=display.none, editable=false)
+plot(rsiStanceBull ? 1.0 : rsiStanceBear ? -1.0 : 0.0, "ml_rsi_stance_code", display=display.none, editable=false)
 plot(maBull ? 1.0 : maBear ? -1.0 : 0.0, "ml_ma_bias", display=display.none, editable=false)
 
 plot(provenBullishPattern ? 1.0 : 0.0, "ml_bull_pattern", display=display.none, editable=false)
 plot(provenBearishPattern ? 1.0 : 0.0, "ml_bear_pattern", display=display.none, editable=false)
 plot(liqSweepBull ? 1.0 : liqSweepBear ? -1.0 : 0.0, "ml_liq_sweep", display=display.none, editable=false)
-plot(acceptInDir ? 1.0 : 0.0, "ml_accept_in_dir", display=display.none, editable=false)
-plot(rejectAtZone ? 1.0 : 0.0, "ml_reject_zone", display=display.none, editable=false)
+
 plot(entryLongTrigger ? 1.0 : 0.0, "ml_entry_long_trigger", display=display.none, editable=false)
 plot(entryShortTrigger ? 1.0 : 0.0, "ml_entry_short_trigger", display=display.none, editable=false)
-plot(exhaustionLong ? 1.0 : 0.0, "ml_exhaustion_long", display=display.none, editable=false)
-plot(exhaustionShort ? 1.0 : 0.0, "ml_exhaustion_short", display=display.none, editable=false)
+
+plot(tradeEntryPrice, "ml_trade_entry", display=display.none, editable=false)
+plot(tradeStopPrice, "ml_trade_stop", display=display.none, editable=false)
+plot(tradeTargetPrice, "ml_trade_tp", display=display.none, editable=false)
+plot(float(tradeLastExitOutcome), "ml_last_exit_outcome", display=display.none, editable=false)
