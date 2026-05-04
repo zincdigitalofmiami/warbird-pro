@@ -10,7 +10,14 @@ import pytest
 from scripts.optuna import warbird_pro_v9_profile as profile
 
 
-def _write_export(path: Path, *, symbol: str, trigger_every: int = 3) -> None:
+def _write_export(
+    path: Path,
+    *,
+    symbol: str,
+    trigger_every: int = 3,
+    capture_method: str = "TRADINGVIEW_INDICATOR_CSV",
+    indicator_file: str | None = profile.PINE_FILE,
+) -> None:
     rows = []
     start = pd.Timestamp("2026-01-02T14:30:00Z")
     for idx in range(40):
@@ -31,18 +38,16 @@ def _write_export(path: Path, *, symbol: str, trigger_every: int = 3) -> None:
     frame = pd.DataFrame(rows)
     frame.to_csv(path, index=False)
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    path.with_suffix(".manifest.json").write_text(
-        json.dumps(
-            {
-                "capture_method": "TRADINGVIEW_INDICATOR_CSV",
-                "indicator_file": profile.PINE_FILE,
-                "trigger_family": profile.TRIGGER_FAMILY,
-                "symbol": symbol,
-                "timeframe": "5",
-                "sha256": digest,
-            }
-        )
-    )
+    manifest = {
+        "capture_method": capture_method,
+        "trigger_family": profile.TRIGGER_FAMILY,
+        "symbol": symbol,
+        "timeframe": "5",
+        "sha256": digest,
+    }
+    if indicator_file is not None:
+        manifest["indicator_file"] = indicator_file
+    path.with_suffix(".manifest.json").write_text(json.dumps(manifest))
 
 
 def test_v9_contract_excludes_fib_negative_stop_candidates() -> None:
@@ -90,3 +95,22 @@ def test_v9_loader_keeps_neg236_as_context_not_stop(tmp_path: Path, monkeypatch:
     assert "fib_neg_0236_context" in frame.columns
     assert frame["fib_neg_0236_context"].notna().any()
     assert "stopFamilyId" not in profile.CATEGORICAL_PARAMS
+
+
+def test_v9_loader_accepts_databento_training_data_without_indicator_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    export_dir = tmp_path / "exports"
+    export_dir.mkdir()
+    _write_export(
+        export_dir / "mes_databento.csv",
+        symbol="MES1!",
+        capture_method="DATABENTO_OHLCV_CSV",
+        indicator_file=None,
+    )
+    monkeypatch.setattr(profile, "OPTUNA_DIR", tmp_path)
+
+    frame = profile.load_data()
+
+    assert set(frame["symbol_root"]) == {"MES"}
+    assert frame["_source_kind"].eq("DATABENTO_OHLCV_CSV").all()

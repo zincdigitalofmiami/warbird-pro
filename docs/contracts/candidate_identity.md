@@ -5,14 +5,15 @@
 
 ## Purpose
 
-Defines identity for Pine-derived modeling rows and trials.
+Defines identity for active-contract modeling rows and trials.
 
 ## Same-Run Rule
 
-Two exports belong to the same modeling run only when all of the following
+Two source files belong to the same modeling run only when all of the following
 match:
 
-- indicator file
+- source kind / capture method
+- indicator file when the source is a Pine/TradingView export
 - repo commit or indicator version
 - symbol
 - timeframe
@@ -27,6 +28,13 @@ For indicator-state rows, identity is:
 - export manifest hash
 - bar timestamp
 - direction/state fields when present
+
+For Databento market-data rows, identity is:
+
+- source manifest hash
+- symbol / normalized root
+- bar timestamp
+- timeframe / schema
 
 For Strategy Tester trades, identity is:
 

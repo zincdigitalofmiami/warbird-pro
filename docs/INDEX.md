@@ -16,18 +16,20 @@ documented evidence snapshot. They may change after new TradingView exports and
 Optuna trials. Any accepted change must update this indexed authority set in
 the same commit.
 
-Current checkpoint lock (2026-05-02): `indicators/warbird-pro-rebuild-fib-ml.pine`
-is the only active main chart indicator, Nexus is retained via
+Current checkpoint lock (2026-05-02): **Warbird Pro V9**
+(`indicators/warbird-pro-v9.pine`) is the only active main chart indicator,
+Nexus is retained via
 `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`, and all
 other Pine variants are historical unless explicitly reopened. 5m/15m tuning
 must preserve the protected Warbird Pro fib anchor ownership and ladder math
 unless explicitly reopened with evidence.
 
 V9 lane lock: `warbird_pro_v9` is a separate Optuna workspace/profile for
-ES/MES-only ATR/risk exit modeling over the active Warbird Pro rebuild exports.
-It ignores NQ/MNQ exports, removes `-.236` as a stop candidate, keeps `-.236`
-only as optional context/export data, and does not authorize Pine edits until a
-champion is approved for promotion.
+ES/MES-only ATR/risk exit modeling over active Warbird Pro V9 training rows
+from TradingView exports or Databento market data. It ignores NQ/MNQ rows,
+removes `-.236` as a stop candidate, keeps `-.236` only as optional
+context/export data, and does not authorize Pine edits until a champion is
+approved for promotion.
 
 ## Read Order
 
@@ -66,7 +68,10 @@ champion is approved for promotion.
 ## Canonical Split
 
 - **Pine/TradingView outputs** = active training/modeling truth
-- **Active Pine files** = `warbird-pro-rebuild-fib-ml.pine` plus retained Nexus
+- **Databento ES/MES market-data rows** = approved training data supplier when
+  manifests identify Databento as source/capture kind; Databento is not the
+  Pine indicator source
+- **Active Pine files** = `warbird-pro-v9.pine` plus retained Nexus
   `warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
 - **Local Optuna workspaces** under `scripts/optuna/workspaces/` = active optimization state
 - **Local `warbird` PG17 warehouse** = legacy/reference unless explicitly reopened

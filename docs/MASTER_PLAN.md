@@ -14,7 +14,7 @@ PineScript indicator behavior. They do not create a separate data-stack
 decision engine.
 
 Single-surface update (2026-05-02): the only active main chart indicator is
-`indicators/warbird-pro-rebuild-fib-ml.pine`. Nexus remains as the only retained
+**Warbird Pro V9** at `indicators/warbird-pro-v9.pine`. Nexus remains as the only retained
 support/research Pine lane:
 
 - `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
@@ -22,9 +22,10 @@ support/research Pine lane:
 All other Pine indicator, strategy, backtest, and fib-only variants are retired
 from the active `indicators/` surface.
 
-V9 lane update (2026-05-02): `warbird_pro_v9` is a separate Optuna lane for the
-same active Warbird Pro rebuild indicator. It models ATR/risk exits from
-manifest-backed TradingView exports on ES/MES only, ignores NQ/MNQ exports,
+V9 lane update (2026-05-02): `warbird_pro_v9` is a separate Optuna lane over the
+same active Warbird Pro V9 indicator. It models ATR/risk exits from
+manifest-backed ES/MES training rows from TradingView exports or Databento
+market data, ignores NQ/MNQ rows,
 excludes `-.236` and other negative fib extensions as stop candidates, keeps
 `-.236` only as optional context/export data, and freezes fib anchors, fib
 visuals, and EMA/MA setup until a champion is approved for Pine promotion.
@@ -33,25 +34,27 @@ visuals, and EMA/MA setup until a champion is approved for Pine promotion.
 
 - The canonical modeling object is the `Warbird Pro` Pine indicator behavior on
   TradingView.
-- Training truth comes from Pine/TradingView outputs emitted by
-  `indicators/warbird-pro-rebuild-fib-ml.pine` and, for Nexus work only,
-  `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`.
+- Training truth comes from manifest-backed active-lane sources: Pine/TradingView
+  outputs emitted by `indicators/warbird-pro-v9.pine`, Databento ES/MES
+  market-data training rows when declared as Databento source data, and, for
+  Nexus work only, `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`.
 - Allowed evidence includes TradingView indicator exports, hidden `ml_*` /
   `nexus_fp_*` plots, Nexus TradingView/Pine `request.footprint()` evidence for
-  `NEXUS_FOOTPRINT_DELTA`, and deterministic Pine-derived state columns.
+  `NEXUS_FOOTPRINT_DELTA`, and deterministic columns derived from approved
+  source rows.
 - The optimization target is indicator quality: settings, thresholds, module
   toggles, stop/target policy, signal frequency, profit factor, drawdown,
   stability, direction balance, and operator usability.
 - External feature stacking is out of scope. No FRED, macro, news, options,
-  cross-asset, Supabase, or Databento-derived feature joins are admitted into
-  the active modeling dataset.
+  cross-asset, Supabase, or mislabeled Databento/TradingView artifacts are
+  admitted into the active modeling dataset.
 - Cloud Supabase is runtime/support only. It is not a model-training mirror and
   does not receive raw trials, raw labels, or full research datasets.
 
 ## Active Surfaces
 
 - Main chart indicator:
-  - `indicators/warbird-pro-rebuild-fib-ml.pine`
+  - `indicators/warbird-pro-v9.pine`
 - Retained Nexus support/research lane:
   - `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
 - Optimization and modeling tools:
@@ -72,6 +75,16 @@ visuals, and EMA/MA setup until a champion is approved for Pine promotion.
 - This file is reference-only and does not supersede active contract rules:
   Pine/TradingView-only modeling rows, explicit trigger-family declaration,
   and no out-of-scope feature stacking without an architecture reopen.
+- Databento is an approved market-data supplier for training rows when the
+  manifest declares a Databento capture/source kind. Databento is not the
+  Pine indicator, not a TradingView indicator CSV, and not a substitute for
+  trigger-family identity. Use Databento historical
+  [`get_range`](https://databento.com/docs/api-reference-historical/timeseries/timeseries-get-range?historical=python&live=python&reference=python),
+  [programmatic batch downloads](https://databento.com/docs/examples/basics-historical/programmatic-batch-download),
+  [OHLCV resampling](https://databento.com/docs/examples/basics-historical/ohlcv-resampling?historical=python&live=python&reference=python),
+  [continuous contracts](https://databento.com/docs/examples/symbology/continuous?historical=python&live=python&reference=python),
+  Optuna [`create_study`](https://optuna.readthedocs.io/en/stable/reference/generated/optuna.create_study.html),
+  and Optuna [`TPESampler`](https://optuna.readthedocs.io/en/stable/reference/samplers/generated/optuna.samplers.TPESampler.html).
 
 ## Non-Goals
 
@@ -81,6 +94,8 @@ The following are explicitly retired from the active plan:
 - using local legacy warehouse training tables (`ag_training`) as the model source
 - training on FRED, macro, news, options, or cross-asset features
 - reconstructing Pine behavior from Python OHLCV as the canonical label path
+- recording Databento market-data rows as `TRADINGVIEW_INDICATOR_CSV` or as a
+  Pine indicator source
 - promoting a live model packet that scores separate server-side features
 - using cloud Supabase as a training database
 - reviving deleted Pine strategy, backtest, or fib-only variants without an
@@ -90,7 +105,7 @@ The following are explicitly retired from the active plan:
 
 Every modeling run must declare exactly one trigger family:
 
-- `LIVE_ANCHOR_FOOTPRINT`: entries from `warbird-pro-rebuild-fib-ml.pine`
+- `LIVE_ANCHOR_FOOTPRINT`: entries from `warbird-pro-v9.pine`
   `entryLongTrigger` / `entryShortTrigger` (legacy trigger-family identifier;
   rebuild lane does not require footprint inputs).
 - `NEXUS_FOOTPRINT_DELTA`: Nexus lower-pane footprint-delta evidence from the
@@ -136,33 +151,36 @@ Required facts:
 
 No Pine code changes are allowed without explicit session approval.
 
-### Phase 2 - Pine Output Capture
+### Phase 2 - Training Row Capture
 
-Capture training rows from TradingView/Pine only.
+Capture training rows from manifest-backed active-lane sources.
 
 Allowed sources:
 
-- TradingView indicator CSV export from `warbird-pro-rebuild-fib-ml.pine`
+- TradingView indicator CSV export from `warbird-pro-v9.pine`
+- Databento ES/MES market-data training rows with a Databento capture/source
+  kind in the manifest
 - hidden `ml_*` export fields emitted by that indicator
 - retained Nexus `nexus_fp_*` footprint exports for `NEXUS_FOOTPRINT_DELTA`
-- deterministic artifacts produced from those Pine outputs
+- deterministic artifacts produced from approved source rows
 
 Required manifest fields:
 
-- indicator file
+- indicator file when the source is Pine/TradingView
 - repo commit
 - symbol
 - timeframe
-- TradingView export range
-- Pine input settings
-- trigger family and source Pine file
+- source/export date range
+- Pine input settings when the source is Pine/TradingView
+- trigger family and source Pine file when applicable
+- source kind / capture method
 - row count
 - export hash
 - notes on missing or platform-limited fields
 
 ### Phase 3 - Settings And Build Modeling
 
-Run Optuna modeling only against Pine-derived trial data.
+Run Optuna modeling only against approved manifest-backed trial data.
 
 Permitted modeling questions:
 
@@ -171,7 +189,7 @@ Permitted modeling questions:
 - Which filter/module toggles improve or damage the signal?
 - Which stop/target policy works best inside the current Pine state machine?
 - In the `warbird_pro_v9` lane only, which ATR/risk exit policy works best for
-  existing Warbird Pro rebuild entry triggers across ES/MES exports?
+  existing Warbird Pro V9 entry triggers across ES/MES exports?
 - Which Pine states or `ml_*` / `nexus_fp_*` exports explain winners versus
   failures?
 - Which settings are robust across IS/OOS windows?
@@ -225,11 +243,12 @@ Promotion is manual. A champion means:
 
 ## Pine Budget Baseline
 
-Verified 2026-05-02:
+Verified 2026-05-04:
 
-- `warbird-pro-rebuild-fib-ml.pine`: 28 output calls (plot family), 0
-  `alertcondition()` calls, 3 `request.security()` calls, and no
-  `request.footprint()` path in the main indicator.
+- `warbird-pro-v9.pine`: 19 output-consuming calls
+  (17 `plot()` + 2 `alertcondition()`), 4 `request.security()` calls,
+  0 `request.footprint()` calls, 16 `line.new()` calls, 1 `box.new()`,
+  and 1 `table.new()`.
 
 Any Pine addition must be priced before code is written. Nexus request/output
 budgets must be repriced before any Nexus edit.
@@ -241,7 +260,7 @@ budgets must be repriced before any Nexus edit.
 - No daily-ingestion training dependency.
 - No Pine edits without explicit approval.
 - Canonical fib and trade-state semantics are locked in
-  `indicators/warbird-pro-rebuild-fib-ml.pine`: anchor ownership, fib ladder
+  `indicators/warbird-pro-v9.pine`: anchor ownership, fib ladder
   construction (`fibPrice` + canonical levels), entry/stop/target state, and
   `ml_last_exit_outcome` semantics are protected scope.
 - Banned regression pattern (repo-wide): do not use the pivot-window
@@ -262,6 +281,6 @@ budgets must be repriced before any Nexus edit.
 
 ## Current Blocker
 
-Run controlled 5m/15m tuning from manifest-backed TradingView exports on
-`indicators/warbird-pro-rebuild-fib-ml.pine`, then promote only evidence-backed
-settings. Keep Nexus available only for its retained footprint/research lane.
+Run controlled 5m/15m tuning from manifest-backed Warbird Pro V9 training rows
+on ES/MES, then promote only evidence-backed settings. Keep Nexus available
+only for its retained footprint/research lane.

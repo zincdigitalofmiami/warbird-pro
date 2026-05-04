@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Warbird Pro — standalone Optuna profile.
+Warbird Pro V9 — standalone Optuna profile.
 
-Optimizes Warbird Pro Pine indicator parameters against a
+Optimizes Warbird Pro V9 Pine indicator parameters against a
 TradingView CSV export.  Fully standalone — no shared strategy code.
 
 Architecture
@@ -86,7 +86,7 @@ TRADE_NONE   = 0
 TRADE_SETUP  = 1
 TRADE_ACTIVE = 2
 
-# Fib extension ratios (canonical, matches v7 Pine constants)
+# Fib extension ratios (canonical, matches Warbird Pro V9 Pine constants)
 FIB_T1, FIB_T2, FIB_T3, FIB_T4, FIB_T5 = 1.236, 1.618, 2.000, 2.236, 2.618
 
 # ── Profile interface (required by runner.py) ─────────────────────────────────
@@ -724,7 +724,7 @@ def load_data() -> pd.DataFrame:
     TV CSV export instructions
     --------------------------
     1. Open TradingView Desktop
-    2. Load indicators/warbird-pro-rebuild-fib-ml.pine on MES1! 15m chart
+    2. Load indicators/warbird-pro-v9.pine on MES1! 15m chart
     3. Pine Editor → Export CSV (or Script → Export Data to CSV)
     4. Save to: scripts/optuna/workspaces/warbird_pro/export.csv
     """
@@ -733,7 +733,7 @@ def load_data() -> pd.DataFrame:
             f"\n\nTV CSV export not found:\n  {CSV_PATH}\n\n"
             "To generate:\n"
             "  1. Open TradingView Desktop\n"
-            "  2. Load indicators/warbird-pro-rebuild-fib-ml.pine on MES1! 15m\n"
+            "  2. Load indicators/warbird-pro-v9.pine on MES1! 15m\n"
             "  3. Pine Editor → Export → Export CSV\n"
             f"  4. Save to {CSV_PATH}\n"
             "See docs/runbooks/strategy_tuning.md for full instructions.\n"
@@ -802,7 +802,7 @@ def load_data() -> pd.DataFrame:
 
 def run_backtest(df: pd.DataFrame, params: dict[str, Any], start_date: str) -> dict[str, Any]:
     """
-    Optuna objective for v7 Warbird Institutional.
+    Optuna objective for Warbird Pro V9.
 
     Steps
     -----

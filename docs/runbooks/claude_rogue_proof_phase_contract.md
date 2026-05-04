@@ -10,8 +10,8 @@ is fail-closed: if a requirement is unmet, the task is incomplete.
 
 Execute only this scoped program unless Kirk explicitly reopens scope:
 
-1. Keep `indicators/warbird-pro-rebuild-fib-ml.pine` as the only active main chart
-   indicator.
+1. Keep **Warbird Pro V9** at `indicators/warbird-pro-v9.pine` as the only
+   active main chart indicator.
 2. Keep Nexus:
    - `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
 3. Treat these Pine variants as retired/historical unless explicitly reopened:

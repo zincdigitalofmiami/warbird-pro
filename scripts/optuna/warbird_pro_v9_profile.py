@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Warbird Pro V9 Optuna profile.
 
-This lane models ATR/risk exits from manifest-backed TradingView exports for
-the active Warbird Pro rebuild indicator. It intentionally does not mutate Pine
+This lane models ATR/risk exits from manifest-backed ES/MES training rows for
+Warbird Pro V9. TradingView exports may provide Pine trigger telemetry, and
+Databento may provide market-data training rows. Databento is a data supplier,
+not the Pine indicator source. This profile intentionally does not mutate Pine
 or optimize fib-anchor, visual, or EMA/MA setup inputs.
 """
 
@@ -25,7 +27,7 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.optuna.paths import workspace_dir
 
 PROFILE_KEY = "warbird_pro_v9"
-PINE_FILE = "indicators/warbird-pro-rebuild-fib-ml.pine"
+PINE_FILE = "indicators/warbird-pro-v9.pine"
 TRIGGER_FAMILY = "LIVE_ANCHOR_FOOTPRINT"
 
 OPTUNA_DIR = workspace_dir(PROFILE_KEY)
@@ -35,7 +37,7 @@ MANIFEST_ENV = "WARBIRD_PRO_V9_MANIFEST"
 ALLOWED_SYMBOL_ROOTS = frozenset({"ES", "MES"})
 IGNORED_SYMBOL_ROOTS = frozenset({"NQ", "MNQ"})
 ALLOWED_TIMEFRAMES = frozenset({"5", "15", "5m", "15m"})
-ALLOWED_CAPTURE_METHODS = frozenset(
+TRADINGVIEW_CAPTURE_METHODS = frozenset(
     {
         "TRADINGVIEW_INDICATOR_CSV",
         "TV_INDICATOR_CSV",
@@ -43,6 +45,14 @@ ALLOWED_CAPTURE_METHODS = frozenset(
         "CSV_EXPORT",
     }
 )
+DATABENTO_CAPTURE_METHODS = frozenset(
+    {
+        "DATABENTO_OHLCV_CSV",
+        "DATABENTO_TRAINING_CSV",
+        "DATABENTO_BARS_CSV",
+    }
+)
+ALLOWED_CAPTURE_METHODS = TRADINGVIEW_CAPTURE_METHODS | DATABENTO_CAPTURE_METHODS
 
 POINT_VALUE_BY_ROOT = {"MES": 5.0, "ES": 50.0}
 COMMISSION_SIDE_USD = 1.0
@@ -163,15 +173,25 @@ def _load_manifest(csv_path: Path) -> dict[str, Any]:
         )
 
     manifest = json.loads(manifest_path.read_text())
-    capture_method = str(manifest.get("capture_method", "")).strip()
+    capture_method = str(manifest.get("capture_method") or manifest.get("source_kind") or "").strip()
     if capture_method and capture_method not in ALLOWED_CAPTURE_METHODS:
         raise ValueError(
-            "Warbird Pro V9 capture_method must be a TradingView indicator CSV method; "
+            "Warbird Pro V9 capture_method must be a TradingView CSV method or "
+            "Databento training data method; "
             f"got {capture_method!r}."
         )
+    source_kind = capture_method or "TRADINGVIEW_INDICATOR_CSV"
+    manifest["_source_kind"] = source_kind
 
     indicator_file = str(manifest.get("indicator_file", "")).strip()
-    if indicator_file and indicator_file != PINE_FILE:
+    if source_kind in DATABENTO_CAPTURE_METHODS and indicator_file:
+        raise ValueError(
+            "Warbird Pro V9 Databento training manifests must not declare "
+            "indicator_file as the data source. Use capture_method/source_kind "
+            "to identify Databento data and keep Pine identity out of the data "
+            "source field."
+        )
+    if source_kind not in DATABENTO_CAPTURE_METHODS and indicator_file and indicator_file != PINE_FILE:
         raise ValueError(
             f"Warbird Pro V9 manifest indicator_file must be {PINE_FILE!r}; "
             f"got {indicator_file!r}."
@@ -280,6 +300,7 @@ def _prepare_export_frame(frame: pd.DataFrame, manifest: dict[str, Any], source_
     out["symbol_root"] = symbol_root
     out["timeframe"] = str(manifest.get("timeframe", "")).strip()
     out["_source_csv"] = str(source_csv)
+    out["_source_kind"] = str(manifest.get("_source_kind", "")).strip()
     out["_point_value"] = POINT_VALUE_BY_ROOT[symbol_root]
 
     context_col = next(
@@ -338,7 +359,8 @@ def load_data() -> pd.DataFrame:
     export_files = _discover_export_files()
     if not export_files:
         raise FileNotFoundError(
-            "No Warbird Pro V9 TradingView exports found. Put ES/MES exports at "
+            "No Warbird Pro V9 ES/MES training exports found. Put TradingView "
+            "CSV or Databento training CSV files at "
             f"{OPTUNA_DIR / 'export.csv'} or {OPTUNA_DIR / 'exports'}/*.csv, with "
             "a .manifest.json next to each CSV. NQ exports are ignored."
         )

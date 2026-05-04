@@ -33,19 +33,23 @@ Optuna trials continue.
 When that happens, update the active docs before treating the new result as
 agent-ready.
 
-Training/modeling uses Pine/TradingView outputs only:
+Training/modeling uses manifest-backed source data for the active lane:
 
 - TradingView indicator CSV exports for non-Nexus lanes
+- Databento ES/MES market-data training rows when the manifest declares a
+  Databento capture/source kind
 - TradingView/Pine `request.footprint()` `nexus_fp_*` snapshots for Nexus ML RSI
-- deterministic features derived from those Pine outputs
+- deterministic features derived from those approved sources
 
-No daily/hourly ingestion, FRED, macro, cross-asset, news, options, Supabase, or
-Databento feature stacking is admitted into the active modeling dataset.
+No daily/hourly runtime ingestion tables, FRED, macro, cross-asset, news,
+options, Supabase, or mislabeled Databento/TradingView artifacts are admitted
+into the active modeling dataset.
 
 ### Active Pine Surfaces
 
-- `indicators/warbird-pro-rebuild-fib-ml.pine` — only active main chart indicator;
-  trigger family `LIVE_ANCHOR_FOOTPRINT`
+- `indicators/warbird-pro-v9.pine` — only active main chart indicator;
+  TradingView indicator name `Warbird Pro V9`; trigger family
+  `LIVE_ANCHOR_FOOTPRINT`
 - `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine` —
   retained Nexus footprint research/tuning lane; trigger family
   `NEXUS_FOOTPRINT_DELTA`
@@ -59,10 +63,11 @@ Retired/removed Pine variants:
 - `indicators/v7-warbird-institutional-backtest-strategy.pine`
 - `indicators/fibs-only.pine`
 
-Budget verification from 2026-05-02:
+Budget verification from 2026-05-04:
 
-- Warbird Pro rebuild: 28 output calls (plot family), 0 alertcondition calls,
-  3 `request.security()`, and no `request.footprint()` in the main indicator
+- Warbird Pro V9: 19 output-consuming calls
+  (17 `plot()` + 2 `alertcondition()`), 4 `request.security()`, 0
+  `request.footprint()`, 16 `line.new()`, 1 `box.new()`, and 1 `table.new()`
 
 Checkpoint summary from 2026-04-27 operator TradingView snapshots:
 
@@ -84,19 +89,32 @@ Checkpoint summary from 2026-04-27 operator TradingView snapshots:
 ### Current Blocker
 
 Execute controlled 5m/15m tuning on
-`indicators/warbird-pro-rebuild-fib-ml.pine` with manifest-backed evidence, and
+`indicators/warbird-pro-v9.pine` with manifest-backed evidence, and
 keep Nexus footprint work isolated to the retained
 `NEXUS_FOOTPRINT_DELTA` lane. Do not start training/modeling unless the user
 explicitly approves it.
 
 ## Locked Rules
 
+- ALWAYS invoke `superpowers:verification-before-completion` before claiming any
+  task done, fixed, passing, ready to commit, or ready to push. Floor for every
+  Pine edit, Python script change, doc/registry edit, dataset build, and math
+  claim. The Pine Verification Pipeline (lint, guards, npm build) is mandatory
+  but does not replace behavioral verification — also spot-check output against
+  ground truth (TV chart, prior export, screenshot, visible result). Authorized
+  as a durable rule on 2026-05-04. See
+  `memory/feedback_always_verify_before_completion.md`.
+- Use `superpowers:systematic-debugging` before proposing any fix to a bug or
+  unexpected behavior. Don't guess root cause then ship a "fix."
 - Pine is the modeling source of truth.
 - Optimize indicator settings and build quality, not external feature stacks.
+- Databento is an approved training data supplier when manifests label it as
+  Databento source data. It is not the Pine indicator and must not be recorded
+  as a TradingView indicator CSV.
 - No mock data.
 - No daily-ingestion training dependency.
 - No Pine edits without explicit approval in the current session.
-- In `indicators/warbird-pro-rebuild-fib-ml.pine`, fib anchor ownership and ladder
+- In `indicators/warbird-pro-v9.pine`, fib anchor ownership and ladder
   math are protected scope and must not be changed without explicit approval
   plus before/after evidence.
 - Repo-wide fib scanner ban: never reintroduce the pivot-window

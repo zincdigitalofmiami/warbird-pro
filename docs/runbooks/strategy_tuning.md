@@ -5,18 +5,20 @@
 
 ## Purpose
 
-Tune `indicators/warbird-pro-rebuild-fib-ml.pine` on MES using only
-TradingView/Pine evidence and produce defensible Pine settings or build
-recommendations. Nexus remains a separate retained lane and is tuned only from
-TradingView/Pine `request.footprint()` evidence for `NEXUS_FOOTPRINT_DELTA`.
+Tune `indicators/warbird-pro-v9.pine` on MES using manifest-backed active-lane
+training data and produce defensible Pine settings or build recommendations.
+TradingView/Pine exports and approved Databento ES/MES market-data training
+rows are valid when the manifest declares the true source/capture kind. Nexus
+remains a separate retained lane and is tuned only from TradingView/Pine
+`request.footprint()` evidence for `NEXUS_FOOTPRINT_DELTA`.
 
-No FRED, macro, cross-asset, Databento-ingestion, Supabase, local legacy
-warehouse rows (`ag_training`), or synthetic OHLCV reconstruction is admitted
-into the active modeling dataset.
+No FRED, macro, cross-asset, Supabase, local legacy warehouse rows
+(`ag_training`), synthetic OHLCV reconstruction, or mislabeled
+Databento/TradingView artifact is admitted into the active modeling dataset.
 
 ## Active Pine Surfaces
 
-- Main chart indicator: `indicators/warbird-pro-rebuild-fib-ml.pine`
+- Main chart indicator: `indicators/warbird-pro-v9.pine`
 - Nexus footprint tuning lane:
   `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
 
@@ -33,7 +35,7 @@ Retired strategy/backtest/fib-only Pine variants are not active tuning sources:
 
 Every run must declare exactly one active trigger family:
 
-- `LIVE_ANCHOR_FOOTPRINT` for `warbird-pro-rebuild-fib-ml.pine`
+- `LIVE_ANCHOR_FOOTPRINT` for `warbird-pro-v9.pine`
 - `NEXUS_FOOTPRINT_DELTA` for the Nexus footprint lane
 
 `STRATEGY_ACCEPT_SCALP` and `BACKTEST_DIRECT_ANCHOR` are historical only unless
@@ -66,8 +68,9 @@ The campaign is phase-scoped and timeframe-scoped.
 - Run each phase on **5m** and **15m** as separate surfaces.
 - Promotion floor remains **1,000 authoritative trials per surface per phase**
   unless Kirk explicitly overrides it.
-- Any helper script used for trials must be verified against the active rebuild
-  file and trigger family; do not use scripts that require retired Pine files.
+- Any helper script used for trials must be verified against the active
+  Warbird Pro V9 file and trigger family; do not use scripts that require
+  retired Pine files.
 
 | Phase | Scope |
 |---|---|
@@ -83,7 +86,7 @@ Every recommendation must include:
 - Pine file path and repo commit
 - TradingView symbol and timeframe
 - date range
-- export method and manifest
+- export method / source kind and manifest
 - trigger family
 - exact Pine input settings
 - row count and trade count or event count

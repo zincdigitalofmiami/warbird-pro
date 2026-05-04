@@ -28,6 +28,7 @@ Cloud may support:
 Cloud must not receive:
 
 - raw TradingView exports
+- raw Databento training rows
 - raw Strategy Tester trade lists
 - raw Optuna trial tables
 - raw AutoGluon/SHAP artifacts
@@ -38,10 +39,12 @@ Cloud must not receive:
 
 ## Training Boundary
 
-Active training/modeling happens locally from Pine/TradingView outputs. Daily or
-hourly ingestion is not a training source. If runtime ingestion remains for the
-dashboard, it is not evidence for model training unless explicitly exported from
-Pine/TradingView under the active contract.
+Active training/modeling happens locally from manifest-backed active-lane data:
+Pine/TradingView outputs, approved Databento ES/MES market-data training rows,
+and Nexus footprint snapshots under the active contract. Cloud daily/hourly
+runtime ingestion is not a training source. If runtime ingestion remains for the
+dashboard, it is not evidence for model training unless explicitly admitted by
+the active contract and recorded with an honest source/capture manifest.
 
 ## Review Rule
 

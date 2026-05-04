@@ -24,20 +24,23 @@ ready for reuse by another agent.
 
 ## Training Truth
 
-Allowed training inputs are only:
+Allowed training inputs are only manifest-backed active-lane sources:
 
 - TradingView indicator CSV exports for non-Nexus lanes
+- Databento ES/MES market-data training rows when declared as Databento source
+  data in the manifest
 - TradingView/Pine `request.footprint()` `nexus_fp_*` snapshots for Nexus ML RSI
-- deterministic features derived from those Pine/TradingView outputs
+- deterministic features derived from those approved sources
 
 Disallowed active training inputs:
 
 - FRED or macro joins
 - news/options data
 - cross-asset joins
-- Databento or Supabase daily/hourly ingestion as a training feature source
+- Supabase daily/hourly runtime ingestion as a training feature source
 - local `ag_training` warehouse rows
 - Python OHLCV reconstruction as the canonical label source
+- Databento rows mislabeled as TradingView/Pine indicator exports
 
 Historical warehouse tables may remain on disk for lineage. They are not active
 model truth unless Kirk explicitly reopens that architecture.
@@ -70,8 +73,9 @@ Primary metrics:
 
 ## Active Pine Surfaces
 
-- `indicators/warbird-pro-rebuild-fib-ml.pine`
+- `indicators/warbird-pro-v9.pine`
   - only active main chart indicator
+  - TradingView indicator name: **Warbird Pro V9**
   - live entry trigger: `entryLongTrigger` / `entryShortTrigger` from the
     selected fib execution-anchor reclaim plus structure context, winning
     candlestick confirmation, EMA/MA crossover alignment, optional ML RSI
@@ -109,10 +113,10 @@ Policy from this checkpoint:
   semantics.
 - 5m remains the active tuning lane.
 - The protected fib core now lives in
-  `indicators/warbird-pro-rebuild-fib-ml.pine`. No strategy/backtest Pine harness is
+  `indicators/warbird-pro-v9.pine`. No strategy/backtest Pine harness is
   active unless Kirk explicitly reopens one.
 
-Protected fib-core scope in `indicators/warbird-pro-rebuild-fib-ml.pine`:
+Protected fib-core scope in `indicators/warbird-pro-v9.pine`:
 
 - ZigZag/fib anchor ownership transitions (`fibAnchorHigh/Low`, anchor bars,
   `fibZzUpdate()`, `fibBull`)
@@ -134,22 +138,26 @@ Admitted feature families:
 - Pine input settings
 - Pine state-machine fields
 - Pine `ml_*` hidden exports
+- Databento ES/MES market-data training rows when the run manifest declares a
+  Databento source/capture kind
 - Nexus `nexus_fp_*` footprint fields from TradingView/Pine
   `request.footprint()`
 - OHLCV columns included in the TradingView export
-- deterministic columns computed only from the same Pine export
+- deterministic columns computed only from approved source rows
 
 Not admitted:
 
 - server-side macro/fundamental context
 - FRED/economic calendar fields
-- Databento cross-asset context
+- Databento cross-asset context unless a separate contract explicitly reopens it
 - Supabase/cloud serving tables
 - local warehouse reconstructed fib rows
+- Databento rows recorded as `TRADINGVIEW_INDICATOR_CSV` or as a Pine indicator
+  source
 
 ## Label Scope
 
-Labels resolve from Pine/TradingView outputs only.
+Labels resolve from approved manifest-backed source rows only.
 
 Allowed labels:
 
@@ -184,7 +192,7 @@ The promotion artifact is a Pine settings/build brief containing:
 
 - indicator file and commit
 - symbol/timeframe
-- TradingView export manifest
+- source/export manifest
 - trigger family used for evidence
 - champion settings
 - validation metrics
@@ -193,9 +201,11 @@ The promotion artifact is a Pine settings/build brief containing:
 
 ## Runtime Boundary
 
-Supabase and Databento ingestion may remain for live chart/runtime support, but
-they are not active training sources. Cloud must not receive raw trial data,
-raw labels, or full research datasets.
+Supabase ingestion may remain for live chart/runtime support, but it is not an
+active training source. Databento is an approved training data supplier for
+manifest-backed ES/MES market-data rows; it is not the Pine indicator and must
+not be labeled as a TradingView indicator CSV. Cloud must not receive raw trial
+data, raw labels, or full research datasets.
 
 ## Verification
 
@@ -205,7 +215,7 @@ Before any Pine build or settings promotion:
 - run `pine-lint.sh`
 - run contamination guard
 - run `npm run build`
-- save the TradingView export or CDP evidence
+- save the source export, Databento manifest, or CDP evidence
 - document the exact settings and date range
 
 ## Legacy

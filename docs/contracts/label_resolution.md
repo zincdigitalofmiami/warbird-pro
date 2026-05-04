@@ -9,14 +9,17 @@ Defines labels for indicator-only modeling.
 
 ## Label Source
 
-Labels must resolve from Pine/TradingView output only.
+Labels must resolve from the manifest-backed source rows admitted by the active
+contract.
 
 Allowed label sources:
 
 - Strategy Tester closed-trade profit/loss
 - Strategy Tester entry/exit fields
 - Pine exported state fields such as `ml_last_exit_outcome`
-- deterministic labels computed from the same export
+- Databento-backed ES/MES market-data training rows when the manifest declares
+  Databento as the source/capture kind
+- deterministic labels computed from the same approved source data
 
 ## Common Labels
 
@@ -35,8 +38,8 @@ Exact labels are run-specific and must be declared in the export manifest.
 
 ## Rules
 
-- No label may use external data.
-- No label may use fields unavailable in the Pine/TradingView export.
+- No label may use undeclared external data.
+- No label may use fields unavailable in the manifest-backed source rows.
 - Same-bar TP/SL conflicts follow TradingView Strategy Tester behavior when
   Strategy Tester is the source.
-- If a label cannot be reconstructed from the export, mark it missing.
+- If a label cannot be reconstructed from the source data, mark it missing.

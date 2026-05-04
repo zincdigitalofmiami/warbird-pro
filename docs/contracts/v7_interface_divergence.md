@@ -32,7 +32,7 @@ settings, or runbooks.
 ## Strategy (`v7-warbird-strategy.pine`) — Strategy Tester / Pine Modeling Surface
 
 - **Entry trigger:** gated SETUP -> `acceptEvent` + confirmation path, with optional footprint scalp path and risk/ladder/HTF suppressors
-- **Purpose:** Strategy Tester execution surface and Pine `ml_*` export-compatibility mirror. Active modeling uses TradingView/Pine outputs only.
+- **Purpose:** Strategy Tester execution surface and Pine `ml_*` export-compatibility mirror. Active modeling uses the source data admitted by the current active contract.
 - **Output budget:** 60/64 (60 plot, 4 headroom); uses `alert()` not `alertcondition()`
 - **Exit:** SL or active target; TP1 by default with fast-runner target promotion where configured
 - **Commission floor:** $1.00/side; `use_bar_magnifier=true`; `slippage=1` -
@@ -76,5 +76,5 @@ The institutional file is optimized for human operator use: it shows
 high-confidence fib-anchor reclaim signals confirmed by footprint evidence on
 the chart. The strategy files are optimized for TradingView execution testing
 and Pine export/modeling workflows. Offline modeling may rank settings and
-build choices from those Pine outputs; it must not join external features or
-replace Pine with a separate server-side decision engine.
+build choices from active-contract source rows; it must not join external
+features or replace Pine with a separate server-side decision engine.

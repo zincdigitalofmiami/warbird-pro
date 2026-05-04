@@ -8,7 +8,8 @@ the retired warehouse/FRED/macro modeling plan.
 
 They are not active training truth under Warbird Indicator-Only AG Plan v6.
 
-Active modeling now uses Pine/TradingView outputs only. See:
+Active modeling now uses the manifest-backed source data admitted by the active
+contract. See:
 
 - `docs/MASTER_PLAN.md`
 - `docs/contracts/pine_indicator_ag_contract.md`

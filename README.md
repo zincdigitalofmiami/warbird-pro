@@ -48,8 +48,10 @@ The initialization record is
 
 ## Active Architecture
 
-- Training/modeling source: Pine/TradingView outputs only.
-- Main chart indicator: `indicators/warbird-pro-rebuild-fib-ml.pine`.
+- Training/modeling source: manifest-backed active-lane data:
+  Pine/TradingView outputs, approved Databento ES/MES market-data training rows,
+  and Nexus footprint snapshots.
+- Main chart indicator: **Warbird Pro V9** at `indicators/warbird-pro-v9.pine`.
 - Retained Nexus lane:
   - `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
 - Trigger family must be explicit for every run:
@@ -68,11 +70,13 @@ The initialization record is
 
 ## Out Of Scope For Active Training
 
-- daily/hourly ingestion as a training source
+- cloud daily/hourly runtime ingestion as a training source
 - FRED, macro, news, options, and cross-asset feature stacking
 - local legacy warehouse rows (`ag_training`)
 - server-side model packets that score live alerts
 - Supabase as a training database
+- Databento rows mislabeled as a TradingView indicator CSV or Pine indicator
+  source
 
 Runtime ingestion and cloud surfaces may remain for dashboard/chart support, but
 they do not define model truth.

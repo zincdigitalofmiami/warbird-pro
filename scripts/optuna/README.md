@@ -47,11 +47,16 @@ Rules:
 - Legacy `data/*optuna*` directories are deprecated and should stay empty.
 - Study names are operator-facing titles in `optuna-dashboard`. Use clear words with spaces that state the study purpose. Do not use snake_case, version labels, or generic names such as `<indicator>_study`.
 - `warbird_pro` is the only active main chart indicator key and maps to
-  `indicators/warbird-pro-rebuild-fib-ml.pine`.
-- `warbird_pro_v9` is a separate Warbird Pro experiment lane for ES/MES-only
-  ATR/risk exit modeling. It reuses the active rebuild indicator exports, ignores
-  NQ/MNQ exports, excludes `-.236` as a stop candidate, and keeps `-.236` only
-  as optional context when present in an export.
+  **Warbird Pro V9** at `indicators/warbird-pro-v9.pine`.
+- `warbird_pro_v9` is a separate Warbird Pro V9 experiment lane for ES/MES-only
+  ATR/risk exit modeling. It reuses active Warbird Pro V9 training rows from
+  TradingView exports or Databento market data, ignores NQ/MNQ rows, excludes
+  `-.236` as a stop candidate, and keeps `-.236` only as optional context when
+  present.
+- Databento is an approved ES/MES market-data supplier for training rows when
+  manifests declare a Databento capture/source kind such as
+  `DATABENTO_OHLCV_CSV`. Databento is not the Pine indicator and must not be
+  labeled `TRADINGVIEW_INDICATOR_CSV`.
 - `warbird_nexus_ml_rsi` is footprint-only: use the TradingView/Pine
   `request.footprint()` parquet + manifest. Do not use CSV exports, plain OHLCV
   parquet, Databento bars, or synthetic body/wick delta for that lane.
