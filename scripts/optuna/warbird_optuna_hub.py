@@ -1055,7 +1055,19 @@ class HubState:
             }
             cards.append(card)
 
-        cards.sort(key=lambda c: (c["category"], c["surface_type"], c["name"]))
+        _CATEGORY_ORDER = {
+            "chart-core-exit-modeling": 0,
+            "chart-core-entry-filter": 1,
+            "ag-meta-labeler": 2,
+            "joint-challenger": 3,
+            "chart-core": 4,
+            "lower-pane": 5,
+        }
+        cards.sort(key=lambda c: (
+            _CATEGORY_ORDER.get(c["category"], 99),
+            c["surface_type"],
+            c["name"],
+        ))
 
         if self.spawn_children and self.child_manager is not None:
             for card in cards:
