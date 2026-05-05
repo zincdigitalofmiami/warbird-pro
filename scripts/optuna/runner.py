@@ -439,7 +439,7 @@ def register_study_metadata(
     objective_primary: str | None = None,
 ) -> None:
     study.set_user_attr("project", "warbird-pro")
-    study.set_user_attr("contract", "MES_5m" if indicator_key == "warbird_nexus_ml_rsi" else "MES_15m")
+    study.set_user_attr("contract", "MES_5m")
     study.set_user_attr("indicator_key", indicator_key)
     study.set_user_attr("profile", profile_name)
     study.set_user_attr("ranking_policy", ranking_policy)
