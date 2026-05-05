@@ -531,12 +531,11 @@ def write_outputs(
     short_signals = int(df_features["ml_entry_short_trigger"].sum())
 
     manifest = {
-        "indicator_file": PINE_FILE,
         "repo_commit": repo_commit(),
         "symbol": symbol,
         "timeframe": str(timeframe),
         "trigger_family": TRIGGER_FAMILY,
-        "capture_method": "PY_REPLAY_RESEARCH",
+        "capture_method": "DATABENTO_TRAINING_CSV",
         "source_kind": "MES_1M_PARQUET_PYTHON_PIPELINE",
         "source_parquet": str(source_parquet),
         "ts_first": ts_min,
