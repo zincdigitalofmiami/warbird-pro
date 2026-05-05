@@ -45,6 +45,14 @@ START_DATE_IS = "2025-01-01"  # IS window default (Trump regime structural break
 END_DATE_IS = "2026-12-31"  # IS end — OOS defined per config lock date
 RECOMMENDED_LOCAL_DASHBOARD_PORT = 8180
 
+# Indicator-key prefixes whose HPO must NEVER see 2025-01-01+; that window is
+# locked as the structural-break OOS (Trump regime) and reserved for final
+# champion selection only. Bug 2 was an HPO run that ignored this; the guard
+# below in main() raises if --start or --end leak into the locked window for
+# matching keys.
+V9_OOS_LOCKED_KEY_PREFIXES = ("warbird_pro_v9",)
+V9_OOS_LOCK_START = pd.Timestamp("2025-01-01", tz="UTC")
+
 # Ranking policies — opt-in per --ranking-policy CLI flag.
 # win_rate_first_pf_second: legacy default, preserved for backward compat.
 # dsr_composite: Deflated-Sharpe composite per Bailey & López de Prado
@@ -90,6 +98,44 @@ def _safe_int(value: Any, default: int = 0) -> int:
         return int(value)
     except Exception:
         return default
+
+
+def assert_v9_oos_lock(indicator_key: str, start: str, end: str | None) -> None:
+    """Refuse to run if a V9 lane is configured to see the locked OOS window.
+
+    Raises SystemExit on violation so the offending command never proceeds to
+    a real HPO trial. The lock is enforced by --indicator-key prefix so the
+    Hybrid+ scaffold cards (warbird_pro_v9_exit_cpcv,
+    warbird_pro_v9_entry_filter_cpcv, warbird_pro_v9_ag_meta_cpcv,
+    warbird_pro_v9_joint_challenger) inherit the same protection without
+    further wiring.
+    """
+    if not any(indicator_key.startswith(p) for p in V9_OOS_LOCKED_KEY_PREFIXES):
+        return
+    start_ts = pd.Timestamp(start)
+    if start_ts.tzinfo is None:
+        start_ts = start_ts.tz_localize("UTC")
+    if start_ts >= V9_OOS_LOCK_START:
+        raise SystemExit(
+            f"V9 OOS lock violated: --start {start} is at or after the locked "
+            f"OOS boundary {V9_OOS_LOCK_START.date()}. The 2025+ window is "
+            f"reserved for champion selection; HPO must use 2020-01-01 → "
+            f"2024-12-31. Pass --end 2024-12-31 explicitly."
+        )
+    if end is None:
+        raise SystemExit(
+            f"V9 OOS lock requires --end on indicator-key '{indicator_key}'. "
+            f"Pass --end 2024-12-31 to clamp HPO data to the IS window."
+        )
+    end_ts = pd.Timestamp(end)
+    if end_ts.tzinfo is None:
+        end_ts = end_ts.tz_localize("UTC")
+    if end_ts >= V9_OOS_LOCK_START:
+        raise SystemExit(
+            f"V9 OOS lock violated: --end {end} reaches into the locked OOS "
+            f"window (>= {V9_OOS_LOCK_START.date()}). HPO must end 2024-12-31 "
+            f"or earlier."
+        )
 
 
 def resolve_optuna_dir(indicator_key: str, optuna_dir: str | None) -> Path:
@@ -594,6 +640,16 @@ def main():
         help=f"IS start date (default: {START_DATE_IS})",
     )
     parser.add_argument(
+        "--end",
+        default=None,
+        help=(
+            "IS end date (inclusive, ISO yyyy-mm-dd). When set, the data "
+            "frame passed to profile.run_backtest is truncated to ts <= end "
+            "BEFORE the trial. Use to keep an OOS hold-out the tuner cannot "
+            "see (e.g. --start 2020-01-01 --end 2024-12-31 keeps 2025+ for OOS)."
+        ),
+    )
+    parser.add_argument(
         "--top-n",
         type=int,
         default=5,
@@ -632,6 +688,8 @@ def main():
     )
     args = parser.parse_args()
 
+    assert_v9_oos_lock(args.indicator_key, args.start, args.end)
+
     profile = load_profile_adapter(args.profile, args.profile_module)
     study_name = args.study_name or default_study_title(args.indicator_key)
     if "_" in study_name:
@@ -641,8 +699,17 @@ def main():
         )
     optuna_dir = resolve_optuna_dir(args.indicator_key, args.optuna_dir)
     optuna_dir.mkdir(parents=True, exist_ok=True)
-    db_path = Path(args.db) if args.db else (optuna_dir / "study.db")
-    storage = f"sqlite:///{db_path}"
+    if args.db and "://" in args.db:
+        # SQLAlchemy URL (e.g. postgresql+psycopg2://user@host:5432/db)
+        storage = args.db
+        db_path = args.db  # for log display only
+    else:
+        db_path = Path(args.db) if args.db else (optuna_dir / "study.db")
+        storage = f"sqlite:///{db_path}"
+
+    # Honour --end if profile.run_backtest accepts it; clamp data window so
+    # IS tuning never sees OOS bars.
+    is_end = getattr(args, "end", None)
     champ_path = resolve_champion_path(args.indicator_key, args.champion_path)
 
     ranking_policy = args.ranking_policy
@@ -670,6 +737,17 @@ def main():
     print("\nLoading data...")
     df = profile.load_data_fn()
     print(f'  {len(df):,} bars  {df["ts"].min()} → {df["ts"].max()}')
+    if is_end:
+        end_ts = pd.Timestamp(is_end)
+        if end_ts.tzinfo is None:
+            end_ts = end_ts.tz_localize("UTC")
+        else:
+            end_ts = end_ts.tz_convert("UTC")
+        # Inclusive of the entire end day (T23:59:59).
+        end_ts = end_ts + pd.Timedelta("23:59:59.999999")
+        n_before = len(df)
+        df = df.loc[pd.to_datetime(df["ts"], utc=True) <= end_ts].copy()
+        print(f"  --end {is_end}: clamped to {df['ts'].max()} (dropped {n_before - len(df):,} OOS bars)")
 
     objective_metric_name = profile.objective_metric_name or ("win_rate" if ranking_policy == RANKING_POLICY_WR else "dsr_composite")
     study = create_or_load_study(
@@ -735,10 +813,16 @@ def main():
     if args.min_wr > 0:
         export_top_n(study, optuna_dir=optuna_dir, n=args.top_n, min_wr=args.min_wr)
 
-    print(
-        f"\nDashboard: optuna-dashboard sqlite:///{db_path} "
-        f"--port {RECOMMENDED_LOCAL_DASHBOARD_PORT}"
-    )
+    if isinstance(db_path, Path):
+        print(
+            f"\nDashboard: optuna-dashboard sqlite:///{db_path} "
+            f"--port {RECOMMENDED_LOCAL_DASHBOARD_PORT}"
+        )
+    else:
+        print(
+            f"\nDashboard: optuna-dashboard '{db_path}' "
+            f"--port {RECOMMENDED_LOCAL_DASHBOARD_PORT}"
+        )
 
 
 if __name__ == "__main__":
