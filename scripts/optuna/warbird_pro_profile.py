@@ -77,9 +77,6 @@ FROZEN_PINE_PARAMS = frozenset(
         "fibLabelOffsetBarsInput",
         "fibLabelSizeInput",
         "zoneFillTransparencyInput",
-        "useMaGate",
-        "lengthMA",
-        "lengthEMA",
         "showMaLines",
     }
 )
@@ -133,6 +130,7 @@ REQUIRED_FEATURE_COLS = (
 
 # Tunable filter params
 BOOL_PARAMS: list[str] = [
+    "useMaGate",
     "requireBullPatternLong",
     "requireBearPatternShort",
     "requireSweepConfirmLong",
@@ -146,6 +144,8 @@ BOOL_PARAMS: list[str] = [
 ]
 
 NUMERIC_RANGES: dict[str, tuple[float, float]] = {
+    "lengthMA":                (8.0, 50.0),
+    "lengthEMA":               (3.0, 34.0),
     "minHtfConfTotal":         (0.0, 3.0),
     "maxBslDistAtrLong":       (0.5, 14.0),
     "maxSslDistAtrShort":      (0.5, 38.0),
@@ -161,6 +161,8 @@ NUMERIC_RANGES: dict[str, tuple[float, float]] = {
 
 INT_PARAMS: set[str] = {
     "maxHoldBars",
+    "lengthMA",
+    "lengthEMA",
 }
 
 CATEGORICAL_PARAMS: dict[str, list[Any]] = {
@@ -175,6 +177,9 @@ CATEGORICAL_PARAMS: dict[str, list[Any]] = {
 }
 
 INPUT_DEFAULTS: dict[str, Any] = {
+    "useMaGate":               True,
+    "lengthMA":                13,
+    "lengthEMA":               6,
     "requireBullPatternLong":  True,
     "requireBearPatternShort": True,
     "requireSweepConfirmLong":  False,
