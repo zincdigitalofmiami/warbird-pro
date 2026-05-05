@@ -76,6 +76,8 @@ class IndicatorSpec:
     profile_builtin: str = ""
     default_study_name: str = ""
     topn_filename: str = "top5.json"
+    group_key: str = ""
+    group_name: str = ""
 
 
 @dataclass
@@ -308,6 +310,8 @@ def load_registry(path: Path) -> list[IndicatorSpec]:
                 profile_builtin=str(row.get("profile_builtin", "")).strip(),
                 default_study_name=default_study_name,
                 topn_filename=str(row.get("topn_filename", "top5.json")).strip() or "top5.json",
+                group_key=str(row.get("group_key", "")).strip(),
+                group_name=str(row.get("group_name", "")).strip(),
             )
         )
     return specs
@@ -1023,6 +1027,8 @@ class HubState:
                 "surface_type": spec.surface_type,
                 "pine_file": spec.pine_file,
                 "notes": spec.notes,
+                "group_key": spec.group_key,
+                "group_name": spec.group_name,
                 "indicator_dir": str(indicator_dir),
                 "experiments_dir": str(exp_dir),
                 "db_path": str(db_path),
@@ -1075,6 +1081,54 @@ class HubState:
                 card["dashboard_error"] = self.child_manager.card_error(card["key"])
                 card["dashboard_running"] = card["dashboard_url"] is not None
 
+        # Build group aggregations — cards sharing a group_key collapse into one
+        # hub card; individual member cards remain accessible via their own routes.
+        from collections import defaultdict as _defaultdict
+        _gm: dict[str, list[dict[str, Any]]] = _defaultdict(list)
+        for card in cards:
+            gkey = card.get("group_key", "")
+            if gkey:
+                _gm[gkey].append(card)
+                card["is_group_member"] = True
+            else:
+                card["is_group_member"] = False
+
+        groups: dict[str, dict[str, Any]] = {}
+        for gkey, members in _gm.items():
+            gname = next((m["group_name"] for m in members if m.get("group_name")), gkey)
+            best: dict[str, Any] | None = None
+            for m in members:
+                mb = m.get("best")
+                if mb is not None:
+                    if best is None or _safe_float(mb.get("objective_score"), -1.0) > _safe_float(best.get("objective_score"), -1.0):
+                        best = mb
+            last_completes = [m["last_complete"] for m in members if m.get("last_complete")]
+            topn_wrs = [m["topn_best_wr"] for m in members if m.get("topn_best_wr") is not None]
+            topn_pfs = [m["topn_best_pf"] for m in members if m.get("topn_best_pf") is not None]
+            groups[gkey] = {
+                "key": gkey,
+                "name": gname,
+                "members": members,
+                "member_keys": [m["key"] for m in members],
+                "trial_count": sum(m["trial_count"] for m in members),
+                "complete_count": sum(m["complete_count"] for m in members),
+                "running_count": sum(m["running_count"] for m in members),
+                "pruned_count": sum(m["pruned_count"] for m in members),
+                "fail_count": sum(m["fail_count"] for m in members),
+                "study_count": sum(m["study_count"] for m in members),
+                "db_exists": any(m["db_exists"] for m in members),
+                "target_study_exists": any(m["target_study_exists"] for m in members),
+                "last_complete": max(last_completes) if last_completes else None,
+                "best": best,
+                "profile_status": "ready" if any(m["profile_status"] == "ready" for m in members) else "missing",
+                "topn_exists": any(m["topn_exists"] for m in members),
+                "topn_count": sum(m["topn_count"] for m in members if m.get("topn_exists")),
+                "topn_best_wr": max(topn_wrs) if topn_wrs else None,
+                "topn_best_pf": max(topn_pfs) if topn_pfs else None,
+                "topn_error": next((m["topn_error"] for m in members if m.get("topn_error")), None),
+                "db_error": next((m["db_error"] for m in members if m.get("db_error")), None),
+            }
+
         total_indicators = len(cards)
         total_strategies = sum(1 for c in cards if c["surface_type"] == "strategy")
         active_studies = sum(1 for c in cards if c["db_exists"])
@@ -1120,12 +1174,108 @@ class HubState:
             "profile_ready": profile_ready,
             "topn_ready": topn_ready,
             "total_completed": total_completed,
+            "groups": groups,
             "running_now": running_now,
             "best_overall": best_overall,
             "stack_health": self.stack_health,
             "child_dashboards_enabled": self.spawn_children,
             "cards": cards,
         }
+
+
+def _render_group_card(group: dict[str, Any], idx: int) -> str:
+    gkey = _h(group["key"])
+    gname = _h(_display_indicator_name(group["name"]))
+    profile_class = "ok" if group["profile_status"] == "ready" else "warn"
+    profile_chip = "Profile Ready" if group["profile_status"] == "ready" else "Profile Missing"
+    db_status = "ready" if group["target_study_exists"] else "empty"
+    db_label = "Active studies detected" if group["target_study_exists"] else "No studies yet"
+    if group["db_error"]:
+        db_status, db_label = "error", f"DB error: {group['db_error']}"
+
+    b = group["best"]
+    if b is not None:
+        if _safe_int(b.get("quality_events"), 0) > 0:
+            best_block = (
+                "<div class='metrics'>"
+                f"<div><span>Best Score</span><strong>{_safe_float(b['objective_score']):.3f}</strong></div>"
+                f"<div><span>Events</span><strong>{_safe_int(b['quality_events'])}</strong></div>"
+                "</div>"
+            )
+        else:
+            best_block = (
+                "<div class='metrics'>"
+                f"<div><span>Best WR</span><strong>{_safe_float(b['win_rate']):.2%}</strong></div>"
+                f"<div><span>Best PF</span><strong>{_safe_float(b['pf']):.3f}</strong></div>"
+                f"<div><span>Trades</span><strong>{_safe_int(b['trades'])}</strong></div>"
+                f"<div><span>Max DD</span><strong>{_safe_float(b['max_dd']):.1f}</strong></div>"
+                "</div>"
+            )
+    else:
+        best_block = "<div class='muted'>No completed trials</div>"
+
+    if group["topn_error"]:
+        topn_block = f"<div class='warning'>{_h(group['topn_error'])}</div>"
+    elif not group["topn_exists"]:
+        topn_block = "<div class='topn muted'>top-N export missing</div>"
+    else:
+        topn_line = f"top-N ready: {group['topn_count']} rows"
+        if group["topn_best_wr"] is not None:
+            topn_line += f" | WR {_safe_float(group['topn_best_wr']):.2%} | PF {_safe_float(group['topn_best_pf']):.3f}"
+        topn_block = f"<div class='topn'>{topn_line}</div>"
+
+    member_count = len(group.get("members", []))
+    best_wr = _safe_float(b.get("win_rate"), -1.0) if b else -1.0
+    best_pf = _safe_float(b.get("pf"), -1.0) if b else -1.0
+    best_trades = _safe_int(b.get("trades"), 0) if b else 0
+    best_score = _safe_float(b.get("objective_score"), -1.0) if b else -1.0
+
+    return (
+        f"<article class='card' "
+        f"data-default-order='{idx}' "
+        f"data-key='{gkey}' "
+        f"data-name='{gname}' "
+        f"data-surface='indicator' "
+        f"data-category='chart-core' "
+        f"data-trials='{_safe_int(group['trial_count'])}' "
+        f"data-complete='{_safe_int(group['complete_count'])}' "
+        f"data-running='{_safe_int(group['running_count'])}' "
+        f"data-fail='{_safe_int(group['fail_count'])}' "
+        f"data-db-ready='{1 if group['db_exists'] else 0}' "
+        f"data-profile-ready='{1 if group['profile_status'] == 'ready' else 0}' "
+        f"data-topn-ready='{1 if group['topn_exists'] and group['topn_count'] > 0 else 0}' "
+        f"data-best-win-rate='{best_wr}' "
+        f"data-best-pf='{best_pf}' "
+        f"data-best-trades='{best_trades}' "
+        f"data-best-max-dd='{_safe_float(b.get('max_dd'), 1e18) if b else 1e18}' "
+        f"data-best-score='{best_score}' "
+        f"data-best-events='0' "
+        f"data-last-complete='{_h(group['last_complete'] or '')}' "
+        f"data-has-best='{1 if b is not None else 0}'>"
+        f"<header><h3>{gname}</h3></header>"
+        f"<p class='card-purpose'>{member_count} active cards — Hybrid+ CPCV pipeline</p>"
+        "<div class='meta-line'>"
+        "<span class='chip surface'>Indicator</span>"
+        "<span class='chip category'>Chart Core</span>"
+        f"<span class='chip {profile_class}'>{_h(profile_chip)}</span>"
+        "</div>"
+        f"<div class='status {db_status}'>{_h(db_label)}</div>"
+        "<div class='counts'>"
+        f"<span>Cards {member_count}</span>"
+        f"<span>Trials {_safe_int(group['trial_count'])}</span>"
+        f"<span>Complete {_safe_int(group['complete_count'])}</span>"
+        f"<span>Running {_safe_int(group['running_count'])}</span>"
+        f"<span>Pruned {_safe_int(group['pruned_count'])}</span>"
+        f"<span>Fail {_safe_int(group['fail_count'])}</span>"
+        "</div>"
+        f"{best_block}"
+        f"{topn_block}"
+        f"<div class='path'><span>Last Complete:</span> {_h(group['last_complete'] or 'n/a')}</div>"
+        "<div class='actions'>"
+        f"<a class='btn' href='/studies/{gkey}' target='_blank' rel='noreferrer'>Open Studies</a>"
+        "</div>"
+        "</article>"
+    )
 
 
 def render_html(snapshot: dict[str, Any]) -> str:
@@ -1150,7 +1300,20 @@ def render_html(snapshot: dict[str, Any]) -> str:
     ag_badge_text = "AutoGluon 1.5 READY" if stack["availability"]["autogluon_1_5"] else "AutoGluon 1.5 MISSING"
 
     cards_html: list[str] = []
+    rendered_groups: set[str] = set()
+    groups_map: dict[str, Any] = snapshot.get("groups", {})
     for idx, card in enumerate(snapshot["cards"]):
+        # Group members are rendered as a single aggregated card; skip individual rendering.
+        gkey = card.get("group_key", "")
+        if gkey:
+            if gkey in rendered_groups:
+                continue
+            rendered_groups.add(gkey)
+            group = groups_map.get(gkey)
+            if group:
+                cards_html.append(_render_group_card(group, idx))
+            continue
+
         display_name = _display_indicator_name(card["name"])
         surface_label = _display_short_label(card["surface_type"])
         category_label = _display_short_label(card["category"])
@@ -2373,6 +2536,339 @@ def render_study_landing(card: dict[str, Any], child_dashboards_enabled: bool) -
 </html>"""
 
 
+def render_group_landing(group: dict[str, Any], child_dashboards_enabled: bool) -> str:
+    gname = _display_indicator_name(group["name"])
+    members = group.get("members", [])
+
+    member_cards_html: list[str] = []
+    for m in members:
+        mname = _display_indicator_name(m["name"])
+        b = m.get("best")
+        if b is not None:
+            if _safe_int(b.get("quality_events"), 0) > 0:
+                metrics_html = (
+                    f"<div class='metric-pill'>Score {_safe_float(b['objective_score']):.3f}</div>"
+                    f"<div class='metric-pill'>Events {_safe_int(b['quality_events'])}</div>"
+                )
+            else:
+                metrics_html = (
+                    f"<div class='metric-pill'>WR {_safe_float(b['win_rate']):.2%}</div>"
+                    f"<div class='metric-pill'>PF {_safe_float(b['pf']):.3f}</div>"
+                    f"<div class='metric-pill'>Trades {_safe_int(b['trades'])}</div>"
+                    f"<div class='metric-pill'>Max DD {_safe_float(b['max_dd']):.1f}</div>"
+                )
+        else:
+            metrics_html = "<div class='metric-pill muted'>No completed trials</div>"
+
+        db_status_label = "Active study detected" if m["target_study_exists"] else "No study.db yet"
+        db_status_class = "ok" if m["target_study_exists"] else "empty"
+        if m["db_error"]:
+            db_status_label, db_status_class = f"DB error: {m['db_error']}", "error"
+
+        if child_dashboards_enabled and m["db_exists"]:
+            open_btn = (
+                f"<a class='btn primary' href='/open-study/{_h(m['key'])}' target='_blank' rel='noreferrer'>"
+                "Open Optuna Dashboard</a>"
+            )
+        else:
+            open_btn = "<span class='btn disabled'>Optuna Dashboard unavailable</span>"
+
+        mkey_h = _h(m["key"])
+        studies_link = (
+            f"<a class='btn' href='/studies/{mkey_h}' target='_blank' rel='noreferrer'>"
+            "Open Studies</a>"
+        )
+
+        member_cards_html.append(
+            "<article class='study-card'>"
+            f"<h2>{_h(mname)}</h2>"
+            f"<p class='card-purpose'>{_h(m['default_study_name'])}</p>"
+            f"<div class='status-chip {db_status_class}'>{_h(db_status_label)}</div>"
+            "<div class='facts'>"
+            f"<span>Trials {_safe_int(m['trial_count'])}</span>"
+            f"<span>Complete {_safe_int(m['complete_count'])}</span>"
+            f"<span>Running {_safe_int(m['running_count'])}</span>"
+            f"<span>Pruned {_safe_int(m['pruned_count'])}</span>"
+            f"<span>Fail {_safe_int(m['fail_count'])}</span>"
+            "</div>"
+            f"<div class='metrics-row'>{metrics_html}</div>"
+            f"<div class='meta'>Last complete: {_h(m['last_complete'] or 'n/a')}</div>"
+            f"<div class='study-actions'>{studies_link}{open_btn}</div>"
+            "</article>"
+        )
+
+    if not member_cards_html:
+        member_cards_html.append("<div class='empty'>No cards registered in this group.</div>")
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{_h(gname)} Studies</title>
+  <style>
+    :root {{
+      color-scheme: dark;
+      --bg: #000000;
+      --text: rgba(255, 255, 255, 0.92);
+      --muted: rgba(255, 255, 255, 0.56);
+      --soft: rgba(255, 255, 255, 0.34);
+      --line: rgba(255, 255, 255, 0.08);
+      --accent: #26c6da;
+      --accent-line: rgba(38, 198, 218, 0.22);
+    }}
+    * {{ box-sizing: border-box; }}
+    html {{ background: #000; }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 72% 16%, rgba(38, 198, 218, 0.11), transparent 32%),
+        linear-gradient(135deg, #000000 0%, #0a0a0a 50%, #111111 100%);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }}
+    body::before {{
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: url("/assets/chart_watermark.svg") center 92px / min(980px, 92vw) no-repeat;
+      opacity: 0.68;
+      filter: saturate(1.45) brightness(1.55) contrast(1.08);
+      mix-blend-mode: screen;
+      z-index: 0;
+    }}
+    body::after {{
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, rgba(0, 0, 0, 0.10), rgba(0, 0, 0, 0.38)),
+        radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.05), transparent 36%);
+      z-index: 0;
+    }}
+    .brandbar {{
+      position: relative;
+      z-index: 1;
+      height: 80px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 max(20px, calc((100vw - 1120px) / 2 + 24px));
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      background: rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(12px);
+    }}
+    .brand {{
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      color: var(--text);
+      text-decoration: none;
+      min-width: 0;
+    }}
+    .brand img {{ width: 190px; height: auto; display: block; }}
+    .brand span {{
+      color: var(--muted);
+      font-size: 13px;
+      border-left: 1px solid rgba(255, 255, 255, 0.1);
+      padding-left: 14px;
+      white-space: nowrap;
+    }}
+    .brand-meta {{ color: var(--soft); font-size: 12px; text-transform: uppercase; }}
+    main {{
+      position: relative;
+      z-index: 1;
+      width: min(1120px, calc(100vw - 48px));
+      margin: 0 auto;
+      padding: 34px 0 48px;
+    }}
+    .top {{
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: flex-start;
+      padding: 24px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(18, 20, 22, 0.52), rgba(0, 0, 0, 0.48));
+      border-radius: 8px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(5px) saturate(1.04);
+      -webkit-backdrop-filter: blur(5px) saturate(1.04);
+    }}
+    h1 {{
+      margin: 0 0 8px;
+      color: #fff;
+      font-size: clamp(28px, 4vw, 42px);
+      line-height: 1.15;
+    }}
+    .subtitle {{
+      max-width: 700px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }}
+    .actions {{
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }}
+    .btn {{
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 36px;
+      padding: 0 13px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      color: var(--text);
+      text-decoration: none;
+      font-size: 13px;
+      white-space: nowrap;
+      background: rgba(255, 255, 255, 0.03);
+    }}
+    .btn.primary {{
+      border-color: var(--accent-line);
+      background: rgba(38, 198, 218, 0.08);
+      color: rgba(224, 242, 254, 0.96);
+    }}
+    .btn.disabled {{
+      color: rgba(255, 255, 255, 0.34);
+      pointer-events: none;
+    }}
+    .grid {{
+      margin-top: 22px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+    }}
+    .study-card {{
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(18, 20, 22, 0.52), rgba(0, 0, 0, 0.48));
+      border-radius: 8px;
+      padding: 18px;
+      display: grid;
+      gap: 10px;
+      backdrop-filter: blur(5px) saturate(1.04);
+      -webkit-backdrop-filter: blur(5px) saturate(1.04);
+      box-shadow: 0 18px 52px rgba(0, 0, 0, 0.24);
+      transition: border-color 160ms ease, transform 160ms ease;
+    }}
+    .study-card:hover {{
+      border-color: var(--accent-line);
+      transform: translateY(-1px);
+    }}
+    .study-card h2 {{
+      margin: 0;
+      color: #fff;
+      font-size: 20px;
+      line-height: 1.2;
+    }}
+    .card-purpose {{
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.4;
+    }}
+    .status-chip {{
+      display: inline-block;
+      font-size: 12px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }}
+    .status-chip.ok {{ color: #86efac; border-color: rgba(34, 197, 94, 0.28); background: rgba(34, 197, 94, 0.08); }}
+    .status-chip.empty {{ color: #fde68a; border-color: rgba(245, 158, 11, 0.28); background: rgba(245, 158, 11, 0.08); }}
+    .status-chip.error {{ color: #fecaca; border-color: rgba(239, 68, 68, 0.32); background: rgba(239, 68, 68, 0.08); }}
+    .facts {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }}
+    .facts span {{
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.035);
+      border-radius: 999px;
+      padding: 4px 8px;
+      color: rgba(255, 255, 255, 0.76);
+      font-size: 12px;
+    }}
+    .metrics-row {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }}
+    .metric-pill {{
+      border: 1px solid rgba(38, 198, 218, 0.22);
+      background: rgba(38, 198, 218, 0.06);
+      border-radius: 999px;
+      padding: 4px 9px;
+      color: rgba(207, 250, 254, 0.92);
+      font-size: 12px;
+    }}
+    .metric-pill.muted {{
+      border-color: var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--muted);
+    }}
+    .meta {{ color: var(--muted); font-size: 12px; }}
+    .study-actions {{
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }}
+    .empty {{
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 24px;
+      color: var(--muted);
+      text-align: center;
+    }}
+    @media (max-width: 720px) {{
+      .brandbar {{ height: auto; min-height: 72px; flex-direction: column; gap: 8px; padding: 16px 20px; }}
+      .brand {{ flex-wrap: wrap; }}
+      .brand img {{ width: 150px; }}
+      .brand span {{ border-left: 0; padding-left: 0; }}
+      .brand-meta {{ display: none; }}
+      main {{ width: min(100vw - 32px, 1120px); }}
+      .top {{ flex-direction: column; }}
+      .actions {{ justify-content: flex-start; }}
+    }}
+  </style>
+</head>
+<body>
+  <header class="brandbar">
+    <a class="brand" href="/">
+      <img src="/assets/warbird-logo.svg" alt="Warbird Pro" />
+      <span>Optuna Study Operations</span>
+    </a>
+    <div class="brand-meta">Local Operator Surface</div>
+  </header>
+  <main>
+    <section class="top">
+      <div>
+        <h1>{_h(gname)}</h1>
+        <div class="subtitle">
+          {len(members)} cards in this group — each card has its own study DB and Optuna run.
+          Use each card's <em>Open Optuna Dashboard</em> button for trial-level controls.
+        </div>
+      </div>
+      <div class="actions">
+        <a class="btn" href="/">Back to Hub</a>
+      </div>
+    </section>
+    <section class="grid">
+      {''.join(member_cards_html)}
+    </section>
+  </main>
+</body>
+</html>"""
+
+
 def render_study_detail(card: dict[str, Any], study_id: int, child_dashboards_enabled: bool) -> str | None:
     display_name = _display_indicator_name(card["name"])
     study = load_workspace_study_detail(Path(card["db_path"]), study_id)
@@ -2805,6 +3301,18 @@ def _build_handler(state: HubState):
                     self.send_error(404, "Unknown study route")
                     return
                 key = parts[0]
+
+                # Group landing page — one page showing all member cards.
+                if len(parts) == 1 and key in snap.get("groups", {}):
+                    group = snap["groups"][key]
+                    payload = render_group_landing(group, snap["child_dashboards_enabled"]).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
+
                 card = next((c for c in snap["cards"] if c["key"] == key), None)
                 if card is None:
                     self.send_error(404, f"Unknown workspace key: {key}")
