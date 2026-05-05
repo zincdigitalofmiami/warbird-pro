@@ -15,8 +15,8 @@ def _write_export(
     *,
     symbol: str,
     trigger_every: int = 3,
-    capture_method: str = "TRADINGVIEW_INDICATOR_CSV",
-    indicator_file: str | None = profile.PINE_FILE,
+    capture_method: str = "DATABENTO_OHLCV_CSV",
+    indicator_file: str | None = None,
 ) -> None:
     rows = []
     start = pd.Timestamp("2026-01-02T14:30:00Z")
@@ -68,7 +68,7 @@ def test_v9_contract_keeps_fib_visuals_and_ma_setup_frozen() -> None:
     assert profile.FROZEN_PINE_PARAMS.isdisjoint(tunables)
 
 
-def test_v9_loader_accepts_es_mes_and_ignores_nq(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_v9_loader_accepts_mes_only_and_ignores_es_nq(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     export_dir = tmp_path / "exports"
     export_dir.mkdir()
     _write_export(export_dir / "mes.csv", symbol="CME_MINI:MES1!")
@@ -79,9 +79,12 @@ def test_v9_loader_accepts_es_mes_and_ignores_nq(tmp_path: Path, monkeypatch: py
 
     frame = profile.load_data()
 
-    assert set(frame["symbol_root"]) == {"MES", "ES"}
-    assert all("nq.csv" not in source for source in frame["_source_csv"].unique())
-    assert len(frame.attrs["ignored_exports"]) == 1
+    assert set(frame["symbol_root"]) == {"MES"}
+    used_filenames = {Path(source).name for source in frame["_source_csv"].unique()}
+    assert "es.csv" not in used_filenames
+    assert "nq.csv" not in used_filenames
+    assert "mes.csv" in used_filenames
+    assert len(frame.attrs["ignored_exports"]) == 2
 
 
 def test_v9_loader_keeps_neg236_as_context_not_stop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,3 +117,20 @@ def test_v9_loader_accepts_databento_training_data_without_indicator_source(
 
     assert set(frame["symbol_root"]) == {"MES"}
     assert frame["_source_kind"].eq("DATABENTO_OHLCV_CSV").all()
+
+
+def test_v9_loader_rejects_tradingview_csv_capture_method(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    export_dir = tmp_path / "exports"
+    export_dir.mkdir()
+    _write_export(
+        export_dir / "tv.csv",
+        symbol="MES1!",
+        capture_method="TRADINGVIEW_INDICATOR_CSV",
+        indicator_file=profile.PINE_FILE,
+    )
+    monkeypatch.setattr(profile, "OPTUNA_DIR", tmp_path)
+
+    with pytest.raises(ValueError, match="Databento method"):
+        profile.load_data()

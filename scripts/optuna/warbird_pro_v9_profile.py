@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Warbird Pro V9 Optuna profile.
 
-This lane models ATR/risk exits from manifest-backed ES/MES training rows for
-Warbird Pro V9. TradingView exports may provide Pine trigger telemetry, and
-Databento may provide market-data training rows. Databento is a data supplier,
-not the Pine indicator source. This profile intentionally does not mutate Pine
-or optimize fib-anchor, visual, or EMA/MA setup inputs.
+This lane models ATR/risk exits from manifest-backed Databento MES 5m training
+rows for Warbird Pro V9. Databento is the only admitted historical data source;
+ES, NQ, MNQ, and other timeframes are ignored. This profile intentionally does
+not mutate Pine or optimize fib-anchor, visual, or EMA/MA setup inputs.
 """
 
 from __future__ import annotations
@@ -34,17 +33,9 @@ OPTUNA_DIR = workspace_dir(PROFILE_KEY)
 EXPORT_ENV = "WARBIRD_PRO_V9_EXPORT"
 MANIFEST_ENV = "WARBIRD_PRO_V9_MANIFEST"
 
-ALLOWED_SYMBOL_ROOTS = frozenset({"ES", "MES"})
-IGNORED_SYMBOL_ROOTS = frozenset({"NQ", "MNQ"})
-ALLOWED_TIMEFRAMES = frozenset({"5", "15", "5m", "15m"})
-TRADINGVIEW_CAPTURE_METHODS = frozenset(
-    {
-        "TRADINGVIEW_INDICATOR_CSV",
-        "TV_INDICATOR_CSV",
-        "TRADINGVIEW_CSV",
-        "CSV_EXPORT",
-    }
-)
+ALLOWED_SYMBOL_ROOTS = frozenset({"MES"})
+IGNORED_SYMBOL_ROOTS = frozenset({"ES", "NQ", "MNQ"})
+ALLOWED_TIMEFRAMES = frozenset({"5", "5m"})
 DATABENTO_CAPTURE_METHODS = frozenset(
     {
         "DATABENTO_OHLCV_CSV",
@@ -52,9 +43,9 @@ DATABENTO_CAPTURE_METHODS = frozenset(
         "DATABENTO_BARS_CSV",
     }
 )
-ALLOWED_CAPTURE_METHODS = TRADINGVIEW_CAPTURE_METHODS | DATABENTO_CAPTURE_METHODS
+ALLOWED_CAPTURE_METHODS = DATABENTO_CAPTURE_METHODS
 
-POINT_VALUE_BY_ROOT = {"MES": 5.0, "ES": 50.0}
+POINT_VALUE_BY_ROOT = {"MES": 5.0}
 COMMISSION_SIDE_USD = 1.0
 MINTICK = 0.25
 DATA_FLOOR = "2020-01-01"
@@ -176,25 +167,18 @@ def _load_manifest(csv_path: Path) -> dict[str, Any]:
     capture_method = str(manifest.get("capture_method") or manifest.get("source_kind") or "").strip()
     if capture_method and capture_method not in ALLOWED_CAPTURE_METHODS:
         raise ValueError(
-            "Warbird Pro V9 capture_method must be a TradingView CSV method or "
-            "Databento training data method; "
-            f"got {capture_method!r}."
+            "Warbird Pro V9 capture_method must be a Databento method "
+            f"({sorted(DATABENTO_CAPTURE_METHODS)}); got {capture_method!r}."
         )
-    source_kind = capture_method or "TRADINGVIEW_INDICATOR_CSV"
+    source_kind = capture_method
     manifest["_source_kind"] = source_kind
 
     indicator_file = str(manifest.get("indicator_file", "")).strip()
-    if source_kind in DATABENTO_CAPTURE_METHODS and indicator_file:
+    if indicator_file:
         raise ValueError(
             "Warbird Pro V9 Databento training manifests must not declare "
-            "indicator_file as the data source. Use capture_method/source_kind "
-            "to identify Databento data and keep Pine identity out of the data "
-            "source field."
-        )
-    if source_kind not in DATABENTO_CAPTURE_METHODS and indicator_file and indicator_file != PINE_FILE:
-        raise ValueError(
-            f"Warbird Pro V9 manifest indicator_file must be {PINE_FILE!r}; "
-            f"got {indicator_file!r}."
+            "indicator_file as the data source. Use capture_method to identify "
+            "the Databento source and keep Pine identity out of the data field."
         )
 
     trigger_family = str(manifest.get("trigger_family", "")).strip()
@@ -212,13 +196,16 @@ def _load_manifest(csv_path: Path) -> dict[str, Any]:
         )
 
     expected_hash = manifest.get("sha256") or manifest.get("csv_sha256") or manifest.get("export_hash")
-    if expected_hash:
-        actual_hash = _sha256_file(csv_path)
-        if str(expected_hash).lower() != actual_hash.lower():
-            raise ValueError(
-                f"Warbird Pro V9 export hash mismatch for {csv_path}: "
-                f"manifest={expected_hash} actual={actual_hash}"
-            )
+    if not expected_hash:
+        raise ValueError(
+            f"Warbird Pro V9 manifest must declare sha256/csv_sha256/export_hash for {csv_path}."
+        )
+    actual_hash = _sha256_file(csv_path)
+    if str(expected_hash).lower() != actual_hash.lower():
+        raise ValueError(
+            f"Warbird Pro V9 export hash mismatch for {csv_path}: "
+            f"manifest={expected_hash} actual={actual_hash}"
+        )
 
     return manifest
 
@@ -275,7 +262,7 @@ def _prepare_export_frame(frame: pd.DataFrame, manifest: dict[str, Any], source_
         return empty
     if symbol_root not in ALLOWED_SYMBOL_ROOTS:
         raise ValueError(
-            f"Warbird Pro V9 only admits ES/MES exports and ignores NQ; got {symbol!r}."
+            f"Warbird Pro V9 admits MES-only Databento exports; got {symbol!r}."
         )
 
     required = {"ts", "open", "high", "low", "close", "volume"}
@@ -359,10 +346,11 @@ def load_data() -> pd.DataFrame:
     export_files = _discover_export_files()
     if not export_files:
         raise FileNotFoundError(
-            "No Warbird Pro V9 ES/MES training exports found. Put TradingView "
-            "CSV or Databento training CSV files at "
-            f"{OPTUNA_DIR / 'export.csv'} or {OPTUNA_DIR / 'exports'}/*.csv, with "
-            "a .manifest.json next to each CSV. NQ exports are ignored."
+            "No Warbird Pro V9 MES 5m Databento exports found. Put Databento "
+            "MES 5m CSV files at "
+            f"{OPTUNA_DIR / 'export.csv'} or {OPTUNA_DIR / 'exports'}/*.csv, "
+            "with a .manifest.json next to each CSV (capture_method must be "
+            "DATABENTO_OHLCV_CSV / DATABENTO_TRAINING_CSV / DATABENTO_BARS_CSV)."
         )
 
     frames: list[pd.DataFrame] = []
@@ -377,8 +365,8 @@ def load_data() -> pd.DataFrame:
 
     if not frames:
         raise ValueError(
-            "Warbird Pro V9 found no usable ES/MES export rows. "
-            f"Ignored NQ/MNQ files: {ignored}"
+            "Warbird Pro V9 found no usable MES 5m export rows. "
+            f"Ignored non-MES files: {ignored}"
         )
 
     df = pd.concat(frames, ignore_index=True).sort_values(["symbol_root", "ts"]).reset_index(drop=True)
@@ -551,7 +539,14 @@ def _score_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
 
     long_trades = sum(1 for t in trades if int(t["direction"]) == 1)
     short_trades = len(trades) - long_trades
-    side_balance = min(long_trades, short_trades) / max(max(long_trades, short_trades), 1)
+    # Side balance only contributes when both sides clear MIN_TRADES; a thin
+    # opposite side (legitimately rare regime) does not get penalised.
+    if min(long_trades, short_trades) >= MIN_TRADES:
+        side_balance = min(long_trades, short_trades) / max(max(long_trades, short_trades), 1)
+        side_weight = 0.10
+    else:
+        side_balance = 1.0
+        side_weight = 0.0
 
     pf_score = min(pf / 2.25, 1.0)
     wr_score = min(wr / 0.62, 1.0)
@@ -564,7 +559,7 @@ def _score_trades(trades: list[dict[str, Any]]) -> dict[str, Any]:
         + 0.25 * expectancy_score
         + 0.18 * wr_score
         + 0.15 * trade_density_score
-        + 0.10 * side_balance
+        + side_weight * side_balance
         - dd_penalty
     )
     score = float(np.clip(score, 0.0, 1.0))

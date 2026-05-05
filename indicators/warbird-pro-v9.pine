@@ -1,29 +1,35 @@
 // This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © Kirk / ZINC Digital
 //
-// Warbird Pro V9 — Fib Anchor + EMA/MA Gate + RSI Context
+// Warbird Pro V9 — Fib Anchor + Liquidity + Volume Delta + Pattern Confluence
 // Source ownership:
-// - Fib engine/ladder visuals: Indicator A (preserved structure contract)
-// - MA gate: Indicator B (SMA + EMA(SMA) crossover family)
-// - RSI/filter/visual controls: Indicator C (RSI context + table + bar colors)
+// - Fib engine/ladder math: Indicator A (PROTECTED — anchor ownership, ZigZag, ratios)
+// - MA gate: Indicator B (SMA + EMA(close) crossover, EMA fast above SMA slow = bull)
+// - RSI/Pattern context: Indicator C (RSI + top-handful candlesticks)
 //
-// Design goals:
-// - Keep the fib engine stable and deterministic
-// - Remove footprint, VWAP, and custom VF/NFE/RSI-KNN clutter from old surfaces
-// - Use proven candlestick patterns as confirmation gates
-// - Keep signal gating light enough to avoid "no trades for days"
-// - Provide hidden Optuna export plots for 5m/15m tuning
+// Design contract:
+// - Fib core remains untouched (anchor ownership, ladder math, draw span)
+// - When a trade fires: ALL fibs (lines, labels, zone box) hide; entry/SL/TP
+//   lines and labels reuse the SAME drawAnchoredLine + setFibLevelLabel
+//   plumbing with the same widths, styles, label sizes, and label offsets
+// - Volume delta uses proportional close-position split (real intrabar info)
+// - Liquidity primitives (BSL/SSL) use 2-bar sweep+reclaim
+// - Candlestick top-handful exported individually for AG/SHAP feature scoring
+// - Exhaustion shows as a single circle above (long-side) or below (short-side)
+//   the bar — no labels, no text, no chart clutter
+// - 50 ml_* hidden plots feed the V9 Optuna entry+exit lanes
 //
 // NO-REPAINT AUDIT:
-// - Structural triggers are gated by barstate.isconfirmed
+// - Structural triggers gated by barstate.isconfirmed
 // - request.security() calls use lookahead_off
-// - ZigZag pivots are consumed only after confirmation from library output
+// - ZigZag pivots consumed only after confirmation from library output
+// - Liquidity reclaim uses bar[1] swept + bar[0] reclaimed (history-only)
 //@version=6
-indicator("Warbird Pro V9", shorttitle="WB V9", overlay=true, max_lines_count=80, max_labels_count=32, max_boxes_count=8)
+indicator("Warbird Pro V9", shorttitle="WB V9", overlay=true, max_lines_count=80, max_labels_count=64, max_boxes_count=8)
 import TradingView/ZigZag/7 as zigzag
 
 //=====================
-// FIBONACCI ENGINE SETTINGS (Source A owner)
+// FIBONACCI ENGINE SETTINGS (Source A — PROTECTED)
 //=====================
 string groupFibEngine = "Fib Structure"
 bool autoTuneZZ = input.bool(false, "Auto-tune ZigZag by Timeframe", group=groupFibEngine)
@@ -39,7 +45,7 @@ float fibDeviation = autoTuneZZ ? (_tfSec >= 14400 ? 4.0 : _tfSec >= 3600 ? 3.5 
 int fibDepth = autoTuneZZ ? (_tfSec >= 14400 ? 20 : _tfSec >= 3600 ? 15 : _tfSec >= 900 ? 20 : 15) : fibDepthManual
 
 //=====================
-// CANONICAL FIB LEVELS (Source A owner)
+// CANONICAL FIB LEVELS (Source A — PROTECTED)
 //=====================
 float FIB_ZERO  = 0.0
 float FIB_236   = 0.236
@@ -75,7 +81,7 @@ int WIDTH_TARGET      = 2
 // SIGNAL LOGIC SETTINGS
 //=====================
 string groupSignal = "Signal Logic"
-int retestContextBars = 3
+int retestContextBars = input.int(3, "Retest Context Bars", minval=1, maxval=20, group=groupSignal)
 bool rejectWick = input.bool(true, "Rejection Uses Wick", group=groupSignal)
 bool oneShotEvent = input.bool(true, "One-shot Signals", group=groupSignal)
 bool usePatternConfirm = input.bool(true, "Require Winning Candlestick Pattern", group=groupSignal)
@@ -83,24 +89,25 @@ bool useMlFilter = input.bool(false, "Require RSI Extreme Gate", group=groupSign
 bool useLiquiditySweepConfirm = input.bool(false, "Require Liquidity Sweep Confirm", group=groupSignal)
 bool gateShortsInBullTrend = input.bool(false, "Gate Shorts In Bull Regime", group=groupSignal)
 int signalCooldownBars = input.int(3, "Signal Cooldown Bars", minval=0, maxval=50, group=groupSignal)
-int liqSweepLookbackBarsInput = input.int(10, "Liquidity Sweep Lookback", minval=3, maxval=200, group=groupSignal)
+int liqLookbackBars = input.int(20, "Liquidity Pool Lookback", minval=5, maxval=200, group=groupSignal)
 float shortGateRsiFloor = input.float(55.0, "Bull Regime RSI Floor (Short Gate)", minval=45.0, maxval=90.0, step=0.5, group=groupSignal)
 
 string groupExecution = "Execution Anchor"
 string optEntryLevelInput = input.string("0.618", "Execution Anchor", options=["0.500", "0.618", "0.786"], group=groupExecution)
 float tradeStopAtrMult = input.float(1.50, "Trade Telemetry ATR Stop", minval=0.25, maxval=10.0, step=0.25, group=groupExecution)
+int tradeMaxHoldBars = input.int(72, "Trade Time Exit (bars)", minval=0, maxval=500, group=groupExecution)
 
 string groupExh = "Exhaustion"
-bool useExhaustion = input.bool(true, "Enable Exhaustion Signals", group=groupExh)
+bool useExhaustion = input.bool(true, "Enable Exhaustion Heads-Up", group=groupExh)
 float exhaustionLevelAtrTol = input.float(0.10, "Extension ATR Tolerance", minval=0.01, maxval=0.50, step=0.01, group=groupExh)
 
 //=====================
-// MA CROSSOVER (Source B owner)
+// MA CROSSOVER (Source B — fast EMA(close) above slow SMA(close) = bull)
 //=====================
 string groupMa = "EMA/MA Crossover"
 bool useMaGate = input.bool(true, "Use EMA/MA Gate", group=groupMa)
-int lengthMA = input.int(13, "MA Length (SMA)", minval=1, maxval=200, group=groupMa)
-int lengthEMA = input.int(6, "EMA Length (on MA)", minval=1, maxval=200, group=groupMa)
+int lengthMA = input.int(13, "MA Length (SMA, slow)", minval=1, maxval=200, group=groupMa)
+int lengthEMA = input.int(6, "EMA Length (close, fast)", minval=1, maxval=200, group=groupMa)
 bool showMaLines = input.bool(true, "Show EMA/MA Lines", group=groupMa)
 color maColorInput = input.color(color.white, "MA Color", group=groupMa, inline="ma")
 int maWidthInput = input.int(2, "", minval=1, maxval=5, group=groupMa, inline="ma")
@@ -108,7 +115,7 @@ color emaColorInput = input.color(#26A69A, "EMA Color", group=groupMa, inline="e
 int emaWidthInput = input.int(2, "", minval=1, maxval=5, group=groupMa, inline="ema")
 
 //=====================
-// RSI CONTEXT (Source C owner)
+// RSI CONTEXT (Source C)
 //=====================
 string groupRsi = "RSI Context"
 int rsiLength = input.int(14, "RSI Length", minval=1, group=groupRsi)
@@ -120,7 +127,7 @@ bool showMlTable = input.bool(true, "Show ML Table", group=groupTable)
 string tablePositionInput = input.string("Bottom Left", "Table Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=groupTable)
 
 //=====================
-// FIB VISUAL SETTINGS (Source A owner)
+// FIB VISUAL SETTINGS (Source A — PROTECTED draw span)
 //=====================
 string groupViz = "Fib Visuals"
 int targetLookbackBars = input.int(40, "Target Line Lookback Bars", minval=5, maxval=500, group=groupViz)
@@ -129,7 +136,7 @@ bool useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window
 string fibLineStyleInput = input.string("Solid", "Fib Line Style", options=["Solid", "Dashed", "Dotted"], group=groupViz)
 color fibAnchorColorInput = input.color(COLOR_ANCHOR, "Anchor Fib", inline="fib_anchor", group=groupViz)
 int fibAnchorWidthInput = input.int(WIDTH_ANCHOR, "", minval=1, maxval=5, inline="fib_anchor", group=groupViz)
-color fibStopColorInput = input.color(COLOR_STOP, "Neg .236", inline="fib_stop", group=groupViz)
+color fibStopColorInput = input.color(COLOR_STOP, "Neg .236 / SL", inline="fib_stop", group=groupViz)
 int fibStopWidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_stop", group=groupViz)
 color fibRetracementColorInput = input.color(COLOR_RETRACEMENT, ".236/.786/Waypoints", inline="fib_retrace", group=groupViz)
 int fibRetracementWidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_retrace", group=groupViz)
@@ -137,7 +144,7 @@ color fibRetracementAccentColorInput = input.color(COLOR_RETRACEMENT_ACCENT, ".3
 int fibRetracementAccentWidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_accent", group=groupViz)
 color fibPivotColorInput = input.color(COLOR_PIVOT, "Pivot Zone", inline="fib_pivot", group=groupViz)
 int fibPivotWidthInput = input.int(WIDTH_PIVOT, "", minval=1, maxval=5, inline="fib_pivot", group=groupViz)
-color fibTargetColorInput = input.color(color.new(COLOR_TARGET, 50), "Targets", inline="fib_target", group=groupViz)
+color fibTargetColorInput = input.color(color.new(COLOR_TARGET, 50), "Targets / TP", inline="fib_target", group=groupViz)
 int fibTargetWidthInput = input.int(WIDTH_TARGET, "", minval=1, maxval=5, inline="fib_target", group=groupViz)
 bool showFibLevelLabelsInput = input.bool(false, "Show Fib Level Labels", group=groupViz)
 int fibLabelOffsetBarsInput = input.int(10, "Fib Label Offset (bars)", minval=0, maxval=30, group=groupViz)
@@ -156,6 +163,12 @@ f_label_size(string sizeName) =>
 f_table_pos(string p) =>
     p == "Top Left" ? position.top_left : p == "Bottom Right" ? position.bottom_right : p == "Bottom Left" ? position.bottom_left : position.top_right
 
+f_xa_code(float c, float slow, float fast) =>
+    na(c) or na(slow) or na(fast) ? 0 : (fast > slow and c > fast) ? 2 : (fast > slow) ? 1 : (fast < slow and c < fast) ? -2 : (fast < slow) ? -1 : 0
+
+f_xa_label(int code) =>
+    code == 2 ? "STRONG BULLISH" : code == 1 ? "BULLISH" : code == -2 ? "STRONG BEARISH" : code == -1 ? "BEARISH" : "NEUTRAL"
+
 //=====================
 // Base metrics
 //=====================
@@ -171,62 +184,88 @@ float lowerWickRatio = barRange > 0 ? lowerWickSize / barRange : 0.0
 float bodyRatio = barRange > 0 ? bodySize / barRange : 0.0
 
 //=====================
-// Candlestick patterns (winning set from Source A)
+// Candlestick patterns — top handful, individually exported
 //=====================
-bool longLowerShadow = lowerWickRatio >= 0.55 and upperWickRatio <= 0.25
-bool dragonflyDoji = lowerWickRatio >= 0.60 and bodyRatio <= 0.15
-bool risingWindow = low > high[1]
+// Bullish (single-bar)
+bool patHammer        = bullishCandle and bodyRatio <= 0.35 and lowerWickRatio >= 0.55 and upperWickRatio <= 0.20
+bool patInvHammer     = bullishCandle and bodyRatio <= 0.35 and upperWickRatio >= 0.55 and lowerWickRatio <= 0.20
+bool patDragonfly     = bodyRatio <= 0.10 and lowerWickRatio >= 0.65 and upperWickRatio <= 0.15
+// Bullish (2-bar)
+bool patBullEngulf    = bullishCandle and bearishCandle[1] and close > open[1] and open < close[1]
+bool patPiercing      = bullishCandle and bearishCandle[1] and open < close[1] and close >= (open[1] + close[1]) / 2.0 and close < open[1]
+// Bullish (3-bar)
+bool patMorningStar   = bearishCandle[2] and bodyRatio[1] <= 0.35 and bullishCandle and close >= (open[2] + close[2]) / 2.0
+bool patThreeWhite    = bullishCandle and bullishCandle[1] and bullishCandle[2] and close > close[1] and close[1] > close[2] and open > open[1] and open[1] > open[2]
 
-bool longUpperShadow = upperWickRatio >= 0.55 and lowerWickRatio <= 0.25
-bool shootingStar = upperWickRatio >= 0.50 and bodyRatio <= 0.35 and bearishCandle
-bool bearishEngulfing = bearishCandle and bullishCandle[1] and close < open[1] and open > close[1]
-bool fallingWindow = high < low[1]
+// Bearish (single-bar)
+bool patShootingStar  = bearishCandle and bodyRatio <= 0.35 and upperWickRatio >= 0.55 and lowerWickRatio <= 0.20
+bool patHangingMan    = bearishCandle and bodyRatio <= 0.35 and lowerWickRatio >= 0.55 and upperWickRatio <= 0.20
+bool patGravestone    = bodyRatio <= 0.10 and upperWickRatio >= 0.65 and lowerWickRatio <= 0.15
+// Bearish (2-bar)
+bool patBearEngulf    = bearishCandle and bullishCandle[1] and close < open[1] and open > close[1]
+bool patDarkCloud     = bearishCandle and bullishCandle[1] and open > close[1] and close <= (open[1] + close[1]) / 2.0 and close > open[1]
+// Bearish (3-bar)
+bool patEveningStar   = bullishCandle[2] and bodyRatio[1] <= 0.35 and bearishCandle and close <= (open[2] + close[2]) / 2.0
+bool patThreeBlack    = bearishCandle and bearishCandle[1] and bearishCandle[2] and close < close[1] and close[1] < close[2] and open < open[1] and open[1] < open[2]
 
-bool provenBullishPattern = longLowerShadow or dragonflyDoji or risingWindow
-bool provenBearishPattern = longUpperShadow or shootingStar or bearishEngulfing or fallingWindow
+bool provenBullishPattern = patHammer or patInvHammer or patDragonfly or patBullEngulf or patPiercing or patMorningStar or patThreeWhite
+bool provenBearishPattern = patShootingStar or patHangingMan or patGravestone or patBearEngulf or patDarkCloud or patEveningStar or patThreeBlack
 
 //=====================
-// RSI context core
+// RSI context
 //=====================
-float baseRsi = ta.rsi(close, rsiLength)
-float finalRsi = baseRsi
-float actualOverbought = rsiOverbought
-float actualOversold = rsiOversold
+float finalRsi = ta.rsi(close, rsiLength)
 
 //=====================
-// MA crossover (Source B logic family)
+// MA crossover (3a fix: EMA on close, fast above slow SMA = bull)
 //=====================
 float xMA = ta.sma(close, lengthMA)
-float xEMA = ta.ema(xMA, lengthEMA)
+float xEMA = ta.ema(close, lengthEMA)
 bool maBull = xEMA > xMA
 bool maBear = xEMA < xMA
 
-// Cross-asset 15m trend (Analytics section)
-// Use EMA(close,9) as fast and SMA(close,21) as slow — conventional trend reading.
+//=====================
+// Cross-asset 15m trend codes (3h)
+//=====================
 [nqClose15, nqSlow15, nqFast15] = request.security("CME_MINI:NQ1!", "15", [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [znClose15, znSlow15, znFast15] = request.security("CBOT:ZN1!", "15", [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [dxClose15, dxSlow15, dxFast15] = request.security("ICEUS:DX1!", "15", [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
-f_xa_trend(float c, float slow, float fast) =>
-    na(c) or na(slow) or na(fast) ? "--" : (fast > slow and c > fast) ? "STRONG BULLISH" : (fast > slow) ? "BULLISH" : (fast < slow and c < fast) ? "STRONG BEARISH" : (fast < slow) ? "BEARISH" : "NEUTRAL"
-
-// Net signed volume (last 20 bars; +buyers / -sellers)
-float signedVolBar = math.sign(close - open) * volume
-float netVol20 = math.sum(signedVolBar, 20)
+int nqCode = f_xa_code(nqClose15, nqSlow15, nqFast15)
+int znCode = f_xa_code(znClose15, znSlow15, znFast15)
+int dxCode = f_xa_code(dxClose15, dxSlow15, dxFast15)
 
 //=====================
-// Liquidity sweep
+// Volume buy/sell delta — proportional close-position split (1)
 //=====================
-int swingLookback = liqSweepLookbackBarsInput
-float swingHigh = ta.highest(high, swingLookback)[1]
-float swingLow = ta.lowest(low, swingLookback)[1]
-bool liqSweepBull = low < swingLow and close > swingLow
-bool liqSweepBear = high > swingHigh and close < swingHigh
+float closePos = barRange > 0 ? (close - low) / barRange : 0.5
+float buyVolBar = volume * closePos
+float sellVolBar = volume * (1.0 - closePos)
+float barDelta = buyVolBar - sellVolBar
+float netDelta20 = math.sum(barDelta, 20)
 
 //=====================
-// HTF confluence (kept lightweight from Source A)
+// Liquidity pools (BSL/SSL) — minimal moving parts, 2-bar reclaim (1e/3d)
 //=====================
-float htfConfTolPct = 0.15
+float bsl = ta.highest(high, liqLookbackBars)[1]
+float ssl = ta.lowest(low, liqLookbackBars)[1]
+
+bool sweptBslBar = high > bsl and close < bsl
+bool sweptSslBar = low < ssl and close > ssl
+
+bool reclaimedBsl = sweptBslBar[1] and close < bsl
+bool reclaimedSsl = sweptSslBar[1] and close > ssl
+
+float bslDistAtr = atr14 > 0 ? (bsl - close) / atr14 : 0.0
+float sslDistAtr = atr14 > 0 ? (close - ssl) / atr14 : 0.0
+
+bool liqSweepBull = sweptSslBar or reclaimedSsl
+bool liqSweepBear = sweptBslBar or reclaimedBsl
+
+//=====================
+// HTF confluence (3e widen tolerance to tick-meaningful)
+//=====================
+float htfConfTolPct = input.float(1.5, "HTF Confluence Tolerance (%)", minval=0.1, maxval=10.0, step=0.1, group=groupSignal)
 [htf1hHigh, htf1hLow] = request.security(syminfo.tickerid, "60", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 float htf1hRange = nz(htf1hHigh - htf1hLow)
@@ -253,7 +292,7 @@ htfConfluenceCheck(float level15m, float currentFibRange) =>
         hits
 
 //=====================
-// AUTO FIB ENGINE — core anchor ownership from Source A
+// AUTO FIB ENGINE (Source A — PROTECTED, unchanged)
 //=====================
 fibZzUpdate() =>
     var fibSettings = zigzag.Settings.new(fibDeviation, fibDepth, color(na), false, false, false, false, "Absolute", true)
@@ -344,39 +383,6 @@ float zoneLower = math.min(p618, p786)
 float zoneFillUpper = math.max(p382, p618)
 float zoneFillLower = math.min(p382, p618)
 
-float rollingHigh8 = ta.highest(high, 8)
-float rollingHigh21 = ta.highest(high, 21)
-float rollingHigh55 = ta.highest(high, 55)
-float rollingLow8 = ta.lowest(low, 8)
-float rollingLow21 = ta.lowest(low, 21)
-float rollingLow55 = ta.lowest(low, 55)
-
-float confluenceQuality = na
-if isValid
-    float anchorRange = fibRange
-    float tol = anchorRange * fibConfluenceTolPct * 0.01
-    int confHits = 0
-    float[] rH = array.from(rollingHigh8, rollingHigh21, rollingHigh55)
-    float[] rL = array.from(rollingLow8, rollingLow21, rollingLow55)
-    for i = 0 to 2
-        float rollingH = array.get(rH, i)
-        float rollingL = array.get(rL, i)
-        float rollingRange = rollingH - rollingL
-        if rollingRange > 0
-            float a382 = fibAnchorLow + anchorRange * FIB_382
-            float a500 = fibAnchorLow + anchorRange * FIB_PIVOT
-            float a618 = fibAnchorLow + anchorRange * FIB_618
-            float r382 = rollingL + rollingRange * FIB_382
-            float r500 = rollingL + rollingRange * FIB_PIVOT
-            float r618 = rollingL + rollingRange * FIB_618
-            if math.abs(a382 - r382) <= tol
-                confHits += 1
-            if math.abs(a500 - r500) <= tol
-                confHits += 1
-            if math.abs(a618 - r618) <= tol
-                confHits += 1
-    confluenceQuality := float(confHits) * anchorRange
-
 float htfRangeForConfluence = fibRange
 int htfConfPivot = htfConfluenceCheck(pPivot, htfRangeForConfluence)
 int htfConf382 = htfConfluenceCheck(p382, htfRangeForConfluence)
@@ -402,9 +408,8 @@ float entryLevel = fibPrice(optEntryRatio)
 bool entryAnchorLong = confirmed and not na(entryLevel) and low <= entryLevel and close >= entryLevel
 bool entryAnchorShort = confirmed and not na(entryLevel) and high >= entryLevel and close <= entryLevel
 
-bool rsiStanceBull = finalRsi <= actualOversold
-bool rsiStanceBear = finalRsi >= actualOverbought
-bool rsiStanceNeutral = not rsiStanceBull and not rsiStanceBear
+bool rsiStanceBull = finalRsi <= rsiOversold
+bool rsiStanceBear = finalRsi >= rsiOverbought
 bool mlLongBias = rsiStanceBull
 bool mlShortBias = rsiStanceBear
 bool shortGate = gateShortsInBullTrend and maBull and finalRsi >= shortGateRsiFloor
@@ -432,13 +437,19 @@ bool entryShortTrigger = oneShotEvent ? (shortSignalRaw and not shortSignalRaw[1
 if entryLongTrigger or entryShortTrigger
     lastSignalBar := bar_index
 
-// Exhaustion: opposite proven pattern at extension zone with ML extremes
-bool extensionTouch = not na(p1272) and not na(pT2) and (dir == 1 ? (high >= p1272 - atr14 * exhaustionLevelAtrTol or high >= pT2 - atr14 * exhaustionLevelAtrTol) : (low <= p1272 + atr14 * exhaustionLevelAtrTol or low <= pT2 + atr14 * exhaustionLevelAtrTol))
-bool exhaustionLong = useExhaustion and confirmed and dir == 1 and extensionTouch and provenBearishPattern and finalRsi >= actualOverbought
-bool exhaustionShort = useExhaustion and confirmed and dir == -1 and extensionTouch and provenBullishPattern and finalRsi <= actualOversold
+// Entry-route bitmask for AG/SHAP feature scoring (3g)
+int entryRouteCode = 0
+if entryLongTrigger or entryShortTrigger
+    entryRouteCode := (usePatternConfirm ? 1 : 0) + (useMaGate ? 2 : 0) + (useLiquiditySweepConfirm ? 4 : 0) + (useMlFilter ? 8 : 0) + (useExhaustion ? 16 : 0)
+
+// Exhaustion: opposite-side reversal pattern at extension with RSI extreme
+bool extensionTouchLong = not na(p1272) and not na(pT2) and (high >= p1272 - atr14 * exhaustionLevelAtrTol or high >= pT2 - atr14 * exhaustionLevelAtrTol)
+bool extensionTouchShort = not na(p1272) and not na(pT2) and (low <= p1272 + atr14 * exhaustionLevelAtrTol or low <= pT2 + atr14 * exhaustionLevelAtrTol)
+bool exhaustionLong = useExhaustion and confirmed and dir == 1 and extensionTouchLong and provenBearishPattern and finalRsi >= rsiOverbought
+bool exhaustionShort = useExhaustion and confirmed and dir == -1 and extensionTouchShort and provenBullishPattern and finalRsi <= rsiOversold
 
 //=====================
-// Trade state (table + export telemetry)
+// Trade engine (with maxHoldBars time-stop, 3c)
 //=====================
 var bool tradeActive = false
 var int tradeSide = 0
@@ -449,7 +460,9 @@ var int tradeEntryBar = na
 var int tradeClosedCount = 0
 var int tradeWinCount = 0
 var int tradeLossCount = 0
-var int tradeLastExitOutcome = 0  // +1 target, -1 stop, 0 unchanged
+var int tradeTimeExitCount = 0
+// Outcome codes: 0=none, 1=target, -1=stop, 2=time
+var int tradeLastExitOutcome = 0
 var float tradeTotalWinPoints = 0.0
 var float tradeTotalLossPoints = 0.0
 
@@ -477,22 +490,31 @@ if not tradeActive
 if tradeActive and not na(tradeEntryBar) and bar_index > tradeEntryBar
     bool stopHit = false
     bool targetHit = false
+    bool timeOut = tradeMaxHoldBars > 0 and (bar_index - tradeEntryBar) >= tradeMaxHoldBars
     if tradeSide == 1
         stopHit := not na(tradeStopPrice) and low <= tradeStopPrice
         targetHit := not na(tradeTargetPrice) and high >= tradeTargetPrice
     else if tradeSide == -1
         stopHit := not na(tradeStopPrice) and high >= tradeStopPrice
         targetHit := not na(tradeTargetPrice) and low <= tradeTargetPrice
-    if stopHit or targetHit
+    if stopHit or targetHit or timeOut
         tradeClosedCount += 1
         if stopHit
             tradeLossCount += 1
             tradeTotalLossPoints += math.abs(tradeStopPrice - tradeEntryPrice)
             tradeLastExitOutcome := -1
-        else
+        else if targetHit
             tradeWinCount += 1
             tradeTotalWinPoints += math.abs(tradeTargetPrice - tradeEntryPrice)
             tradeLastExitOutcome := 1
+        else
+            tradeTimeExitCount += 1
+            float timePnl = tradeSide == 1 ? close - tradeEntryPrice : tradeEntryPrice - close
+            if timePnl >= 0
+                tradeTotalWinPoints += timePnl
+            else
+                tradeTotalLossPoints += math.abs(timePnl)
+            tradeLastExitOutcome := 2
         tradeActive := false
         tradeSide := 0
         tradeEntryPrice := na
@@ -501,16 +523,14 @@ if tradeActive and not na(tradeEntryBar) and bar_index > tradeEntryBar
         tradeEntryBar := na
 
 int tradeBarsActive = tradeActive and not na(tradeEntryBar) ? bar_index - tradeEntryBar : 0
-float tradeRiskPoints = tradeActive and not na(tradeEntryPrice) and not na(tradeStopPrice) ? math.abs(tradeEntryPrice - tradeStopPrice) : na
-float tradePnlPoints = tradeActive and not na(tradeEntryPrice) ? (tradeSide == 1 ? close - tradeEntryPrice : tradeEntryPrice - close) : na
-float tradePnlR = tradeActive and not na(tradeRiskPoints) and tradeRiskPoints > 0 ? tradePnlPoints / tradeRiskPoints : na
 
 //=====================
-// Draw fib ladder
+// Draw fib ladder + trade lifecycle (Section 2 visibility toggle)
 //=====================
 fibLineStyle = f_line_style(fibLineStyleInput)
 fibLabelSize = f_label_size(fibLabelSizeInput)
 
+// Fib lines
 var line lineZero = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
 var line lineNeg236 = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
 var line line236 = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
@@ -527,6 +547,11 @@ var line line1786 = line.new(bar_index, close, bar_index, close, color=color(na)
 var line lineT3 = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 var line lineT4 = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 var line lineT5 = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+
+// Trade lifecycle lines (reuse SAME plumbing/widths/colors as fibs)
+var line lineEntry = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineSL    = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineTP    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 
 var box zoneBox = box.new(bar_index, close, bar_index, close, bgcolor=color(na), border_color=color(na))
 
@@ -546,6 +571,10 @@ var label _fibLbl1786 = na
 var label _fibLblT3 = na
 var label _fibLblT4 = na
 var label _fibLblT5 = na
+
+var label _entryLbl = na
+var label _slLbl = na
+var label _tpLbl = na
 
 int fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
 bool anchorBarsReady = not na(anchorHighBar) and not na(anchorLowBar)
@@ -568,7 +597,7 @@ drawAnchoredLine(line id, bool visible, float price, color col, int width_, int 
 
 setFibLevelLabel(label idIn, bool visible, float price, string txt, color col) =>
     label id = idIn
-    if visible and isValid and not na(price)
+    if visible and not na(price)
         int labelX = bar_index + fibLabelOffsetBarsInput
         string labelText = txt + "  " + str.tostring(price, format.mintick)
         if na(id)
@@ -583,24 +612,30 @@ setFibLevelLabel(label idIn, bool visible, float price, string txt, color col) =
         id := na
     id
 
-drawAnchoredLine(lineZero, true, pZero, fibAnchorColorInput, fibAnchorWidthInput, drawLeftBar)
-drawAnchoredLine(lineNeg236, false, pNeg236, fibStopColorInput, fibStopWidthInput, drawLeftBar)
-drawAnchoredLine(line236, true, p236, fibRetracementColorInput, fibRetracementWidthInput, drawLeftBar)
-drawAnchoredLine(line382, true, p382, fibRetracementAccentColorInput, fibRetracementAccentWidthInput, drawLeftBar)
-drawAnchoredLine(linePivot, true, pPivot, fibAnchorColorInput, fibPivotWidthInput, drawLeftBar)
-drawAnchoredLine(line618, true, p618, fibRetracementAccentColorInput, fibRetracementAccentWidthInput, drawLeftBar)
-drawAnchoredLine(line786, true, p786, fibRetracementColorInput, fibRetracementWidthInput, drawLeftBar)
-drawAnchoredLine(lineOne, true, pOne, fibAnchorColorInput, fibAnchorWidthInput, drawLeftBar)
-drawAnchoredLine(lineT1, true, pT1, fibTargetColorInput, fibTargetWidthInput, drawLeftBar)
-drawAnchoredLine(line1382, true, p1382, fibRetracementColorInput, fibRetracementWidthInput, drawLeftBar)
-drawAnchoredLine(line150, true, p150, fibRetracementColorInput, fibRetracementWidthInput, drawLeftBar)
-drawAnchoredLine(lineT2, true, pT2, fibTargetColorInput, fibTargetWidthInput, drawLeftBar)
-drawAnchoredLine(line1786, true, p1786, fibRetracementColorInput, fibRetracementWidthInput, drawLeftBar)
-drawAnchoredLine(lineT3, true, pT3, fibTargetColorInput, fibTargetWidthInput, drawLeftBar)
-drawAnchoredLine(lineT4, true, pT4, fibTargetColorInput, fibTargetWidthInput, drawLeftBar)
-drawAnchoredLine(lineT5, true, pT5, fibTargetColorInput, fibTargetWidthInput, drawLeftBar)
+bool fibsVisible = not tradeActive and isValid
 
-if not na(zoneFillUpper) and not na(zoneFillLower)
+drawAnchoredLine(lineZero, fibsVisible, pZero, fibAnchorColorInput, fibAnchorWidthInput, drawLeftBar)
+drawAnchoredLine(lineNeg236, false, pNeg236, fibStopColorInput, fibStopWidthInput, drawLeftBar)
+drawAnchoredLine(line236, fibsVisible, p236, fibRetracementColorInput, fibRetracementWidthInput, drawLeftBar)
+drawAnchoredLine(line382, fibsVisible, p382, fibRetracementAccentColorInput, fibRetracementAccentWidthInput, drawLeftBar)
+drawAnchoredLine(linePivot, fibsVisible, pPivot, fibAnchorColorInput, fibPivotWidthInput, drawLeftBar)
+drawAnchoredLine(line618, fibsVisible, p618, fibRetracementAccentColorInput, fibRetracementAccentWidthInput, drawLeftBar)
+drawAnchoredLine(line786, fibsVisible, p786, fibRetracementColorInput, fibRetracementWidthInput, drawLeftBar)
+drawAnchoredLine(lineOne, fibsVisible, pOne, fibAnchorColorInput, fibAnchorWidthInput, drawLeftBar)
+drawAnchoredLine(lineT1, fibsVisible, pT1, fibTargetColorInput, fibTargetWidthInput, drawLeftBar)
+drawAnchoredLine(line1382, fibsVisible, p1382, fibRetracementColorInput, fibRetracementWidthInput, drawLeftBar)
+drawAnchoredLine(line150, fibsVisible, p150, fibRetracementColorInput, fibRetracementWidthInput, drawLeftBar)
+drawAnchoredLine(lineT2, fibsVisible, pT2, fibTargetColorInput, fibTargetWidthInput, drawLeftBar)
+drawAnchoredLine(line1786, fibsVisible, p1786, fibRetracementColorInput, fibRetracementWidthInput, drawLeftBar)
+drawAnchoredLine(lineT3, fibsVisible, pT3, fibTargetColorInput, fibTargetWidthInput, drawLeftBar)
+drawAnchoredLine(lineT4, fibsVisible, pT4, fibTargetColorInput, fibTargetWidthInput, drawLeftBar)
+drawAnchoredLine(lineT5, fibsVisible, pT5, fibTargetColorInput, fibTargetWidthInput, drawLeftBar)
+
+drawAnchoredLine(lineEntry, tradeActive, tradeEntryPrice, fibAnchorColorInput, fibAnchorWidthInput, drawLeftBar)
+drawAnchoredLine(lineSL, tradeActive, tradeStopPrice, fibStopColorInput, fibStopWidthInput, drawLeftBar)
+drawAnchoredLine(lineTP, tradeActive, tradeTargetPrice, fibTargetColorInput, fibTargetWidthInput, drawLeftBar)
+
+if fibsVisible and not na(zoneFillUpper) and not na(zoneFillLower)
     box.set_left(zoneBox, drawLeftBar)
     box.set_right(zoneBox, bar_index)
     box.set_top(zoneBox, zoneFillUpper)
@@ -612,58 +647,60 @@ else
     box.set_border_color(zoneBox, color(na))
 
 if barstate.islast
-    _fibLblZero := setFibLevelLabel(_fibLblZero, showFibLevelLabelsInput, pZero, "0", fibAnchorColorInput)
+    _fibLblZero := setFibLevelLabel(_fibLblZero, showFibLevelLabelsInput and fibsVisible, pZero, "0", fibAnchorColorInput)
     _fibLblNeg236 := setFibLevelLabel(_fibLblNeg236, false, pNeg236, "-.236", fibStopColorInput)
-    _fibLbl236 := setFibLevelLabel(_fibLbl236, showFibLevelLabelsInput, p236, ".236", fibRetracementColorInput)
-    _fibLbl382 := setFibLevelLabel(_fibLbl382, showFibLevelLabelsInput, p382, ".382", fibRetracementAccentColorInput)
-    _fibLblPivot := setFibLevelLabel(_fibLblPivot, showFibLevelLabelsInput, pPivot, ".500", fibAnchorColorInput)
-    _fibLbl618 := setFibLevelLabel(_fibLbl618, showFibLevelLabelsInput, p618, ".618", fibRetracementAccentColorInput)
-    _fibLbl786 := setFibLevelLabel(_fibLbl786, showFibLevelLabelsInput, p786, ".786", fibRetracementColorInput)
-    _fibLblOne := setFibLevelLabel(_fibLblOne, showFibLevelLabelsInput, pOne, "1.000", fibAnchorColorInput)
-    _fibLblT1 := setFibLevelLabel(_fibLblT1, showFibLevelLabelsInput, pT1, "T1", fibTargetColorInput)
-    _fibLbl1382 := setFibLevelLabel(_fibLbl1382, showFibLevelLabelsInput, p1382, "1.382", fibRetracementColorInput)
-    _fibLbl150 := setFibLevelLabel(_fibLbl150, showFibLevelLabelsInput, p150, "1.500", fibRetracementColorInput)
-    _fibLblT2 := setFibLevelLabel(_fibLblT2, showFibLevelLabelsInput, pT2, "T2", fibTargetColorInput)
-    _fibLbl1786 := setFibLevelLabel(_fibLbl1786, showFibLevelLabelsInput, p1786, "1.786", fibRetracementColorInput)
-    _fibLblT3 := setFibLevelLabel(_fibLblT3, showFibLevelLabelsInput, pT3, "T3", fibTargetColorInput)
-    _fibLblT4 := setFibLevelLabel(_fibLblT4, showFibLevelLabelsInput, pT4, "T4", fibTargetColorInput)
-    _fibLblT5 := setFibLevelLabel(_fibLblT5, showFibLevelLabelsInput, pT5, "T5", fibTargetColorInput)
+    _fibLbl236 := setFibLevelLabel(_fibLbl236, showFibLevelLabelsInput and fibsVisible, p236, ".236", fibRetracementColorInput)
+    _fibLbl382 := setFibLevelLabel(_fibLbl382, showFibLevelLabelsInput and fibsVisible, p382, ".382", fibRetracementAccentColorInput)
+    _fibLblPivot := setFibLevelLabel(_fibLblPivot, showFibLevelLabelsInput and fibsVisible, pPivot, ".500", fibAnchorColorInput)
+    _fibLbl618 := setFibLevelLabel(_fibLbl618, showFibLevelLabelsInput and fibsVisible, p618, ".618", fibRetracementAccentColorInput)
+    _fibLbl786 := setFibLevelLabel(_fibLbl786, showFibLevelLabelsInput and fibsVisible, p786, ".786", fibRetracementColorInput)
+    _fibLblOne := setFibLevelLabel(_fibLblOne, showFibLevelLabelsInput and fibsVisible, pOne, "1.000", fibAnchorColorInput)
+    _fibLblT1 := setFibLevelLabel(_fibLblT1, showFibLevelLabelsInput and fibsVisible, pT1, "T1", fibTargetColorInput)
+    _fibLbl1382 := setFibLevelLabel(_fibLbl1382, showFibLevelLabelsInput and fibsVisible, p1382, "1.382", fibRetracementColorInput)
+    _fibLbl150 := setFibLevelLabel(_fibLbl150, showFibLevelLabelsInput and fibsVisible, p150, "1.500", fibRetracementColorInput)
+    _fibLblT2 := setFibLevelLabel(_fibLblT2, showFibLevelLabelsInput and fibsVisible, pT2, "T2", fibTargetColorInput)
+    _fibLbl1786 := setFibLevelLabel(_fibLbl1786, showFibLevelLabelsInput and fibsVisible, p1786, "1.786", fibRetracementColorInput)
+    _fibLblT3 := setFibLevelLabel(_fibLblT3, showFibLevelLabelsInput and fibsVisible, pT3, "T3", fibTargetColorInput)
+    _fibLblT4 := setFibLevelLabel(_fibLblT4, showFibLevelLabelsInput and fibsVisible, pT4, "T4", fibTargetColorInput)
+    _fibLblT5 := setFibLevelLabel(_fibLblT5, showFibLevelLabelsInput and fibsVisible, pT5, "T5", fibTargetColorInput)
+    _entryLbl := setFibLevelLabel(_entryLbl, tradeActive, tradeEntryPrice, "ENTRY", fibAnchorColorInput)
+    _slLbl    := setFibLevelLabel(_slLbl,    tradeActive, tradeStopPrice,  "SL",    fibStopColorInput)
+    _tpLbl    := setFibLevelLabel(_tpLbl,    tradeActive, tradeTargetPrice,"TP",    fibTargetColorInput)
 
 plot(showMaLines ? xMA : na, "MA (SMA)", maColorInput, maWidthInput)
-plot(showMaLines ? xEMA : na, "EMA(on MA)", emaColorInput, emaWidthInput)
+plot(showMaLines ? xEMA : na, "EMA (close)", emaColorInput, emaWidthInput)
+
+// Entry/exit visual markers (3b, no labels — clean)
+plotshape(entryLongTrigger, "Long Entry", style=shape.triangleup, location=location.belowbar, color=color.new(#00FFFF, 0), size=size.tiny)
+plotshape(entryShortTrigger, "Short Entry", style=shape.triangledown, location=location.abovebar, color=color.new(#C60000, 0), size=size.tiny)
+
+// Exhaustion heads-up — circles only, no labels, no text
+plotshape(exhaustionLong, "Long Exhaustion", style=shape.circle, location=location.abovebar, color=color.new(#C60000, 0), size=size.tiny)
+plotshape(exhaustionShort, "Short Exhaustion", style=shape.circle, location=location.belowbar, color=color.new(#00FFFF, 0), size=size.tiny)
 
 //=====================
-// Status table
+// Status table — black bg, white body, dark gray dividers; headers unchanged
 //=====================
-color TBL_BG_BODY    = #DEDEDE
+color TBL_BG_BODY    = #000000
 color TBL_BG_HEADER  = #0A7884
-color TBL_TEXT_BODY  = #0A7884
+color TBL_TEXT_BODY  = #FFFFFF
 color TBL_TEXT_HDR   = #FFFFFF
-color TBL_TEXT_BUY   = #0A7884
+color TBL_TEXT_BUY   = #00FFFF
 color TBL_TEXT_SELL  = #C60000
-color TBL_BORDER     = #CACACA
+color TBL_BORDER     = #333333
 
-bool fibTrendBull = isValid and dir == 1 and close >= fibMidpoint
-bool fibTrendBear = isValid and dir == -1 and close <= fibMidpoint
-bool maTrendBull = maBull and close >= xEMA
-bool maTrendBear = maBear and close <= xEMA
-
-// TREND section
-// Bullish sweep = price wicked BELOW prior lows (sweeping sell-side liquidity) and reclaimed.
-// Bearish sweep = price wicked ABOVE prior highs (sweeping buy-side liquidity) and rejected.
-string liquidityText = liqSweepBull ? "SELL-SIDE SWEEP" : liqSweepBear ? "BUY-SIDE SWEEP" : "NONE"
-color  volColor = netVol20 >= 0 ? TBL_TEXT_BUY : TBL_TEXT_SELL
-string volText = (netVol20 >= 0 ? "+" : "") + str.tostring(int(netVol20))
 string maDirText = (maBull and close >= xEMA) ? "STRONG BULLISH" : maBull ? "BULLISH" : (maBear and close <= xEMA) ? "STRONG BEARISH" : maBear ? "BEARISH" : "NEUTRAL"
 string rsiText = (rsiStanceBull ? "BULL EXTREME " : rsiStanceBear ? "BEAR EXTREME " : "NEUTRAL ") + str.tostring(finalRsi, "#.##")
+string liquidityText = reclaimedSsl ? "SSL RECLAIM" : reclaimedBsl ? "BSL RECLAIM" : sweptSslBar ? "SSL SWEEP" : sweptBslBar ? "BSL SWEEP" : "NONE"
 
-// TRADES section
+color  volColor = netDelta20 >= 0 ? TBL_TEXT_BUY : TBL_TEXT_SELL
+string volText = (netDelta20 >= 0 ? "+" : "") + str.tostring(int(netDelta20))
+
 string positionText = tradeActive ? (tradeSide == 1 ? "LONG" : "SHORT") : "WAITING"
 string entryPriceText = tradeActive ? str.tostring(tradeEntryPrice, format.mintick) : "--"
 string tpSlText = tradeActive ? "TP " + str.tostring(tradeTargetPrice, format.mintick) + " / SL " + str.tostring(tradeStopPrice, format.mintick) : "-- / --"
 string barsInTradeText = tradeActive ? str.tostring(tradeBarsActive) : "--"
 
-// STATISTICS section
 float winRatePct = tradeClosedCount > 0 ? float(tradeWinCount) / float(tradeClosedCount) * 100.0 : na
 float profitFactor = tradeTotalLossPoints > 0 ? tradeTotalWinPoints / tradeTotalLossPoints : na
 string winRateText = na(winRatePct) ? "--" : str.tostring(winRatePct, "#.##") + "%"
@@ -671,12 +708,11 @@ string totalTradesText = str.tostring(tradeClosedCount)
 string winLossText = str.tostring(tradeWinCount) + " / " + str.tostring(tradeLossCount)
 string profitFactorText = na(profitFactor) ? "--" : str.tostring(profitFactor, "#.##")
 
-// ANALYTICS section
 float volPct = atr14 / close * 100.0
 string volatilityText = na(volPct) ? "--" : volPct >= 0.15 ? "HIGH" : volPct >= 0.06 ? "MEDIUM" : "LOW"
-string nqTrend = f_xa_trend(nqClose15, nqSlow15, nqFast15)
-string znTrend = f_xa_trend(znClose15, znSlow15, znFast15)
-string dxTrend = f_xa_trend(dxClose15, dxSlow15, dxFast15)
+string nqTrend = f_xa_label(nqCode)
+string znTrend = f_xa_label(znCode)
+string dxTrend = f_xa_label(dxCode)
 
 f_cell_h(table t, int c, int r, string txt) =>
     table.cell(t, c, r, txt, text_color=TBL_TEXT_HDR, bgcolor=color.new(TBL_BG_HEADER, 0), text_size=size.tiny)
@@ -696,7 +732,7 @@ if showMlTable and not na(mlTable) and barstate.islast
     f_cell_h(mlTable, 1, 0, "")
     f_cell_b(mlTable, 0, 1, "LIQUIDITY")
     f_cell_b(mlTable, 1, 1, liquidityText)
-    f_cell_b(mlTable, 0, 2, "VOLUME")
+    f_cell_b(mlTable, 0, 2, "VOLUME Δ")
     f_cell_v(mlTable, 1, 2, volText, volColor)
     f_cell_b(mlTable, 0, 3, "MOVING AVERAGES")
     f_cell_b(mlTable, 1, 3, maDirText)
@@ -740,19 +776,56 @@ alertcondition(entryLongTrigger, title="Warbird Pro V9 - Long Entry", message="W
 alertcondition(entryShortTrigger, title="Warbird Pro V9 - Short Entry", message="Warbird Pro V9 SHORT entry on {{ticker}} {{interval}} @ {{close}}")
 
 //=====================
-// Hidden Optuna exports
+// Hidden Optuna / AG / SHAP exports (3f, 3g, 3h, 4)
 //=====================
-plot(fibRange, "fib_range", display=display.none, editable=false)
-plot(float(dir), "ml_direction_code", display=display.none, editable=false)
-plot(float(htfConfTotal), "htf_conf_total", display=display.none, editable=false)
+plot(atr14, "ml_atr14", display=display.none, editable=false)
+plot(float(dir), "ml_dir", display=display.none, editable=false)
+plot(fibRange, "ml_fib_range", display=display.none, editable=false)
+plot(atr14 > 0 ? (close - pPivot) / atr14 : 0.0, "ml_pivot_dist_atr", display=display.none, editable=false)
+plot(atr14 > 0 ? (close - p618) / atr14 : 0.0, "ml_p618_dist_atr", display=display.none, editable=false)
+plot(entryZoneTouched ? 1.0 : 0.0, "ml_in_zone", display=display.none, editable=false)
+plot(na(barsSinceBreak) ? -1.0 : float(barsSinceBreak), "ml_bars_since_break", display=display.none, editable=false)
+plot(breakInDir ? 1.0 : 0.0, "ml_break_in_dir", display=display.none, editable=false)
+plot(rejectAtZone ? 1.0 : 0.0, "ml_reject_at_zone", display=display.none, editable=false)
 
 plot(finalRsi, "ml_rsi_value", display=display.none, editable=false)
 plot(rsiStanceBull ? 1.0 : rsiStanceBear ? -1.0 : 0.0, "ml_rsi_stance_code", display=display.none, editable=false)
 plot(maBull ? 1.0 : maBear ? -1.0 : 0.0, "ml_ma_bias", display=display.none, editable=false)
 
-plot(provenBullishPattern ? 1.0 : 0.0, "ml_bull_pattern", display=display.none, editable=false)
-plot(provenBearishPattern ? 1.0 : 0.0, "ml_bear_pattern", display=display.none, editable=false)
-plot(liqSweepBull ? 1.0 : liqSweepBear ? -1.0 : 0.0, "ml_liq_sweep", display=display.none, editable=false)
+plot(patHammer ? 1.0 : 0.0, "ml_pat_hammer", display=display.none, editable=false)
+plot(patInvHammer ? 1.0 : 0.0, "ml_pat_inv_hammer", display=display.none, editable=false)
+plot(patDragonfly ? 1.0 : 0.0, "ml_pat_dragonfly", display=display.none, editable=false)
+plot(patBullEngulf ? 1.0 : 0.0, "ml_pat_bull_engulf", display=display.none, editable=false)
+plot(patPiercing ? 1.0 : 0.0, "ml_pat_piercing", display=display.none, editable=false)
+plot(patMorningStar ? 1.0 : 0.0, "ml_pat_morning_star", display=display.none, editable=false)
+plot(patThreeWhite ? 1.0 : 0.0, "ml_pat_three_white", display=display.none, editable=false)
+
+plot(patShootingStar ? 1.0 : 0.0, "ml_pat_shooting_star", display=display.none, editable=false)
+plot(patHangingMan ? 1.0 : 0.0, "ml_pat_hanging_man", display=display.none, editable=false)
+plot(patGravestone ? 1.0 : 0.0, "ml_pat_gravestone", display=display.none, editable=false)
+plot(patBearEngulf ? 1.0 : 0.0, "ml_pat_bear_engulf", display=display.none, editable=false)
+plot(patDarkCloud ? 1.0 : 0.0, "ml_pat_dark_cloud", display=display.none, editable=false)
+plot(patEveningStar ? 1.0 : 0.0, "ml_pat_evening_star", display=display.none, editable=false)
+plot(patThreeBlack ? 1.0 : 0.0, "ml_pat_three_black", display=display.none, editable=false)
+
+plot(atr14 > 0 ? (bsl - close) / atr14 : 0.0, "ml_bsl_dist_atr", display=display.none, editable=false)
+plot(atr14 > 0 ? (close - ssl) / atr14 : 0.0, "ml_ssl_dist_atr", display=display.none, editable=false)
+plot(sweptBslBar ? 1.0 : 0.0, "ml_swept_bsl", display=display.none, editable=false)
+plot(sweptSslBar ? 1.0 : 0.0, "ml_swept_ssl", display=display.none, editable=false)
+plot(reclaimedBsl ? 1.0 : 0.0, "ml_reclaimed_bsl", display=display.none, editable=false)
+plot(reclaimedSsl ? 1.0 : 0.0, "ml_reclaimed_ssl", display=display.none, editable=false)
+
+plot(barDelta, "ml_bar_delta", display=display.none, editable=false)
+plot(netDelta20, "ml_net_delta_20", display=display.none, editable=false)
+
+plot(float(nqCode), "ml_xa_nq_code", display=display.none, editable=false)
+plot(float(znCode), "ml_xa_zn_code", display=display.none, editable=false)
+plot(float(dxCode), "ml_xa_dx_code", display=display.none, editable=false)
+
+plot(exhaustionLong ? 1.0 : 0.0, "ml_exhaust_long", display=display.none, editable=false)
+plot(exhaustionShort ? 1.0 : 0.0, "ml_exhaust_short", display=display.none, editable=false)
+plot(float(entryRouteCode), "ml_entry_route_code", display=display.none, editable=false)
+plot(float(htfConfTotal), "ml_htf_conf_total", display=display.none, editable=false)
 
 plot(entryLongTrigger ? 1.0 : 0.0, "ml_entry_long_trigger", display=display.none, editable=false)
 plot(entryShortTrigger ? 1.0 : 0.0, "ml_entry_short_trigger", display=display.none, editable=false)
