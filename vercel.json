@@ -4,6 +4,6 @@
     "silent": true
   },
   "git": {
-    "deploymentEnabled": false
+    "deploymentEnabled": true
   }
 }
