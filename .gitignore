@@ -113,3 +113,6 @@ data/optuna/
 
 # Screenshot artifacts (research/debugging — not source)
 *.png
+
+# Claude Code session state (lives inside repo for single-folder consolidation)
+.claude-state/
