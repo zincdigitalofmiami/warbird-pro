@@ -114,39 +114,6 @@ export default function DashboardLiveClient() {
             Live dashboard fetches and chart subscriptions are paused until the current Warbird runtime and contract audit is finished.
           </div>
         </div>
-      ) : data?.runtime.active ? (
-        <div
-          className="px-4 py-3 text-[11px] leading-5"
-          style={{
-            background: "rgba(242, 54, 69, 0.12)",
-            borderBottom: "1px solid rgba(242, 54, 69, 0.28)",
-            color: "rgba(255,255,255,0.82)",
-          }}
-        >
-          <div className="font-semibold uppercase tracking-[0.18em] text-[10px] text-red-300">
-            Warbird Runtime Degraded
-          </div>
-          <div className="mt-1 text-white/75">
-            {data.runtime.reason ??
-              "Legacy Warbird reader health could not be proven. The MES chart can still render, but Warbird setup state is intentionally withheld."}
-          </div>
-          <div className="mt-1 text-white/55">
-            Checked{" "}
-            {new Date(data.runtime.checkedAt).toLocaleString("en-US", {
-              month: "short",
-              day: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: true,
-              timeZone: "America/Chicago",
-            })}
-            {" · "}
-            Missing objects:{" "}
-            {data.runtime.missingObjects.length > 0
-              ? data.runtime.missingObjects.join(", ")
-              : "none reported"}
-          </div>
-        </div>
       ) : null}
 
       {/* Top: Correlations Row */}
