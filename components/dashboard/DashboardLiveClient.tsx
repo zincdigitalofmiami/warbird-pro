@@ -41,7 +41,22 @@ interface DashboardPayload {
   setups: WarbirdSetupRow[];
   events: WarbirdSetupEventRow[];
   signalEvents: SignalEvent[];
-  correlations: Record<string, { close: number; prevClose: number }>;
+  correlations: Record<
+    string,
+    {
+      close: number;
+      prevClose: number;
+      changePct?: number;
+      impact?: number;
+      mesBps?: number;
+      mesBpsRaw?: number;
+      confidence?: number;
+      betaToMes?: number | null;
+      corrToMes?: number | null;
+      rvol?: number | null;
+      notionalVolume?: number | null;
+    }
+  >;
   counts: DashboardSetupCounts;
   runtime: WarbirdRuntimeState;
   generatedAt: string;
