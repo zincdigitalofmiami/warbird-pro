@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchOhlcv } from "@/lib/ingestion/databento";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 interface MesPriceBar {
   symbol: string;
@@ -11,10 +11,19 @@ interface MesPriceBar {
   volume: number;
 }
 
+interface Mes1hRow {
+  ts: string;
+  open: number | string;
+  high: number | string;
+  low: number | string;
+  close: number | string;
+  volume: number | string | null;
+}
+
 const DEFAULT_LOOKBACK = 5000;
 const MAX_LOOKBACK = 20000;
-const MIN_VALID_MES_PRICE = 500;
 const CACHE_TTL_MS = 55 * 60 * 1000;
+const PAGE_SIZE = 1000;
 
 const mes1hCache = new Map<number, { expiresAt: number; data: MesPriceBar[]; asOf: string }>();
 
@@ -35,33 +44,70 @@ function isValidMesBar(bar: MesPriceBar): boolean {
     return false;
   }
 
-  if (
-    bar.open < MIN_VALID_MES_PRICE ||
-    bar.high < MIN_VALID_MES_PRICE ||
-    bar.low < MIN_VALID_MES_PRICE ||
-    bar.close < MIN_VALID_MES_PRICE
-  ) {
-    return false;
-  }
-
   if (bar.high < bar.low) return false;
   if (bar.high < Math.max(bar.open, bar.close)) return false;
   if (bar.low > Math.min(bar.open, bar.close)) return false;
+  if (Number.isNaN(new Date(bar.tradeDate).getTime())) return false;
 
   return true;
+}
+
+async function fetchMes1hFromSupabase(lookback: number): Promise<MesPriceBar[]> {
+  const supabase = createAdminClient();
+  const rows: Mes1hRow[] = [];
+  let from = 0;
+
+  while (rows.length < lookback) {
+    const batchSize = Math.min(PAGE_SIZE, lookback - rows.length);
+    const to = from + batchSize - 1;
+
+    const { data, error } = await supabase
+      .from("mes_1h")
+      .select("ts, open, high, low, close, volume")
+      .order("ts", { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      throw new Error(`mes_1h query failed: ${error.message}`);
+    }
+
+    if (!data || data.length === 0) {
+      break;
+    }
+
+    rows.push(...(data as Mes1hRow[]));
+    from += data.length;
+
+    if (data.length < batchSize) {
+      break;
+    }
+  }
+
+  return rows
+    .map((row) => ({
+      symbol: "MES",
+      tradeDate: String(row.ts),
+      open: Number(row.open),
+      high: Number(row.high),
+      low: Number(row.low),
+      close: Number(row.close),
+      volume: Number(row.volume ?? 0),
+    }))
+    .filter(isValidMesBar)
+    .sort((a, b) => new Date(a.tradeDate).getTime() - new Date(b.tradeDate).getTime());
 }
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const lookback = parseLookback(url);
-    const cached = mes1hCache.get(lookback);
+    const cached = mes1hCache.get(lookback) ?? null;
     if (cached && cached.expiresAt > Date.now()) {
       return NextResponse.json({
         ok: true,
         data: cached.data,
         asOf: cached.asOf,
-        source: "Databento GLBX.MDP3 ohlcv-1h (MES.n.0)",
+        source: "supabase mes_1h",
         timeframe: "1h",
         requestedLookback: lookback,
         returnedRows: cached.data.length,
@@ -69,29 +115,19 @@ export async function GET(request: Request) {
       });
     }
 
-    const end = new Date();
-    const start = new Date(end.getTime() - lookback * 60 * 60 * 1000);
-
-    const rawBars = await fetchOhlcv({
-      dataset: "GLBX.MDP3",
-      symbol: "MES.n.0",
-      stypeIn: "continuous",
-      schema: "ohlcv-1h",
-      start: start.toISOString(),
-      end: end.toISOString(),
-    });
-
-    const bars = rawBars
-      .map((bar) => ({
-        symbol: "MES",
-        tradeDate: new Date(bar.time * 1000).toISOString(),
-        open: Number(bar.open),
-        high: Number(bar.high),
-        low: Number(bar.low),
-        close: Number(bar.close),
-        volume: Number(bar.volume),
-      }))
-      .filter(isValidMesBar);
+    const bars = await fetchMes1hFromSupabase(lookback);
+    if (bars.length === 0 && cached) {
+      return NextResponse.json({
+        ok: true,
+        data: cached.data,
+        asOf: cached.asOf,
+        source: "supabase mes_1h",
+        timeframe: "1h",
+        requestedLookback: lookback,
+        returnedRows: cached.data.length,
+        cache: "stale",
+      });
+    }
 
     const asOf = new Date().toISOString();
     mes1hCache.set(lookback, {
@@ -104,13 +140,28 @@ export async function GET(request: Request) {
       ok: true,
       data: bars,
       asOf,
-      source: "Databento GLBX.MDP3 ohlcv-1h (MES.n.0)",
+      source: "supabase mes_1h",
       timeframe: "1h",
       requestedLookback: lookback,
       returnedRows: bars.length,
       cache: "miss",
     });
   } catch (err) {
+    const url = new URL(request.url);
+    const lookback = parseLookback(url);
+    const cached = mes1hCache.get(lookback) ?? null;
+    if (cached) {
+      return NextResponse.json({
+        ok: true,
+        data: cached.data,
+        asOf: cached.asOf,
+        source: "supabase mes_1h",
+        timeframe: "1h",
+        requestedLookback: lookback,
+        returnedRows: cached.data.length,
+        cache: "stale",
+      });
+    }
     return NextResponse.json(
       {
         ok: false,

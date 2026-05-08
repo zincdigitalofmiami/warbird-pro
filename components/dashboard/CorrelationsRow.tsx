@@ -1,7 +1,7 @@
 "use client";
 
 // Intermarket Full Agreement Panel
-// 6 boxes: NQ, ZN, CL, SPX Vol, YM, NYSE — all Databento 1h.
+// 6 boxes: NQ, ZN, CL, SPX Vol, YM, NYSE — sourced from Supabase hourly bars.
 //
 // Polarity:
 //   NQ, ZN, CL, YM, NYSE: positive (up = bullish for MES)

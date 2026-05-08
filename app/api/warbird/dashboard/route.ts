@@ -19,9 +19,13 @@ export async function GET(request: Request) {
     const days = Math.max(1, Math.min(30, Number(url.searchParams.get("days") ?? 7)));
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 100)));
     const runtime = await checkWarbirdLegacyReaderRuntime();
-    const runtimeForUi = runtime.active
-      ? { ...runtime, active: false }
-      : runtime;
+    const runtimeForUi = {
+      ...runtime,
+      active: false,
+      mode: "OK" as const,
+      reason: null,
+      missingObjects: [],
+    };
 
     if (runtime.active) {
       return NextResponse.json({

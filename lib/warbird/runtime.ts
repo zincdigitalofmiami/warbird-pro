@@ -1,15 +1,19 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { fetchOhlcv } from "@/lib/ingestion/databento";
+
+interface CrossAssetCloseRow {
+  ts: string;
+  close: number | string;
+}
 
 const DASHBOARD_CORRELATION_SERIES = [
-  { code: "NQ", dataset: "GLBX.MDP3", symbol: "NQ.c.0" },
-  { code: "ZN", dataset: "GLBX.MDP3", symbol: "ZN.c.0" },
-  { code: "CL", dataset: "GLBX.MDP3", symbol: "CL.c.0" },
-  // Databento GLBX-derived realized volatility proxy from ES hourly closes.
-  { code: "SPXVOL", dataset: "GLBX.MDP3", symbol: "ES.c.0", derived: "spxvol" as const },
-  { code: "YM", dataset: "GLBX.MDP3", symbol: "YM.c.0" },
-  // "NYSE futures" is mapped to the S&P 500 e-mini front contract.
-  { code: "NYSE", dataset: "GLBX.MDP3", symbol: "ES.c.0" },
+  { code: "NQ", sourceCode: "NQ" },
+  { code: "ZN", sourceCode: "ZN" },
+  { code: "CL", sourceCode: "CL" },
+  // SPXVOL is derived from ES hourly closes.
+  { code: "SPXVOL", sourceCode: "ES", derived: "spxvol" as const },
+  { code: "YM", sourceCode: "YM" },
+  // "NYSE futures" panel intentionally mirrors ES on this surface.
+  { code: "NYSE", sourceCode: "ES" },
 ] as const;
 const CORRELATION_LOOKBACK_HOURS = 36;
 const SPXVOL_LOOKBACK_HOURS = 168;
@@ -56,49 +60,54 @@ function computeRollingRealizedVol(closes: number[], window: number): number[] {
   return vols;
 }
 
+async function fetchRecentCloses(
+  supabase: SupabaseClient,
+  symbolCode: string,
+  limit: number,
+): Promise<number[]> {
+  const { data, error } = await supabase
+    .from("cross_asset_1h")
+    .select("ts, close")
+    .eq("symbol_code", symbolCode)
+    .order("ts", { ascending: false })
+    .limit(limit);
+
+  if (error || !data || data.length === 0) return [];
+
+  return (data as CrossAssetCloseRow[])
+    .map((row) => Number(row.close))
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .reverse();
+}
+
 export async function fetchDashboardCorrelations(
-  _supabase: SupabaseClient,
+  supabase: SupabaseClient,
 ): Promise<DashboardCorrelationMap> {
   if (correlationCache && correlationCache.expiresAt > Date.now()) {
     return correlationCache.data;
   }
 
   const correlations: DashboardCorrelationMap = {};
-  const end = new Date();
-  const endIso = end.toISOString();
-  const barFetches = new Map<string, Promise<Awaited<ReturnType<typeof fetchOhlcv>>>>();
+  const closeFetches = new Map<string, Promise<number[]>>();
 
   const seriesResults = await Promise.all(
     DASHBOARD_CORRELATION_SERIES.map(async (series) => {
       try {
-        const fetchKey = `${series.dataset}|${series.symbol}`;
-        if (!barFetches.has(fetchKey)) {
+        const fetchKey = `${series.sourceCode}|${"derived" in series ? "spxvol" : "close"}`;
+        if (!closeFetches.has(fetchKey)) {
           const lookbackHours = "derived" in series && series.derived === "spxvol"
             ? SPXVOL_LOOKBACK_HOURS
             : CORRELATION_LOOKBACK_HOURS;
-          const startIso = new Date(
-            end.getTime() - lookbackHours * 60 * 60 * 1000,
-          ).toISOString();
-
-          barFetches.set(
+          closeFetches.set(
             fetchKey,
-            fetchOhlcv({
-              dataset: series.dataset,
-              symbol: series.symbol,
-              stypeIn: "continuous",
-              schema: "ohlcv-1h",
-              start: startIso,
-              end: endIso,
-            }),
+            fetchRecentCloses(supabase, series.sourceCode, lookbackHours),
           );
         }
 
-        const bars = await barFetches.get(fetchKey)!;
-
-        if (bars.length < 2) return null;
+        const closes = await closeFetches.get(fetchKey)!;
+        if (closes.length < 2) return null;
 
         if ("derived" in series && series.derived === "spxvol") {
-          const closes = bars.map((bar) => bar.close).filter((price) => Number.isFinite(price) && price > 0);
           const vols = computeRollingRealizedVol(closes, SPXVOL_WINDOW_HOURS);
           if (vols.length < 2) return null;
           const close = vols[vols.length - 1];
@@ -108,16 +117,15 @@ export async function fetchDashboardCorrelations(
           return { code: series.code, close, prevClose };
         }
 
-        const last = bars[bars.length - 1];
-        const prev = bars[bars.length - 2];
-        if (!last || !prev) return null;
-        if (!Number.isFinite(last.close) || !Number.isFinite(prev.close)) return null;
-        if (last.close <= 0 || prev.close <= 0) return null;
+        const close = closes[closes.length - 1];
+        const prevClose = closes[closes.length - 2];
+        if (!Number.isFinite(close) || !Number.isFinite(prevClose)) return null;
+        if (close <= 0 || prevClose <= 0) return null;
 
         return {
           code: series.code,
-          close: last.close,
-          prevClose: prev.close,
+          close,
+          prevClose,
         };
       } catch {
         return null;
