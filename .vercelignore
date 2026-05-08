@@ -1,0 +1,13 @@
+.git
+
+# Local research/data artifacts (never required at runtime)
+data/
+Data/
+artifacts/
+local_warehouse/
+
+# Large archive formats used for offline training captures
+*.zip
+*.dbn
+*.zst
+*.parquet
