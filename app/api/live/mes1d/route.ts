@@ -81,7 +81,8 @@ export async function GET() {
     const { data: rows, error } = await supabase
       .from("mes_1d")
       .select("ts, open, high, low, close, volume")
-      .order("ts", { ascending: true });
+      .order("ts", { ascending: true })
+      .limit(5000);
 
     if (error) {
       return NextResponse.json(
