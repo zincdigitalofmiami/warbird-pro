@@ -1,0 +1,30 @@
+name: Auto Copilot Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  request-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request Copilot review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set +e
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPO}/pulls/${PR_NUMBER}/copilot-reviews"
+          status=$?
+          if [ $status -ne 0 ]; then
+            echo "::notice::Copilot review request returned non-zero (already requested, repo setting handles it, or API endpoint changed). Not failing the workflow."
+          fi
+          exit 0
