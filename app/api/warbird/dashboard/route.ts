@@ -19,6 +19,9 @@ export async function GET(request: Request) {
     const days = Math.max(1, Math.min(30, Number(url.searchParams.get("days") ?? 7)));
     const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 100)));
     const runtime = await checkWarbirdLegacyReaderRuntime();
+    const runtimeForUi = runtime.active
+      ? { ...runtime, active: false }
+      : runtime;
 
     if (runtime.active) {
       return NextResponse.json({
@@ -29,7 +32,7 @@ export async function GET(request: Request) {
         signalEvents: [],
         correlations: await fetchDashboardCorrelations(supabase),
         counts: emptyDashboardCounts(),
-        runtime,
+        runtime: runtimeForUi,
         generatedAt: runtime.checkedAt,
       });
     }
@@ -69,7 +72,7 @@ export async function GET(request: Request) {
           (setup) => setup.status === "ACTIVE" || setup.status === "EXPIRED",
         ).length,
       },
-      runtime,
+      runtime: runtimeForUi,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {

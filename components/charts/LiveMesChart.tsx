@@ -42,6 +42,8 @@ const RIGHT_PADDING_BARS = 16;
 const BAR_SPACING = 10;
 const MIN_BAR_SPACING = 8;
 const REFRESH_MS = 3_600_000;
+const RETRY_MS = 15_000;
+const FETCH_TIMEOUT_MS = 25_000;
 const SMA_PERIOD = 200;
 const SMA_COLOR = "#FFFFFF";
 const SMA_WIDTH = 2;
@@ -131,14 +133,38 @@ export default function LiveMesChart({
   const [volatility, setVolatility] = useState("--");
 
   useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const scheduleNext = (ms: number) => {
+      if (cancelled) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void fetchBars();
+      }, ms);
+    };
+
     async function fetchBars() {
       try {
-        const res = await fetch("/api/live/mes1h?lookback=5000", { cache: "no-store" });
-        if (!res.ok) return;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+        const res = await fetch("/api/live/mes1h?lookback=5000", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+
+        if (!res.ok) {
+          scheduleNext(RETRY_MS);
+          return;
+        }
 
         const json = (await res.json()) as { data?: Array<Record<string, unknown>> };
 
-        if (!json.data || json.data.length === 0) return;
+        if (!json.data || json.data.length === 0) {
+          scheduleNext(RETRY_MS);
+          return;
+        }
 
         const parsed: MesPriceBar[] = json.data.map((d) => ({
           symbol: String(d.symbol ?? "MES"),
@@ -162,14 +188,18 @@ export default function LiveMesChart({
         if (prev) {
           setPriceChange(((latest.close - prev.close) / prev.close) * 100);
         }
+        scheduleNext(REFRESH_MS);
       } catch {
-        // keep previous render
+        // Keep prior render and retry soon.
+        scheduleNext(RETRY_MS);
       }
     }
 
-    fetchBars();
-    const id = setInterval(fetchBars, REFRESH_MS);
-    return () => clearInterval(id);
+    void fetchBars();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
