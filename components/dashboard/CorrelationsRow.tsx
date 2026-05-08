@@ -1,24 +1,24 @@
 "use client";
 
 // Intermarket Full Agreement Panel
-// 6 boxes: NQ, RTY, CL, HG, 6E, 6J — all Databento 1h from cross_asset_1h
+// 6 boxes: NQ, ZN, CL, SPX Vol, YM, NYSE — all Databento 1h.
 //
 // Polarity:
-//   NQ, RTY, CL, HG, 6E: positive (up = bullish for MES)
-//   6J: INVERSE (JPY weakness = bullish for MES, so price DOWN = +1)
+//   NQ, ZN, CL, YM, NYSE: positive (up = bullish for MES)
+//   SPX Vol: INVERSE (volatility up = risk-off)
 //
 // Atomic state per symbol: +1 (Bull), 0 (Neutral), -1 (Bear)
 //   Derived from hourly % change: > +0.01% = +1, < -0.01% = -1, else 0
-//   6J polarity is flipped after computing raw change
+//   Inverse polarity symbols are flipped after computing raw change
 //
 // Background rule (STRICT CONSENSUS):
 //   All six +1 → all boxes green
 //   All six -1 → all boxes red
 //   Otherwise  → all boxes transparent
 //
-// Weighted IM Score (Warbird weights):
-//   NQ: 25%, RTY: 13.33%, CL: 13.33%, HG: 13.33%, 6E: 7.5%, 6J: 7.5%
-//   Range: -0.80 to +0.80
+// Weighted IM Score (equal weight):
+//   six symbols × 16.67%
+//   Range: -1.00 to +1.00
 
 interface TickerConfig {
   label: string;
@@ -29,12 +29,12 @@ interface TickerConfig {
 }
 
 const TICKERS: TickerConfig[] = [
-  { label: "NQ",  symbolCode: "NQ",  sublabel: "Nasdaq",   polarity: "positive", weight: 0.25 },
-  { label: "RTY", symbolCode: "RTY", sublabel: "Russell",  polarity: "positive", weight: 0.1333 },
-  { label: "CL",  symbolCode: "CL",  sublabel: "Crude",    polarity: "positive", weight: 0.1333 },
-  { label: "HG",  symbolCode: "HG",  sublabel: "Copper",   polarity: "positive", weight: 0.1333 },
-  { label: "EUR", symbolCode: "6E",  sublabel: "EUR/USD",  polarity: "positive", weight: 0.075 },
-  { label: "JPY", symbolCode: "6J",  sublabel: "JPY/USD",  polarity: "inverse",  weight: 0.075 },
+  { label: "NQ",     symbolCode: "NQ",     sublabel: "Nasdaq",         polarity: "positive", weight: 0.1667 },
+  { label: "ZN",     symbolCode: "ZN",     sublabel: "10Y Treasury",   polarity: "positive", weight: 0.1667 },
+  { label: "CL",     symbolCode: "CL",     sublabel: "Crude Oil",      polarity: "positive", weight: 0.1667 },
+  { label: "SPXVOL", symbolCode: "SPXVOL", sublabel: "S&P Realized Vol", polarity: "inverse",  weight: 0.1667 },
+  { label: "YM",     symbolCode: "YM",     sublabel: "Dow Futures",    polarity: "positive", weight: 0.1667 },
+  { label: "NYSE",   symbolCode: "NYSE",   sublabel: "NYSE Futures",   polarity: "positive", weight: 0.1667 },
 ];
 
 // Minimum absolute change to register as directional (avoids noise at flat)
@@ -87,7 +87,7 @@ export default function CorrelationsRow({ correlations }: CorrelationsRowProps) 
       ? "rgba(242, 54, 69, 0.15)"
       : "transparent";
 
-  // Weighted IM score: NQ 25%, RTY/CL/HG 13.33%, 6E/6J 7.5%
+  // Weighted IM score (equal-weight across six symbols)
   const imScore = tickerData.reduce(
     (sum, d) => sum + d.ticker.weight * d.atomicState,
     0,
@@ -183,8 +183,7 @@ export default function CorrelationsRow({ correlations }: CorrelationsRowProps) 
 }
 
 function formatPrice(price: number, symbolCode: string): string {
-  if (symbolCode === "6E") return price.toFixed(5);
-  if (symbolCode === "6J") return price.toFixed(6);
-  if (symbolCode === "HG") return price.toFixed(4);
+  if (symbolCode === "ZN") return price.toFixed(3);
+  if (symbolCode === "SPXVOL") return price.toFixed(2);
   return price.toFixed(2);
 }

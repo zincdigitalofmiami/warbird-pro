@@ -12,6 +12,7 @@ import {
   type ISeriesApi,
   type CandlestickData,
   type Time,
+  type UTCTimestamp,
 } from "lightweight-charts";
 import type { SetupCandidate } from "@/lib/setup-candidates";
 import type { WarbirdSignal } from "@/lib/warbird/types";
@@ -40,10 +41,11 @@ const INITIAL_VISIBLE_BARS = 120;
 const RIGHT_PADDING_BARS = 16;
 const BAR_SPACING = 10;
 const MIN_BAR_SPACING = 8;
-const REFRESH_MS = 300_000;
+const REFRESH_MS = 3_600_000;
 const SMA_PERIOD = 200;
 const SMA_COLOR = "#FFFFFF";
 const SMA_WIDTH = 2;
+const TRADING_HOURS_PER_YEAR = 252 * 24;
 
 interface MesPriceBar {
   symbol: string;
@@ -63,8 +65,8 @@ interface LiveMesChartProps {
   eventLabel?: string;
 }
 
-function toChartDay(dateStr: string): Time {
-  return dateStr.slice(0, 10) as unknown as Time;
+function toChartTime(dateStr: string): Time {
+  return Math.floor(new Date(dateStr).getTime() / 1000) as UTCTimestamp;
 }
 
 function computeVolatility(bars: MesPriceBar[]): string {
@@ -77,7 +79,7 @@ function computeVolatility(bars: MesPriceBar[]): string {
   const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
   const variance =
     returns.reduce((a, b) => a + (b - mean) ** 2, 0) / returns.length;
-  return (Math.sqrt(variance) * Math.sqrt(252) * 100).toFixed(1) + "%";
+  return (Math.sqrt(variance) * Math.sqrt(TRADING_HOURS_PER_YEAR) * 100).toFixed(1) + "%";
 }
 
 function computeSmaData(candles: CandlestickData<Time>[], period: number): { time: Time; value: number }[] {
@@ -131,12 +133,10 @@ export default function LiveMesChart({
   useEffect(() => {
     async function fetchBars() {
       try {
-        const res = await fetch("/api/live/mes1d", { cache: "no-store" });
+        const res = await fetch("/api/live/mes1h?lookback=5000", { cache: "no-store" });
         if (!res.ok) return;
 
-        const json = (await res.json()) as {
-          data?: Array<Record<string, unknown>>;
-        };
+        const json = (await res.json()) as { data?: Array<Record<string, unknown>> };
 
         if (!json.data || json.data.length === 0) return;
 
@@ -219,7 +219,8 @@ export default function LiveMesChart({
       },
       timeScale: {
         borderColor: "transparent",
-        timeVisible: false,
+        timeVisible: true,
+        secondsVisible: false,
         fixLeftEdge: false,
         fixRightEdge: false,
         rightOffset: RIGHT_PADDING_BARS,
@@ -245,13 +246,13 @@ export default function LiveMesChart({
 
     const candleData: CandlestickData<Time>[] = bars
       .map((b) => ({
-        time: toChartDay(b.tradeDate),
+        time: toChartTime(b.tradeDate),
         open: b.open,
         high: b.high,
         low: b.low,
         close: b.close,
       }))
-      .sort((a, b) => String(a.time).localeCompare(String(b.time)));
+      .sort((a, b) => Number(a.time) - Number(b.time));
 
     const series = chart.addSeries(CandlestickSeries, {
       upColor: CANDLE_THEME.upColor,
@@ -364,9 +365,9 @@ export default function LiveMesChart({
             <div className="w-2 h-2 rounded-full bg-cyan-400 shadow-lg shadow-cyan-400/50" />
             <span className="text-sm font-semibold text-white tracking-tight">MES1!</span>
           </div>
-          <span className="text-[11px] text-white/30 font-medium">
-            Micro E-mini S&P 500 &bull; 1D
-          </span>
+            <span className="text-[11px] text-white/30 font-medium">
+            Micro E-mini S&P 500 &bull; 1H
+            </span>
         </div>
         <div className="flex items-center gap-4">
           {highPrice != null && lowPrice != null && (

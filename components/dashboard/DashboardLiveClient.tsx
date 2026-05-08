@@ -48,6 +48,7 @@ interface DashboardPayload {
 }
 
 const DASHBOARD_PULLS_PAUSED = false;
+const HOURLY_REFRESH_MS = 3_600_000;
 
 export default function DashboardLiveClient() {
   const [data, setData] = useState<DashboardPayload | null>(null);
@@ -84,7 +85,7 @@ export default function DashboardLiveClient() {
     }
 
     void fetchData();
-    const interval = setInterval(fetchData, 60_000);
+    const interval = setInterval(fetchData, HOURLY_REFRESH_MS);
     return () => {
       cancelled = true;
       clearInterval(interval);
