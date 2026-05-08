@@ -7,12 +7,19 @@ ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 
 # No-feature-branches guard (CLAUDE.md Locked Rule, 2026-05-08).
-# Refuses pushes to any remote ref that isn't refs/heads/main. The branch
-# names being pushed come from git on stdin (one line per ref).
+# Refuses pushes to any remote ref that isn't refs/heads/main, EXCEPT
+# delete-pushes (--delete) which are how you clean up stale branches.
+# A delete-push from git looks like:  (delete) 0000...0000 <remote_ref> <old_sha>
+# so local_sha == 40 zeroes means the user is trying to remove a remote ref —
+# allow it regardless of which branch is being deleted (deleting stale
+# branches is what the rule wants, not what it forbids).
 # Override for an emergency with ALLOW_NON_MAIN_PUSH=1.
+ZERO_SHA="0000000000000000000000000000000000000000"
 if [[ "${ALLOW_NON_MAIN_PUSH:-0}" != "1" ]]; then
-  while read -r local_ref _local_sha remote_ref _remote_sha; do
+  while read -r local_ref local_sha remote_ref _remote_sha; do
     [[ -z "$local_ref" ]] && continue
+    # Allow delete-pushes (stale branch cleanup).
+    [[ "$local_sha" == "$ZERO_SHA" ]] && continue
     if [[ "$remote_ref" != "refs/heads/main" ]]; then
       echo "ERROR: pre-push refused — pushing to '$remote_ref'." >&2
       echo "       CLAUDE.md Locked Rule (2026-05-08): only main is pushable." >&2
