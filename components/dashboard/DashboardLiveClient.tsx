@@ -47,7 +47,7 @@ interface DashboardPayload {
   generatedAt: string;
 }
 
-const DASHBOARD_PULLS_PAUSED = true;
+const DASHBOARD_PULLS_PAUSED = false;
 
 export default function DashboardLiveClient() {
   const [data, setData] = useState<DashboardPayload | null>(null);

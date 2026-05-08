@@ -1,293 +1,58 @@
 "use client";
 
-import {
-  useEffect,
-  useRef,
-  useState,
-  useMemo,
-  forwardRef,
-  useImperativeHandle,
-} from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import {
-  CandlestickSeries,
-  ColorType,
-  CrosshairMode,
   createChart,
-  IChartApi,
-  ISeriesApi,
+  CandlestickSeries,
   LineSeries,
+  ColorType,
   LineStyle,
-  TickMarkType,
-  Time,
-  UTCTimestamp,
+  type IChartApi,
+  type ISeriesApi,
+  type CandlestickData,
+  type Time,
 } from "lightweight-charts";
-import { createClient } from "@/lib/supabase/client";
-import type { FibResult } from "@/lib/types";
-import { ForecastTargetsPrimitive } from "@/lib/charts/ForecastTargetsPrimitive";
-import { SetupMarkersPrimitive } from "@/lib/charts/SetupMarkersPrimitive";
-import { FibLinesPrimitive } from "@/lib/charts/FibLinesPrimitive";
-import { ensureFutureWhitespace } from "@/lib/charts/ensureFutureWhitespace";
-import { getEventDisplayPhase } from "@/lib/event-display";
 import type { SetupCandidate } from "@/lib/setup-candidates";
-
-import { warbirdSignalToTargets } from "@/lib/warbird/projection";
 import type { WarbirdSignal } from "@/lib/warbird/types";
-import TV from "@/lib/colors";
+import {
+  calculateFibonacciMultiPeriod,
+  type CandleData,
+  type FibResult,
+} from "@/lib/charts/autofib-v16";
+import { V16FibLinesPrimitive } from "@/lib/charts/V16FibLinesPrimitive";
 
-type MesPoint = {
-  time: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume?: number;
-};
-
-type StreamStatus = "connecting" | "live" | "stale" | "error";
-
-const BAR_INTERVAL_SEC = 900; // 15m
-const GO_RECENT_BARS = 32; // ~8 hours of 15m bars
-const INITIAL_VISIBLE_BARS = 120;
-const RIGHT_PADDING_BARS = 16;
-const DEFAULT_BAR_SPACING = 10;
-const MIN_BAR_SPACING = 0.5;
-const ENABLE_FORMING_BAR_UPDATES = false;
-const MAX_TOUCH_MARKERS = 1;
-const MAX_HOOK_MARKERS = 1;
-const FIB_TARGET_1_RATIO = 1.236;
-const FIB_TARGET_2_RATIO = 1.618;
-const FIB_NUMERIC_EPSILON = 1e-9;
-// Keep bar rendering aligned with the V15 daily chart styling.
-const THEME = {
+const CANDLE_THEME = {
   upColor: "#26C6DA",
   downColor: "#FF0000",
   borderUpColor: "transparent",
   borderDownColor: "transparent",
   wickUpColor: "#FFFFFF",
   wickDownColor: "rgba(178,181,190,0.83)",
-  gridColor: "rgba(255,255,255,0.04)",
-  crosshairColor: "rgba(255,255,255,0.55)",
-  labelBgColor: "rgba(20,10,40,0.9)",
-  textColor: "rgba(255,255,255,0.4)",
-} as const;
-
-// ─── Gap-Free Time Mapping ──────────────────────────────────────────────────
-
-interface TimeMap {
-  realToGf: Map<number, number>;
-  gfToReal: Map<number, number>;
-  baseTime: number;
-}
-
-function buildGapFreeMapping(points: MesPoint[]): {
-  gfPoints: MesPoint[];
-  map: TimeMap;
-} {
-  if (points.length === 0) {
-    return {
-      gfPoints: [],
-      map: { realToGf: new Map(), gfToReal: new Map(), baseTime: 0 },
-    };
-  }
-
-  const baseTime = points[0].time;
-  const realToGf = new Map<number, number>();
-  const gfToReal = new Map<number, number>();
-
-  const gfPoints = points.map((p, i) => {
-    const gfTime = baseTime + i * BAR_INTERVAL_SEC;
-    realToGf.set(p.time, gfTime);
-    gfToReal.set(gfTime, p.time);
-    return { ...p, time: gfTime };
-  });
-
-  return { gfPoints, map: { realToGf, gfToReal, baseTime } };
-}
-
-/** Format a real UTC timestamp for the time axis (Central Time) */
-function formatRealTime(
-  realTimeSec: number,
-  tickMarkType: TickMarkType,
-): string {
-  const d = new Date(realTimeSec * 1000);
-  switch (tickMarkType) {
-    case TickMarkType.Year:
-      return d.toLocaleDateString("en-US", {
-        year: "numeric",
-        timeZone: "America/Chicago",
-      });
-    case TickMarkType.Month:
-      return d.toLocaleDateString("en-US", {
-        month: "short",
-        timeZone: "America/Chicago",
-      });
-    case TickMarkType.DayOfMonth:
-      return d.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        timeZone: "America/Chicago",
-      });
-    case TickMarkType.Time:
-    case TickMarkType.TimeWithSeconds:
-    default:
-      return d.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-        timeZone: "America/Chicago",
-      });
-  }
-}
-
-// ─── Chart Helpers ──────────────────────────────────────────────────────────
-
-function toChartPoint(point: MesPoint) {
-  return {
-    time: point.time as UTCTimestamp,
-    open: point.open,
-    high: point.high,
-    low: point.low,
-    close: point.close,
-  };
-}
-
-function setupSortTime(setup: SetupCandidate): number {
-  return setup.goTime ?? setup.hookTime ?? setup.touchTime ?? setup.createdAt;
-}
-
-function isRenderableGoSetup(setup: SetupCandidate): boolean {
-  if (setup.phase !== "TRIGGERED") return false;
-  if (
-    setup.entry == null ||
-    setup.stopLoss == null ||
-    setup.tp1 == null ||
-    setup.tp2 == null
-  )
-    return false;
-
-  if (setup.direction === "BULLISH") {
-    return (
-      setup.stopLoss < setup.entry &&
-      setup.tp1 > setup.entry &&
-      setup.tp2 >= setup.tp1
-    );
-  }
-  return (
-    setup.tp2 <= setup.tp1 &&
-    setup.tp1 < setup.entry &&
-    setup.stopLoss > setup.entry
-  );
-}
-
-function selectSetupsForChart(
-  setups: SetupCandidate[],
-  lastTimeSec: number | null,
-): SetupCandidate[] {
-  if (setups.length === 0) return [];
-
-  const goCandidates = setups
-    .filter(isRenderableGoSetup)
-    .sort((a, b) => setupSortTime(b) - setupSortTime(a));
-
-  const recentGoCandidates =
-    lastTimeSec == null
-      ? goCandidates
-      : goCandidates.filter(
-          (s) =>
-            s.goTime != null &&
-            lastTimeSec - s.goTime <= BAR_INTERVAL_SEC * GO_RECENT_BARS,
-        );
-
-  const sourceGo =
-    recentGoCandidates.length > 0 ? recentGoCandidates : goCandidates;
-  const selectedGo = sourceGo.slice(0, 1);
-
-  const leadDirection = selectedGo[0]?.direction;
-  const leadTime = selectedGo[0] ? setupSortTime(selectedGo[0]) : null;
-
-  const selectedHooks = setups
-    .filter((s) => s.phase === "CONFIRMED")
-    .filter((s) => (leadDirection ? s.direction === leadDirection : true))
-    .filter((s) => (leadTime != null ? setupSortTime(s) <= leadTime : true))
-    .sort((a, b) => setupSortTime(b) - setupSortTime(a))
-    .slice(0, MAX_HOOK_MARKERS);
-
-  const selectedTouches = setups
-    .filter((s) => s.phase === "CONTACT")
-    .filter((s) => (leadDirection ? s.direction === leadDirection : true))
-    .filter((s) => (leadTime != null ? setupSortTime(s) <= leadTime : true))
-    .sort((a, b) => setupSortTime(b) - setupSortTime(a))
-    .slice(0, MAX_TOUCH_MARKERS);
-
-  return [...selectedGo, ...selectedHooks, ...selectedTouches];
-}
-
-type FibSeed = {
-  direction: "LONG" | "SHORT" | "BULLISH" | "BEARISH";
-  fibLevel: number | null | undefined;
-  fibRatio: number | null | undefined;
-  tp1: number | null | undefined;
-  tp2: number | null | undefined;
 };
 
-function asFiniteNumber(value: number | null | undefined): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
+const GRID_COLOR = "rgba(255,255,255,0.04)";
+const CROSSHAIR_COLOR = "rgba(255,255,255,0.55)";
+const LABEL_BG = "rgba(20,10,40,0.9)";
+const TEXT_COLOR = "rgba(255,255,255,0.4)";
 
-function deriveFibRange(seed: FibSeed, fibLevel: number, fibRatio: number): number | null {
-  const tp1 = asFiniteNumber(seed.tp1);
-  const tp2 = asFiniteNumber(seed.tp2);
+const INITIAL_VISIBLE_BARS = 120;
+const RIGHT_PADDING_BARS = 16;
+const BAR_SPACING = 10;
+const MIN_BAR_SPACING = 8;
+const REFRESH_MS = 300_000;
+const SMA_PERIOD = 200;
+const SMA_COLOR = "#FFFFFF";
+const SMA_WIDTH = 2;
 
-  if (tp1 != null && Math.abs(FIB_TARGET_1_RATIO - fibRatio) > FIB_NUMERIC_EPSILON) {
-    const range = Math.abs((tp1 - fibLevel) / (FIB_TARGET_1_RATIO - fibRatio));
-    if (range > FIB_NUMERIC_EPSILON) return range;
-  }
-
-  if (tp2 != null && Math.abs(FIB_TARGET_2_RATIO - fibRatio) > FIB_NUMERIC_EPSILON) {
-    const range = Math.abs((tp2 - fibLevel) / (FIB_TARGET_2_RATIO - fibRatio));
-    if (range > FIB_NUMERIC_EPSILON) return range;
-  }
-
-  return null;
-}
-
-function buildFibResultFromSeed(seed: FibSeed | null | undefined): FibResult | null {
-  if (!seed) return null;
-
-  const fibLevel = asFiniteNumber(seed.fibLevel);
-  const fibRatio = asFiniteNumber(seed.fibRatio);
-  if (fibLevel == null || fibRatio == null) return null;
-
-  const range = deriveFibRange(seed, fibLevel, fibRatio);
-  if (range == null) return null;
-
-  const isBullish = seed.direction === "LONG" || seed.direction === "BULLISH";
-  const direction = isBullish ? 1 : -1;
-  const base = fibLevel - direction * range * fibRatio;
-  const anchorLow = isBullish ? base : base - range;
-  const anchorHigh = isBullish ? base + range : base;
-
-  if (
-    !Number.isFinite(anchorLow) ||
-    !Number.isFinite(anchorHigh) ||
-    anchorHigh - anchorLow <= FIB_NUMERIC_EPSILON
-  ) {
-    return null;
-  }
-
-  return {
-    levels: [],
-    anchorHigh,
-    anchorLow,
-    isBullish,
-    anchorHighBarIndex: 0,
-    anchorLowBarIndex: 0,
-  };
-}
-
-export interface LiveMesChartHandle {
-  captureScreenshot: () => string | null;
+interface MesPriceBar {
+  symbol: string;
+  tradeDate: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
 }
 
 interface LiveMesChartProps {
@@ -298,811 +63,381 @@ interface LiveMesChartProps {
   eventLabel?: string;
 }
 
-const LiveMesChart = forwardRef<LiveMesChartHandle, LiveMesChartProps>(
-  function LiveMesChart({ paused = false, signal, setups, eventPhase, eventLabel }, ref) {
-    const containerRef = useRef<HTMLDivElement | null>(null);
-    const chartRef = useRef<IChartApi | null>(null);
-    const seriesRef = useRef<ISeriesApi<"Candlestick", Time> | null>(null);
-    const whitespaceSeriesRef = useRef<ISeriesApi<"Line", Time> | null>(null);
-    const primitiveRef = useRef<ForecastTargetsPrimitive | null>(null);
-    const setupPrimitiveRef = useRef<SetupMarkersPrimitive | null>(null);
-    const fibPrimitiveRef = useRef<FibLinesPrimitive | null>(null);
+function toChartDay(dateStr: string): Time {
+  return dateStr.slice(0, 10) as unknown as Time;
+}
 
-    const initialViewportAppliedRef = useRef(false);
-    const displayEventPhase = getEventDisplayPhase(eventPhase);
+function computeVolatility(bars: MesPriceBar[]): string {
+  const recent = bars.slice(-20);
+  if (recent.length < 2) return "--";
+  const returns: number[] = [];
+  for (let i = 1; i < recent.length; i++) {
+    returns.push(Math.log(recent[i].close / recent[i - 1].close));
+  }
+  const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
+  const variance =
+    returns.reduce((a, b) => a + (b - mean) ** 2, 0) / returns.length;
+  return (Math.sqrt(variance) * Math.sqrt(252) * 100).toFixed(1) + "%";
+}
 
-    // Gap-free points (sequential times for chart rendering)
-    const pointsRef = useRef<MesPoint[]>([]);
-    // Original real-time points (session stats and setup time lookup)
-    const realPointsRef = useRef<MesPoint[]>([]);
-    // Bidirectional time mapping: real ↔ gap-free
-    const timeMapRef = useRef<TimeMap>({
-      realToGf: new Map(),
-      gfToReal: new Map(),
-      baseTime: 0,
+function computeSmaData(candles: CandlestickData<Time>[], period: number): { time: Time; value: number }[] {
+  if (candles.length < period) return [];
+
+  const result: { time: Time; value: number }[] = [];
+  let rollingSum = 0;
+
+  for (let i = 0; i < candles.length; i += 1) {
+    rollingSum += candles[i].close;
+    if (i >= period) {
+      rollingSum -= candles[i - period].close;
+    }
+    if (i >= period - 1) {
+      result.push({
+        time: candles[i].time,
+        value: rollingSum / period,
+      });
+    }
+  }
+
+  return result;
+}
+
+export default function LiveMesChart({
+  paused: _paused = false,
+  signal: _signal = null,
+  setups: _setups = [],
+  eventPhase: _eventPhase,
+  eventLabel: _eventLabel,
+}: LiveMesChartProps) {
+  void _paused;
+  void _signal;
+  void _setups;
+  void _eventPhase;
+  void _eventLabel;
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const fitCalledRef = useRef(false);
+  const fibLockedRef = useRef<FibResult | null>(null);
+
+  const [bars, setBars] = useState<MesPriceBar[]>([]);
+  const [lastPrice, setLastPrice] = useState<number | null>(null);
+  const [priceChange, setPriceChange] = useState(0);
+  const [highPrice, setHighPrice] = useState<number | null>(null);
+  const [lowPrice, setLowPrice] = useState<number | null>(null);
+  const [volatility, setVolatility] = useState("--");
+
+  useEffect(() => {
+    async function fetchBars() {
+      try {
+        const res = await fetch("/api/live/mes1d", { cache: "no-store" });
+        if (!res.ok) return;
+
+        const json = (await res.json()) as {
+          data?: Array<Record<string, unknown>>;
+        };
+
+        if (!json.data || json.data.length === 0) return;
+
+        const parsed: MesPriceBar[] = json.data.map((d) => ({
+          symbol: String(d.symbol ?? "MES"),
+          tradeDate: String(d.tradeDate),
+          open: Number(d.open),
+          high: Number(d.high),
+          low: Number(d.low),
+          close: Number(d.close),
+          volume: Number(d.volume),
+        }));
+
+        setBars(parsed);
+
+        const latest = parsed[parsed.length - 1];
+        const prev = parsed[parsed.length - 2];
+        setLastPrice(latest.close);
+        setHighPrice(latest.high);
+        setLowPrice(latest.low);
+        setVolatility(computeVolatility(parsed));
+
+        if (prev) {
+          setPriceChange(((latest.close - prev.close) / prev.close) * 100);
+        }
+      } catch {
+        // keep previous render
+      }
+    }
+
+    fetchBars();
+    const id = setInterval(fetchBars, REFRESH_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    if (!containerRef.current || bars.length === 0) return;
+
+    if (chartRef.current) {
+      try {
+        chartRef.current.remove();
+      } catch {
+        // ignore dispose race
+      }
+      chartRef.current = null;
+      seriesRef.current = null;
+      fitCalledRef.current = false;
+    }
+
+    const chart = createChart(containerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: "transparent" },
+        textColor: TEXT_COLOR,
+        fontFamily: "Inter, sans-serif",
+        fontSize: 11,
+        attributionLogo: false,
+      },
+      grid: {
+        vertLines: { color: GRID_COLOR },
+        horzLines: { color: GRID_COLOR },
+      },
+      crosshair: {
+        vertLine: {
+          color: CROSSHAIR_COLOR,
+          width: 1,
+          style: LineStyle.Solid,
+          labelBackgroundColor: LABEL_BG,
+        },
+        horzLine: {
+          color: CROSSHAIR_COLOR,
+          width: 1,
+          style: LineStyle.Solid,
+          labelBackgroundColor: LABEL_BG,
+        },
+      },
+      rightPriceScale: {
+        borderColor: "transparent",
+        autoScale: true,
+        scaleMargins: { top: 0.05, bottom: 0.05 },
+      },
+      timeScale: {
+        borderColor: "transparent",
+        timeVisible: false,
+        fixLeftEdge: false,
+        fixRightEdge: false,
+        rightOffset: RIGHT_PADDING_BARS,
+        barSpacing: BAR_SPACING,
+        minBarSpacing: MIN_BAR_SPACING,
+        lockVisibleTimeRangeOnResize: true,
+      },
+      handleScroll: {
+        mouseWheel: false,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: false,
+      },
+      handleScale: {
+        mouseWheel: false,
+        pinch: true,
+        axisPressedMouseMove: { time: true, price: true },
+        axisDoubleClickReset: { time: true, price: true },
+      },
     });
 
-    const [status, setStatus] = useState<StreamStatus>("connecting");
-    const [error, setError] = useState<string | null>(null);
-    const [lastPrice, setLastPrice] = useState<number | null>(null);
-    const [priceChange, setPriceChange] = useState<number>(0);
-    const [sessionHigh, setSessionHigh] = useState<number | null>(null);
-    const [sessionLow, setSessionLow] = useState<number | null>(null);
+    chartRef.current = chart;
 
-    /** Look up gap-free time for a real timestamp, snapping to nearest 15m bar */
-    const realToGapFree = (
-      realTime: number | null | undefined,
-    ): number | undefined => {
-      if (realTime == null) return undefined;
-      const { realToGf } = timeMapRef.current;
-      const exact = realToGf.get(realTime);
-      if (exact != null) return exact;
-      const snapped =
-        Math.round(realTime / BAR_INTERVAL_SEC) * BAR_INTERVAL_SEC;
-      return realToGf.get(snapped);
-    };
+    const candleData: CandlestickData<Time>[] = bars
+      .map((b) => ({
+        time: toChartDay(b.tradeDate),
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+      }))
+      .sort((a, b) => String(a.time).localeCompare(String(b.time)));
 
-    const chartSetups = useMemo(
-      () =>
-        selectSetupsForChart(
-          setups ?? [],
-          realPointsRef.current[realPointsRef.current.length - 1]?.time ?? null,
-        ),
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      [setups, lastPrice],
-    );
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: CANDLE_THEME.upColor,
+      downColor: CANDLE_THEME.downColor,
+      borderUpColor: CANDLE_THEME.borderUpColor,
+      borderDownColor: CANDLE_THEME.borderDownColor,
+      wickUpColor: CANDLE_THEME.wickUpColor,
+      wickDownColor: CANDLE_THEME.wickDownColor,
+      priceLineVisible: true,
+    });
 
-    useImperativeHandle(ref, () => ({
-      captureScreenshot: () => {
-        if (!chartRef.current) return null;
-        try {
-          const canvas = chartRef.current.takeScreenshot();
-          return canvas.toDataURL("image/png");
-        } catch {
-          return null;
-        }
-      },
-    }));
+    series.setData(candleData);
+    seriesRef.current = series;
 
-    // --- Chart setup ---
-    useEffect(() => {
-      if (!containerRef.current) return;
-
-      const chart = createChart(containerRef.current, {
-        autoSize: true,
-        layout: {
-          background: { type: ColorType.Solid, color: "transparent" },
-          textColor: THEME.textColor,
-          fontFamily: "Inter, sans-serif",
-          fontSize: 11,
-          attributionLogo: false,
-        },
-        grid: {
-          vertLines: { color: THEME.gridColor },
-          horzLines: { color: THEME.gridColor },
-        },
-        rightPriceScale: {
-          borderColor: "transparent",
-          autoScale: true,
-          scaleMargins: { top: 0.05, bottom: 0.05 },
-        },
-        timeScale: {
-          borderColor: "transparent",
-          timeVisible: true,
-          fixLeftEdge: false,
-          fixRightEdge: false,
-          rightOffset: 16,
-          barSpacing: DEFAULT_BAR_SPACING,
-          minBarSpacing: MIN_BAR_SPACING,
-          lockVisibleTimeRangeOnResize: true,
-          tickMarkFormatter: (time: Time, tickMarkType: TickMarkType) => {
-            const realTime = timeMapRef.current.gfToReal.get(time as number);
-            if (realTime == null) return "";
-            return formatRealTime(realTime, tickMarkType);
-          },
-        },
-        localization: {
-          timeFormatter: (time: Time) => {
-            const realTime = timeMapRef.current.gfToReal.get(time as number);
-            if (realTime == null) return "";
-            const d = new Date(realTime * 1000);
-            return d.toLocaleString("en-US", {
-              month: "short",
-              day: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: true,
-              timeZone: "America/Chicago",
-            });
-          },
-        },
-        crosshair: {
-          mode: CrosshairMode.Normal,
-          vertLine: {
-            color: THEME.crosshairColor,
-            width: 1,
-            style: LineStyle.Solid,
-            labelBackgroundColor: THEME.labelBgColor,
-          },
-          horzLine: {
-            color: THEME.crosshairColor,
-            width: 1,
-            style: LineStyle.Solid,
-            labelBackgroundColor: THEME.labelBgColor,
-          },
-        },
-        handleScroll: {
-          mouseWheel: false,
-          pressedMouseMove: true,
-          horzTouchDrag: true,
-          vertTouchDrag: false,
-        },
-        handleScale: {
-          mouseWheel: false,
-          pinch: true,
-          axisPressedMouseMove: { time: true, price: true },
-          axisDoubleClickReset: { time: true, price: true },
-        },
-      });
-
-      const series = chart.addSeries(CandlestickSeries, {
-        upColor: THEME.upColor,
-        downColor: THEME.downColor,
-        borderUpColor: THEME.borderUpColor,
-        borderDownColor: THEME.borderDownColor,
-        wickUpColor: THEME.wickUpColor,
-        wickDownColor: THEME.wickDownColor,
-        priceLineVisible: true,
-        lastValueVisible: true,
-        priceFormat: {
-          type: "price",
-          precision: 2,
-          minMove: 0.25,
-        },
-      });
-
-      const whitespaceSeries = chart.addSeries(LineSeries, {
-        color: "rgba(255,255,255,0)",
-        lineWidth: 1,
-        lastValueVisible: false,
+    const smaData = computeSmaData(candleData, SMA_PERIOD);
+    if (smaData.length > 0) {
+      const smaSeries = chart.addSeries(LineSeries, {
+        color: SMA_COLOR,
+        lineWidth: SMA_WIDTH,
+        lineStyle: LineStyle.Solid,
         priceLineVisible: false,
+        lastValueVisible: false,
         crosshairMarkerVisible: false,
       });
+      smaSeries.setData(smaData);
+    }
 
-      const primitive = new ForecastTargetsPrimitive();
-      series.attachPrimitive(primitive);
+    const fibPrimitive = new V16FibLinesPrimitive();
+    series.attachPrimitive(fibPrimitive);
 
-      const setupPrimitive = new SetupMarkersPrimitive();
-      series.attachPrimitive(setupPrimitive);
+    const fibCandles: CandleData[] = bars.map((b, idx) => ({
+      time: idx,
+      open: b.open,
+      high: b.high,
+      low: b.low,
+      close: b.close,
+      volume: b.volume,
+    }));
 
-      const fibPrimitive = new FibLinesPrimitive();
-      series.attachPrimitive(fibPrimitive);
+    const currentPrice = bars[bars.length - 1]?.close;
+    let fibResult = fibLockedRef.current;
+    if (
+      !fibResult ||
+      currentPrice == null ||
+      currentPrice > fibResult.anchorHigh ||
+      currentPrice < fibResult.anchorLow
+    ) {
+      fibResult = calculateFibonacciMultiPeriod(fibCandles);
+      fibLockedRef.current = fibResult;
+    }
 
-
-
-
-      chartRef.current = chart;
-      seriesRef.current = series;
-      whitespaceSeriesRef.current = whitespaceSeries;
-      primitiveRef.current = primitive;
-      setupPrimitiveRef.current = setupPrimitive;
-      fibPrimitiveRef.current = fibPrimitive;
-      const resizeObserver = new ResizeObserver(() => {
-        chart.applyOptions({ autoSize: true });
-      });
-      resizeObserver.observe(containerRef.current);
-
-      return () => {
-        resizeObserver.disconnect();
-        series.detachPrimitive(primitive);
-        series.detachPrimitive(setupPrimitive);
-        series.detachPrimitive(fibPrimitive);
-        chart.removeSeries(whitespaceSeries);
-        chart.remove();
-        chartRef.current = null;
-        seriesRef.current = null;
-        whitespaceSeriesRef.current = null;
-        primitiveRef.current = null;
-        setupPrimitiveRef.current = null;
-        fibPrimitiveRef.current = null;
-      };
-    }, []);
-
-    // --- Live data: Supabase Realtime subscription ---
-    useEffect(() => {
-      if (paused) {
-        setStatus("stale");
-        setError("Live chart pulls are paused until the dashboard/runtime audit is complete.");
-        return;
-      }
-
-      const supabase = createClient();
-
-      const updateSessionStats = (points: MesPoint[]) => {
-        if (points.length === 0) return;
-        const last = points[points.length - 1];
-        setLastPrice(last.close);
-
-        let high = -Infinity;
-        let low = Infinity;
-        for (const p of points) {
-          if (p.high > high) high = p.high;
-          if (p.low < low) low = p.low;
-        }
-        setSessionHigh(high);
-        setSessionLow(low);
-
-        const first = points[0];
-        if (first.open > 0) {
-          setPriceChange(((last.close - first.open) / first.open) * 100);
-        }
-      };
-
-      const buildWhitespaceData = (
-        lastGfTime: number,
-        lastRealTime: number,
-        map: TimeMap,
-      ) => {
-        const whitespace = ensureFutureWhitespace(
-          lastGfTime,
-          BAR_INTERVAL_SEC,
-          RIGHT_PADDING_BARS,
-        );
-        for (let i = 0; i < whitespace.length; i += 1) {
-          const wsGfTime = whitespace[i].time as number;
-          const wsRealTime = lastRealTime + BAR_INTERVAL_SEC * (i + 1);
-          map.gfToReal.set(wsGfTime, wsRealTime);
-          map.realToGf.set(wsRealTime, wsGfTime);
-        }
-        return whitespace;
-      };
-
-      const rebuildAndRender = (rawPoints: MesPoint[]) => {
-        if (!seriesRef.current || !whitespaceSeriesRef.current || rawPoints.length === 0) return;
-
-        realPointsRef.current = rawPoints;
-        const { gfPoints, map } = buildGapFreeMapping(rawPoints);
-        timeMapRef.current = map;
-        pointsRef.current = gfPoints;
-
-        const lastGfTime = gfPoints[gfPoints.length - 1].time;
-        const lastRealTime = rawPoints[rawPoints.length - 1].time;
-        const whitespace = buildWhitespaceData(lastGfTime, lastRealTime, map);
-
-        return { gfPoints, whitespace, map };
-      };
-
-      const applySnapshot = (rawPoints: MesPoint[]) => {
-        try {
-          const result = rebuildAndRender(rawPoints);
-          if (!result || !seriesRef.current) return;
-
-          seriesRef.current.setData(result.gfPoints.map(toChartPoint));
-          whitespaceSeriesRef.current?.setData(result.whitespace);
-
-          updateSessionStats(rawPoints);
-
-          const timeScale = chartRef.current?.timeScale();
-          timeScale?.applyOptions({
-            barSpacing: DEFAULT_BAR_SPACING,
-            minBarSpacing: MIN_BAR_SPACING,
-          });
-
-          if (timeScale && !initialViewportAppliedRef.current) {
-            const totalBars = result.gfPoints.length;
-            const visibleBars = Math.min(INITIAL_VISIBLE_BARS, totalBars);
-            const from = Math.max(0, totalBars - visibleBars);
-            const to = Math.max(0, totalBars - 1) + RIGHT_PADDING_BARS;
-            timeScale.setVisibleLogicalRange({ from, to });
-            initialViewportAppliedRef.current = true;
-          } else {
-            timeScale?.scrollToPosition(RIGHT_PADDING_BARS, false);
-          }
-
-          setStatus("live");
-          setError(null);
-        } catch (e) {
-          setStatus("error");
-          setError(e instanceof Error ? e.message : "Invalid snapshot");
-        }
-      };
-
-      const applyRealtimeUpdate = (row: {
-        ts: string;
-        open: number;
-        high: number;
-        low: number;
-        close: number;
-        volume: number;
-      }) => {
-        try {
-          if (!seriesRef.current) return;
-
-          const realTime = Math.floor(new Date(row.ts).getTime() / 1000);
-          const newPoint: MesPoint = {
-            time: realTime,
-            open: Number(row.open),
-            high: Number(row.high),
-            low: Number(row.low),
-            close: Number(row.close),
-            volume: Number(row.volume),
-          };
-
-          // Check if this is an intrabar update (same timestamp exists)
-          const existingIdx = realPointsRef.current.findIndex(
-            (p) => p.time === realTime,
-          );
-
-          if (existingIdx >= 0) {
-            // Intrabar update — use series.update() for efficiency
-            realPointsRef.current[existingIdx] = newPoint;
-            const gfTime = timeMapRef.current.realToGf.get(realTime);
-            if (gfTime != null) {
-              seriesRef.current.update({
-                time: gfTime as UTCTimestamp,
-                open: newPoint.open,
-                high: newPoint.high,
-                low: newPoint.low,
-                close: newPoint.close,
-              });
-            }
-          } else if (
-            realPointsRef.current.length === 0 ||
-            realTime > realPointsRef.current[realPointsRef.current.length - 1].time
-          ) {
-            realPointsRef.current = [...realPointsRef.current, newPoint];
-            const lastGfTime =
-              pointsRef.current.length > 0
-                ? pointsRef.current[pointsRef.current.length - 1].time
-                : realTime;
-            const nextGfTime =
-              pointsRef.current.length > 0
-                ? lastGfTime + BAR_INTERVAL_SEC
-                : realTime;
-
-            timeMapRef.current.realToGf.set(realTime, nextGfTime);
-            timeMapRef.current.gfToReal.set(nextGfTime, realTime);
-
-            const gfPoint = { ...newPoint, time: nextGfTime };
-            pointsRef.current = [...pointsRef.current, gfPoint];
-            seriesRef.current.update(toChartPoint(gfPoint));
-
-            const whitespace = buildWhitespaceData(
-              nextGfTime,
-              realTime,
-              timeMapRef.current,
-            );
-            whitespaceSeriesRef.current?.setData(whitespace);
-          } else {
-            // Out-of-order bar — merge and rebuild gap-free mapping
-            const realByTime = new Map(
-              realPointsRef.current.map((p) => [p.time, p] as const),
-            );
-            realByTime.set(realTime, newPoint);
-            const newRealPoints = [...realByTime.values()].sort(
-              (a, b) => a.time - b.time,
-            );
-
-            const result = rebuildAndRender(newRealPoints);
-            if (!result) return;
-
-            const range =
-              chartRef.current?.timeScale().getVisibleLogicalRange();
-            seriesRef.current.setData(result.gfPoints.map(toChartPoint));
-            whitespaceSeriesRef.current?.setData(result.whitespace);
-            if (range) {
-              chartRef.current?.timeScale().setVisibleLogicalRange(range);
-            }
-          }
-
-          updateSessionStats(realPointsRef.current);
-          setStatus("live");
-          setError(null);
-        } catch (e) {
-          setStatus("error");
-          setError(e instanceof Error ? e.message : "Invalid update");
-        }
-      };
-
-      let cancelled = false;
-
-      async function startRealtimeFeed() {
-        try {
-          // Cache busting: cacheComponents=true in next.config
-          const snapshotRes = await fetch(
-            `/api/live/mes15m?snapshot=1&backfill=5000&cb=${Date.now()}`,
-            { cache: "no-store" },
-          );
-          const snapshotData = (await snapshotRes.json()) as
-            | { points: MesPoint[]; live?: boolean }
-            | { error: string };
-
-          if (cancelled) return;
-          if (!snapshotRes.ok || !("points" in snapshotData)) {
-            throw new Error(
-              "error" in snapshotData
-                ? snapshotData.error
-                : "Failed to load MES 15m snapshot",
-            );
-          }
-
-          applySnapshot(snapshotData.points || []);
-        } catch (e) {
-          if (cancelled) return;
-          setStatus("error");
-          setError(
-            e instanceof Error
-              ? e.message
-              : "Failed to load initial chart data.",
-          );
-        }
-      }
-
-      // Subscribe to Supabase Realtime for mes_15m updates (completed bars)
-      const channel = supabase
-        .channel("mes_15m_realtime")
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "mes_15m",
-          },
-          (payload) => {
-            if (cancelled) return;
-            const row = payload.new as {
-              ts: string;
-              open: number;
-              high: number;
-              low: number;
-              close: number;
-              volume: number;
-            };
-            if (row?.ts) {
-              applyRealtimeUpdate(row);
-            }
-          },
-        )
-        .subscribe((status) => {
-          if (status === "SUBSCRIBED") {
-            // Realtime channel active
-          }
-        });
-
-      // ── Forming-bar: subscribe to mes_1m for intra-bar updates ──────────
-      // Aggregates incoming 1m ticks into the current forming 15m candle
-      // so the chart stays current between 15m bar closes.
-      let currentFormingBar: { ts: number; open: number; high: number; low: number; close: number; volume: number } | null = null;
-      let channel1m: ReturnType<typeof supabase.channel> | null = null;
-
-      if (ENABLE_FORMING_BAR_UPDATES) {
-        channel1m = supabase
-          .channel("mes_1m_forming")
-          .on(
-            "postgres_changes",
-            {
-              event: "*",
-              schema: "public",
-              table: "mes_1m",
-            },
-            (payload) => {
-              if (cancelled || !seriesRef.current) return;
-              const row = payload.new as {
-                ts: string;
-                open: number;
-                high: number;
-                low: number;
-                close: number;
-                volume: number;
-              };
-              if (!row?.ts) return;
-
-              const tickTime = Math.floor(new Date(row.ts).getTime() / 1000);
-              // Floor to 15m bucket
-              const barTime = Math.floor(tickTime / BAR_INTERVAL_SEC) * BAR_INTERVAL_SEC;
-
-              // Compare against the current wall-clock 15m bucket to determine if this is a forming bar.
-              const nowBucket = Math.floor(Date.now() / 1000 / BAR_INTERVAL_SEC) * BAR_INTERVAL_SEC;
-              if (barTime < nowBucket) return; // This bar is in the past — already completed
-
-              const open = Number(row.open);
-              const high = Number(row.high);
-              const low = Number(row.low);
-              const close = Number(row.close);
-              const vol = Number(row.volume);
-
-              if (currentFormingBar && currentFormingBar.ts === barTime) {
-                // Update existing forming bar with new 1m tick
-                currentFormingBar.high = Math.max(currentFormingBar.high, high);
-                currentFormingBar.low = Math.min(currentFormingBar.low, low);
-                currentFormingBar.close = close;
-                currentFormingBar.volume += vol;
-              } else {
-                // New 15m bucket — start a fresh forming bar
-                currentFormingBar = { ts: barTime, open, high, low, close, volume: vol };
-              }
-
-              const fb = currentFormingBar;
-
-              // Map forming bar to gap-free time and push to chart
-              let gfTime = timeMapRef.current.realToGf.get(barTime);
-              if (gfTime == null && pointsRef.current.length > 0) {
-                // This is a brand-new forming bar — assign next gap-free slot
-                const lastGfTime = pointsRef.current[pointsRef.current.length - 1].time;
-                gfTime = lastGfTime + BAR_INTERVAL_SEC;
-                timeMapRef.current.realToGf.set(barTime, gfTime);
-                timeMapRef.current.gfToReal.set(gfTime, barTime);
-              }
-
-              if (gfTime != null) {
-                seriesRef.current!.update({
-                  time: gfTime as UTCTimestamp,
-                  open: fb.open,
-                  high: fb.high,
-                  low: fb.low,
-                  close: fb.close,
-                });
-
-                // Update last price for header display
-                setLastPrice(fb.close);
-                setStatus("live");
-              }
-            },
-          )
-          .subscribe();
-      }
-
-      startRealtimeFeed();
-
-      return () => {
-        cancelled = true;
-        supabase.removeChannel(channel);
-        if (channel1m) {
-          supabase.removeChannel(channel1m);
-        }
-      };
-    }, [paused]);
-
-    // --- Wire Warbird forecast targets to primitive ---
-    useEffect(() => {
-      if (!primitiveRef.current) return;
-
-      if (!signal || pointsRef.current.length === 0) {
-        primitiveRef.current.setTargets([]);
-        return;
-      }
-
-      const gfPoints = pointsRef.current;
-      const lastGfTime = gfPoints[gfPoints.length - 1].time;
-      const futureEnd = lastGfTime + BAR_INTERVAL_SEC * 16;
-
-      const targets = warbirdSignalToTargets(
-        signal,
-        lastGfTime,
-        futureEnd,
+    if (fibResult) {
+      const anchorIdx = Math.min(
+        fibResult.anchorHighBarIndex,
+        fibResult.anchorLowBarIndex,
       );
+      const anchorStartTime = candleData[anchorIdx]?.time;
+      fibPrimitive.setFibResult(fibResult, anchorStartTime);
+    } else {
+      fibPrimitive.setFibResult(null);
+    }
 
-      primitiveRef.current.setTargets(targets);
-    }, [signal, lastPrice]);
-
-    // --- Wire setup candidates to primitive ---
-    useEffect(() => {
-      if (!setupPrimitiveRef.current) return;
-
-      if (
-        !chartSetups ||
-        chartSetups.length === 0 ||
-        pointsRef.current.length === 0
-      ) {
-        setupPrimitiveRef.current.setMarkers(null);
-        return;
-      }
-
-      const lastGfTime = pointsRef.current[pointsRef.current.length - 1].time;
-
-      const mappedSetups = chartSetups.map((s) => ({
-        ...s,
-        touchTime:
-          s.touchTime != null
-            ? (realToGapFree(s.touchTime) ?? s.touchTime)
-            : s.touchTime,
-        hookTime:
-          s.hookTime != null
-            ? (realToGapFree(s.hookTime) ?? s.hookTime)
-            : s.hookTime,
-        goTime:
-          s.goTime != null ? (realToGapFree(s.goTime) ?? s.goTime) : s.goTime,
-      }));
-
-      setupPrimitiveRef.current.setMarkers({
-        setups: mappedSetups,
-        lastTime: lastGfTime,
-        futureBars: 16,
-        barInterval: BAR_INTERVAL_SEC,
+    if (!fitCalledRef.current && candleData.length > 0) {
+      const total = candleData.length;
+      const visible = Math.min(INITIAL_VISIBLE_BARS, total);
+      chart.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, total - visible),
+        to: total - 1 + RIGHT_PADDING_BARS,
       });
-    }, [chartSetups, lastPrice]);
+      fitCalledRef.current = true;
+    }
 
-    // --- Render fib levels from backend signal/setup contract (no local fib engine) ---
-    // No fallback: if signal.setup fib fields are missing, render nothing.
-    useEffect(() => {
-      if (!fibPrimitiveRef.current) return;
-
-      const seed: FibSeed | null = signal?.setup
-        ? {
-            direction: signal.setup.direction,
-            fibLevel: signal.setup.fibLevel,
-            fibRatio: signal.setup.fibRatio,
-            tp1: signal.setup.tp1,
-            tp2: signal.setup.tp2,
-          }
-        : null;
-
-      const fibResult = buildFibResultFromSeed(seed);
-      if (!fibResult) {
-        fibPrimitiveRef.current.setFibResult(null);
-        return;
+    let disposed = false;
+    const observer = new ResizeObserver((entries) => {
+      if (disposed || !entries[0]) return;
+      const { width, height } = entries[0].contentRect;
+      try {
+        chart.applyOptions({ width, height });
+      } catch {
+        // ignore dispose race
       }
+    });
+    observer.observe(containerRef.current);
 
-      // Find the anchor bar by scanning candle history for the bar whose
-      // low (LONG) or high (SHORT) matches the reconstructed anchor price.
-      // This starts fib lines at the definitive swing high/low bar, matching
-      // TradingView's "Extend Right" behavior exactly.
-      let anchorGfTime: number | undefined = undefined;
-      const points = realPointsRef.current;
-      if (points.length > 0) {
-        const lookback = points.length > 100 ? points.slice(-100) : points;
-        const targetPrice = fibResult.isBullish ? fibResult.anchorLow : fibResult.anchorHigh;
-        const priceKey = fibResult.isBullish ? "low" : "high";
-        let bestDiff = Infinity;
-        let bestRealTime: number | null = null;
-        for (const pt of lookback) {
-          const diff = Math.abs(pt[priceKey] - targetPrice);
-          if (diff < bestDiff) {
-            bestDiff = diff;
-            bestRealTime = pt.time;
-          }
-        }
-        if (bestRealTime != null) {
-          anchorGfTime = timeMapRef.current.realToGf.get(bestRealTime) ?? bestRealTime;
-        }
+    return () => {
+      disposed = true;
+      observer.disconnect();
+      try {
+        series.detachPrimitive(fibPrimitive);
+        chart.remove();
+      } catch {
+        // ignore dispose race
       }
+    };
+  }, [bars]);
 
-      fibPrimitiveRef.current.setFibResult(fibResult, anchorGfTime);
-    }, [lastPrice, signal]);
+  const changeColor = priceChange >= 0 ? "#26C6DA" : "#EC0000";
 
-
-
-
-    const changeColor = priceChange >= 0 ? TV.bull.bright : TV.bear.bright;
-
-    return (
-      <div
-        className="relative w-full h-full flex flex-col overflow-hidden"
-        style={{
-          background: "linear-gradient(180deg, #131722 0%, #0d1117 100%)",
-        }}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between px-3 py-1 border-b border-white/5 flex-shrink-0">
-          <div className="flex items-center gap-4">
+  return (
+    <div
+      className="relative w-full rounded-xl overflow-hidden border border-white/5 flex flex-col"
+      style={{
+        background: "linear-gradient(180deg, #131722 0%, #0d1117 100%)",
+        height: "80vh",
+      }}
+    >
+      <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 border-b border-white/5">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-cyan-400 shadow-lg shadow-cyan-400/50" />
+            <span className="text-sm font-semibold text-white tracking-tight">MES1!</span>
+          </div>
+          <span className="text-[11px] text-white/30 font-medium">
+            Micro E-mini S&P 500 &bull; 1D
+          </span>
+        </div>
+        <div className="flex items-center gap-4">
+          {highPrice != null && lowPrice != null && (
+            <div className="flex items-center gap-3 text-[11px]">
+              <div className="flex items-center gap-1">
+                <span className="text-white/30">H</span>
+                <span className="text-white/60 font-mono">{highPrice.toFixed(2)}</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-white/30">L</span>
+                <span className="text-white/60 font-mono">{lowPrice.toFixed(2)}</span>
+              </div>
+            </div>
+          )}
+          <div className="h-3 w-px bg-white/10" />
+          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5">
+            <span className="text-[9px] text-white/30 uppercase">IV</span>
+            <span className="text-[11px] font-mono text-cyan-400">{volatility}</span>
+          </div>
+          {lastPrice != null && (
             <div className="flex items-center gap-2">
-              <div
-                className="w-2 h-2 rounded-full animate-pulse shadow-lg"
-                style={{
-                  backgroundColor:
-                    status === "live"
-                      ? "#26C6DA"
-                      : status === "connecting"
-                        ? "#F23645"
-                        : "#FF0000",
-                  boxShadow:
-                    status === "live" ? "0 0 8px rgba(38,198,218,0.5)" : "none",
-                }}
-              />
-              <span className="text-base font-semibold text-white tracking-tight">
-                MES
+              <span className="text-xl font-semibold text-white tabular-nums">
+                {lastPrice.toFixed(2)}
+              </span>
+              <span className="text-xs font-medium tabular-nums" style={{ color: changeColor }}>
+                {priceChange >= 0 ? "+" : ""}
+                {priceChange.toFixed(2)}%
               </span>
             </div>
-            <span className="text-xs text-white/30 font-medium">
-              Micro E-mini S&P 500 &bull; 15m
-            </span>
-            {eventPhase && eventPhase !== "CLEAR" ? (
-              <span
-                title={eventLabel ?? undefined}
-                className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border ${
-                  displayEventPhase === "LOCKOUT"
-                    ? "bg-red-500/10 text-red-400 border-red-500/20"
-                    : displayEventPhase === "WATCH"
-                      ? "bg-amber-500/10 text-amber-300 border-amber-500/20"
-                      : displayEventPhase === "REPRICE"
-                          ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                          : "bg-white/5 text-white/40 border-white/10"
-                }`}
-              >
-                {displayEventPhase}
-              </span>
-            ) : null}
-          </div>
-
-          <div className="flex items-center gap-6">
-            {sessionHigh != null && sessionLow != null ? (
-              <div className="flex items-center gap-4 text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-white/30">H</span>
-                  <span className="text-white/60 font-mono tabular-nums">
-                    {sessionHigh.toFixed(2)}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-white/30">L</span>
-                  <span className="text-white/60 font-mono tabular-nums">
-                    {sessionLow.toFixed(2)}
-                  </span>
-                </div>
-              </div>
-            ) : null}
-
-            {sessionHigh != null ? <div className="h-4 w-px bg-white/10" /> : null}
-
-            {lastPrice != null ? (
-              <div className="flex items-center gap-3">
-                <span className="text-2xl font-semibold text-white tabular-nums">
-                  {lastPrice.toFixed(2)}
-                </span>
-                <span
-                  className="text-sm font-medium tabular-nums"
-                  style={{ color: changeColor }}
-                >
-                  {priceChange >= 0 ? "+" : ""}
-                  {priceChange.toFixed(2)}%
-                </span>
-              </div>
-            ) : null}
-
-            <span
-              className="text-[10px] font-bold uppercase tracking-wider"
-              style={{
-                color:
-                  status === "live"
-                    ? "#26C6DA"
-                    : status === "connecting"
-                      ? "#F23645"
-                      : "#FF0000",
-              }}
-            >
-              {status}
-            </span>
-          </div>
+          )}
         </div>
-
-        {/* Chart — flex-1 fills remaining space, min-h prevents collapse */}
-        <div className="relative flex-1 min-h-[400px]">
-
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
-            <Image
-              src="/chart_watermark.svg"
-              alt=""
-              width={300}
-              height={300}
-              className="opacity-[0.25]"
-              unoptimized
-              priority
-            />
-          </div>
-          <div ref={containerRef} className="absolute inset-0 z-10" />
-        </div>
-
-
-
-        {/* Error banner */}
-        {error ? (
-          <div className="px-6 py-2 border-t border-white/5 flex-shrink-0">
-            <p className="text-xs text-red-400">{error}</p>
-          </div>
-        ) : null}
       </div>
-    );
-  },
-);
 
-export default LiveMesChart;
+      <div className="relative w-full flex-1 min-h-0">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-[1]">
+          <Image
+            src="/chart_watermark.svg"
+            alt=""
+            width={280}
+            height={140}
+            className="opacity-[0.10]"
+            style={{ filter: "grayscale(100%)" }}
+            priority
+          />
+        </div>
+        <div
+          ref={containerRef}
+          style={{
+            width: "100%",
+            height: "100%",
+            position: "absolute",
+            top: 0,
+            left: 0,
+          }}
+        />
+      </div>
+
+      <div className="flex-shrink-0 flex items-center justify-center gap-6 px-4 py-1.5 border-t border-white/5 bg-black/20">
+        <div className="flex items-center gap-1.5">
+          <div className="w-4 h-0.5" style={{ backgroundColor: SMA_COLOR }} />
+          <span className="text-[9px] text-white/40 uppercase">200 SMA</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2.5 h-3 rounded-sm" style={{ backgroundColor: "#26C6DA" }} />
+          <span className="text-[9px] text-white/40 uppercase">Bull</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2.5 h-3 rounded-sm" style={{ backgroundColor: "#EC0000" }} />
+          <span className="text-[9px] text-white/40 uppercase">Bear</span>
+        </div>
+      </div>
+    </div>
+  );
+}
