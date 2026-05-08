@@ -6,18 +6,5 @@ set -euo pipefail
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 
-# No-feature-branches guard (CLAUDE.md Locked Rule, 2026-05-08).
-# Commits must land on main. If you're on a claude/*, copilot/*, feature/*, or
-# any other branch, this refuses the commit. To override for an emergency,
-# set ALLOW_NON_MAIN_COMMIT=1 (don't make a habit of it).
-BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
-if [[ "$BRANCH" != "main" && "${ALLOW_NON_MAIN_COMMIT:-0}" != "1" ]]; then
-  echo "ERROR: pre-commit refused — current branch is '$BRANCH', not 'main'." >&2
-  echo "       CLAUDE.md Locked Rule (2026-05-08): all commits land on main." >&2
-  echo "       Fix: git stash && git checkout main && git stash pop && retry." >&2
-  echo "       Override (rare): ALLOW_NON_MAIN_COMMIT=1 git commit ..." >&2
-  exit 1
-fi
-
 echo "INFO: pre-commit gate -> scripts/guards/warbird-agent-precheck.sh"
 "$ROOT_DIR/scripts/guards/warbird-agent-precheck.sh" --mode pre-commit

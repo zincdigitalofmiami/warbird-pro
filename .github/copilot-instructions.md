@@ -31,15 +31,14 @@ Eleven skills, mirrored across the three locations above. Full descriptions in e
 
 These come from AGENTS.md and CLAUDE.md — they are non-negotiable regardless of what Copilot's base training suggests:
 
-1. **NO FEATURE BRANCHES. ALL COMMITS LAND DIRECTLY ON `main`.** Kirk has explicitly directed (most recently 2026-05-08) that the repo is worked flat on `main` — no per-session, per-task, or per-PR branches. Do not create `claude/...`, `copilot/...`, `feature/...`, or any other branch. Do not open pull requests; commit straight to `main` and push. If a harness creates a branch automatically, merge into `main` and delete the branch before ending the session. See CLAUDE.md "Locked Rules" for the full text.
-2. **Never push to remote or deploy without explicit user approval each time.** Prior approvals do not carry forward.
-3. **Never use mock data.** Real data or nothing.
-4. **Never use an ORM (including Prisma).** Direct SQL via `psycopg2` only.
-5. **Never add `.github/copilot-instructions.md` that competes with `AGENTS.md`.** This file is a redirector, not a competing surface. Do not expand it into authoritative content.
-6. **Pine indicator changes require all five verification gates** (pine-facade compile, pine-lint, check-contamination, strategy-parity, npm build) before commit. See AGENTS.md.
-7. **Local warehouse migrations** live in `local_warehouse/migrations/` with the `local_schema_migrations` ledger — NOT `supabase/migrations/`.
-8. **Time-series discipline is absolute.** No random shuffle, minimum 1-session embargo, AutoGluon `--num-bag-folds 0` mandatory for time-series. See `training-quant-trading`.
-9. **`.remember/` files are append-only.** Never overwrite.
+1. **Never push to remote or deploy without explicit user approval each time.** Prior approvals do not carry forward.
+2. **Never use mock data.** Real data or nothing.
+3. **Never use an ORM (including Prisma).** Direct SQL via `psycopg2` only.
+4. **Never add `.github/copilot-instructions.md` that competes with `AGENTS.md`.** This file is a redirector, not a competing surface. Do not expand it into authoritative content.
+5. **Pine indicator changes require all five verification gates** (pine-facade compile, pine-lint, check-contamination, strategy-parity, npm build) before commit. See AGENTS.md.
+6. **Local warehouse migrations** live in `local_warehouse/migrations/` with the `local_schema_migrations` ledger — NOT `supabase/migrations/`.
+7. **Time-series discipline is absolute.** No random shuffle, minimum 1-session embargo, AutoGluon `--num-bag-folds 0` mandatory for time-series. See `training-quant-trading`.
+8. **`.remember/` files are append-only.** Never overwrite.
 
 ## When Copilot Chat is asked to suggest code
 
