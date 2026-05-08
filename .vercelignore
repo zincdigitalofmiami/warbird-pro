@@ -1,4 +1,13 @@
 .git
+.remember
+.claude/
+.kilo/
+.kilocode/
+.playwright-mcp/
+.pytest_cache/
+.ruff_cache/
+.tmp/
+.venv/
 
 # Local research/data artifacts (never required at runtime)
 data/
