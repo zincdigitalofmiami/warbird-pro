@@ -80,16 +80,12 @@ export default function CorrelationsRow({ correlations }: CorrelationsRowProps) 
     return { ticker, close, prevClose, changePct, impact, mesBps, confidence, rvol, atomicState };
   });
 
-  // Weighted IM score in MES bps (lane contributions are pre-weighted server-side)
-  const imScore = tickerData.reduce(
-    (sum, d) => sum + d.mesBps,
-    0,
-  );
   const upPressureBps = tickerData.reduce((sum, d) => sum + Math.max(0, d.mesBps), 0);
   const downPressureBps = tickerData.reduce((sum, d) => sum + Math.max(0, -d.mesBps), 0);
   const totalAbsPressureBps = upPressureBps + downPressureBps;
   const upPressurePct = totalAbsPressureBps > 0 ? (upPressureBps / totalAbsPressureBps) * 100 : 50;
   const downPressurePct = 100 - upPressurePct;
+  const confluencePct = Math.max(upPressurePct, downPressurePct);
 
   const netUpDominant = upPressurePct >= PRESSURE_DOMINANCE_THRESHOLD_PCT;
   const netDownDominant = downPressurePct >= PRESSURE_DOMINANCE_THRESHOLD_PCT;
@@ -196,7 +192,7 @@ export default function CorrelationsRow({ correlations }: CorrelationsRowProps) 
             MES Pressure
           </span>
           <span
-            className="text-sm font-bold tabular-nums"
+            className="text-2xl leading-none font-extrabold tabular-nums"
             style={{
               color: netUpDominant
                 ? "#26C6DA"
@@ -205,14 +201,9 @@ export default function CorrelationsRow({ correlations }: CorrelationsRowProps) 
                   : "rgba(255,255,255,0.40)",
             }}
           >
-            {upPressurePct >= downPressurePct ? "UP" : "DOWN"} {Math.max(upPressurePct, downPressurePct).toFixed(0)}%
+            {confluencePct.toFixed(0)}%
           </span>
-          <span className="text-[9px] text-white/45 tabular-nums">
-            D {downPressurePct.toFixed(0)}% / U {upPressurePct.toFixed(0)}%
-          </span>
-          <span className="text-[9px] text-white/40 tabular-nums">
-            NET {imScore >= 0 ? "+" : ""}{imScore.toFixed(1)}bp
-          </span>
+          <span className="text-[9px] text-white/35 uppercase tracking-wide">Confluence</span>
         </div>
       </div>
     </div>

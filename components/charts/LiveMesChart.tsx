@@ -41,13 +41,30 @@ const INITIAL_VISIBLE_BARS = 120;
 const RIGHT_PADDING_BARS = 16;
 const BAR_SPACING = 10;
 const MIN_BAR_SPACING = 8;
-const REFRESH_MS = 3_600_000;
+const REFRESH_MS = 60 * 60 * 1000;
 const RETRY_MS = 15_000;
 const FETCH_TIMEOUT_MS = 25_000;
 const SMA_PERIOD = 200;
 const SMA_COLOR = "#FFFFFF";
 const SMA_WIDTH = 2;
 const TRADING_HOURS_PER_YEAR = 252 * 24;
+const CHART_TIME_ZONE = "America/Chicago";
+
+const AXIS_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: CHART_TIME_ZONE,
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+const CROSSHAIR_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: CHART_TIME_ZONE,
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
 
 interface MesPriceBar {
   symbol: string;
@@ -67,8 +84,46 @@ interface LiveMesChartProps {
   eventLabel?: string;
 }
 
+type BusinessDayLike = {
+  year: number;
+  month: number;
+  day: number;
+};
+
+function timeToTz(originalTime: number, timeZone: string): UTCTimestamp {
+  const zonedDate = new Date(
+    new Date(originalTime * 1000).toLocaleString("en-US", { timeZone }),
+  );
+  return Math.floor(zonedDate.getTime() / 1000) as UTCTimestamp;
+}
+
+function parseTimeToUnix(time: Time): number | null {
+  if (typeof time === "number") return time;
+  if (typeof time === "string") {
+    const parsed = Date.parse(time);
+    return Number.isNaN(parsed) ? null : Math.floor(parsed / 1000);
+  }
+  const businessDay = time as BusinessDayLike;
+  return Math.floor(
+    Date.UTC(businessDay.year, businessDay.month - 1, businessDay.day) / 1000,
+  );
+}
+
 function toChartTime(dateStr: string): Time {
-  return Math.floor(new Date(dateStr).getTime() / 1000) as UTCTimestamp;
+  const utcSeconds = Math.floor(new Date(dateStr).getTime() / 1000);
+  return timeToTz(utcSeconds, CHART_TIME_ZONE);
+}
+
+function formatAxisTimeLabel(time: Time): string {
+  const seconds = parseTimeToUnix(time);
+  if (seconds == null) return "";
+  return AXIS_TIME_FORMATTER.format(new Date(seconds * 1000));
+}
+
+function formatCrosshairTimeLabel(time: Time): string {
+  const seconds = parseTimeToUnix(time);
+  if (seconds == null) return "";
+  return CROSSHAIR_TIME_FORMATTER.format(new Date(seconds * 1000));
 }
 
 function computeVolatility(bars: MesPriceBar[]): string {
@@ -224,6 +279,9 @@ export default function LiveMesChart({
         fontSize: 11,
         attributionLogo: false,
       },
+      localization: {
+        timeFormatter: formatCrosshairTimeLabel,
+      },
       grid: {
         vertLines: { color: GRID_COLOR },
         horzLines: { color: GRID_COLOR },
@@ -257,6 +315,7 @@ export default function LiveMesChart({
         barSpacing: BAR_SPACING,
         minBarSpacing: MIN_BAR_SPACING,
         lockVisibleTimeRangeOnResize: true,
+        tickMarkFormatter: (time: Time) => formatAxisTimeLabel(time),
       },
       handleScroll: {
         mouseWheel: false,

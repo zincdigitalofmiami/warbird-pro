@@ -63,7 +63,7 @@ interface DashboardPayload {
 }
 
 const DASHBOARD_PULLS_PAUSED = false;
-const HOURLY_REFRESH_MS = 3_600_000;
+const HOURLY_REFRESH_MS = 60 * 60 * 1000;
 
 export default function DashboardLiveClient() {
   const [data, setData] = useState<DashboardPayload | null>(null);

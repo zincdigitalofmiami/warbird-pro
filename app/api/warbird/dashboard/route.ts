@@ -12,6 +12,22 @@ import {
   fetchWarbirdSetupHistory,
 } from "@/lib/warbird/queries";
 
+const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store, max-age=0",
+  "CDN-Cache-Control": "no-store",
+  "Vercel-CDN-Cache-Control": "no-store",
+};
+
+function respondJson(body: unknown, init?: Parameters<typeof NextResponse.json>[1]) {
+  return NextResponse.json(body, {
+    ...init,
+    headers: {
+      ...NO_STORE_HEADERS,
+      ...(init?.headers ?? {}),
+    },
+  });
+}
+
 export async function GET(request: Request) {
   try {
     const supabase = await createClient();
@@ -30,7 +46,7 @@ export async function GET(request: Request) {
     };
 
     if (runtime.active) {
-      return NextResponse.json({
+      return respondJson({
         signal: null,
         setup: null,
         setups: [],
@@ -61,7 +77,7 @@ export async function GET(request: Request) {
       setup.status === "ACTIVE" || setup.status === "TP1_HIT",
     );
 
-    return NextResponse.json({
+    return respondJson({
       signal: composeWarbirdSignal(state),
       setup: state.setup,
       setups: history.setups,
@@ -82,7 +98,7 @@ export async function GET(request: Request) {
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    return NextResponse.json(
+    return respondJson(
       { error: error instanceof Error ? error.message : "Internal error" },
       { status: 500 },
     );

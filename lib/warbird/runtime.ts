@@ -28,7 +28,7 @@ const MAX_RVOL_BOOST = 1.75;
 const MIN_RVOL_BOOST = 0.55;
 const IMPACT_SATURATION_BPS = 12;
 const STALE_HARD_STOP_HOURS = 10;
-const CORRELATION_CACHE_TTL_MS = 55 * 60 * 1000;
+const CORRELATION_CACHE_TTL_MS = 5 * 60 * 1000;
 
 let correlationCache: { expiresAt: number; data: DashboardCorrelationMap } | null = null;
 

@@ -22,10 +22,25 @@ interface Mes1hRow {
 
 const DEFAULT_LOOKBACK = 5000;
 const MAX_LOOKBACK = 20000;
-const CACHE_TTL_MS = 55 * 60 * 1000;
+const CACHE_TTL_MS = 2 * 60 * 1000;
 const PAGE_SIZE = 1000;
+const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store, max-age=0",
+  "CDN-Cache-Control": "no-store",
+  "Vercel-CDN-Cache-Control": "no-store",
+};
 
 const mes1hCache = new Map<number, { expiresAt: number; data: MesPriceBar[]; asOf: string }>();
+
+function respondJson(body: unknown, init?: Parameters<typeof NextResponse.json>[1]) {
+  return NextResponse.json(body, {
+    ...init,
+    headers: {
+      ...NO_STORE_HEADERS,
+      ...(init?.headers ?? {}),
+    },
+  });
+}
 
 function parseLookback(url: URL): number {
   const raw = Number(url.searchParams.get("lookback") ?? DEFAULT_LOOKBACK);
@@ -103,7 +118,7 @@ export async function GET(request: Request) {
     const lookback = parseLookback(url);
     const cached = mes1hCache.get(lookback) ?? null;
     if (cached && cached.expiresAt > Date.now()) {
-      return NextResponse.json({
+      return respondJson({
         ok: true,
         data: cached.data,
         asOf: cached.asOf,
@@ -117,7 +132,7 @@ export async function GET(request: Request) {
 
     const bars = await fetchMes1hFromSupabase(lookback);
     if (bars.length === 0 && cached) {
-      return NextResponse.json({
+      return respondJson({
         ok: true,
         data: cached.data,
         asOf: cached.asOf,
@@ -136,7 +151,7 @@ export async function GET(request: Request) {
       asOf,
     });
 
-    return NextResponse.json({
+    return respondJson({
       ok: true,
       data: bars,
       asOf,
@@ -151,7 +166,7 @@ export async function GET(request: Request) {
     const lookback = parseLookback(url);
     const cached = mes1hCache.get(lookback) ?? null;
     if (cached) {
-      return NextResponse.json({
+      return respondJson({
         ok: true,
         data: cached.data,
         asOf: cached.asOf,
@@ -162,7 +177,7 @@ export async function GET(request: Request) {
         cache: "stale",
       });
     }
-    return NextResponse.json(
+    return respondJson(
       {
         ok: false,
         data: [],

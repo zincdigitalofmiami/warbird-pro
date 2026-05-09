@@ -122,10 +122,18 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    const end = new Date(now.getTime() - 30 * 60 * 1000);
+    // Use only completed hourly bars: request range ends at current UTC hour boundary.
+    const end = new Date(Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      now.getUTCHours(),
+      0,
+      0,
+      0,
+    ));
 
     let totalRows1h = 0;
-    let totalRows1d = 0;
     const errors: string[] = [];
 
     for (const sym of symbolsForShard) {
@@ -178,54 +186,6 @@ Deno.serve(async (req: Request) => {
           .upsert(rows1h, { onConflict: "ts,symbol_code" });
         if (error) throw new Error(`cross_asset_1h upsert: ${error.message}`);
         totalRows1h += rows1h.length;
-
-        const touchedDays = [...new Set(validBars.map((bar) => new Date(bar.time * 1000).toISOString().slice(0, 10)))];
-
-        for (const day of touchedDays) {
-          const dayStartIso = `${day}T00:00:00Z`;
-          const dayEnd = new Date(`${day}T00:00:00Z`);
-          dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
-
-          const { data: dayBars, error: dayBarsError } = await supabase
-            .from("cross_asset_1h")
-            .select("ts, open, high, low, close, volume")
-            .eq("symbol_code", sym.code)
-            .gte("ts", dayStartIso)
-            .lt("ts", dayEnd.toISOString())
-            .order("ts", { ascending: true });
-
-          if (dayBarsError) {
-            throw new Error(`cross_asset_1h day aggregation read failed: ${dayBarsError.message}`);
-          }
-
-          if (!dayBars || dayBars.length === 0) {
-            continue;
-          }
-
-          const dailyBar = {
-            ts: dayStartIso,
-            open: Number(dayBars[0].open),
-            high: Math.max(...dayBars.map((bar) => Number(bar.high))),
-            low: Math.min(...dayBars.map((bar) => Number(bar.low))),
-            close: Number(dayBars[dayBars.length - 1].close),
-            volume: dayBars.reduce((sum, bar) => sum + Number(bar.volume), 0),
-          };
-
-          const { error: dErr } = await supabase.from("cross_asset_1d").upsert(
-            {
-              ts: dailyBar.ts,
-              symbol_code: sym.code,
-              open: dailyBar.open,
-              high: dailyBar.high,
-              low: dailyBar.low,
-              close: dailyBar.close,
-              volume: dailyBar.volume,
-            },
-            { onConflict: "ts,symbol_code" },
-          );
-          if (dErr) throw new Error(`cross_asset_1d upsert: ${dErr.message}`);
-          totalRows1d++;
-        }
       } catch (e) {
         errors.push(`${sym.code}: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -234,12 +194,12 @@ Deno.serve(async (req: Request) => {
     const durationMs = Date.now() - startTime;
     await supabase.from("job_log").insert({
       job_name: "cross-asset",
-      status: errors.length > 0 ? "PARTIAL" : totalRows1h + totalRows1d > 0 ? "SUCCESS" : "SKIPPED",
-      rows_affected: totalRows1h + totalRows1d,
+      status: errors.length > 0 ? "PARTIAL" : totalRows1h > 0 ? "SUCCESS" : "SKIPPED",
+      rows_affected: totalRows1h,
       duration_ms: durationMs,
       error_message: errors.length > 0
         ? `shard=${shardIndex}/${shardCount} | ${errors.join(" | ")}`
-        : totalRows1h + totalRows1d === 0
+        : totalRows1h === 0
           ? `no_valid_bars shard=${shardIndex}/${shardCount}`
           : null,
     });
@@ -251,8 +211,8 @@ Deno.serve(async (req: Request) => {
       shard_index: shardIndex,
       shard_count: shardCount,
       rows_1h: totalRows1h,
-      rows_1d: totalRows1d,
-      rows_affected: totalRows1h + totalRows1d,
+      rows_1d: 0,
+      rows_affected: totalRows1h,
       errors: errors.length > 0 ? errors : undefined,
       duration_ms: durationMs,
     });
