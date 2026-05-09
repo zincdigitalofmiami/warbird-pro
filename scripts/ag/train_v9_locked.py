@@ -9,16 +9,16 @@ training-ag-feature-finder):
     outputs true probabilities for the downstream EV decision rule
   - eval_metric=log_loss — proper probability scoring (roc_auc only
     ranks; log_loss penalizes miscalibrated confidence)
-  - hyperparameter_tune_kwargs — per-family HPO within time budget
+  - hyperparameter_tune_kwargs — per-family HPO within time budge
   - num_bag_folds=0, num_stack_levels=0 — time-series safe
     (no internal IID bagging/stacking)
   - dynamic_stacking=False (explicit, reproducible)
   - time_limit=7200s (2 hours so NN_TORCH/FASTAI fully converge)
   - chronological train/val/test split with embargo = max_hold_bars + 1 bars
     (label-horizon-aware; enforced by scripts/optuna/cpcv.py)
-  - predictor.persist_models() after fit for fast repeated predict
+  - predictor.persist_models() after fit for fast repeated predic
   - leaderboard(extra_info=True) for hyperparameter visibility
-  - Apple Silicon OpenMP guards set BEFORE any AG/lightgbm import
+  - Apple Silicon OpenMP guards set BEFORE any AG/lightgbm impor
   - Drop AG-flagged useless features (ml_in_zone constant=1, ml_xa_zn/dx_code
     constant=0 because data not local, ml_entry_route_code constant)
 
@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import os
 
-# Apple Silicon OpenMP guards — MUST be set BEFORE any AG/lightgbm import
+# Apple Silicon OpenMP guards — MUST be set BEFORE any AG/lightgbm impor
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["LIGHTGBM_NUM_THREADS"] = "1"
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
@@ -53,7 +53,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.optuna.cpcv import embargoed_chronological_split
+from scripts.optuna.cpcv import embargoed_chronological_spli
 
 CSV_PATH = REPO_ROOT / "scripts/optuna/workspaces/warbird_pro/exports/databento_mes_5m_2020-2026_strict.csv"
 OUTPUT_ROOT = REPO_ROOT / "models/warbird_pro_v9"
@@ -98,7 +98,7 @@ ML_FEATURES = [
 ]
 LABEL_COL = "winner_10pt_24bar"
 
-# Chronological split BOUNDARIES. Embargo gaps between train/val and val/test
+# Chronological split BOUNDARIES. Embargo gaps between train/val and val/tes
 # are applied at runtime in main() via embargoed_chronological_split() so the
 # embargo size tracks --max-hold-bars. The 1-bar embargo present in earlier
 # revisions (Bug 1) leaked labels across the 6-hour resolution window — fixed
@@ -108,7 +108,8 @@ VAL_END = pd.Timestamp("2024-12-31T23:55:00", tz="UTC")
 TEST_START = pd.Timestamp("2025-01-01T00:00:00", tz="UTC")  # OOS lock — no HPO trial may see this
 
 
-def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 72) -> pd.DataFrame:
+
+def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFrame:
     df = df.sort_values("ts").reset_index(drop=True)
     long_mask = df["ml_entry_long_trigger"].astype(float) > 0
     short_mask = df["ml_entry_short_trigger"].astype(float) > 0
@@ -116,33 +117,81 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 72) -> pd.DataFra
     entry_idx = np.where(entry_mask)[0]
     print(f"  entry candidates: {len(entry_idx):,}", flush=True)
 
-    outcomes = df["ml_last_exit_outcome"].astype(float).to_numpy()
+    highs = df["high"].to_numpy()
+    lows = df["low"].to_numpy()
+    entries = df["ml_trade_entry"].to_numpy()
+    closes = df["close"].to_numpy()
+    atrs = df["ml_atr14"].to_numpy() if "ml_atr14" in df.columns else np.full(len(df), 5.0)
 
-    rows: list[dict[str, Any]] = []
+    rows = []
+    dropped_neither = 0
+
+    # We will use 1.0 ATR stop and 2.0 ATR target (with 10 point minimum target) as the training truth for the base classifier
     for i in entry_idx:
-        end = min(i + max_hold_bars + 1, len(df))
-        future = outcomes[i + 1:end]
-        nz = np.where(future != 0)[0]
-        if len(nz) == 0:
+        entry_price = entries[i] if pd.notna(entries[i]) and entries[i] > 0 else closes[i]
+        is_long = long_mask.iloc[i]
+        atr_val = atrs[i] if pd.notna(atrs[i]) and atrs[i] > 0 else 5.0
+
+        target_hit_idx = -1
+        stop_hit_idx = -1
+
+        # 1.0 ATR Stop, 2.0 ATR Target (min 10 points)
+        tp_dist = max(10.0, atr_val * 2.0)
+        sl_dist = atr_val * 1.0
+
+        tp_price = entry_price + tp_dist if is_long else entry_price - tp_dis
+        sl_price = entry_price - sl_dist if is_long else entry_price + sl_dis
+
+        # scan up to max_hold_bars (24)
+        end_idx = min(i + max_hold_bars + 1, len(df))
+        for j in range(i + 1, end_idx):
+            h = highs[j]
+            l = lows[j]
+
+            # Check Stop Loss
+            if is_long and l <= sl_price:
+                stop_hit_idx = j
+            elif not is_long and h >= sl_price:
+                stop_hit_idx = j
+
+            # Check Take Profi
+            if is_long and h >= tp_price:
+                target_hit_idx = j
+            elif not is_long and l <= tp_price:
+                target_hit_idx = j
+
+            # Resolution
+            if target_hit_idx != -1 and stop_hit_idx != -1:
+                # Intrabeam collision (both hit in same bar) -> treat as SL (pessimistic)
+                outcome = 0
+                resolution_bar = j
+                break
+            elif target_hit_idx != -1:
+                outcome = 1
+                resolution_bar = j
+                break
+            elif stop_hit_idx != -1:
+                outcome = 0
+                resolution_bar = j
+                break
+        else:
+            # Neither hit within max_hold_bars
+            dropped_neither += 1
             continue
-        offset = int(nz[0])
-        outcome_code = int(future[offset])
-        label_value = (
-            int(df[LABEL_COL].iloc[i])
-            if LABEL_COL in df.columns and pd.notna(df[LABEL_COL].iloc[i])
-            else (1 if outcome_code == 1 else 0)
-        )
+
         rec = {col: df[col].iloc[i] for col in ML_FEATURES if col in df.columns}
         rec["ts"] = df["ts"].iloc[i]
-        rec[LABEL_COL] = label_value
-        rec["_outcome_code"] = outcome_code
-        rec["_bars_to_resolution"] = offset + 1
+        rec[LABEL_COL] = outcome
+        rec["_outcome_code"] = 1 if outcome == 1 else -1
+        rec["_bars_to_resolution"] = resolution_bar - i
         rows.append(rec)
 
     out = pd.DataFrame(rows).sort_values("ts").reset_index(drop=True)
-    print(f"  resolved trades: {len(out):,}", flush=True)
-    print(f"  {LABEL_COL} rate: {out[LABEL_COL].mean():.4f}  ({int(out[LABEL_COL].sum()):,} positives / {len(out):,} total)", flush=True)
-    return out
+    print(f"  resolved trades: {len(out):,}")
+    print(f"  dropped neither-hit: {dropped_neither:,}")
+    if len(out) > 0:
+        print(f"  {LABEL_COL} rate: {out[LABEL_COL].mean():.4f}  ({int(out[LABEL_COL].sum()):,} positives / {len(out):,} total)")
+    return ou
 
 
 def main() -> int:
@@ -160,7 +209,7 @@ def main() -> int:
     trades = build_trade_dataset(df, max_hold_bars=args.max_hold_bars)
 
     # Label-horizon-aware embargo. The label looks forward up to
-    # max_hold_bars; the embargo around each split boundary must be at least
+    # max_hold_bars; the embargo around each split boundary must be at leas
     # max_hold_bars + 1 to keep the resolution window from leaking across
     # train/val/test. Enforced by cpcv._enforce_embargo_floor().
     embargo_bars = args.max_hold_bars + 1
