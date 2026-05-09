@@ -1,0 +1,384 @@
+#!/usr/bin/env python3
+"""Monte Carlo robustness analysis for Warbird Pro V9 binary classifier.
+
+Parquet/CSV-based, no DB dependency. Binary classification (winner/loser).
+Loads a trained AG predictor, builds a trade dataset from the V9 export CSV,
+and runs vectorized Monte Carlo simulation over resampled trade sequences.
+
+Tasks:
+  A — Overall P&L distribution, drawdown, win rate, profit factor
+  B — Per-direction (long/short) breakdown
+  C — Threshold sweep: P(winner) >= tau gating
+  G — Calibration: predicted vs realized per cohort
+  H — Regime stability: early/late half comparison
+  I — Win/loss streak profile
+
+Usage:
+  python scripts/ag/monte_carlo_v9.py \
+      --predictor-path models/warbird_pro_v9/locked_<tag> \
+      --csv exports/mes_5m.csv \
+      --split oos \
+      [--n-paths 2000] [--seed 42] \
+      [--output-dir artifacts/mc_v9/<tag>]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("LIGHTGBM_NUM_THREADS", "1")
+
+import numpy as np
+import pandas as pd
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+LABEL_COL = "winner"
+MES_POINT_VALUE = 5.0
+COMMISSION_ROUND_TRIP = 6.75
+DEFAULT_SL_POINTS = 7.0
+DEFAULT_TP_POINTS = 14.0
+OOS_START = pd.Timestamp("2025-01-01", tz="UTC")
+IS_END = pd.Timestamp("2024-12-31T23:59:59", tz="UTC")
+
+
+def _build_trades(
+    df: pd.DataFrame, feature_cols: list[str], max_hold_bars: int
+) -> pd.DataFrame:
+    df = df.sort_values("ts").reset_index(drop=True)
+    long_mask = df["ml_entry_long_trigger"].astype(float) > 0
+    short_mask = df["ml_entry_short_trigger"].astype(float) > 0
+    entry_idx = np.where(long_mask | short_mask)[0]
+    outcomes = df["ml_last_exit_outcome"].astype(float).to_numpy()
+    dirs = df["ml_dir"].astype(float).to_numpy() if "ml_dir" in df.columns else np.ones(len(df))
+    rows: list[dict[str, Any]] = []
+    for i in entry_idx:
+        end = min(i + max_hold_bars + 1, len(df))
+        future = outcomes[i + 1:end]
+        nz = np.where(future != 0)[0]
+        if nz.size == 0:
+            continue
+        offset = int(nz[0])
+        rec = {col: df[col].iloc[i] for col in feature_cols if col in df.columns}
+        rec["ts"] = df["ts"].iloc[i]
+        rec[LABEL_COL] = 1 if int(future[offset]) == 1 else 0
+        rec["direction"] = int(dirs[i])
+        rows.append(rec)
+    return pd.DataFrame(rows).sort_values("ts").reset_index(drop=True)
+
+
+def _compute_payoffs(
+    y_true: np.ndarray,
+    sl_pts: float = DEFAULT_SL_POINTS,
+    tp_pts: float = DEFAULT_TP_POINTS,
+) -> np.ndarray:
+    win_payoff = tp_pts * MES_POINT_VALUE - COMMISSION_ROUND_TRIP
+    loss_payoff = -(sl_pts * MES_POINT_VALUE + COMMISSION_ROUND_TRIP)
+    return np.where(y_true == 1, win_payoff, loss_payoff)
+
+
+def simulate_paths(
+    proba_pos: np.ndarray,
+    payoffs_win: float,
+    payoffs_loss: float,
+    n_paths: int,
+    rng: np.random.Generator,
+) -> dict[str, Any]:
+    N = len(proba_pos)
+    if N == 0:
+        return {"total_pnl": np.zeros(n_paths), "max_drawdown": np.zeros(n_paths),
+                "win_rate": np.zeros(n_paths), "n_trades": 0}
+    outcomes = rng.random((n_paths, N)) < proba_pos[None, :]
+    realized = np.where(outcomes, payoffs_win, payoffs_loss)
+    running = np.cumsum(realized, axis=1)
+    running_max = np.maximum.accumulate(running, axis=1)
+    drawdown = (running_max - running).max(axis=1)
+    total_pnl = running[:, -1]
+    win_rate = outcomes.mean(axis=1)
+    return {
+        "total_pnl": total_pnl,
+        "max_drawdown": drawdown,
+        "win_rate": win_rate,
+        "n_trades": N,
+        "realized": realized,
+        "outcomes": outcomes,
+    }
+
+
+def quantiles(arr: np.ndarray, qs=(0.05, 0.25, 0.50, 0.75, 0.95)) -> dict[str, float]:
+    if arr.size == 0:
+        return {f"p{int(q*100)}": 0.0 for q in qs}
+    return {f"p{int(q*100)}": float(np.quantile(arr, q)) for q in qs}
+
+
+def rollup(proba_pos: np.ndarray, y_true: np.ndarray, n_paths: int,
+           rng: np.random.Generator, sl_pts: float, tp_pts: float) -> dict[str, Any]:
+    payoffs_win = tp_pts * MES_POINT_VALUE - COMMISSION_ROUND_TRIP
+    payoffs_loss = -(sl_pts * MES_POINT_VALUE + COMMISSION_ROUND_TRIP)
+    ev_per_trade = proba_pos * payoffs_win + (1 - proba_pos) * payoffs_loss
+    ev_mean = float(ev_per_trade.mean()) if ev_per_trade.size else 0.0
+    ev_std = float(ev_per_trade.std(ddof=1)) if ev_per_trade.size > 1 else 0.0
+    sharpe = ev_mean / ev_std if ev_std > 0 else 0.0
+
+    sim = simulate_paths(proba_pos, payoffs_win, payoffs_loss, n_paths, rng)
+    base_wr = float(y_true.mean()) if y_true.size else 0.0
+    gross_wins = float(np.sum(sim["realized"][sim["outcomes"]])) if sim["n_trades"] else 0.0
+    gross_losses = float(-np.sum(sim["realized"][~sim["outcomes"]])) if sim["n_trades"] else 0.0
+    pf = gross_wins / gross_losses if gross_losses > 0 else float("inf") if gross_wins > 0 else 0.0
+
+    return {
+        "n_trades": sim["n_trades"],
+        "base_win_rate": base_wr,
+        "ev_per_trade": ev_mean,
+        "ev_std_per_trade": ev_std,
+        "per_trade_sharpe": sharpe,
+        "mc_total_pnl": quantiles(sim["total_pnl"]),
+        "mc_max_drawdown": quantiles(sim["max_drawdown"]),
+        "mc_win_rate_mean": float(sim["win_rate"].mean()),
+        "profit_factor": pf,
+    }
+
+
+def task_C_threshold_sweep(
+    proba_pos: np.ndarray, y_true: np.ndarray, n_paths: int,
+    rng_root: np.random.Generator, sl_pts: float, tp_pts: float,
+    thresholds: list[float] | None = None,
+) -> dict[str, Any]:
+    if thresholds is None:
+        thresholds = [round(x, 2) for x in np.arange(0.40, 0.80, 0.05)]
+    results: dict[str, Any] = {}
+    for tau in thresholds:
+        mask = proba_pos >= tau
+        if mask.sum() < 10:
+            results[str(tau)] = {"n_gated": int(mask.sum()), "status": "too_few"}
+            continue
+        rng = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
+        r = rollup(proba_pos[mask], y_true[mask], n_paths, rng, sl_pts, tp_pts)
+        r["n_gated"] = int(mask.sum())
+        r["gated_wr"] = float(y_true[mask].mean())
+        r["lift"] = r["gated_wr"] - float(y_true.mean())
+        results[str(tau)] = r
+    return results
+
+
+def task_G_calibration(
+    proba_pos: np.ndarray, y_true: np.ndarray, n_bins: int = 10,
+) -> list[dict[str, Any]]:
+    bin_edges = np.linspace(0, 1, n_bins + 1)
+    rows: list[dict[str, Any]] = []
+    for lo, hi in zip(bin_edges[:-1], bin_edges[1:]):
+        mask = (proba_pos >= lo) & (proba_pos < hi)
+        n = int(mask.sum())
+        if n == 0:
+            continue
+        predicted = float(proba_pos[mask].mean())
+        realized = float(y_true[mask].mean())
+        ratio = realized / predicted if predicted > 0 else float("inf")
+        if 0.7 <= ratio <= 1.3:
+            verdict = "OK"
+        elif realized > predicted:
+            verdict = "UNDERCONFIDENT"
+        else:
+            verdict = "OVERCONFIDENT"
+        rows.append({
+            "bin": f"[{lo:.2f}, {hi:.2f})",
+            "n": n,
+            "predicted": predicted,
+            "realized": realized,
+            "ratio": ratio,
+            "verdict": verdict,
+        })
+    return rows
+
+
+def task_H_regime_stability(
+    proba_pos: np.ndarray, y_true: np.ndarray, ts: np.ndarray,
+    n_paths: int, rng_root: np.random.Generator, sl_pts: float, tp_pts: float,
+) -> dict[str, Any]:
+    ts_num = pd.to_datetime(ts, utc=True).astype("int64")
+    mid = np.median(ts_num)
+    early_mask = ts_num < mid
+    late_mask = ~early_mask
+    rng_e = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
+    rng_l = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
+    early = rollup(proba_pos[early_mask], y_true[early_mask], n_paths, rng_e, sl_pts, tp_pts)
+    late = rollup(proba_pos[late_mask], y_true[late_mask], n_paths, rng_l, sl_pts, tp_pts)
+    ev_diff = abs(early["ev_per_trade"] - late["ev_per_trade"])
+    verdict = "STABLE" if ev_diff < early["ev_std_per_trade"] else "FRAGILE"
+    return {
+        "early": early,
+        "late": late,
+        "ev_absolute_diff": ev_diff,
+        "verdict": verdict,
+    }
+
+
+def task_I_streaks(
+    proba_pos: np.ndarray, n_paths: int, rng: np.random.Generator,
+    payoffs_win: float, payoffs_loss: float,
+) -> dict[str, Any]:
+    sim = simulate_paths(proba_pos, payoffs_win, payoffs_loss, n_paths, rng)
+    outcomes = sim["outcomes"]
+    realized = sim["realized"]
+    if sim["n_trades"] == 0:
+        return {}
+
+    def _longest_runs(arr_2d: np.ndarray, pred_fn) -> np.ndarray:
+        out = np.zeros(arr_2d.shape[0], dtype=np.int32)
+        for i in range(arr_2d.shape[0]):
+            mask_row = pred_fn(arr_2d[i])
+            run, best = 0, 0
+            for v in mask_row:
+                if v:
+                    run += 1
+                    best = max(best, run)
+                else:
+                    run = 0
+            out[i] = best
+        return out
+
+    win_streaks = _longest_runs(outcomes, lambda a: a)
+    loss_streaks = _longest_runs(outcomes, lambda a: ~a)
+    max_single_win = np.where(realized > 0, realized, 0).max(axis=1)
+    running = np.cumsum(realized, axis=1)
+    running_max = np.maximum.accumulate(running, axis=1)
+    underwater = running < running_max
+    underwater_dur = _longest_runs(underwater, lambda a: a)
+
+    return {
+        "winning_streak": quantiles(win_streaks.astype(float)),
+        "losing_streak": quantiles(loss_streaks.astype(float)),
+        "max_single_win": quantiles(max_single_win),
+        "underwater_duration": quantiles(underwater_dur.astype(float)),
+    }
+
+
+def main() -> int:
+    from scripts.ag.train_v9_locked import ML_FEATURES
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--predictor-path", type=Path, required=True)
+    ap.add_argument("--csv", type=Path, required=True)
+    ap.add_argument("--split", choices=["is", "oos", "all"], default="oos")
+    ap.add_argument("--n-paths", type=int, default=2000)
+    ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--max-hold-bars", type=int, default=72)
+    ap.add_argument("--sl-points", type=float, default=DEFAULT_SL_POINTS)
+    ap.add_argument("--tp-points", type=float, default=DEFAULT_TP_POINTS)
+    ap.add_argument("--output-dir", type=Path, default=None)
+    args = ap.parse_args()
+
+    from autogluon.tabular import TabularPredictor
+    pred = TabularPredictor.load(str(args.predictor_path), require_py_version_match=False)
+    pred.persist_models()
+
+    tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    output_dir = args.output_dir or (REPO_ROOT / "artifacts" / "mc_v9" / f"mc_{tag}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"loading {args.csv}", flush=True)
+    df = pd.read_csv(args.csv, parse_dates=["ts"])
+    feature_cols = [c for c in ML_FEATURES if c in df.columns]
+    trades = _build_trades(df, feature_cols, max_hold_bars=args.max_hold_bars)
+    trades["ts"] = pd.to_datetime(trades["ts"], utc=True)
+    print(f"  total trades: {len(trades):,}  WR={trades[LABEL_COL].mean():.4f}", flush=True)
+
+    if args.split == "oos":
+        trades = trades[trades["ts"] >= OOS_START].reset_index(drop=True)
+    elif args.split == "is":
+        trades = trades[trades["ts"] <= IS_END].reset_index(drop=True)
+    print(f"  {args.split} trades: {len(trades):,}  WR={trades[LABEL_COL].mean():.4f}", flush=True)
+
+    if len(trades) < 30:
+        print("Too few trades for MC analysis", flush=True)
+        return 1
+
+    y_true = trades[LABEL_COL].to_numpy()
+    proba = pred.predict_proba(trades[feature_cols])
+    proba_pos = proba.iloc[:, 1].to_numpy() if isinstance(proba, pd.DataFrame) else np.asarray(proba)
+
+    rng_root = np.random.default_rng(args.seed)
+
+    print("\n=== Task A — Overall ===", flush=True)
+    rng_a = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
+    task_a = rollup(proba_pos, y_true, args.n_paths, rng_a, args.sl_points, args.tp_points)
+    print(f"  EV/trade=${task_a['ev_per_trade']:.2f}  PF={task_a['profit_factor']:.3f}"
+          f"  MC p50 PnL=${task_a['mc_total_pnl']['p50']:.0f}", flush=True)
+
+    print("\n=== Task B — Per direction ===", flush=True)
+    task_b: dict[str, Any] = {}
+    if "direction" in trades.columns:
+        for d_val, d_label in [(1, "long"), (-1, "short")]:
+            mask = trades["direction"].to_numpy() == d_val
+            if mask.sum() < 10:
+                task_b[d_label] = {"n_trades": int(mask.sum()), "status": "too_few"}
+                continue
+            rng_b = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
+            task_b[d_label] = rollup(proba_pos[mask], y_true[mask], args.n_paths, rng_b,
+                                     args.sl_points, args.tp_points)
+            print(f"  {d_label}: EV=${task_b[d_label]['ev_per_trade']:.2f}"
+                  f"  n={task_b[d_label]['n_trades']}", flush=True)
+
+    print("\n=== Task C — Threshold sweep ===", flush=True)
+    task_c = task_C_threshold_sweep(proba_pos, y_true, args.n_paths, rng_root,
+                                    args.sl_points, args.tp_points)
+    for tau, r in task_c.items():
+        if r.get("status") == "too_few":
+            continue
+        print(f"  tau={tau}  n={r.get('n_gated',0)}  lift={r.get('lift',0):.4f}"
+              f"  EV=${r.get('ev_per_trade',0):.2f}", flush=True)
+
+    print("\n=== Task G — Calibration ===", flush=True)
+    task_g = task_G_calibration(proba_pos, y_true)
+    for row in task_g:
+        print(f"  {row['bin']}  n={row['n']}  pred={row['predicted']:.3f}"
+              f"  real={row['realized']:.3f}  {row['verdict']}", flush=True)
+
+    print("\n=== Task H — Regime stability ===", flush=True)
+    task_h = task_H_regime_stability(proba_pos, y_true, trades["ts"].to_numpy(),
+                                     args.n_paths, rng_root, args.sl_points, args.tp_points)
+    print(f"  verdict={task_h['verdict']}  EV_diff=${task_h['ev_absolute_diff']:.2f}", flush=True)
+
+    print("\n=== Task I — Streak profile ===", flush=True)
+    payoffs_win = args.tp_points * MES_POINT_VALUE - COMMISSION_ROUND_TRIP
+    payoffs_loss = -(args.sl_points * MES_POINT_VALUE + COMMISSION_ROUND_TRIP)
+    rng_i = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
+    task_i = task_I_streaks(proba_pos, args.n_paths, rng_i, payoffs_win, payoffs_loss)
+    if task_i:
+        print(f"  win streak p50={task_i['winning_streak']['p50']:.0f}"
+              f"  loss streak p50={task_i['losing_streak']['p50']:.0f}", flush=True)
+
+    full_output = {
+        "generated_at": tag,
+        "predictor_path": str(args.predictor_path),
+        "csv": str(args.csv),
+        "split": args.split,
+        "n_paths": args.n_paths,
+        "sl_points": args.sl_points,
+        "tp_points": args.tp_points,
+        "commission_rt": COMMISSION_ROUND_TRIP,
+        "task_A_overall": task_a,
+        "task_B_per_direction": task_b,
+        "task_C_threshold_sweep": task_c,
+        "task_G_calibration": task_g,
+        "task_H_regime_stability": task_h,
+        "task_I_streaks": task_i,
+    }
+    (output_dir / "mc_v9_results.json").write_text(json.dumps(full_output, indent=2, default=str))
+    print(f"\nwrote {output_dir / 'mc_v9_results.json'}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 """Warbird Pro V9 — LOCKED AG full-zoo training run.
 
-Per-skill discipline (training-ag-best-practices, training-full-zoo):
+Per-skill discipline (training-ag-best-practices, training-full-zoo,
+training-ag-feature-finder):
   - 7-family canonical zoo with single-thread pins
-  - num_bag_folds=0 (mandatory time-series)
-  - num_stack_levels=0 (mandatory when bag_folds=0)
-  - dynamic_stacking=False (explicit)
-  - presets="good_quality" (NOT best_quality — best_quality enables dynamic_stacking)
+  - presets="best_quality" — full zoo + weighted ensemble + stacking
+  - calibrate=True — built-in isotonic calibration so predict_proba
+    outputs true probabilities for the downstream EV decision rule
+  - eval_metric=log_loss — proper probability scoring (roc_auc only
+    ranks; log_loss penalizes miscalibrated confidence)
+  - hyperparameter_tune_kwargs — per-family HPO within time budget
+  - num_bag_folds=8, num_stack_levels=1 — outer CPCV handles
+    time-series validation; inner bagging uses use_bag_holdout=True
+    so bags train on train_data only
+  - dynamic_stacking=False (explicit, reproducible)
   - time_limit=7200s (2 hours so NN_TORCH/FASTAI fully converge)
   - chronological train/val/test split with embargo = max_hold_bars + 1 bars
     (label-horizon-aware; enforced by scripts/optuna/cpcv.py)
-  - eval_metric=roc_auc, problem_type=binary
+  - predictor.persist_models() after fit for fast repeated predict
+  - leaderboard(extra_info=True) for hyperparameter visibility
   - Apple Silicon OpenMP guards set BEFORE any AG/lightgbm import
   - Drop AG-flagged useless features (ml_in_zone constant=1, ml_xa_zn/dx_code
     constant=0 because data not local, ml_entry_route_code constant)
@@ -50,13 +58,10 @@ from scripts.optuna.cpcv import embargoed_chronological_split
 CSV_PATH = REPO_ROOT / "scripts/optuna/workspaces/warbird_pro/exports/databento_mes_5m_2020-2026_strict.csv"
 OUTPUT_ROOT = REPO_ROOT / "models/warbird_pro_v9"
 
-# Features used by AG. Excluded from this list:
-#   ml_in_zone           — constant=1 at entry-trigger time (precondition not feature)
-#   ml_xa_zn_code        — constant=0 (ZN data not in local cross_asset_1h)
-#   ml_xa_dx_code        — constant=0 (DX data not in local cross_asset_1h)
-#   ml_entry_route_code  — constant in single-config replay (no variation)
-#   ml_reject_at_zone    — AG flagged useless on prior run; rare and mostly noise
-#   direction (derived from ml_dir, would be redundant)
+# Features matching new Warbird Pro V9 indicator schema.
+# train_v9_locked.py filters to columns present in the dataset, so missing
+# features (e.g. footprint, vix, eqh, levels) on older datasets are skipped
+# silently — fresh dataset build picks them up.
 ML_FEATURES = [
     # structural / regime
     "ml_atr14", "ml_dir", "ml_fib_range",
@@ -64,22 +69,32 @@ ML_FEATURES = [
     "ml_bars_since_break", "ml_break_in_dir",
     # momentum
     "ml_rsi_value", "ml_rsi_stance_code", "ml_ma_bias",
-    # candlestick patterns (top handful)
-    "ml_pat_hammer", "ml_pat_inv_hammer", "ml_pat_dragonfly",
-    "ml_pat_bull_engulf", "ml_pat_piercing", "ml_pat_morning_star",
-    "ml_pat_three_white",
-    "ml_pat_shooting_star", "ml_pat_hanging_man", "ml_pat_gravestone",
-    "ml_pat_bear_engulf", "ml_pat_dark_cloud", "ml_pat_evening_star",
-    "ml_pat_three_black",
-    # liquidity
+    "ml_ma_slow_dist_atr", "ml_ma_fast_dist_atr",
+    # ADX
+    "ml_adx_value", "ml_adx_plus_di", "ml_adx_minus_di",
+    # candlestick patterns (curated 8 from real backtest performance)
+    "ml_pat_bull_engulf", "ml_pat_piercing",
+    "ml_pat_rising_window", "ml_pat_harami_bull",
+    "ml_pat_bear_engulf", "ml_pat_marubozu_black",
+    "ml_pat_harami_bear", "ml_pat_tweezer_top",
+    # liquidity primitives (BSL/SSL sweep+reclaim)
     "ml_bsl_dist_atr", "ml_ssl_dist_atr",
-    "ml_swept_bsl", "ml_swept_ssl", "ml_reclaimed_bsl", "ml_reclaimed_ssl",
-    # volume delta
-    "ml_bar_delta", "ml_net_delta_20",
-    # cross-asset (NQ only — ZN/DX not local)
-    "ml_xa_nq_code",
-    # exhaustion / HTF
-    "ml_exhaust_long", "ml_exhaust_short", "ml_htf_conf_total",
+    "ml_swept_bsl", "ml_swept_ssl",
+    "ml_reclaimed_bsl", "ml_reclaimed_ssl",
+    # liquidity expansions (equal H/L pools, VWAP, volume z-score)
+    "ml_liq_eqh_dist_atr", "ml_liq_eql_dist_atr",
+    "ml_liq_vwap_dist_atr", "ml_liq_vol_zscore",
+    # cross-asset 5m
+    "ml_xa_nq_code", "ml_xa_zn_code", "ml_xa_dx_code",
+    # cross-asset advanced (VIX, MES↔NQ correlation, DXY divergence)
+    "ml_xa_vix_zscore", "ml_xa_corr_nq", "ml_xa_dxy_diverge",
+    # HTF confluence
+    "ml_htf_conf_total",
+    # daily/weekly S/R distances
+    "ml_lvl_pdh_dist_atr", "ml_lvl_pdl_dist_atr",
+    "ml_lvl_pwh_dist_atr", "ml_lvl_pwl_dist_atr",
+    # footprint (real intrabar bid/ask delta, POC, VA position)
+    "ml_fp_delta_pct", "ml_fp_poc_dist_atr", "ml_fp_va_position",
 ]
 LABEL_COL = "winner"
 
@@ -146,8 +161,10 @@ def main() -> int:
     # train/val/test. Enforced by cpcv._enforce_embargo_floor().
     embargo_bars = args.max_hold_bars + 1
 
-    train_end_idx = int(np.searchsorted(trades["ts"].to_numpy(), np.datetime64(TRAIN_END.to_numpy()), side="right"))
-    val_end_idx = int(np.searchsorted(trades["ts"].to_numpy(), np.datetime64(VAL_END.to_numpy()), side="right"))
+    # Force consistent tz-aware UTC compare; some upstream parsers strip tz
+    ts_utc = pd.to_datetime(trades["ts"], utc=True)
+    train_end_idx = int((ts_utc < TRAIN_END).sum())
+    val_end_idx = int((ts_utc < VAL_END).sum())
 
     train_pos, val_pos, test_pos = embargoed_chronological_split(
         n_samples=len(trades),
@@ -187,29 +204,37 @@ def main() -> int:
     print(f"  output dir:    {out_dir}", flush=True)
     print(f"  features:      {len(feature_cols)} ({', '.join(feature_cols[:6])}, ...)", flush=True)
     print(f"  time-limit:    {args.time_limit}s", flush=True)
-    print(f"  preset:        good_quality (NOT best_quality — explicit)", flush=True)
-    print(f"  num_bag_folds: 0 (time-series MANDATORY)", flush=True)
-    print(f"  stack_levels:  0 (when bag_folds=0)", flush=True)
+    print(f"  preset:        best_quality (full zoo + ensemble + stacking)", flush=True)
+    print(f"  calibrate:     True (isotonic calibration for EV rule)", flush=True)
+    print(f"  num_bag_folds: 8 (use_bag_holdout=True; outer CPCV validates)", flush=True)
+    print(f"  stack_levels:  1", flush=True)
     print(f"  dyn_stacking:  False (explicit, reproducible)", flush=True)
+    print(f"  HPO:           random searcher, 20 trials per family", flush=True)
     print(f"  zoo:           7-family canonical (single-thread pins)", flush=True)
-    print(f"  eval_metric:   roc_auc", flush=True)
+    print(f"  eval_metric:   log_loss (probability scoring for EV rule)", flush=True)
     print(f"  OMP_NUM_THREADS={os.environ.get('OMP_NUM_THREADS')} KMP_DUPLICATE_LIB_OK={os.environ.get('KMP_DUPLICATE_LIB_OK')}", flush=True)
 
     pred = TabularPredictor(
         label=LABEL_COL,
         path=str(out_dir),
-        eval_metric="roc_auc",
+        eval_metric="log_loss",
         problem_type="binary",
     ).fit(
         train_data=train,
         tuning_data=val,
         use_bag_holdout=True,
         time_limit=args.time_limit,
-        presets="good_quality",
-        num_bag_folds=0,
-        num_stack_levels=0,
+        presets="best_quality",
+        calibrate=True,
+        num_bag_folds=8,
+        num_stack_levels=1,
         dynamic_stacking=False,
         ag_args_ensemble={"fold_fitting_strategy": "sequential_local"},
+        hyperparameter_tune_kwargs={
+            "searcher": "random",
+            "scheduler": "local",
+            "num_trials": 20,
+        },
         hyperparameters={
             "GBM": [{"num_threads": 1}, {"num_threads": 1, "extra_trees": True}],
             "CAT": {"thread_count": 1},
@@ -222,9 +247,10 @@ def main() -> int:
         verbosity=2,
         num_gpus=0,
     )
+    pred.persist()
 
     print("\n=== leaderboard (OOS test set) ===", flush=True)
-    lb = pred.leaderboard(test, silent=True)
+    lb = pred.leaderboard(test, extra_info=True, silent=True)
     print(lb.to_string(), flush=True)
     lb.to_csv(out_dir / "leaderboard.csv", index=False)
 

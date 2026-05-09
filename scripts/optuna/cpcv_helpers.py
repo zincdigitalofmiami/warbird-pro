@@ -157,12 +157,19 @@ def _aggregate(
 # appear as a top-level Python identifier (defensive against substring scanners).
 _AG_FIXED_KWARGS: dict[str, Any] = {
     "problem_type": "binary",
+    "eval_metric": "log_loss",
 }
 _AG_FIT_FIXED_KWARGS: dict[str, Any] = {
-    "num_bag_folds": 8,       # safe: use_bag_holdout=True keeps bags off the test set
-    "num_stack_levels": 1,    # one stacking level; test set stays embargoed
+    "num_bag_folds": 8,
+    "num_stack_levels": 1,
     "dynamic_stacking": False,
-    "use_bag_holdout": True,  # bags train on train_data only; tuning_data is the holdout
+    "use_bag_holdout": True,
+    "calibrate": True,
+    "hyperparameter_tune_kwargs": {
+        "searcher": "random",
+        "scheduler": "local",
+        "num_trials": 20,
+    },
     "verbosity": 0,
 }
 
@@ -240,7 +247,6 @@ def ag_embargoed_train_and_score(
     predictor_kwargs = dict(_AG_FIXED_KWARGS)
     predictor_kwargs["label"] = label_col
     predictor_kwargs["path"] = str(output_dir)
-    predictor_kwargs["eval_metric"] = "roc_auc"
 
     fit_kwargs = dict(_AG_FIT_FIXED_KWARGS)
     fit_kwargs["train_data"] = train
@@ -252,6 +258,7 @@ def ag_embargoed_train_and_score(
         fit_kwargs["hyperparameters"] = ag_hyperparams
 
     pred = TabularPredictor(**predictor_kwargs).fit(**fit_kwargs)
+    pred.persist()
 
     proba = pred.predict_proba(test[feature_cols])
     if isinstance(proba, pd.DataFrame):

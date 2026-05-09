@@ -116,3 +116,6 @@ data/optuna/
 
 # Claude Code session state (lives inside repo for single-folder consolidation)
 .claude-state/
+
+# AG predictor artifacts (large pkl files, regenerated per training run)
+models/
