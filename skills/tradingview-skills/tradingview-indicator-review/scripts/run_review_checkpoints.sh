@@ -26,7 +26,7 @@ detect_root() {
 }
 
 ROOT_DIR="$(detect_root)"
-INDICATOR_FILE="$ROOT_DIR/indicators/v6-warbird-complete.pine"
+INDICATOR_FILE="$ROOT_DIR/indicators/warbird-pro-v9.pine"
 SKIP_PARITY=0
 SKIP_BUILD=1
 DRY_RUN=0
@@ -41,7 +41,7 @@ usage() {
 Usage: $(basename "$0") [options]
 
 Options:
-  --indicator <path>   Indicator file to lint (default: indicators/v6-warbird-complete.pine)
+  --indicator <path>   Indicator file to lint (default: indicators/warbird-pro-v9.pine)
   --skip-parity        Skip indicator/strategy parity check
   --skip-build         Skip npm build gate
   --dry-run            Print planned commands and exit

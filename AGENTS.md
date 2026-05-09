@@ -117,7 +117,8 @@ context, or agent-facing notes pointing at an older trigger or training surface.
   - `warbird_pro_v9` is isolated from `warbird_pro`; it admits ES/MES
     training rows from TradingView exports or Databento market data, ignores
     NQ/MNQ rows, and models ATR/risk exits without Pine edits.
-  - Active 4-card Hybrid+ run: exit_cpcv → entry_filter_cpcv → ag_meta_cpcv → joint_challenger
+  - Hybrid+ 4-card chain is deprecated; active direction is the single
+    `warbird_pro_core` training card (Core module scaffold under construction).
   - Dataset: `workspaces/warbird_pro_v9/exports/mes_5m.csv` (441,852 5m bars, clean build dd81ebf)
   - Build script: `workspaces/warbird_pro_v9/build_v9_dataset.py` — params MUST match live TV settings
 - `scripts/ag/tv_auto_tune.py`, `scripts/ag/tune_strategy_params.py`: TradingView

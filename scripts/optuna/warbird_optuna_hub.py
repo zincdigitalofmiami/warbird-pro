@@ -1007,7 +1007,7 @@ class HubState:
             indicator_dir = resolve_indicator_dir(spec)
             # Auto-create the workspace dir for newly-registered cards so the
             # hub never silently drops a registry entry just because its
-            # workspace tree hasn't been initialized yet (Hybrid+ V9 cards
+            # workspace tree hasn't been initialized yet (V9/Core cards
             # land via registry + profile only; their study.db materializes
             # the first time the operator launches an HPO trial).
             indicator_dir.mkdir(parents=True, exist_ok=True)
@@ -1253,7 +1253,7 @@ def _render_group_card(group: dict[str, Any], idx: int) -> str:
         f"data-last-complete='{_h(group['last_complete'] or '')}' "
         f"data-has-best='{1 if b is not None else 0}'>"
         f"<header><h3>{gname}</h3></header>"
-        f"<p class='card-purpose'>{member_count} active cards — Hybrid+ CPCV pipeline</p>"
+        f"<p class='card-purpose'>{member_count} active cards — Core pipeline</p>"
         "<div class='meta-line'>"
         "<span class='chip surface'>Indicator</span>"
         "<span class='chip category'>Chart Core</span>"
