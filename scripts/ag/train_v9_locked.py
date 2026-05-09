@@ -4,15 +4,14 @@
 Per-skill discipline (training-ag-best-practices, training-full-zoo,
 training-ag-feature-finder):
   - 7-family canonical zoo with single-thread pins
-  - presets="best_quality" — full zoo + weighted ensemble + stacking
+  - presets="best_quality" — full zoo (no bagging/stacking)
   - calibrate=True — built-in isotonic calibration so predict_proba
     outputs true probabilities for the downstream EV decision rule
   - eval_metric=log_loss — proper probability scoring (roc_auc only
     ranks; log_loss penalizes miscalibrated confidence)
   - hyperparameter_tune_kwargs — per-family HPO within time budget
-  - num_bag_folds=8, num_stack_levels=1 — outer CPCV handles
-    time-series validation; inner bagging uses use_bag_holdout=True
-    so bags train on train_data only
+  - num_bag_folds=0, num_stack_levels=0 — time-series safe
+    (no internal IID bagging/stacking)
   - dynamic_stacking=False (explicit, reproducible)
   - time_limit=7200s (2 hours so NN_TORCH/FASTAI fully converge)
   - chronological train/val/test split with embargo = max_hold_bars + 1 bars
@@ -23,11 +22,10 @@ training-ag-feature-finder):
   - Drop AG-flagged useless features (ml_in_zone constant=1, ml_xa_zn/dx_code
     constant=0 because data not local, ml_entry_route_code constant)
 
-Note: full Combinatorial Purged CV across IS is the responsibility of the
-Hybrid+ Card 3 Optuna profile (warbird_pro_v9_ag_meta_cpcv_profile). This
-standalone trainer fits a single predictor on an embargoed chronological
-split for fast iteration; CPCV per trial would multiply this script's
-runtime by ~15x without changing the deliverable (one predictor).
+Note: this standalone trainer fits a single predictor on an embargoed
+chronological split for fast iteration. The Core AutoGluon card
+(scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py)
+is the production training surface and runs through scripts/ag/train_hard_gate.py.
 """
 from __future__ import annotations
 
@@ -84,6 +82,8 @@ ML_FEATURES = [
     # liquidity expansions (equal H/L pools, VWAP, volume z-score)
     "ml_liq_eqh_dist_atr", "ml_liq_eql_dist_atr",
     "ml_liq_vwap_dist_atr", "ml_liq_vol_zscore",
+    # ETL CVD divergence features (Python-only, no Pine budget impact)
+    "ml_cvd_div_bull", "ml_cvd_div_bear",
     # cross-asset 5m
     "ml_xa_nq_code", "ml_xa_zn_code", "ml_xa_dx_code",
     # cross-asset advanced (VIX, MES↔NQ correlation, DXY divergence)
@@ -96,7 +96,7 @@ ML_FEATURES = [
     # footprint (real intrabar bid/ask delta, POC, VA position)
     "ml_fp_delta_pct", "ml_fp_poc_dist_atr", "ml_fp_va_position",
 ]
-LABEL_COL = "winner"
+LABEL_COL = "winner_10pt_24bar"
 
 # Chronological split BOUNDARIES. Embargo gaps between train/val and val/test
 # are applied at runtime in main() via embargoed_chronological_split() so the
@@ -127,17 +127,21 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 72) -> pd.DataFra
             continue
         offset = int(nz[0])
         outcome_code = int(future[offset])
-        winner = 1 if outcome_code == 1 else 0
+        label_value = (
+            int(df[LABEL_COL].iloc[i])
+            if LABEL_COL in df.columns and pd.notna(df[LABEL_COL].iloc[i])
+            else (1 if outcome_code == 1 else 0)
+        )
         rec = {col: df[col].iloc[i] for col in ML_FEATURES if col in df.columns}
         rec["ts"] = df["ts"].iloc[i]
-        rec[LABEL_COL] = winner
+        rec[LABEL_COL] = label_value
         rec["_outcome_code"] = outcome_code
         rec["_bars_to_resolution"] = offset + 1
         rows.append(rec)
 
     out = pd.DataFrame(rows).sort_values("ts").reset_index(drop=True)
     print(f"  resolved trades: {len(out):,}", flush=True)
-    print(f"  winner rate: {out[LABEL_COL].mean():.4f}  ({int(out[LABEL_COL].sum()):,} winners / {len(out):,} total)", flush=True)
+    print(f"  {LABEL_COL} rate: {out[LABEL_COL].mean():.4f}  ({int(out[LABEL_COL].sum()):,} positives / {len(out):,} total)", flush=True)
     return out
 
 
@@ -204,10 +208,10 @@ def main() -> int:
     print(f"  output dir:    {out_dir}", flush=True)
     print(f"  features:      {len(feature_cols)} ({', '.join(feature_cols[:6])}, ...)", flush=True)
     print(f"  time-limit:    {args.time_limit}s", flush=True)
-    print(f"  preset:        best_quality (full zoo + ensemble + stacking)", flush=True)
+    print(f"  preset:        best_quality (full zoo, no bagging/stacking)", flush=True)
     print(f"  calibrate:     True (isotonic calibration for EV rule)", flush=True)
-    print(f"  num_bag_folds: 8 (use_bag_holdout=True; outer CPCV validates)", flush=True)
-    print(f"  stack_levels:  1", flush=True)
+    print(f"  num_bag_folds: 0 (time-series safe)", flush=True)
+    print(f"  stack_levels:  0", flush=True)
     print(f"  dyn_stacking:  False (explicit, reproducible)", flush=True)
     print(f"  HPO:           random searcher, 20 trials per family", flush=True)
     print(f"  zoo:           7-family canonical (single-thread pins)", flush=True)
@@ -222,12 +226,12 @@ def main() -> int:
     ).fit(
         train_data=train,
         tuning_data=val,
-        use_bag_holdout=True,
+        use_bag_holdout=False,
         time_limit=args.time_limit,
         presets="best_quality",
         calibrate=True,
-        num_bag_folds=8,
-        num_stack_levels=1,
+        num_bag_folds=0,
+        num_stack_levels=0,
         dynamic_stacking=False,
         ag_args_ensemble={"fold_fitting_strategy": "sequential_local"},
         hyperparameter_tune_kwargs={
