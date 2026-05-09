@@ -100,6 +100,9 @@ artifacts/
 
 # Optuna study DB and run artifacts (resume-safe, but not tracked in git)
 scripts/optuna/workspaces/*
+!scripts/optuna/workspaces/warbird_pro_core/
+scripts/optuna/workspaces/warbird_pro_core/*
+!scripts/optuna/workspaces/warbird_pro_core/build_core_dataset.py
 !scripts/optuna/workspaces/sats_ps/
 scripts/optuna/workspaces/sats_ps/*
 !scripts/optuna/workspaces/sats_ps/champion.json

@@ -145,10 +145,10 @@ claim — validate in Python first before reserving Pine plot budget.
 
 ### Current Blocker
 
-Pine atomic pass partial — V9 Pine pattern drop done, train_v9_locked.py
-ML_FEATURES updated, profile schema cleaned. Pending: verification pipeline
-(pine-lint, fib guards, contamination, no-tv-force, npm build, agent precheck)
-+ ETL build + Core card body + Optuna hub wiring + pre-launch gate report.
+Core ETL/trainer partial — DXY parity, fixed 10/-5/24 labels, strict feature
+schema, Yahoo `DX-Y.NYB`, and Databento trade-side CVD/order-flow features are
+wired in code. Pending: full 1y Core build, Core card body + hard-gate launch
+wiring, Optuna hub wiring, and pre-launch gate report.
 
 ### Live Pine Settings (Canonical — read TV inputs panel, not Pine code defaults)
 

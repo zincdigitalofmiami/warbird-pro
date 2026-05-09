@@ -19,8 +19,8 @@ training-ag-feature-finder):
   - predictor.persist_models() after fit for fast repeated predic
   - leaderboard(extra_info=True) for hyperparameter visibility
   - Apple Silicon OpenMP guards set BEFORE any AG/lightgbm impor
-  - Drop AG-flagged useless features (ml_in_zone constant=1, ml_xa_zn/dx_code
-    constant=0 because data not local, ml_entry_route_code constant)
+  - Drop AG-flagged useless features (ml_in_zone constant=1, stale dx_code,
+    ml_entry_route_code constant)
 
 Note: this standalone trainer fits a single predictor on an embargoed
 chronological split for fast iteration. The Core AutoGluon card
@@ -53,15 +53,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.optuna.cpcv import embargoed_chronological_spli
+from scripts.optuna.cpcv import embargoed_chronological_split
 
 CSV_PATH = REPO_ROOT / "scripts/optuna/workspaces/warbird_pro/exports/databento_mes_5m_2020-2026_strict.csv"
 OUTPUT_ROOT = REPO_ROOT / "models/warbird_pro_v9"
 
-# Features matching new Warbird Pro V9 indicator schema.
-# train_v9_locked.py filters to columns present in the dataset, so missing
-# features (e.g. footprint, vix, eqh, levels) on older datasets are skipped
-# silently — fresh dataset build picks them up.
+# Features matching the locked Warbird Pro V9 Core surface.
+# Missing columns are fatal. The Core trainer must not silently fall back to an
+# older replay/export schema because that masks stale feature contracts.
 ML_FEATURES = [
     # structural / regime
     "ml_atr14", "ml_dir", "ml_fib_range",
@@ -85,7 +84,7 @@ ML_FEATURES = [
     # ETL CVD divergence features (Python-only, no Pine budget impact)
     "ml_cvd_div_bull", "ml_cvd_div_bear",
     # cross-asset 5m
-    "ml_xa_nq_code", "ml_xa_zn_code", "ml_xa_dx_code",
+    "ml_xa_nq_code", "ml_xa_zn_code", "ml_xa_dxy_code",
     # cross-asset advanced (VIX, MES↔NQ correlation, DXY divergence)
     "ml_xa_vix_zscore", "ml_xa_corr_nq", "ml_xa_dxy_diverge",
     # HTF confluence
@@ -98,18 +97,56 @@ ML_FEATURES = [
 ]
 LABEL_COL = "winner_10pt_24bar"
 
-# Chronological split BOUNDARIES. Embargo gaps between train/val and val/tes
-# are applied at runtime in main() via embargoed_chronological_split() so the
-# embargo size tracks --max-hold-bars. The 1-bar embargo present in earlier
-# revisions (Bug 1) leaked labels across the 6-hour resolution window — fixed
-# now by enforcing embargo >= max_hold_bars + 1 in scripts/optuna/cpcv.py.
-TRAIN_END = pd.Timestamp("2024-06-30T23:55:00", tz="UTC")
-VAL_END = pd.Timestamp("2024-12-31T23:55:00", tz="UTC")
-TEST_START = pd.Timestamp("2025-01-01T00:00:00", tz="UTC")  # OOS lock — no HPO trial may see this
+REQUIRED_INPUT_COLUMNS = [
+    "ts",
+    "high",
+    "low",
+    "close",
+    "ml_entry_long_trigger",
+    "ml_entry_short_trigger",
+    *ML_FEATURES,
+]
+
+
+def validate_input_schema(df: pd.DataFrame) -> None:
+    missing = [col for col in REQUIRED_INPUT_COLUMNS if col not in df.columns]
+    if missing:
+        raise RuntimeError(
+            "Core training CSV is missing required columns: "
+            + ", ".join(missing)
+        )
+    stale = [col for col in ("ml_xa_dx_code", "ml_bar_delta", "ml_net_delta_20") if col in df.columns]
+    if stale:
+        raise RuntimeError(
+            "Core training CSV still contains stale/banned columns: "
+            + ", ".join(stale)
+        )
+
+
+def validate_trade_features(trades: pd.DataFrame) -> None:
+    missing = [col for col in ML_FEATURES if col not in trades.columns]
+    if missing:
+        raise RuntimeError(f"Trade feature set missing required columns: {missing}")
+    bad_inf = [
+        col for col in ML_FEATURES
+        if np.isinf(pd.to_numeric(trades[col], errors="coerce")).any()
+    ]
+    if bad_inf:
+        raise RuntimeError(f"Trade feature set contains +/-inf values: {bad_inf}")
+    all_null = [col for col in ML_FEATURES if trades[col].isna().all()]
+    if all_null:
+        raise RuntimeError(f"Trade feature columns are entirely null: {all_null}")
 
 
 
 def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFrame:
+    """Build fixed 10/-5/24 triple-barrier labels at entry bars.
+
+    A win is +10 MES points before -5 MES points within 24 5m bars. Rows where
+    neither barrier is hit are dropped. If target and stop are both touched in
+    the same future bar, the label is pessimistically a loss because 5m OHLC
+    cannot prove target-before-stop ordering.
+    """
     df = df.sort_values("ts").reset_index(drop=True)
     long_mask = df["ml_entry_long_trigger"].astype(float) > 0
     short_mask = df["ml_entry_short_trigger"].astype(float) > 0
@@ -119,50 +156,46 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFra
 
     highs = df["high"].to_numpy()
     lows = df["low"].to_numpy()
-    entries = df["ml_trade_entry"].to_numpy()
+    entries = (
+        df["ml_trade_entry"].to_numpy()
+        if "ml_trade_entry" in df.columns
+        else np.full(len(df), np.nan)
+    )
     closes = df["close"].to_numpy()
-    atrs = df["ml_atr14"].to_numpy() if "ml_atr14" in df.columns else np.full(len(df), 5.0)
 
     rows = []
     dropped_neither = 0
 
-    # We will use 1.0 ATR stop and 2.0 ATR target (with 10 point minimum target) as the training truth for the base classifier
     for i in entry_idx:
         entry_price = entries[i] if pd.notna(entries[i]) and entries[i] > 0 else closes[i]
-        is_long = long_mask.iloc[i]
-        atr_val = atrs[i] if pd.notna(atrs[i]) and atrs[i] > 0 else 5.0
+        is_long = bool(long_mask.iloc[i])
 
         target_hit_idx = -1
         stop_hit_idx = -1
 
-        # 1.0 ATR Stop, 2.0 ATR Target (min 10 points)
-        tp_dist = max(10.0, atr_val * 2.0)
-        sl_dist = atr_val * 1.0
+        tp_dist = 10.0
+        sl_dist = 5.0
+        tp_price = entry_price + tp_dist if is_long else entry_price - tp_dist
+        sl_price = entry_price - sl_dist if is_long else entry_price + sl_dist
+        resolution_bar = -1
+        outcome = 0
 
-        tp_price = entry_price + tp_dist if is_long else entry_price - tp_dis
-        sl_price = entry_price - sl_dist if is_long else entry_price + sl_dis
-
-        # scan up to max_hold_bars (24)
         end_idx = min(i + max_hold_bars + 1, len(df))
         for j in range(i + 1, end_idx):
             h = highs[j]
             l = lows[j]
 
-            # Check Stop Loss
             if is_long and l <= sl_price:
                 stop_hit_idx = j
             elif not is_long and h >= sl_price:
                 stop_hit_idx = j
 
-            # Check Take Profi
             if is_long and h >= tp_price:
                 target_hit_idx = j
             elif not is_long and l <= tp_price:
                 target_hit_idx = j
 
-            # Resolution
             if target_hit_idx != -1 and stop_hit_idx != -1:
-                # Intrabeam collision (both hit in same bar) -> treat as SL (pessimistic)
                 outcome = 0
                 resolution_bar = j
                 break
@@ -179,19 +212,40 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFra
             dropped_neither += 1
             continue
 
-        rec = {col: df[col].iloc[i] for col in ML_FEATURES if col in df.columns}
+        rec = {col: df[col].iloc[i] for col in ML_FEATURES}
         rec["ts"] = df["ts"].iloc[i]
+        rec["direction"] = 1 if is_long else -1
+        rec["entry_price"] = float(entry_price)
+        rec["target_price"] = float(tp_price)
+        rec["stop_price"] = float(sl_price)
         rec[LABEL_COL] = outcome
         rec["_outcome_code"] = 1 if outcome == 1 else -1
         rec["_bars_to_resolution"] = resolution_bar - i
         rows.append(rec)
+
+    if not rows:
+        out_cols = [
+            *ML_FEATURES,
+            "ts",
+            "direction",
+            "entry_price",
+            "target_price",
+            "stop_price",
+            LABEL_COL,
+            "_outcome_code",
+            "_bars_to_resolution",
+        ]
+        print(f"  resolved trades: 0")
+        print(f"  dropped neither-hit: {dropped_neither:,}")
+        return pd.DataFrame(columns=out_cols)
 
     out = pd.DataFrame(rows).sort_values("ts").reset_index(drop=True)
     print(f"  resolved trades: {len(out):,}")
     print(f"  dropped neither-hit: {dropped_neither:,}")
     if len(out) > 0:
         print(f"  {LABEL_COL} rate: {out[LABEL_COL].mean():.4f}  ({int(out[LABEL_COL].sum()):,} positives / {len(out):,} total)")
-    return ou
+    validate_trade_features(out)
+    return out
 
 
 def main() -> int:
@@ -199,14 +253,29 @@ def main() -> int:
     ap.add_argument("--csv", type=Path, default=CSV_PATH)
     ap.add_argument("--output-root", type=Path, default=OUTPUT_ROOT)
     ap.add_argument("--time-limit", type=int, default=7200)
-    ap.add_argument("--max-hold-bars", type=int, default=72)
+    ap.add_argument("--max-hold-bars", type=int, default=24)
+    ap.add_argument("--train-frac", type=float, default=0.70)
+    ap.add_argument("--val-frac", type=float, default=0.15)
+    ap.add_argument("--validate-only", action="store_true",
+                    help="Build labels/splits and run hard schema gates without fitting AutoGluon.")
     args = ap.parse_args()
+    if not (0.0 < args.train_frac < 1.0):
+        raise SystemExit("--train-frac must be in (0, 1)")
+    if not (0.0 < args.val_frac < 1.0):
+        raise SystemExit("--val-frac must be in (0, 1)")
+    if args.train_frac + args.val_frac >= 1.0:
+        raise SystemExit("--train-frac + --val-frac must leave a non-empty test segment")
 
     print(f"loading {args.csv}", flush=True)
     df = pd.read_csv(args.csv, parse_dates=["ts"])
     print(f"  rows={len(df):,}  range={df['ts'].iloc[0]} -> {df['ts'].iloc[-1]}", flush=True)
+    validate_input_schema(df)
 
     trades = build_trade_dataset(df, max_hold_bars=args.max_hold_bars)
+    if len(trades) < 200:
+        raise RuntimeError(f"Too few resolved trades: {len(trades):,}")
+    if trades[LABEL_COL].nunique() != 2:
+        raise RuntimeError(f"{LABEL_COL} must contain both classes")
 
     # Label-horizon-aware embargo. The label looks forward up to
     # max_hold_bars; the embargo around each split boundary must be at leas
@@ -214,10 +283,8 @@ def main() -> int:
     # train/val/test. Enforced by cpcv._enforce_embargo_floor().
     embargo_bars = args.max_hold_bars + 1
 
-    # Force consistent tz-aware UTC compare; some upstream parsers strip tz
-    ts_utc = pd.to_datetime(trades["ts"], utc=True)
-    train_end_idx = int((ts_utc < TRAIN_END).sum())
-    val_end_idx = int((ts_utc < VAL_END).sum())
+    train_end_idx = int(len(trades) * args.train_frac)
+    val_end_idx = int(len(trades) * (args.train_frac + args.val_frac))
 
     train_pos, val_pos, test_pos = embargoed_chronological_split(
         n_samples=len(trades),
@@ -234,18 +301,23 @@ def main() -> int:
     print(f"  IS  (train):  {len(train_df):,}  WR={train_df[LABEL_COL].mean():.4f}  ({train_df['ts'].min()} → {train_df['ts'].max()})", flush=True)
     print(f"  VAL (tuning): {len(val_df):,}  WR={val_df[LABEL_COL].mean():.4f}  ({val_df['ts'].min()} → {val_df['ts'].max()})", flush=True)
     print(f"  OOS (test):   {len(test_df):,}  WR={test_df[LABEL_COL].mean():.4f}  ({test_df['ts'].min()} → {test_df['ts'].max()})", flush=True)
-    if test_df["ts"].min() < TEST_START:
-        raise RuntimeError(
-            f"OOS lock violated: test segment starts {test_df['ts'].min()} < {TEST_START}"
-        )
-
     if len(train_df) < 200 or len(val_df) < 50 or len(test_df) < 50:
         raise RuntimeError(f"Splits too thin: train={len(train_df)} val={len(val_df)} test={len(test_df)}")
+    for name, slice_df in (("train", train_df), ("val", val_df), ("test", test_df)):
+        if slice_df[LABEL_COL].nunique() != 2:
+            raise RuntimeError(f"{name} split missing one label class")
 
-    feature_cols = [c for c in ML_FEATURES if c in trades.columns]
+    feature_cols = list(ML_FEATURES)
     train = train_df[feature_cols + [LABEL_COL]].copy()
     val = val_df[feature_cols + [LABEL_COL]].copy()
     test = test_df[feature_cols + [LABEL_COL]].copy()
+
+    if args.validate_only:
+        print("\nvalidate-only PASS")
+        print(f"  features: {len(feature_cols)}")
+        print(f"  label: {LABEL_COL}")
+        print(f"  max_hold_bars: {args.max_hold_bars}")
+        return 0
 
     from autogluon.tabular import TabularPredictor
 
