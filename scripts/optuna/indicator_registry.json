@@ -221,6 +221,29 @@
     "notes": "Hybrid+ Card 4 — bounded challenger only. Searches strategy params + AG hyperparams jointly. Capped trial budget (default 500). Promotes ONLY if it strictly beats the Card 1+2+3 winner on the locked OOS window per scripts/optuna/promote_v9_champion.py --allow-challenger."
   },
   {
+    "key": "warbird_pro_core",
+    "name": "Warbird Pro V9 Core AutoGluon Training",
+    "surface_type": "indicator",
+    "category": "ag-binary-classifier",
+    "pine_file": "indicators/warbird-pro-v9.pine",
+    "profile_module": "scripts.optuna.cards.core_training.2026_05_09_warbird_pro_autogluon_core",
+    "default_study_name": "Warbird Pro V9 Core AG 10pt 24bar",
+    "symbol": "MES1!",
+    "timeframe": "5",
+    "data_floor": "2025-05-01",
+    "label_column": "winner_10pt_24bar",
+    "trigger_family": "LIVE_ANCHOR_FOOTPRINT",
+    "objective_metric": "ag_test_log_loss",
+    "min_trades_floor": 200,
+    "allowed_capture_methods": [
+      "DATABENTO_OHLCV_CSV",
+      "DATABENTO_TRAINING_CSV",
+      "DATABENTO_BARS_CSV",
+      "DATABENTO_TRADES_CSV"
+    ],
+    "notes": "Core card scaffold only. Training contract wiring lands in follow-up commits."
+  },
+  {
     "key": "warbird_nexus_ml_rsi",
     "name": "Warbird Nexus Machine Learning RSI",
     "surface_type": "indicator",
