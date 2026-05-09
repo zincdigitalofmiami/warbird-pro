@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
-"""Warbird Pro V9 — Joint strategy + AG-hyperparam challenger (Hybrid+ Card 4).
+"""DEPRECATED 2026-05-09 — Hybrid+ Card 4 (warbird_pro_v9_joint_challenger).
 
-Bounded challenger ONLY. Card 4 searches the full product space of strategy
-exit params + AG hyperparams in a single Optuna study. The user's plan
-explicitly admits this only as a challenger, never as an authority — its
-champion is allowed to promote ONLY if it strictly beats the Card 1 + 2 + 3
-winners on the locked OOS window (see scripts/optuna/promote_v9_champion.py).
+The Hybrid+ 4-card chain (exit_cpcv + entry_filter_cpcv + ag_meta_cpcv +
+this card) was scrapped. Path went 4 cards -> 2 cards -> single Core
+AutoGluon card. See docs/MASTER_PLAN.md "V9 Core AutoGluon" section and the
+`warbird_pro_core` entry in scripts/optuna/indicator_registry.json.
 
-Trial budget is capped at 500 by orchestration. Same CPCV/embargo discipline
-as Card 3 (label_horizon-aware, enforced by scripts/optuna/cpcv.py).
+This file is retained for git history only. It is NOT runnable: importing it
+raises SystemExit.
 """
 from __future__ import annotations
 
+import sys
+
+raise SystemExit(
+    "warbird_pro_v9_joint_challenger_profile is DEPRECATED (Hybrid+ Card 4). "
+    "Use scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py instead."
+)
+
+# --- legacy code below (unreachable) -----------------------------------------
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 

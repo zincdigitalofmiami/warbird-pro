@@ -25,7 +25,9 @@ training-ag-feature-finder):
 Note: this standalone trainer fits a single predictor on an embargoed
 chronological split for fast iteration. The Core AutoGluon card
 (scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py)
-is the production training surface and runs through scripts/ag/train_hard_gate.py.
+is the production training surface and goes through scripts/ag/train_hard_gate.py.
+The earlier Hybrid+ Card 3 (warbird_pro_v9_ag_meta_cpcv) that wrapped this
+trainer in CPCV was deprecated 2026-05-09.
 """
 from __future__ import annotations
 
@@ -70,11 +72,9 @@ ML_FEATURES = [
     "ml_ma_slow_dist_atr", "ml_ma_fast_dist_atr",
     # ADX
     "ml_adx_value", "ml_adx_plus_di", "ml_adx_minus_di",
-    # candlestick patterns (curated 8 from real backtest performance)
-    "ml_pat_bull_engulf", "ml_pat_piercing",
-    "ml_pat_rising_window", "ml_pat_harami_bull",
-    "ml_pat_bear_engulf", "ml_pat_marubozu_black",
-    "ml_pat_harami_bear", "ml_pat_tweezer_top",
+    # candlestick patterns (curated 4 from real backtest performance)
+    "ml_pat_rising_window",
+    "ml_pat_bear_engulf", "ml_pat_marubozu_black", "ml_pat_tweezer_top",
     # liquidity primitives (BSL/SSL sweep+reclaim)
     "ml_bsl_dist_atr", "ml_ssl_dist_atr",
     "ml_swept_bsl", "ml_swept_ssl",

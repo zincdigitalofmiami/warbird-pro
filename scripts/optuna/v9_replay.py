@@ -1,25 +1,33 @@
 #!/usr/bin/env python3
-"""Warbird Pro V9 Pine -> Python feature replay.
+"""DEPRECATED 2026-05-09 — V9 Pine -> Python feature replay (Hybrid+ chain).
 
-Mirrors `indicators/warbird-pro-v9.pine` bar-by-bar to derive the 50 ml_*
-feature columns from raw MES 5m OHLCV. Parity intent (not bit-exact) — the
-ZigZag pivot detection is a deviation-based approximation of the TradingView
-ZigZag/7 library since that library is closed-source.
+This file replayed indicators/warbird-pro-v9.pine bar-by-bar in Python to feed
+the now-deprecated Hybrid+ 4-card chain. It is retired because:
 
-Inputs:
-  data/mes_5m.parquet  (cols: ts, open, high, low, close, volume, symbol)
+  1. The Hybrid+ chain is replaced by the single Core AutoGluon card
+     (scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py).
+  2. This replay uses the contamination-era ZigZag settings (deviation=4.0,
+     depth=20, threshold_floor=0.50) that produced the 2026-05-05 bad dataset.
+     Live Pine V9 uses 3.0 / 10 / 0.15 (see CLAUDE.md "Live Pine Settings").
+  3. It computes 14 candlestick patterns plus 5 phantom features
+     (ml_in_zone, ml_bar_delta, ml_net_delta_20, ml_exhaust_long/short,
+     ml_entry_route_code, ml_reject_at_zone) that current V9 Pine no longer
+     emits.
 
-Output (per call):
-  pandas.DataFrame with columns: ts, open, high, low, close, volume, symbol,
-  plus all ml_* feature columns required by warbird_pro_profile.py and
-  warbird_pro_v9_profile.py.
-
-Pine line references in comments tie each computation to the source.
+The Core ETL (under construction) builds features directly from Databento MES
+trades + bars, NOT via this replay. Retained for git history only.
 """
 from __future__ import annotations
 
-import math
 import sys
+
+raise SystemExit(
+    "v9_replay is DEPRECATED (Hybrid+ chain). Core ETL will build features "
+    "directly from Databento trades + bars."
+)
+
+# --- legacy code below (unreachable) -----------------------------------------
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any

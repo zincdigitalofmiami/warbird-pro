@@ -1,38 +1,26 @@
 #!/usr/bin/env python3
-"""Warbird Pro V9 winner classifier — AutoGluon full-zoo training.
+"""DEPRECATED 2026-05-09 — V9 winner classifier (Hybrid+ chain).
 
-Trains a binary classifier (winner vs non-winner) on the V9 ml_* feature surface
-emitted by `indicators/warbird-pro-v9.pine` and replayed via
-`scripts/optuna/v9_replay.py`. Output is a TabularPredictor + per-feature
-importance ranking suitable for SHAP analysis.
+This standalone AG winner classifier was a precursor to the Hybrid+ Card 3
+AG meta-labeler. Both are retired in favor of the single Core AutoGluon card
+(scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py),
+which uses the canonical Core training script scripts/ag/train_v9_locked.py.
 
-Input:
-  scripts/optuna/workspaces/warbird_pro/exports/databento_mes_5m_*.csv
-  (the strict-gated V9 replay output)
-
-Label construction:
-  Trades = bars where ml_entry_long_trigger=1 OR ml_entry_short_trigger=1
-  Looking forward, find ml_last_exit_outcome in {1, -1, 2}
-  winner = (outcome == 1)  # target hit
-  losers/timeouts = (outcome in {-1, 2})
-
-Time-series correctness:
-  --num-bag-folds 0  (mandatory per training-full-zoo skill)
-  Train/test split is chronological, not random.
-  Embargo between IS and OOS = max_hold_bars + 1 bars (label-horizon-aware,
-  enforced by scripts/optuna/cpcv.py). The previous 0-bar gap leaked the
-  in-flight 6-hour resolution window across the OOS boundary (Bug 1).
-  IS = 2020-01-01 .. 2024-12-31, OOS = 2025-01-01 onward (Trump regime).
-
-Usage:
-  python scripts/ag/train_v9_winner_classifier.py [--time-limit 14400]
+Retained for git history only. Not runnable.
 """
 from __future__ import annotations
 
+import sys
+
+raise SystemExit(
+    "train_v9_winner_classifier is DEPRECATED (Hybrid+ chain). "
+    "Use scripts/ag/train_v9_locked.py with the Core card config instead."
+)
+
+# --- legacy code below (unreachable) -----------------------------------------
 import argparse
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -54,23 +42,41 @@ from scripts.optuna.cpcv import _enforce_embargo_floor  # noqa: PLC2701  (intent
 CSV_PATH = REPO_ROOT / "scripts/optuna/workspaces/warbird_pro/exports/databento_mes_5m_2020-2026_strict.csv"
 OUTPUT_ROOT = REPO_ROOT / "models/warbird_pro_v9"
 
+# V9 canonical feature surface — kept in sync with scripts/ag/train_v9_locked.py
+# Phantom features (ml_in_zone, ml_reject_at_zone, ml_bar_delta, ml_net_delta_20,
+# ml_exhaust_*, ml_entry_route_code, 14-pattern set) were dropped during the V9
+# rebuild; this list now mirrors the active V9 Pine output.
 ML_FEATURE_COLS = [
+    # structural / regime
     "ml_atr14", "ml_dir", "ml_fib_range",
     "ml_pivot_dist_atr", "ml_p618_dist_atr",
-    "ml_in_zone", "ml_bars_since_break", "ml_break_in_dir", "ml_reject_at_zone",
+    "ml_bars_since_break", "ml_break_in_dir",
+    # momentum
     "ml_rsi_value", "ml_rsi_stance_code", "ml_ma_bias",
-    "ml_pat_hammer", "ml_pat_inv_hammer", "ml_pat_dragonfly",
-    "ml_pat_bull_engulf", "ml_pat_piercing", "ml_pat_morning_star",
-    "ml_pat_three_white",
-    "ml_pat_shooting_star", "ml_pat_hanging_man", "ml_pat_gravestone",
-    "ml_pat_bear_engulf", "ml_pat_dark_cloud", "ml_pat_evening_star",
-    "ml_pat_three_black",
+    "ml_ma_slow_dist_atr", "ml_ma_fast_dist_atr",
+    # ADX
+    "ml_adx_value", "ml_adx_plus_di", "ml_adx_minus_di",
+    # candlestick patterns (curated 4)
+    "ml_pat_rising_window",
+    "ml_pat_bear_engulf", "ml_pat_marubozu_black", "ml_pat_tweezer_top",
+    # liquidity primitives (BSL/SSL sweep+reclaim)
     "ml_bsl_dist_atr", "ml_ssl_dist_atr",
-    "ml_swept_bsl", "ml_swept_ssl", "ml_reclaimed_bsl", "ml_reclaimed_ssl",
-    "ml_bar_delta", "ml_net_delta_20",
+    "ml_swept_bsl", "ml_swept_ssl",
+    "ml_reclaimed_bsl", "ml_reclaimed_ssl",
+    # liquidity expansions
+    "ml_liq_eqh_dist_atr", "ml_liq_eql_dist_atr",
+    "ml_liq_vwap_dist_atr", "ml_liq_vol_zscore",
+    # cross-asset 5m
     "ml_xa_nq_code", "ml_xa_zn_code", "ml_xa_dx_code",
-    "ml_exhaust_long", "ml_exhaust_short",
-    "ml_entry_route_code", "ml_htf_conf_total",
+    # cross-asset advanced (VIX, MES↔NQ correlation, DXY divergence)
+    "ml_xa_vix_zscore", "ml_xa_corr_nq", "ml_xa_dxy_diverge",
+    # HTF confluence
+    "ml_htf_conf_total",
+    # daily/weekly S/R distances
+    "ml_lvl_pdh_dist_atr", "ml_lvl_pdl_dist_atr",
+    "ml_lvl_pwh_dist_atr", "ml_lvl_pwl_dist_atr",
+    # footprint (intrabar bid/ask delta, POC, VA position)
+    "ml_fp_delta_pct", "ml_fp_poc_dist_atr", "ml_fp_va_position",
 ]
 
 LABEL_COL = "winner"

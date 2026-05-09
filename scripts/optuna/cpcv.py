@@ -7,10 +7,11 @@ skfolio.model_selection.CombinatorialPurgedCV without adding skfolio as a
 dependency.
 
 Used by:
-- scripts/ag/train_v9_locked.py (AG meta-labeler diagnostic splits)
-- scripts/ag/train_v9_winner_classifier.py (winner classifier diagnostic splits)
-- scripts/optuna/warbird_pro_v9_ag_meta_cpcv_profile.py (Hybrid+ Card 3 — landed
-  with the scaffold commit)
+- scripts/ag/train_v9_locked.py (V9 Core diagnostic splits)
+- scripts/optuna/cards/core_training/ (Core AG card, under construction)
+
+(Originally also used by the Hybrid+ 4-card chain. That chain was deprecated
+2026-05-09; its profile modules raise SystemExit on import.)
 
 Hard contract: embargo_bars MUST be >= label_horizon_bars + 1. The
 _enforce_embargo_floor() check raises ValueError if violated, so a regression

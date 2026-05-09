@@ -1,9 +1,9 @@
 """Guards for scripts/optuna/cpcv.py — Bug 1 cannot recur.
 
 Bug 1 was a 1-bar embargo applied around a 72-bar label horizon in
-scripts/ag/train_v9_locked.py and train_v9_winner_classifier.py. These tests
-prove the cpcv utility refuses any embargo below label_horizon + 1, and
-that combinatorial folds + the chronological fixed-split helper both honor
+scripts/ag/train_v9_locked.py (and the now-deprecated train_v9_winner_classifier.py).
+These tests prove the cpcv utility refuses any embargo below label_horizon + 1,
+and that combinatorial folds + the chronological fixed-split helper both honor
 the floor.
 """
 from __future__ import annotations

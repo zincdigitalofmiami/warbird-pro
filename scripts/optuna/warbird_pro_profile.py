@@ -10,8 +10,9 @@ Companion profile `warbird_pro_v9_profile.py` covers ATR/risk EXIT modeling on
 the same triggers. Together they form the V9 entry+exit Optuna pair.
 
 This profile does not mutate Pine. Fib core (anchor ownership, ladder math,
-ZigZag, draw span), MA/EMA setup, and visual surface are frozen per the
-indicator-only Optuna contract (docs/contracts/pine_indicator_ag_contract.md).
+ZigZag, draw span), and visual surface are frozen per the indicator-only
+Optuna contract (docs/contracts/pine_indicator_ag_contract.md). MA lengths are
+tunable in this entry-filter lane only; Pine promotion still requires approval.
 """
 
 from __future__ import annotations
@@ -60,7 +61,7 @@ DATA_FLOOR = "2025-05-01"
 MIN_TRADES = 40
 OBJECTIVE_METRIC = "v9_entry_filter_score"
 
-# Pine inputs that must remain frozen (visual + fib-core + MA setup)
+# Pine inputs that must remain frozen (visual + fib-core)
 FROZEN_PINE_PARAMS = frozenset(
     {
         "autoTuneZZ",
@@ -81,34 +82,25 @@ FROZEN_PINE_PARAMS = frozenset(
     }
 )
 
-# Bullish + bearish candlestick pattern columns emitted by Pine
+# Candlestick pattern columns emitted by Pine — locked to 4 per backtest evidence
 BULL_PATTERN_COLS = (
-    "ml_pat_hammer",
-    "ml_pat_inv_hammer",
-    "ml_pat_dragonfly",
-    "ml_pat_bull_engulf",
-    "ml_pat_piercing",
-    "ml_pat_morning_star",
-    "ml_pat_three_white",
+    "ml_pat_rising_window",
 )
 BEAR_PATTERN_COLS = (
-    "ml_pat_shooting_star",
-    "ml_pat_hanging_man",
-    "ml_pat_gravestone",
     "ml_pat_bear_engulf",
-    "ml_pat_dark_cloud",
-    "ml_pat_evening_star",
-    "ml_pat_three_black",
+    "ml_pat_marubozu_black",
+    "ml_pat_tweezer_top",
 )
 
-# Required feature columns for filter HPO (raised by load_data on missing)
+# Required feature columns for filter HPO (raised by load_data on missing).
+# Must match the ml_* plot() surface of indicators/warbird-pro-v9.pine exactly.
+# ml_xa_dx_code renamed to ml_xa_dxy_code — update here when Pine rename lands.
 REQUIRED_FEATURE_COLS = (
     "ml_entry_long_trigger",
     "ml_entry_short_trigger",
     "ml_atr14",
     "ml_dir",
     "ml_rsi_value",
-    "ml_in_zone",
     "ml_bars_since_break",
     "ml_pivot_dist_atr",
     "ml_p618_dist_atr",
@@ -118,27 +110,18 @@ REQUIRED_FEATURE_COLS = (
     "ml_swept_ssl",
     "ml_reclaimed_bsl",
     "ml_reclaimed_ssl",
-    "ml_bar_delta",
-    "ml_net_delta_20",
     "ml_xa_nq_code",
     "ml_xa_zn_code",
     "ml_xa_dx_code",
-    "ml_exhaust_long",
-    "ml_exhaust_short",
     "ml_htf_conf_total",
 )
 
 # Tunable filter params
 BOOL_PARAMS: list[str] = [
-    "useMaGate",
     "requireBullPatternLong",
     "requireBearPatternShort",
     "requireSweepConfirmLong",
     "requireSweepConfirmShort",
-    "requirePositiveDeltaLong",
-    "requireNegativeDeltaShort",
-    "blockOnExhaustionLong",
-    "blockOnExhaustionShort",
     "requireXaNqAlignment",
     "blockShortsInStrongUp",
 ]
@@ -149,8 +132,6 @@ NUMERIC_RANGES: dict[str, tuple[float, float]] = {
     "minHtfConfTotal":         (0.0, 3.0),
     "maxBslDistAtrLong":       (0.5, 14.0),
     "maxSslDistAtrShort":      (0.5, 38.0),
-    "minNetDelta20Long":       (-50000.0, 50000.0),
-    "maxNetDelta20Short":      (-50000.0, 50000.0),
     "minPivotDistAtr":         (-7.0, 7.0),
     "rsiUpperBlockLong":       (60.0, 95.0),
     "rsiLowerBlockShort":      (5.0, 40.0),
@@ -179,7 +160,6 @@ CATEGORICAL_PARAMS: dict[str, list[Any]] = {
 }
 
 INPUT_DEFAULTS: dict[str, Any] = {
-    "useMaGate":               True,
     "lengthMA":                50,
     "lengthEMA":               21,
     "maTypeSlow":              "EMA",
@@ -188,17 +168,11 @@ INPUT_DEFAULTS: dict[str, Any] = {
     "requireBearPatternShort": True,
     "requireSweepConfirmLong":  False,
     "requireSweepConfirmShort": False,
-    "requirePositiveDeltaLong":  False,
-    "requireNegativeDeltaShort": False,
-    "blockOnExhaustionLong":  True,
-    "blockOnExhaustionShort": True,
     "requireXaNqAlignment":   False,
     "blockShortsInStrongUp":  False,
     "minHtfConfTotal":   0.0,
     "maxBslDistAtrLong": 8.0,
     "maxSslDistAtrShort": 8.0,
-    "minNetDelta20Long":  -5000.0,
-    "maxNetDelta20Short":  5000.0,
     "minPivotDistAtr":     -3.0,
     "rsiUpperBlockLong":   80.0,
     "rsiLowerBlockShort":  20.0,
@@ -434,12 +408,6 @@ def _passes_long_filter(row: pd.Series, params: dict[str, Any]) -> bool:
     if bool(params.get("requireSweepConfirmLong", False)):
         if not (float(row.get("ml_swept_ssl", 0.0)) > 0.0 or float(row.get("ml_reclaimed_ssl", 0.0)) > 0.0):
             return False
-    if bool(params.get("requirePositiveDeltaLong", False)):
-        if float(row.get("ml_net_delta_20", 0.0)) < float(params.get("minNetDelta20Long", -5000.0)):
-            return False
-    if bool(params.get("blockOnExhaustionLong", True)):
-        if float(row.get("ml_exhaust_long", 0.0)) > 0.0:
-            return False
     if bool(params.get("requireXaNqAlignment", False)):
         if float(row.get("ml_xa_nq_code", 0.0)) <= 0.0:
             return False
@@ -460,12 +428,6 @@ def _passes_short_filter(row: pd.Series, params: dict[str, Any]) -> bool:
             return False
     if bool(params.get("requireSweepConfirmShort", False)):
         if not (float(row.get("ml_swept_bsl", 0.0)) > 0.0 or float(row.get("ml_reclaimed_bsl", 0.0)) > 0.0):
-            return False
-    if bool(params.get("requireNegativeDeltaShort", False)):
-        if float(row.get("ml_net_delta_20", 0.0)) > float(params.get("maxNetDelta20Short", 5000.0)):
-            return False
-    if bool(params.get("blockOnExhaustionShort", True)):
-        if float(row.get("ml_exhaust_short", 0.0)) > 0.0:
             return False
     if bool(params.get("blockShortsInStrongUp", False)):
         if float(row.get("ml_xa_nq_code", 0.0)) >= 2.0:

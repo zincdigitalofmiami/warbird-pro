@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
-"""Warbird Pro V9 — Champion promotion gate (locked OOS replay).
+"""DEPRECATED 2026-05-09 — Hybrid+ champion promotion gate.
 
-Replays the top-N candidates from each Hybrid+ card on the locked OOS window
-(2025-01-01 onwards) which was never seen by HPO. Selects the champion under
-runbook Step C thresholds (OOS WR drop ≤ 25% absolute, OOS PF ≥ 1.10) and
-writes scripts/optuna/workspaces/<run_id>/champion.json.
+Promoted champions from the now-retired Hybrid+ 4-card chain. With the chain
+deprecated, this promotion logic is obsolete. The Core AutoGluon card is
+gated by scripts/ag/train_hard_gate.py (SHAP + MC integrity gates), not by
+this script. See docs/MASTER_PLAN.md "V9 Core AutoGluon" section and
+.claude/skills/training-hard-gate.
 
-Card 4 (joint challenger) is allowed to promote ONLY if it strictly beats
-the Card 1 + 2 + 3 winner on the locked OOS, per the Hybrid+ design.
-
-Usage:
-  python scripts/optuna/promote_v9_champion.py --run-id <id>
+Retained for git history only. Not runnable.
 """
 from __future__ import annotations
 
+import sys
+
+raise SystemExit(
+    "promote_v9_champion is DEPRECATED (Hybrid+ chain). The Core card is gated "
+    "by scripts/ag/train_hard_gate.py instead."
+)
+
+# --- legacy code below (unreachable) -----------------------------------------
 import argparse
 import importlib
 import json
-import sys
 from pathlib import Path
 from typing import Any
 

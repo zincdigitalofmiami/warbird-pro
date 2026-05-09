@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
-"""Strict-gated V9 replay: re-emit triggers with Pine's intended gates ON.
+"""DEPRECATED 2026-05-09 — Strict-gated V9 replay wrapper (Hybrid+ chain).
 
-Wraps scripts/optuna/v9_replay.py by toggling USE_PATTERN_CONFIRM and
-USE_MA_GATE to True before invoking replay(). Produces a smaller, higher-quality
-candidate set that better matches what live Pine emits.
+Wrapper around the deprecated scripts/optuna/v9_replay.py. Retired with the
+Hybrid+ 4-card chain; superseded by the Core ETL which builds features
+directly from Databento.
 """
 from __future__ import annotations
+
 import sys
+
+raise SystemExit(
+    "v9_replay_strict is DEPRECATED (Hybrid+ chain). See scripts/optuna/cards/core_training/."
+)
+
+# --- legacy code below (unreachable) -----------------------------------------
 from pathlib import Path
 import pandas as pd
 

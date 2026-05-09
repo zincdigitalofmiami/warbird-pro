@@ -226,11 +226,11 @@ The Pine code `input.float(default, ...)` values are NOT authoritative.
   pivot-window `fibHtfSnapshot` variant that uses `ta.barssince(...)` and
   `pivotHighInWindow` / `pivotLowInWindow`. That pattern is banned due to
   repeated wide-fib regressions.
-- Pine budget baseline verified 2026-05-04:
-  - `warbird-pro-v9.pine`: 19 output-consuming calls
-    (17 `plot()` + 2 `alertcondition()`), 4 `request.security()` calls, 0
-    `request.footprint()` calls, 16 `line.new()` calls, 1 `box.new()`, and
-    1 `table.new()`
+- Pine budget baseline verified 2026-05-09 by `scripts/guards/pine-lint.sh`:
+  - `warbird-pro-v9.pine`: 53 output-consuming calls
+    (51 `plot()` + 2 `alertcondition()`), 9 `request.security()` calls
+    after comment-line normalization, 1 `request.footprint()` call,
+    19 `line.new()` calls, 1 `box.new()`, and 1 `table.new()`
   - Nexus files are retained; price their request/output budget before any
     Nexus edit.
 - Price every new output or request path before writing Pine code.

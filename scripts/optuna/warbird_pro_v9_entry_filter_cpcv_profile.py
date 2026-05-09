@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
-"""Warbird Pro V9 — Entry filter HPO under CPCV (Hybrid+ Card 2).
+"""DEPRECATED 2026-05-09 — Hybrid+ Card 2 (warbird_pro_v9_entry_filter_cpcv).
 
-Wraps the existing single-IS entry-filter profile (warbird_pro_profile) with
-CPCV-aware scoring. Each Optuna trial scores the sampled filter params across
-combinatorial purged folds with embargo = max_hold_bars + 1 bars.
+The Hybrid+ 4-card chain (exit_cpcv + this card + ag_meta_cpcv +
+joint_challenger) was scrapped. Path went 4 cards -> 2 cards -> single Core
+AutoGluon card. See docs/MASTER_PLAN.md "V9 Core AutoGluon" section and the
+`warbird_pro_core` entry in scripts/optuna/indicator_registry.json.
 
-Card 2 expects the Card 1 champion to seed Trial #0 via runner.py's
-seed_champion(); the seed flows through `INPUT_DEFAULTS` so a Card-1 exit
-champion is the starting point for entry-filter exploration.
+This file is retained for git history only. It is NOT runnable: importing it
+raises SystemExit.
 """
 from __future__ import annotations
 
+import sys
+
+raise SystemExit(
+    "warbird_pro_v9_entry_filter_cpcv_profile is DEPRECATED (Hybrid+ Card 2). "
+    "Use scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py instead."
+)
+
+# --- legacy code below (unreachable) -----------------------------------------
 from typing import Any
 
 import pandas as pd

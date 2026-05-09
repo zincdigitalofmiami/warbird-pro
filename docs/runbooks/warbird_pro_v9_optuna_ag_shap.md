@@ -1,5 +1,22 @@
 # Warbird Pro V9 — Optuna + AG + SHAP Runbook
 
+> **DEPRECATED 2026-05-09.** This runbook described the now-retired Hybrid+
+> 4-card chain (`warbird_pro_v9_exit_cpcv`, `warbird_pro_v9_entry_filter_cpcv`,
+> `warbird_pro_v9_ag_meta_cpcv`, `warbird_pro_v9_joint_challenger`). The chain
+> was scrapped 4 → 2 → single Core AutoGluon card. The active runbook surface
+> is now:
+>
+> - `docs/MASTER_PLAN.md` "V9 Core AutoGluon" section (current plan)
+> - `scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py` (under construction)
+> - `scripts/ag/train_hard_gate.py` (production gate)
+> - `.claude/skills/training-hard-gate` (gate doctrine)
+>
+> Content below is preserved for historical reference only. All file paths
+> referenced (Card 1-4 profiles, orchestrate_v9_run, promote_v9_champion,
+> v9_replay) are quarantined and raise SystemExit on import.
+
+---
+
 **Date authorized:** 2026-05-04
 **Active Pine surface:** `indicators/warbird-pro-v9.pine` (frozen until promotion approval)
 **Trigger family:** `LIVE_ANCHOR_FOOTPRINT`
@@ -12,7 +29,7 @@ two-lane Optuna setup (entry filter + exit policy), AutoGluon training, and
 SHAP-driven feature pruning. It is the operator playbook for the
 "best entry, best exit, heads-up exhaustion" goal.
 
-## 0. Hybrid+ Optuna architecture (active)
+## 0. Hybrid+ Optuna architecture (deprecated 2026-05-09)
 
 The legacy two-lane pair (`warbird_pro` and `warbird_pro_v9`) remains
 operational for backward compatibility, but the production-active

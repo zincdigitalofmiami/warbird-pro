@@ -1,35 +1,29 @@
 #!/usr/bin/env python3
-"""Warbird Pro V9 — Hybrid+ run orchestrator.
+"""DEPRECATED 2026-05-09 — Hybrid+ 4-card orchestrator.
 
-Creates one orchestrated run ID, writes a manifest of card studies, and
-produces the strategy-candidate manifest Card 3 (AG meta) consumes.
+Orchestrated the now-retired Hybrid+ chain (Cards 1-4). Replaced by the single
+Core AutoGluon card (scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py)
++ scripts/ag/train_hard_gate.py for production runs. See docs/MASTER_PLAN.md
+"V9 Core AutoGluon" section.
 
-Cards 1, 2, 3, and optionally 4 are run sequentially via the standard
-runner.py invocation. Each card's study DB lives at
-scripts/optuna/workspaces/<card_key>/study.db and the optuna hub at :8090
-auto-spawns child dashboards on :8100+.
-
-Usage:
-  python scripts/optuna/orchestrate_v9_run.py \
-      --n-trials-exit 500 --n-trials-filter 1500 --n-trials-ag 1000 \
-      [--n-trials-joint 500] [--top-k 5] [--dry-run]
-
-Champion selection from a finished run:
-  python scripts/optuna/promote_v9_champion.py --run-id <id>
-
-This orchestrator does NOT run any HPO itself; it stages artifacts and
-prints the runner.py commands so the operator can launch each card with
-visible logs. `--dry-run` prints commands without writing the manifest.
+Retained for git history only. Not runnable.
 """
 from __future__ import annotations
 
+import sys
+
+raise SystemExit(
+    "orchestrate_v9_run is DEPRECATED (Hybrid+ chain). Use scripts/ag/train_hard_gate.py "
+    "with the Core card config instead."
+)
+
+# --- legacy code below (unreachable) -----------------------------------------
 import argparse
 import datetime as _dt
 import hashlib
 import json
 import shlex
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 

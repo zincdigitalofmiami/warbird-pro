@@ -1,32 +1,28 @@
 #!/usr/bin/env python3
-"""Warbird Pro V9 — AG meta-labeler HPO under CPCV (Hybrid+ Card 3).
+"""DEPRECATED 2026-05-09 — Hybrid+ Card 3 (warbird_pro_v9_ag_meta_cpcv).
 
-Card 3 puts the AutoGluon TabularPredictor inside the Optuna dashboard as a
-first-class study card. Each trial:
+The Hybrid+ 4-card chain (exit_cpcv + entry_filter_cpcv + this card +
+joint_challenger) was scrapped. Path went 4 cards -> 2 cards -> single Core
+AutoGluon card. See docs/MASTER_PLAN.md "V9 Core AutoGluon" section and the
+`warbird_pro_core` entry in scripts/optuna/indicator_registry.json.
 
-  1. Picks an AG hyperparameter sample (preset, family subset, time_limit,
-     prob_threshold) AND a `strategy_candidate_id` chosen from the top-K
-     winners from Cards 1 + 2 (the orchestrate script writes the candidate
-     manifest before this card runs).
-  2. Builds the labeled trade dataset by replaying V9 ml_* exports against
-     the chosen candidate's strategy params.
-  3. Splits the trades chronologically with embargo = label_horizon + 1
-     bars (no IID K-fold; embargo enforced by scripts/optuna/cpcv.py).
-  4. Fits AG on train, validates on the embargoed val slice, predicts on the
-     embargoed test slice.
-  5. Returns lift (gated_winrate - base_winrate) as the trial objective and
-     logs ag_* user_attrs for dashboard inspection (model_path,
-     prob_threshold, leakage_flags, calibration, etc.).
-
-This card consumes the same Databento export as Cards 1 and 2; it does not
-re-export bars. The `strategy_candidate_id` categorical is the integration
-seam that gives the AG study its top-K coupling.
+This file is retained for git history only. It is NOT runnable: importing it
+raises SystemExit. It also references V8-era features (ml_pat_morning_star,
+ml_in_zone, ml_bar_delta, ml_net_delta_20, ml_exhaust_*) that current V9 Pine
+no longer emits.
 """
 from __future__ import annotations
 
+import sys
+
+raise SystemExit(
+    "warbird_pro_v9_ag_meta_cpcv_profile is DEPRECATED (Hybrid+ Card 3). "
+    "Use scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py instead."
+)
+
+# --- legacy code below (unreachable) -----------------------------------------
 import json
 import os
-import sys
 from pathlib import Path
 from typing import Any
 

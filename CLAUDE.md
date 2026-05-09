@@ -65,11 +65,12 @@ Retired/removed Pine variants:
 - `indicators/v7-warbird-institutional-backtest-strategy.pine`
 - `indicators/fibs-only.pine`
 
-Budget verification from 2026-05-04:
+Budget verification from 2026-05-09 by `scripts/guards/pine-lint.sh`:
 
-- Warbird Pro V9: 19 output-consuming calls
-  (17 `plot()` + 2 `alertcondition()`), 4 `request.security()`, 0
-  `request.footprint()`, 16 `line.new()`, 1 `box.new()`, and 1 `table.new()`
+- Warbird Pro V9: 53 output-consuming calls
+  (51 `plot()` + 2 `alertcondition()`), 9 `request.security()` after
+  comment-line normalization, 1 `request.footprint()`, 19 `line.new()`,
+  1 `box.new()`, and 1 `table.new()`
 
 Checkpoint summary from 2026-04-27 operator TradingView snapshots:
 
@@ -90,11 +91,64 @@ Checkpoint summary from 2026-04-27 operator TradingView snapshots:
 - `scripts/ag/train_ag_baseline.py`, local `ag_training`, and FRED-join lineage
   tables are legacy unless explicitly reopened.
 
+### Current Plan — Warbird Pro V9 Core AutoGluon (2026-05-09)
+
+The Hybrid+ 4-card system (`warbird_pro_v9_exit_cpcv`,
+`warbird_pro_v9_entry_filter_cpcv`, `warbird_pro_v9_ag_meta_cpcv`,
+`warbird_pro_v9_joint_challenger`) is **deprecated**. Path went 4 cards →
+2 cards → single Core card. The Core card supersedes all four.
+
+**Single active training card:** `scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py`
+(under construction). MAE-regression side card scaffolds in
+`scripts/optuna/cards/side_models/` and trains AFTER Core lands.
+
+**AG config (locked):**
+
+- `preset='best_quality'`
+- Full zoo via explicit `hyperparameters` dict — 7 families:
+  GBM (×2 configs), CAT, XGB, RF (×2), XT (×2), NN_TORCH, FASTAI
+- `num_bag_folds=0`, `num_stack_levels=0` (no bagging — time-series safe)
+- `dynamic_stacking=False` (override best_quality's default for reproducibility)
+- `eval_metric='log_loss'`, `calibrate=True` (so 0.75 inference threshold = 75% real-world WR)
+- `time_limit=7200s` (2h, full zoo)
+- `ag_args_ensemble={'fold_fitting_strategy': 'sequential_local'}`
+- All OpenMP families single-threaded; `OMP_NUM_THREADS=1` env guard at script top
+
+**Label (locked):** triple-barrier `winner_10pt_24bar` =
+`1` if price hits +10pts before -5pts within 24 5m bars (2:1 R:R, 2-hour window);
+`0` otherwise; rows where neither barrier hits within 24 bars are DROPPED
+(not relabeled as loss).
+
+**Inference:** Apply `proba > 0.75` confidence threshold for Grade A+ entries.
+Session is a feature (`ml_session_ny/london/asia`, `ml_minutes_from_open`),
+NOT a pre-filter — let AG learn regime-conditional precision.
+
+**Data window:** Core trains on Databento MES 2025-05 → 2026-05 (1y, dense feature
+coverage). Footprint reconstruction from Databento MES Trades 365d. The newer
+OHLCV-1s 2315d (~6.3y) Databento download is reserved for a future v10
+long-horizon ensemble card, NOT Core (would NaN out 2/3 of feature surface).
+
+**Feature surface:** V9 Pine ml_* + ETL-derived `ml_cvd_div_bull/bear` (CVD
+divergence, Python-only, no Pine cost) + microstructure (1m sub-bar) + IB +
+volume profile HVN/LVN + UTC-anchored economic-event features.
+
+**V9 Pine pattern set:** 4 curated patterns —
+Bull: `patRisingWindow`. Bear: `patBearEngulf`, `patMarubozuBlack`, `patTweezerTop`.
+Dropped 2026-05-09: `patBullEngulf`, `patPiercing`, `patHaramiBull`, `patHaramiBear`.
+
+**DXY rename:** HELD per Kirk 2026-05-09. `ml_xa_dx_code` stays as-is for now;
+atomic rename pass will sweep Pine + train_v9_locked.py + profile in a single
+commit when Kirk authorizes.
+
+**Three Line Strike pattern:** HELD for v10. 84% citation is unverified vendor
+claim — validate in Python first before reserving Pine plot budget.
+
 ### Current Blocker
 
-Hybrid+ 4-card authority run is deprecated. Active direction is the single
-Core training card (`scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py`).
-Treat legacy Hybrid+ runtime notes as historical only.
+Pine atomic pass partial — V9 Pine pattern drop done, train_v9_locked.py
+ML_FEATURES updated, profile schema cleaned. Pending: verification pipeline
+(pine-lint, fib guards, contamination, no-tv-force, npm build, agent precheck)
++ ETL build + Core card body + Optuna hub wiring + pre-launch gate report.
 
 ### Live Pine Settings (Canonical — read TV inputs panel, not Pine code defaults)
 

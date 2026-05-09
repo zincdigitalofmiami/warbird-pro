@@ -104,11 +104,11 @@ def assert_v9_oos_lock(indicator_key: str, start: str, end: str | None) -> None:
     """Refuse to run if a V9 lane is configured to see the locked OOS window.
 
     Raises SystemExit on violation so the offending command never proceeds to
-    a real HPO trial. The lock is enforced by --indicator-key prefix so the
-    Hybrid+ scaffold cards (warbird_pro_v9_exit_cpcv,
-    warbird_pro_v9_entry_filter_cpcv, warbird_pro_v9_ag_meta_cpcv,
-    warbird_pro_v9_joint_challenger) inherit the same protection without
-    further wiring.
+    a real HPO trial. The lock is enforced by --indicator-key prefix
+    (`warbird_pro_v9*`) so any V9-keyed card inherits the protection without
+    further wiring. (The Hybrid+ 4-card chain that originally drove this
+    prefix was deprecated 2026-05-09; the prefix lock remains for any future
+    V9-keyed card such as `warbird_pro_core`.)
     """
     if not any(indicator_key.startswith(p) for p in V9_OOS_LOCKED_KEY_PREFIXES):
         return

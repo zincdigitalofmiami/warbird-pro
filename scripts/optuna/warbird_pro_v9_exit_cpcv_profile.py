@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
-"""Warbird Pro V9 — Exit policy HPO under CPCV (Hybrid+ Card 1).
+"""DEPRECATED 2026-05-09 — Hybrid+ Card 1 (warbird_pro_v9_exit_cpcv).
 
-Wraps the existing single-IS exit profile (warbird_pro_v9_profile) with
-CPCV-aware scoring. Each Optuna trial scores the sampled exit params across
-combinatorial purged folds with embargo = max_hold_bars + 1 bars, so a thin
-high-WR slice can no longer drive the leaderboard alone.
+The Hybrid+ 4-card chain (this card + entry_filter_cpcv + ag_meta_cpcv +
+joint_challenger) was scrapped. Path went 4 cards -> 2 cards -> single Core
+AutoGluon card. See docs/MASTER_PLAN.md "V9 Core AutoGluon" section and the
+`warbird_pro_core` entry in scripts/optuna/indicator_registry.json.
 
-Search space and frozen Pine inputs are inherited from the base profile.
+This file is retained for git history / promotion-logic reference only. It is
+NOT runnable: importing it raises SystemExit.
 """
 from __future__ import annotations
 
+import sys
+
+raise SystemExit(
+    "warbird_pro_v9_exit_cpcv_profile is DEPRECATED (Hybrid+ Card 1). "
+    "Use scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py instead."
+)
+
+# --- legacy code below (unreachable) -----------------------------------------
 from typing import Any
 
 import pandas as pd

@@ -13,7 +13,7 @@
     "timeframe": "5",
     "data_floor": "2025-05-01",
     "label_column": "ml_entry_long_trigger/ml_entry_short_trigger",
-    "output_budget": "53/64 output-consuming calls (51 plot + 2 alertcondition); 9 request.security (pine-lint counting)",
+    "output_budget": "53/64 output-consuming calls (51 plot + 2 alertcondition); 9 request.security; 1 request.footprint (pine-lint counting)",
     "trigger_family": "LIVE_ANCHOR_FOOTPRINT",
     "frozen_params": [
       "autoTuneZZ",
@@ -30,8 +30,6 @@
       "fibLabelOffsetBarsInput",
       "fibLabelSizeInput",
       "zoneFillTransparencyInput",
-      "lengthMA",
-      "lengthEMA",
       "showMaLines"
     ],
     "tunable_filter_params": [
@@ -41,20 +39,18 @@
       "minBearPatternsShort",
       "requireSweepConfirmLong",
       "requireSweepConfirmShort",
-      "requirePositiveDeltaLong",
-      "requireNegativeDeltaShort",
-      "blockOnExhaustionLong",
-      "blockOnExhaustionShort",
       "requireXaNqAlignment",
       "blockShortsInStrongUp",
       "minHtfConfTotal",
       "maxBslDistAtrLong",
       "maxSslDistAtrShort",
-      "minNetDelta20Long",
-      "maxNetDelta20Short",
       "minPivotDistAtr",
       "rsiUpperBlockLong",
       "rsiLowerBlockShort"
+    ],
+    "tunable_ma_params": [
+      "lengthMA",
+      "lengthEMA"
     ],
     "tunable_exit_params_shared_with_v9": [
       "stopAtrMult",
@@ -71,7 +67,7 @@
       "DATABENTO_BARS_CSV",
       "DATABENTO_TRADES_CSV"
     ],
-    "notes": "V9 entry-filter HPO. MES 5m only, Databento historical only. Treats Pine V9 ml_entry_long_trigger / ml_entry_short_trigger as candidates and tunes a post-trigger filter that decides which to TAKE based on the rich ml_* feature surface (candlestick patterns, BSL/SSL liquidity, volume delta, HTF confluence, exhaustion, cross-asset codes). Pine fib core, MA setup, and visuals are frozen. Negative-fib stop candidates banned by contract."
+    "notes": "V9 entry-filter HPO. MES 5m only, Databento historical only. Treats Pine V9 ml_entry_long_trigger / ml_entry_short_trigger as candidates and tunes a post-trigger filter. 2026-05-09: pattern set trimmed to 4 (RisingWindow + BearEngulf/MarubozuBlack/TweezerTop). Phantom params removed: useMaGate, requirePositiveDeltaLong, requireNegativeDeltaShort, blockOnExhaustionLong/Short, minNetDelta20Long, maxNetDelta20Short. MA lengths now tunable (SMA 30-70, EMA 14-34). Negative-fib stop candidates banned by contract."
   },
   {
     "key": "warbird_pro_v9",
@@ -87,7 +83,7 @@
     "timeframe": "5",
     "data_floor": "2025-05-01",
     "label_column": "ml_entry_long_trigger/ml_entry_short_trigger",
-    "output_budget": "53/64 output-consuming calls (51 plot + 2 alertcondition); 9 request.security (pine-lint counting)",
+    "output_budget": "53/64 output-consuming calls (51 plot + 2 alertcondition); 9 request.security; 1 request.footprint (pine-lint counting)",
     "trigger_family": "LIVE_ANCHOR_FOOTPRINT",
     "frozen_params": [
       "autoTuneZZ",
@@ -100,8 +96,6 @@
       "targetLookbackBars",
       "extendLevelsRight",
       "useConfluenceAnchorSpan",
-      "lengthMA",
-      "lengthEMA",
       "showMaLines"
     ],
     "tunable_exit_params": [
@@ -126,99 +120,7 @@
       "DATABENTO_BARS_CSV",
       "DATABENTO_TRADES_CSV"
     ],
-    "notes": "V9 exit-policy HPO. MES 5m only, Databento historical only. Models ATR/risk exits (bracket, R:R, breakeven, ATR trail) on the same Pine V9 entry triggers. Negative-fib extension stops banned. Pine source frozen until promotion approval."
-  },
-  {
-    "key": "warbird_pro_v9_exit_cpcv",
-    "name": "Warbird Pro V9 — Exit Policy (CPCV)",
-    "group_key": "warbird_pro_v9_production",
-    "group_name": "Warbird Pro V9 Production",
-    "surface_type": "indicator",
-    "category": "chart-core-exit-modeling",
-    "pine_file": "indicators/warbird-pro-v9.pine",
-    "profile_module": "scripts.optuna.warbird_pro_v9_exit_cpcv_profile",
-    "default_study_name": "Warbird Pro V9 Exit Policy CPCV",
-    "symbol": "MES1!",
-    "timeframe": "5",
-    "data_floor": "2020-01-01",
-    "trigger_family": "LIVE_ANCHOR_FOOTPRINT",
-    "objective_metric": "v9_risk_exit_score",
-    "min_trades_floor": 20,
-    "allowed_capture_methods": [
-      "DATABENTO_OHLCV_CSV",
-      "DATABENTO_TRAINING_CSV",
-      "DATABENTO_BARS_CSV"
-    ],
-    "notes": "Hybrid+ Card 1. Wraps the existing exit-policy lane with CPCV (n_splits=6, n_test=2, embargo=label_horizon+1 bars). HPO MUST use --start 2020-01-01 --end 2024-12-31 (V9 OOS lock enforced by runner.py.assert_v9_oos_lock)."
-  },
-  {
-    "key": "warbird_pro_v9_entry_filter_cpcv",
-    "name": "Warbird Pro V9 — Entry Filter (CPCV)",
-    "group_key": "warbird_pro_v9_production",
-    "group_name": "Warbird Pro V9 Production",
-    "surface_type": "indicator",
-    "category": "chart-core-entry-filter",
-    "pine_file": "indicators/warbird-pro-v9.pine",
-    "profile_module": "scripts.optuna.warbird_pro_v9_entry_filter_cpcv_profile",
-    "default_study_name": "Warbird Pro V9 Entry Filter CPCV",
-    "symbol": "MES1!",
-    "timeframe": "5",
-    "data_floor": "2020-01-01",
-    "trigger_family": "LIVE_ANCHOR_FOOTPRINT",
-    "objective_metric": "v9_entry_filter_score",
-    "min_trades_floor": 40,
-    "allowed_capture_methods": [
-      "DATABENTO_OHLCV_CSV",
-      "DATABENTO_TRAINING_CSV",
-      "DATABENTO_BARS_CSV"
-    ],
-    "notes": "Hybrid+ Card 2. Wraps the existing entry-filter lane with CPCV. Seed Trial #0 with the Card 1 exit champion via --champion-path scripts/optuna/workspaces/warbird_pro_v9_exit_cpcv/champion.json."
-  },
-  {
-    "key": "warbird_pro_v9_ag_meta_cpcv",
-    "name": "Warbird Pro V9 — AG Meta-Labeler (CPCV)",
-    "group_key": "warbird_pro_v9_production",
-    "group_name": "Warbird Pro V9 Production",
-    "surface_type": "indicator",
-    "category": "ag-meta-labeler",
-    "pine_file": "indicators/warbird-pro-v9.pine",
-    "profile_module": "scripts.optuna.warbird_pro_v9_ag_meta_cpcv_profile",
-    "default_study_name": "Warbird Pro V9 AG Meta CPCV",
-    "symbol": "MES1!",
-    "timeframe": "5",
-    "data_floor": "2020-01-01",
-    "trigger_family": "LIVE_ANCHOR_FOOTPRINT",
-    "objective_metric": "ag_gating_lift",
-    "min_trades_floor": 200,
-    "allowed_capture_methods": [
-      "DATABENTO_OHLCV_CSV",
-      "DATABENTO_TRAINING_CSV",
-      "DATABENTO_BARS_CSV"
-    ],
-    "notes": "Hybrid+ Card 3 — AG meta-labeler inside Optuna. Each trial samples (ag_family, time_limit, prob_threshold, strategy_candidate_id) and fits AG with embargoed chronological split (label_horizon+1 bars). user_attrs include ag_model_path, ag_test_auc, ag_test_brier, ag_lift, ag_leakage_flags. Strategy candidates are produced by orchestrate_v9_run.py from Cards 1+2 top-K cross-product."
-  },
-  {
-    "key": "warbird_pro_v9_joint_challenger",
-    "name": "Warbird Pro V9 — Joint Challenger (Bounded)",
-    "group_key": "warbird_pro_v9_production",
-    "group_name": "Warbird Pro V9 Production",
-    "surface_type": "indicator",
-    "category": "joint-challenger",
-    "pine_file": "indicators/warbird-pro-v9.pine",
-    "profile_module": "scripts.optuna.warbird_pro_v9_joint_challenger_profile",
-    "default_study_name": "Warbird Pro V9 Joint Challenger",
-    "symbol": "MES1!",
-    "timeframe": "5",
-    "data_floor": "2020-01-01",
-    "trigger_family": "LIVE_ANCHOR_FOOTPRINT",
-    "objective_metric": "joint_challenger_lift",
-    "min_trades_floor": 200,
-    "allowed_capture_methods": [
-      "DATABENTO_OHLCV_CSV",
-      "DATABENTO_TRAINING_CSV",
-      "DATABENTO_BARS_CSV"
-    ],
-    "notes": "Hybrid+ Card 4 — bounded challenger only. Searches strategy params + AG hyperparams jointly. Capped trial budget (default 500). Promotes ONLY if it strictly beats the Card 1+2+3 winner on the locked OOS window per scripts/optuna/promote_v9_champion.py --allow-challenger."
+    "notes": "V9 exit-policy HPO. MES 5m only, Databento historical only. Models ATR/risk exits on the same Pine V9 entry triggers. Negative-fib extension stops banned. 2026-05-09: pattern set trimmed to 4. MA setup remains frozen in this exit lane. Pine source frozen until promotion approval."
   },
   {
     "key": "warbird_pro_core",
@@ -229,9 +131,12 @@
     "profile_module": "scripts.optuna.cards.core_training.2026_05_09_warbird_pro_autogluon_core",
     "default_study_name": "Warbird Pro V9 Core AG 10pt 24bar",
     "symbol": "MES1!",
+    "allowed_symbol_roots": ["MES"],
+    "ignored_symbol_roots": ["ES", "NQ", "MNQ"],
     "timeframe": "5",
     "data_floor": "2025-05-01",
     "label_column": "winner_10pt_24bar",
+    "output_budget": "53/64 output-consuming calls (51 plot + 2 alertcondition); 9 request.security; 1 request.footprint (pine-lint counting)",
     "trigger_family": "LIVE_ANCHOR_FOOTPRINT",
     "objective_metric": "ag_test_log_loss",
     "min_trades_floor": 200,
@@ -241,7 +146,38 @@
       "DATABENTO_BARS_CSV",
       "DATABENTO_TRADES_CSV"
     ],
-    "notes": "Core card scaffold only. Training contract wiring lands in follow-up commits."
+    "ag_config": {
+      "preset": "best_quality",
+      "num_bag_folds": 0,
+      "num_stack_levels": 0,
+      "dynamic_stacking": false,
+      "eval_metric": "log_loss",
+      "calibrate": true,
+      "time_limit": 7200,
+      "ag_args_ensemble": {"fold_fitting_strategy": "sequential_local"},
+      "hyperparameters": {
+        "GBM": [{"num_threads": 1}, {"num_threads": 1, "extra_trees": true}],
+        "CAT": {"thread_count": 1},
+        "XGB": {"n_jobs": 1},
+        "RF": [{"criterion": "gini"}, {"criterion": "entropy"}],
+        "XT": [{"criterion": "gini"}, {"criterion": "entropy"}],
+        "NN_TORCH": {},
+        "FASTAI": {}
+      }
+    },
+    "label_spec": {
+      "type": "triple_barrier",
+      "tp_points": 10,
+      "sl_points": 5,
+      "max_bars": 24,
+      "drop_neither_hit": true,
+      "rr_ratio": "2:1"
+    },
+    "inference": {
+      "threshold": 0.75,
+      "session_filter": "feature_only_not_prefilter"
+    },
+    "notes": "Single Core training card supersedes the deprecated Hybrid+ 4-card chain (warbird_pro_v9_exit_cpcv, warbird_pro_v9_entry_filter_cpcv, warbird_pro_v9_ag_meta_cpcv, warbird_pro_v9_joint_challenger removed 2026-05-09). Binary classifier on V9 ml_* feature surface + ETL CVD divergence + microstructure + IB + HVN/LVN + UTC-anchored events. Triple-barrier label: +10pts before -5pts within 24 5m bars (2h, 2:1 R:R), drop neither-hit rows. Best_quality preset with explicit no-bag/no-stack overrides keeps it time-series safe. Hard gate enforced via scripts/ag/train_hard_gate.py."
   },
   {
     "key": "warbird_nexus_ml_rsi",

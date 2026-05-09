@@ -251,12 +251,12 @@ Promotion is manual. A champion means:
 
 ## Pine Budget Baseline
 
-Verified 2026-05-04:
+Verified 2026-05-09 by `scripts/guards/pine-lint.sh`:
 
-- `warbird-pro-v9.pine`: 19 output-consuming calls
-  (17 `plot()` + 2 `alertcondition()`), 4 `request.security()` calls,
-  0 `request.footprint()` calls, 16 `line.new()` calls, 1 `box.new()`,
-  and 1 `table.new()`.
+- `warbird-pro-v9.pine`: 53 output-consuming calls
+  (51 `plot()` + 2 `alertcondition()`), 9 `request.security()` calls after
+  comment-line normalization, 1 `request.footprint()` call, 19 `line.new()`
+  calls, 1 `box.new()`, and 1 `table.new()`.
 
 Any Pine addition must be priced before code is written. Nexus request/output
 budgets must be repriced before any Nexus edit.
@@ -289,15 +289,20 @@ budgets must be repriced before any Nexus edit.
 
 ## Current Blocker
 
-Hybrid+ 4-card authority run is deprecated. Active direction is the single
-Core training card (`scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py`).
-Treat legacy Hybrid+ runtime notes as historical only.
+Pine atomic pass partial — V9 Pine pattern drop done, train_v9_locked.py
+ML_FEATURES updated, profile schema cleaned. Pending: verification pipeline +
+ETL build + Core card body + Optuna hub wiring + pre-launch gate report.
 
 ---
 
 ## V9 Core AutoGluon — Active Plan (2026-05-09)
 
-### Live Pine Settings (authoritative — must match `build_v9_dataset.py` exactly)
+The earlier Hybrid+ 4-card system (`warbird_pro_v9_exit_cpcv`,
+`warbird_pro_v9_entry_filter_cpcv`, `warbird_pro_v9_ag_meta_cpcv`,
+`warbird_pro_v9_joint_challenger`) is **deprecated**. Path went 4 → 2 → single
+Core card. The Core card supersedes all four.
+
+### Live Pine Settings (authoritative — must match dataset builder exactly)
 
 | Parameter | Value | Pine input name |
 |-----------|-------|-----------------|
@@ -310,51 +315,71 @@ Treat legacy Hybrid+ runtime notes as historical only.
 | MA Length (SMA) | **13** | `lengthMA` |
 | EMA Length | **6** | `lengthEMA` |
 
-**Critical rule:** Before every dataset build, read the live TradingView indicator
-inputs panel and verify `build_v9_dataset.py` constants match exactly.
-The Pine code `input.float(default, ...)` defaults are NOT authoritative —
-the user's saved TV settings are.
+**Rule:** Before every dataset build, read the live TradingView indicator
+inputs panel and verify the dataset-builder constants match exactly. Pine code
+`input.float(default, ...)` defaults are NOT authoritative — the user's saved
+TV settings are. Contamination incident (2026-05-05) used dev=4.0, depth=20,
+floor=0.50 — all wrong; do not repeat.
 
-### Training Dataset Contract
+### V9 Pine Pattern Set (post-2026-05-09 trim)
 
-- Source: `data/mes_1m.parquet` (Databento 1m MES, 2020-01-01+)
-- Build script: `scripts/optuna/workspaces/warbird_pro_v9/build_v9_dataset.py`
-- Output: `exports/mes_5m.csv` — 441,852 5m bars, sha256 recorded in manifest
-- IS window: `2020-01-01 → 2024-12-31` (runner `--start`/`--end` flags)
-- OOS lock: `2025-01-01+` — untouched until champion promotion
-- Clean build committed: `dd81ebf` (2026-05-05), after contamination purge
+- **Bull (1):** `patRisingWindow`
+- **Bear (3):** `patBearEngulf`, `patMarubozuBlack`, `patTweezerTop`
+- **Dropped 2026-05-09:** `patBullEngulf`, `patPiercing`, `patHaramiBull`,
+  `patHaramiBear`
+- **HOLD for v10:** Three Line Strike (84% vendor citation unverified — validate
+  in Python first before reserving Pine plot budget)
 
-**Contamination incident (2026-05-05):** Prior CSV was built with stale params
-`dev=4.0, depth=20, floor=0.50`. All study DBs were deleted and the dataset
-rebuilt clean with `dev=3.0, depth=10, floor=0.15`. Runner label `MES_15m` was
-also fixed to `MES_5m` (commit `c241214`).
+### Core Training Dataset Contract
 
-### Kirk's Exit Trade Preferences (GOAL — Optuna rewards these)
+- **Source:** Databento MES — Trades 365d (footprint reconstruction) + OHLCV
+  bars 5m (training resolution) + OHLCV 1m (microstructure features only).
+- **Window:** 2025-05-01 → 2026-05-09 (1y, dense feature coverage).
+  The newer Databento OHLCV-1s 2315d download is reserved for a future v10
+  long-horizon ensemble card, NOT Core (would NaN 2/3 of feature surface).
+- **Feature surface:** V9 Pine ml_* + ETL-derived `ml_cvd_div_bull/bear` (CVD
+  divergence, Python-only, zero Pine cost) + 1m microstructure features +
+  Initial Balance + volume profile HVN/LVN + UTC-anchored economic-event
+  features (CPI/NFP/PPI=13:30 UTC, FOMC=19:00/18:00 UTC seasonal).
+- **Label (triple barrier):** `winner_10pt_24bar` = 1 if +10 pts before -5 pts
+  within 24 5m bars (2:1 R:R, 2-hour window); 0 otherwise; rows where neither
+  barrier hits within the window are DROPPED (not relabeled as loss).
 
-- **Target SL:** 1.0 ATR (search range: 0.75–2.0; max SL = 2.0 ATR)
-- **Target breakeven range:** 1–3R (`targetRiskMultiple` range: 1.0–3.0)
-- Objective includes `target_hit_rate` reward (weight 0.14): fraction of trades
-  exiting at TARGET, not stop/time. Configs where price reaches the 1–3R goal
-  are actively scored higher.
+### Kirk's Trade Preferences
 
-### 4-Card Sequence
+- **Target move:** 10 MES points (40 ticks, $50/contract).
+- **Target SL:** 1.0 ATR. **Max SL:** 2.0 ATR. `stopAtrMult` range (0.75, 2.0).
+- **Target breakeven range:** 1–3R. `targetRiskMultiple` range (1.0, 3.0).
+- **Inference threshold:** `proba > 0.75` for Grade A+ entries.
+  `eval_metric='log_loss'` + `calibrate=True` ensures the threshold = real WR.
+- **Session filter:** feature only (`ml_session_ny/london/asia`,
+  `ml_minutes_from_open`), NOT a pre-filter — let AG learn the regime.
 
-| Card | Profile | Trials | Status |
-|------|---------|--------|--------|
-| 1 | `warbird_pro_v9_exit_cpcv` | 1000 | **Running** (PID 71880) |
-| 2 | `warbird_pro_v9_entry_filter_cpcv` | 1000 | Pending Card 1 |
-| 3 | `warbird_pro_v9_ag_meta_cpcv` | 1000 | Pending Card 2 |
-| 4 | `warbird_pro_v9_joint_challenger` | 500 | Pending Card 3 |
+### Single Core Training Card
 
-Cards run via `scripts/optuna/orchestrate_v9_run.py` in dependency order.
-AG (Card 3) uses `best_quality` preset + `num_bag_folds=8`, `num_stack_levels=1`.
+| Card | Profile | Status |
+|------|---------|--------|
+| Core | `scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py` | Under construction |
 
-### Promotion Gate (champion.json)
+**AG config (locked):**
 
-```bash
-python scripts/optuna/promote_v9_champion.py --run-id <run_id>
-```
+- `preset='best_quality'`
+- Full zoo (7 families) via explicit `hyperparameters` dict:
+  GBM (×2: standard + extra_trees), CAT, XGB, RF (×2: gini + entropy),
+  XT (×2: gini + entropy), NN_TORCH, FASTAI
+- `num_bag_folds=0`, `num_stack_levels=0` — no bagging, time-series safe
+- `dynamic_stacking=False` — override preset default for reproducibility
+- `eval_metric='log_loss'`, `calibrate=True`
+- `time_limit=7200s` (2h, full zoo lets NN_TORCH + FASTAI converge)
+- `ag_args_ensemble={'fold_fitting_strategy': 'sequential_local'}`
+- All OpenMP families single-threaded; `OMP_NUM_THREADS=1` env guard at top
 
-- WR drop IS→OOS ≤ 25%
-- OOS PF ≥ 1.10
-- Card 4 must strictly beat Cards 1+2+3 winner on OOS to promote
+**Side card (post-Core):** `scripts/optuna/cards/side_models/` will hold a MAE
+regression model that predicts maximum adverse excursion per trade. Used for
+SL sizing AFTER the Core binary classifier ranks setups. Trained separately;
+NOT grafted into Core.
+
+### Hard Gate
+
+Production runs go through `scripts/ag/train_hard_gate.py`. Manual chains of
+train → SHAP → MC are forbidden. See `.claude/skills/training-hard-gate`.

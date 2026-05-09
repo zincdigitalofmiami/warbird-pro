@@ -228,20 +228,16 @@ float bodyRatio = barRange > 0 ? bodySize / barRange : 0.0
 //=====================
 // Candlestick patterns — curated from real backtest performance (return >= 0.5%)
 //=====================
-// Bullish — Engulfing, Piercing, Rising Window, Harami Bull
-bool patBullEngulf    = bullishCandle and bearishCandle[1] and close > open[1] and open < close[1]
-bool patPiercing      = bullishCandle and bearishCandle[1] and open < close[1] and close >= (open[1] + close[1]) / 2.0 and close < open[1]
+// Bullish — Rising Window
 bool patRisingWindow  = bullishCandle and low > high[1]
-bool patHaramiBull    = bullishCandle and bearishCandle[1] and bodyRatio[1] >= 0.5 and high <= open[1] and low >= close[1] and bodyRatio < bodyRatio[1] * 0.7
 
-// Bearish — Engulfing, Marubozu Black, Harami Bear, Tweezer Top
+// Bearish — Engulfing, Marubozu Black, Tweezer Top
 bool patBearEngulf    = bearishCandle and bullishCandle[1] and close < open[1] and open > close[1]
 bool patMarubozuBlack = bearishCandle and bodyRatio >= 0.85 and upperWickRatio <= 0.10 and lowerWickRatio <= 0.10
-bool patHaramiBear    = bearishCandle and bullishCandle[1] and bodyRatio[1] >= 0.5 and high <= close[1] and low >= open[1] and bodyRatio < bodyRatio[1] * 0.7
 bool patTweezerTop    = bearishCandle and math.abs(high - high[1]) <= atr14 * 0.05 and bullishCandle[1]
 
-bool provenBullishPattern = patBullEngulf or patPiercing or patRisingWindow or patHaramiBull
-bool provenBearishPattern = patBearEngulf or patMarubozuBlack or patHaramiBear or patTweezerTop
+bool provenBullishPattern = patRisingWindow
+bool provenBearishPattern = patBearEngulf or patMarubozuBlack or patTweezerTop
 
 //=====================
 // RSI context
@@ -977,14 +973,10 @@ plot(adxValue, "ml_adx_value", display=display.none, editable=false)
 plot(adxDiPlus, "ml_adx_plus_di", display=display.none, editable=false)
 plot(adxDiMinus, "ml_adx_minus_di", display=display.none, editable=false)
 
-// candlestick patterns (curated 8 from real backtest performance)
-plot(patBullEngulf ? 1.0 : 0.0, "ml_pat_bull_engulf", display=display.none, editable=false)
-plot(patPiercing ? 1.0 : 0.0, "ml_pat_piercing", display=display.none, editable=false)
+// candlestick patterns (curated 4 from real backtest performance)
 plot(patRisingWindow ? 1.0 : 0.0, "ml_pat_rising_window", display=display.none, editable=false)
-plot(patHaramiBull ? 1.0 : 0.0, "ml_pat_harami_bull", display=display.none, editable=false)
 plot(patBearEngulf ? 1.0 : 0.0, "ml_pat_bear_engulf", display=display.none, editable=false)
 plot(patMarubozuBlack ? 1.0 : 0.0, "ml_pat_marubozu_black", display=display.none, editable=false)
-plot(patHaramiBear ? 1.0 : 0.0, "ml_pat_harami_bear", display=display.none, editable=false)
 plot(patTweezerTop ? 1.0 : 0.0, "ml_pat_tweezer_top", display=display.none, editable=false)
 
 // liquidity primitives (BSL/SSL sweep/reclaim)
