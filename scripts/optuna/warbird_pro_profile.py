@@ -126,8 +126,8 @@ BOOL_PARAMS: list[str] = [
 ]
 
 NUMERIC_RANGES: dict[str, tuple[float, float]] = {
-    "lengthMA":                (30.0, 70.0),
-    "lengthEMA":               (14.0, 34.0),
+    "lengthMA":                (90.0, 110.0),
+    "lengthEMA":               (40.0, 60.0),
     "minHtfConfTotal":         (0.0, 3.0),
     "maxBslDistAtrLong":       (0.5, 14.0),
     "maxSslDistAtrShort":      (0.5, 38.0),
@@ -154,15 +154,11 @@ CATEGORICAL_PARAMS: dict[str, list[Any]] = {
     ],
     "minBullPatternsLong":  [0, 1, 2, 3],
     "minBearPatternsShort": [0, 1, 2, 3],
-    "maTypeSlow":           ["SMA", "EMA", "HMA"],
-    "maTypeFast":           ["SMA", "EMA", "HMA"],
 }
 
 INPUT_DEFAULTS: dict[str, Any] = {
-    "lengthMA":                50,
-    "lengthEMA":               21,
-    "maTypeSlow":              "EMA",
-    "maTypeFast":              "EMA",
+    "lengthMA":                100,
+    "lengthEMA":               50,
     "requireBullPatternLong":  True,
     "requireBearPatternShort": True,
     "requireSweepConfirmLong":  False,

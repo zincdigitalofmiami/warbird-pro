@@ -67,7 +67,7 @@
       "DATABENTO_BARS_CSV",
       "DATABENTO_TRADES_CSV"
     ],
-    "notes": "V9 entry-filter HPO. MES 5m only, Databento historical only. Treats Pine V9 ml_entry_long_trigger / ml_entry_short_trigger as candidates and tunes a post-trigger filter. 2026-05-09: pattern set trimmed to 4 (RisingWindow + BearEngulf/MarubozuBlack/TweezerTop). Phantom params removed: useMaGate, requirePositiveDeltaLong, requireNegativeDeltaShort, blockOnExhaustionLong/Short, minNetDelta20Long, maxNetDelta20Short. MA lengths now tunable (SMA 30-70, EMA 14-34). Negative-fib stop candidates banned by contract."
+    "notes": "V9 entry-filter HPO. MES 5m only, Databento historical only. Treats Pine V9 ml_entry_long_trigger / ml_entry_short_trigger as candidates and tunes a post-trigger filter. 2026-05-09: pattern set trimmed to 4 (RisingWindow + BearEngulf/MarubozuBlack/TweezerTop). Removed stale OHLCV-delta params: requirePositiveDeltaLong, requireNegativeDeltaShort, blockOnExhaustionLong/Short, minNetDelta20Long, maxNetDelta20Short. useMaGate is restored as the live Pine EMA/MA gate switch. MA lengths are tunable only +/-10 around live defaults (SMA 90-110, EMA 40-60); MA type params stay removed. Negative-fib stop candidates banned by contract."
   },
   {
     "key": "warbird_pro_v9",

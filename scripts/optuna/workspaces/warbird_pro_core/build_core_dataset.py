@@ -2,13 +2,15 @@
 """Build the Warbird Pro V9 Core training dataset.
 
 This is the AG/Core ETL surface, not a Pine edit. It builds manifest-backed 5m
-MES rows with the locked V9 feature schema, Yahoo DXY parity, and optional
-Databento trade-side order-flow reconstruction for CVD/divergence/absorption.
+MES rows with the locked V9 feature schema, Yahoo DXY parity, VIX movement
+pressure fallback, and optional Databento trade-side order-flow reconstruction
+for CVD/divergence/absorption.
 
 Core mode:
   - bars: MES OHLCV, normalized to 5m
   - cross-asset: NQ/ZN from local Databento 1h bars when available
   - DXY: Yahoo Finance DX-Y.NYB, aligned to the MES 5m clock
+  - VIX: movement pressure from VIXCLS daily close fallback when available
   - order flow: Databento trades zip, MES outright contracts only
   - labels are built by scripts/ag/train_v9_locked.py, not here
 
@@ -65,8 +67,11 @@ MIN_FIB_RANGE_ATR = 0.5
 FIB_HYSTERESIS_PCT = 2.0
 HTF_CONF_TOL_PCT = 1.5
 
-MA_SLOW_LEN = 13
-MA_FAST_LEN = 6
+USE_MA_GATE = True
+MA_SLOW_LEN = 100
+MA_FAST_LEN = 50
+XA_MIN_AGREEMENT = 3
+VIX_PRESSURE_BAND = 0.35
 RSI_LEN = 14
 RSI_OVERBOUGHT = 75.0
 RSI_OVERSOLD = 25.0
@@ -77,7 +82,8 @@ EQH_MIN_TAPS = 2
 EQH_LOOKBACK = 100
 VOL_Z_LEN = 20
 CORR_LEN = 20
-VIX_Z_LEN = 20
+VIX_MOVE_BARS = 3
+VIX_ATR_LEN = 14
 ORDERFLOW_ROLLING_LEN = 20
 ORDERFLOW_ABSORPTION_DELTA_PCT = 35.0
 ORDERFLOW_FLUSH_DELTA_PCT = 35.0
@@ -163,6 +169,13 @@ def zscore(series: pd.Series, length: int) -> pd.Series:
     mean = series.rolling(length, min_periods=length).mean()
     sd = series.rolling(length, min_periods=length).std(ddof=0)
     return ((series - mean) / sd.replace(0, np.nan)).fillna(0.0)
+
+
+def close_movement_pressure(series: pd.Series, move_bars: int, atr_length: int) -> pd.Series:
+    move = series - series.shift(move_bars)
+    one_bar_move = series.diff().abs()
+    atr_proxy = one_bar_move.ewm(alpha=1.0 / atr_length, adjust=False, min_periods=atr_length).mean()
+    return (move / atr_proxy.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 
 def xa_code(close: pd.Series) -> pd.Series:
@@ -571,10 +584,10 @@ def merge_cross_assets(df: pd.DataFrame, cross_asset_path: Path | None, dxy_inte
         vix[value_col] = pd.to_numeric(vix[value_col], errors="coerce")
         vix_series = vix.dropna(subset=[value_col]).set_index(date_col)[value_col].sort_index()
         vix_aligned = align_series_to_index(vix_series, idx)
-        out["ml_xa_vix_zscore"] = zscore(vix_aligned, VIX_Z_LEN).to_numpy(dtype=float)
+        out["ml_xa_vix_pressure"] = close_movement_pressure(vix_aligned, VIX_MOVE_BARS, VIX_ATR_LEN).to_numpy(dtype=float)
     else:
-        out["ml_xa_vix_zscore"] = 0.0
-        warnings.append("VIX CSV unavailable; VIX z-score set to 0")
+        out["ml_xa_vix_pressure"] = 0.0
+        warnings.append("VIX CSV unavailable; VIX movement pressure set to 0")
 
     nq_proxy = out["ml_xa_nq_code"].replace(0, np.nan).ffill().fillna(0.0)
     out["ml_xa_corr_nq"] = (
@@ -779,8 +792,22 @@ def build_volume_profile(price_aggs: list[pd.DataFrame], target_index: pd.Dateti
 
 def finalize_entries(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
-    long_ok = out["__is_valid"] & out["__trigger_long"] & (out["ml_xa_nq_code"] >= 0) & out["__recent_liq_bull"]
-    short_ok = out["__is_valid"] & out["__trigger_short"] & (out["ml_xa_nq_code"] <= 0) & out["__recent_liq_bear"]
+    ma_long_ok = (out["ml_ma_bias"] > 0) if USE_MA_GATE else True
+    ma_short_ok = (out["ml_ma_bias"] < 0) if USE_MA_GATE else True
+    xa_long_agreement = (
+        (out["ml_xa_nq_code"] > 0).astype(int)
+        + (out["ml_xa_zn_code"] > 0).astype(int)
+        + (out["ml_xa_dxy_code"] < 0).astype(int)
+        + (out["ml_xa_vix_pressure"] < -VIX_PRESSURE_BAND).astype(int)
+    )
+    xa_short_agreement = (
+        (out["ml_xa_nq_code"] < 0).astype(int)
+        + (out["ml_xa_zn_code"] < 0).astype(int)
+        + (out["ml_xa_dxy_code"] > 0).astype(int)
+        + (out["ml_xa_vix_pressure"] > VIX_PRESSURE_BAND).astype(int)
+    )
+    long_ok = out["__is_valid"] & out["__trigger_long"] & ma_long_ok & (xa_long_agreement >= XA_MIN_AGREEMENT) & out["__recent_liq_bull"]
+    short_ok = out["__is_valid"] & out["__trigger_short"] & ma_short_ok & (xa_short_agreement >= XA_MIN_AGREEMENT) & out["__recent_liq_bear"]
     out["ml_entry_long_trigger"] = long_ok.astype(float)
     out["ml_entry_short_trigger"] = short_ok.astype(float)
     return out.drop(columns=[c for c in out.columns if c.startswith("__")])

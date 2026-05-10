@@ -43,11 +43,12 @@ Training rows may come only from manifest-backed active-lane sources:
 No external feature stack is admitted.
 
 `warbird_pro_v9` may load ES and MES exports as separate rows from the same
-active Warbird Pro V9 training lane. NQ/MNQ rows are ignored. No cross-symbol
-join, NQ leadership feature, cloud table, or external feature stack is admitted
-into this lane. Databento may supply ES/MES market-data training rows, but it is
-not the Pine indicator, not a trigger family, and not a TradingView indicator
-CSV export.
+active Warbird Pro V9 training lane. NQ/MNQ rows are ignored. No external
+cross-symbol join, cloud table, or external feature stack is admitted into this
+lane. Pine-native NQ/ZN/DXY/VIX values emitted by the active indicator are part
+of the indicator behavior. Databento may supply ES/MES market-data training
+rows, but it is not the Pine indicator, not a trigger family, and not a
+TradingView indicator CSV export.
 
 Databento note: Databento historical
 [`get_range`](https://databento.com/docs/api-reference-historical/timeseries/timeseries-get-range?historical=python&live=python&reference=python),
@@ -69,9 +70,11 @@ Do not mix trigger families inside one run.
   `entryLongTrigger` / `entryShortTrigger`, built from the selected fib
   execution-anchor reclaim, structure context, winning candlestick confirmation,
   EMA/MA crossover alignment, optional ML RSI filtering, optional
-  liquidity-sweep confirmation, one-shot gating, ladder validity, and the
-  bullish-trend short gate. (The trigger-family name is legacy and retained for
-  continuity.)
+  liquidity-sweep confirmation, one-shot gating, ladder validity, and the active
+  NQ/ZN/DXY/VIX cross-asset agreement gate when enabled. NQ is same-direction,
+  DXY is inverse-risk, VIX is ATR-normalized movement pressure, and ZN follows
+  the explicit Pine setting `ZN Gate Direction`. (The trigger-family name is
+  legacy and retained for continuity.)
 - `NEXUS_FOOTPRINT_DELTA`: Nexus lower-pane footprint-delta trigger from
   `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`. Rows
   must come from TradingView/Pine `request.footprint()` evidence containing
@@ -124,8 +127,13 @@ Frozen during V9:
 
 - fib anchor ownership and ZigZag settings
 - fib ladder/visual construction
-- EMA/MA setup inputs and visual display
+- EMA/MA visual display semantics
 - Pine source code until promotion approval
+
+The V9 EMA/MA gate is fixed as slow SMA(close) vs fast EMA(close), with live
+defaults `lengthMA=100` and `lengthEMA=50`. Entry-filter HPO may tune only
+within +/-10 of those defaults (`lengthMA` 90-110, `lengthEMA` 40-60); do not
+reintroduce smaller-timeframe MA defaults or MA type-selection params.
 
 ## Explicit Exclusions
 
@@ -134,7 +142,7 @@ The active modeling dataset must not join:
 - FRED or macro data
 - economic calendar data
 - news/options data
-- cross-asset futures data
+- external cross-asset futures data outside active Pine exports
 - Supabase cloud tables
 - Databento rows mislabeled as TradingView indicator exports or Pine indicator
   sources

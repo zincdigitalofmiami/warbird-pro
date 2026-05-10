@@ -51,7 +51,7 @@ The data IS local, including 4.4GB of MES tick-level Trades from Databento (1 ye
 ### What landed in `training-prep` commit
 - New V9 indicator with curated patterns, liquidity package, cross-asset advanced, S/R levels, footprint, FOMC, per-line styles
 - `scripts/ag/train_v9_locked.py` — ML_FEATURES aligned to 45 features (43 Pine features + 2 ETL CVD divergence features), tz-bug fixed, persist() API fixed
-- `scripts/optuna/warbird_pro_profile.py` — MA ranges 30-70 / 14-34 + maType categoricals + INPUT_DEFAULTS bumped to 50/21
+- `scripts/optuna/warbird_pro_profile.py` — MA ranges now track live V9 defaults +/-10: `lengthMA` 90-110 and `lengthEMA` 40-60; MA type categoricals removed
 - `scripts/optuna/cpcv_helpers.py` — eval_metric=log_loss, calibrate=True, persist() fix
 - `scripts/ag/monte_carlo_v9.py` (new) — MC robustness analysis
 - `scripts/ag/shap_v9.py` (new) — SHAP explainability
@@ -112,8 +112,8 @@ These were items I previously deferred or skipped. Status after Kirk's review:
 | 4 | Volume profile / HVN-LVN | **DECISION OWED** | Was in original scope, dropped to fit budget. Now have headroom from pattern cleanup. |
 | 5 | Initial Balance / Opening Range S/R | **DECISION OWED** | First 30/60min RTH H/L. Was in original D/W S/R proposal. Dropped to fit budget. |
 | 6 | Side cards (candlesticks-only, liquidity-only, cross-asset-only, footprint-only) | **DECISION OWED** | Build now in scaffold form, or after Core lands? |
-| 7 | MA range wiring through to entry-filter Optuna profile | **DECISION OWED** | `warbird_pro_v9_entry_filter_cpcv_profile.py` inherits from base which now has new MA ranges. But child profile may have stale references. |
-| 8 | Optuna entry-filter profile uses obsolete features | **DECISION OWED** | References `ml_bar_delta`, `ml_net_delta_20` (banned), `useMaGate` (gone), `requireBullPatternLong`, etc. Need rewrite to match new V9 schema. |
+| 7 | MA range wiring through to entry-filter Optuna profile | **LOCKED IN** | Base profile uses live V9 defaults +/-10: `lengthMA` 90-110 and `lengthEMA` 40-60. |
+| 8 | Optuna entry-filter profile uses obsolete features | **LOCKED IN** | Current V9 restored `useMaGate` as the Pine gate switch and keeps fixed SMA/EMA semantics; banned OHLCV-delta features remain excluded. |
 | 9 | Footprint window strategy (A/B/C) | **DECISION OWED** | A: train 2010-now, footprint=NaN pre-2025; B: train only 2025-05→2026-05; C: train 2010-now, validate/test on footprint window only. |
 | 10 | ETL pre-flight gate (Kirk: "make sure that shit is loaded") | **LOCKED IN** | Hard assertion before AG.fit — see § Pre-training gates below. |
 | 11 | Sub-bar features from raw trades schema | **DECISION OWED** | Trade-size distribution, large-print frequency, time-weighted imbalance per bar. Beyond the 7 microstructure features. |
@@ -160,7 +160,7 @@ Until those answers exist, the Core card script does NOT get written.
 | TN OHLCV | Databento | `data/GLBX-20260503-SYE7R843QV.zip` | ohlcv-1m | 2010-06-06 → 2026-05-31 |
 | Cross-asset 1h (NQ/ZN/6E/6J/CL/HG/RTY) | Databento | `Historical Data/Databento/raw/databento_futures_ohlcv_1h.parquet` | ohlcv-1h | 2010-06 → 2025-12 |
 | MES Trades (TICK) | Databento | `data/MES ES Trades GLBX-20260508-SAGMRP8P3H.zip` | trades | **2025-05-08 → 2026-05-08** (1yr) |
-| VIX (FRED) | FRED VIXCLS | `/Volumes/Satechi Hub/ZINC-FUSION-V15/data/downloads/VIXCLS.csv` | daily | 1990-01-02 → 2026-01-29 |
+| VIX movement pressure fallback | FRED VIXCLS | `/Volumes/Satechi Hub/ZINC-FUSION-V15/data/downloads/VIXCLS.csv` | daily close-only pressure proxy | 1990-01-02 → 2026-01-29 |
 | DXY | Yahoo `DX-Y.NYB` | NOT LOCAL — fetch via `yfinance` | daily | 1985 → present |
 
 **Disk:** 515 GiB free on `/Volumes/Satechi Hub` — adequate (footprint expansion ~50GB).
@@ -213,8 +213,8 @@ for col in ['ml_xa_nq_code', 'ml_xa_zn_code', 'ml_xa_dxy_code']:
     n_nonzero = (df[col] != 0).sum()
     assert n_nonzero > len(df) * 0.1, f"FATAL: {col} is {(df[col]==0).mean():.1%} zeros — pull broken"
 
-# 4. VIX z-score has variance
-assert df['ml_xa_vix_zscore'].std() > 0.1, "FATAL: ml_xa_vix_zscore is constant — VIX pull broken"
+# 4. VIX movement pressure has variance
+assert df['ml_xa_vix_pressure'].std() > 0.1, "FATAL: ml_xa_vix_pressure is constant — VIX pressure pull broken"
 
 # 5. Patterns fire on real bars (not all zeros)
 for col in [c for c in ML_FEATURES if c.startswith('ml_pat_')]:
@@ -251,7 +251,7 @@ If ANY assertion fails, log the exact reason and exit nonzero. Don't run trainin
 | **Display title** | `2026-05-09 - Warbird Pro Autogluon Core` (literal in Optuna hub UI) |
 | **AG objective** | Binary classification: `winner_10pt_24bar` (1=+10pts before -5pts within 24 bars; neither-hit rows dropped) |
 | **Eval metric** | `log_loss` (proper probability scoring + isotonic calibration) |
-| **Data** | NEW dataset rebuilt from new V9 indicator + Databento trades + Yahoo DXY + FRED VIX (see § Data inventory) |
+| **Data** | NEW dataset rebuilt from new V9 indicator + Databento trades + Yahoo DXY + VIX movement pressure fallback (see § Data inventory) |
 | **Train/val/test** | Chronological with 73-bar embargo (max_hold_bars + 1). Window split per Kirk's decision on item #9. |
 | **Feature set** | 45 features: 43 Pine-emitted features plus Python-only `ml_cvd_div_bull` / `ml_cvd_div_bear`. STRICT ASSERTION: no missing columns. |
 | **Model zoo** | Full canonical 7-family: GBM, CAT, XGB, RF, XT, **NN_TORCH, FASTAI** (FastAI explicitly required per Kirk) |

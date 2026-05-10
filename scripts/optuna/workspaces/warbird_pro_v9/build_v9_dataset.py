@@ -11,7 +11,7 @@ sufficient for V9 ATR/risk exit modeling:
   - ZigZag deviation pivots (TradingView/ZigZag/7 semantics)
   - Fib anchor + ladder + midpoint regime with hysteresis
   - HTF 1h confluence
-  - SMA(13) + EMA-on-SMA(6) MA gate
+  - SMA(100) slow + EMA(close, 50) fast MA gate
   - RSI(14) extreme gate (75/25)
   - Candlestick pattern confirmation (3 bull, 4 bear)
   - Liquidity sweep confirmation
@@ -20,7 +20,7 @@ sufficient for V9 ATR/risk exit modeling:
 Output columns (CSV):
   ts (unix seconds, UTC), open, high, low, close, volume,
   ml_entry_long_trigger, ml_entry_short_trigger, fib_neg_0236_context,
-  ma_sma, ema_of_ma  -- audit-only, helpful for cross-check vs TV CSV
+  ma_sma, ema_close  -- audit-only, helpful for cross-check vs TV CSV
 
 Run:
   python scripts/optuna/workspaces/warbird_pro_v9/build_v9_dataset.py \\
@@ -54,8 +54,8 @@ FIB_HYSTERESIS_PCT = 2.0
 FIB_CONFLUENCE_TOL_PCT = 0.05
 HTF_CONF_TOL_PCT = 0.15
 
-LENGTH_MA = 13
-LENGTH_EMA = 6
+LENGTH_MA = 100
+LENGTH_EMA = 50
 RSI_LENGTH = 14
 RSI_OVERBOUGHT = 75.0
 RSI_OVERSOLD = 25.0
@@ -295,9 +295,9 @@ def compute_features(df_5m: pd.DataFrame) -> pd.DataFrame:
     atr10 = atr_rma(high, low, close, 10)
     rsi14 = rsi_rma(close, RSI_LENGTH)
     ma_sma_v = sma(close, LENGTH_MA)
-    ema_of_ma_v = ema_of(ma_sma_v, LENGTH_EMA)
-    ma_bull = ema_of_ma_v > ma_sma_v
-    ma_bear = ema_of_ma_v < ma_sma_v
+    ema_close_v = ema_of(close, LENGTH_EMA)
+    ma_bull = ema_close_v > ma_sma_v
+    ma_bear = ema_close_v < ma_sma_v
 
     bar_range = high - low
     body_size = np.abs(close - open_)
@@ -427,8 +427,8 @@ def compute_features(df_5m: pd.DataFrame) -> pd.DataFrame:
     long_sweep = liq_sweep_bull if USE_LIQUIDITY_SWEEP else np.ones(n, dtype=bool)
     short_sweep = liq_sweep_bear if USE_LIQUIDITY_SWEEP else np.ones(n, dtype=bool)
     if USE_MA_GATE:
-        ma_long_ok = ma_bull & (close >= ema_of_ma_v)
-        ma_short_ok = ma_bear & (close <= ema_of_ma_v)
+        ma_long_ok = ma_bull
+        ma_short_ok = ma_bear
     else:
         ma_long_ok = np.ones(n, dtype=bool)
         ma_short_ok = np.ones(n, dtype=bool)
@@ -494,7 +494,7 @@ def compute_features(df_5m: pd.DataFrame) -> pd.DataFrame:
             "ml_entry_short_trigger": entry_short_trigger.astype("float64"),
             "fib_neg_0236_context": p_neg_236,
             "ma_sma": ma_sma_v,
-            "ema_of_ma": ema_of_ma_v,
+            "ema_close": ema_close_v,
             "fib_range": fib_range,
             "ml_direction_code": direction_code.astype("float64"),
             "ml_rsi_value": rsi14,

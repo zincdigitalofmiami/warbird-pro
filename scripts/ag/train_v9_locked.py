@@ -85,8 +85,8 @@ ML_FEATURES = [
     "ml_cvd_div_bull", "ml_cvd_div_bear",
     # cross-asset 5m
     "ml_xa_nq_code", "ml_xa_zn_code", "ml_xa_dxy_code",
-    # cross-asset advanced (VIX, MES↔NQ correlation, DXY divergence)
-    "ml_xa_vix_zscore", "ml_xa_corr_nq", "ml_xa_dxy_diverge",
+    # cross-asset advanced (VIX movement pressure, MES↔NQ correlation, DXY divergence)
+    "ml_xa_vix_pressure", "ml_xa_corr_nq", "ml_xa_dxy_diverge",
     # HTF confluence
     "ml_htf_conf_total",
     # daily/weekly S/R distances

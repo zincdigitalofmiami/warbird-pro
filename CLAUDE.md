@@ -170,10 +170,17 @@ Smoke verification evidence is recorded in
 | Confluence Tolerance % | **0.05** |
 | Min Fib Range ATR | **0.5** |
 | Midpoint Hysteresis % | **2.0** |
+| Use EMA/MA Gate | **true** |
+| MA Length (SMA, slow) | **100** |
+| EMA Length (close, fast) | **50** |
 
 `build_v9_dataset.py` must match these exactly. The contamination incident
 (2026-05-05) used dev=4.0, depth=20, floor=0.50 — all wrong. Always verify
 live TV settings before building a new dataset.
+
+Entry-filter HPO may search only +/-10 around those MA lengths: `lengthMA`
+90-110 and `lengthEMA` 40-60. The live Pine gate is fixed SMA(close) slow vs
+EMA(close) fast.
 
 ### Kirk's Exit Preferences (GOAL — actively rewarded in objective)
 

@@ -131,7 +131,7 @@ context, or agent-facing notes pointing at an older trigger or training surface.
 - `local_warehouse/`, local `warbird`, and `scripts/ag/train_ag_baseline.py`:
   legacy/reference unless explicitly reopened.
 
-## Live Pine Settings (Authoritative — 2026-05-05)
+## Live Pine Settings (Authoritative — 2026-05-09)
 
 These are the LIVE values from the TradingView indicator inputs panel.
 The Pine code `input.float(default, ...)` values are NOT authoritative.
@@ -145,8 +145,9 @@ The Pine code `input.float(default, ...)` values are NOT authoritative.
 | Confluence Tolerance % (fibConfluenceTolPct) | **0.05** |
 | Min Fib Range ATR (minFibRangeAtr) | **0.5** |
 | Midpoint Hysteresis % (fibHysteresisPct) | **2.0** |
-| MA Length SMA (lengthMA) | **13** |
-| EMA Length (lengthEMA) | **6** |
+| Use EMA/MA Gate (useMaGate) | **true** |
+| MA Length SMA (lengthMA) | **100** |
+| EMA Length (lengthEMA) | **50** |
 
 ## Kirk's Exit Trade Preferences (GOAL — Rewarded in Objective)
 

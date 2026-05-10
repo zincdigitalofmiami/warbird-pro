@@ -4,7 +4,7 @@
 // Warbird Pro V9 — Fib Anchor + Liquidity + Patterns + Cross-Asset + Footprint
 // Source ownership:
 // - Fib engine/ladder math: Indicator A (PROTECTED — anchor ownership, ZigZag, ratios)
-// - MA gate: SMA/EMA/HMA crossover, fast above slow = bull (type-selectable)
+// - MA gate: fast EMA(close) above slow SMA(close) = bull
 // - RSI context + curated candlestick patterns from real backtest performance
 //
 // Design contract:
@@ -14,7 +14,7 @@
 //   plumbing with the same widths, styles, label sizes, and label offsets
 // - Liquidity is its own first-class package: BSL/SSL sweep+reclaim,
 //   equal-highs/lows pools, session VWAP context, volume z-score
-// - Cross-asset: NQ/ZN/DXY trend codes + VIX z-score + MES↔NQ rolling
+// - Cross-asset: NQ/ZN/DXY trend codes + VIX movement pressure + MES↔NQ rolling
 //   correlation + DXY divergence
 // - Daily/weekly S/R: PDH/PDL/PWH/PWL distance features + thin lines
 // - Footprint: real intrabar bid/ask delta + POC distance + VA position
@@ -26,7 +26,7 @@
 // - ZigZag pivots consumed only after confirmation from library output
 // - Liquidity reclaim uses bar[1] swept + bar[0] reclaimed (history-only)
 //@version=6
-indicator("Warbird Pro V9", shorttitle="WB V9", overlay=true, max_lines_count=80, max_labels_count=200, max_boxes_count=8)
+indicator("Warbird Pro V9", shorttitle="Warbird V9", overlay=true, max_lines_count=80, max_labels_count=200, max_boxes_count=8)
 import TradingView/ZigZag/7 as zigzag
 
 //=====================
@@ -74,7 +74,7 @@ color COLOR_STOP               = #CB3F3B
 
 int WIDTH_ANCHOR      = 1
 int WIDTH_RETRACEMENT = 1
-int WIDTH_PIVOT       = 3
+int WIDTH_PIVOT       = 2
 int WIDTH_TARGET      = 2
 
 //=====================
@@ -92,14 +92,17 @@ float tradeStopAtrMult = input.float(1.50, "ATR Stop Multiplier", minval=0.25, m
 int tradeMaxHoldBars = input.int(72, "Max Hold (bars)", minval=0, maxval=500, group=groupExecution)
 
 //=====================
-// MA CROSSOVER (Source B — fast EMA(close) above slow SMA(close) = bull)
+// EMA/MA CROSSOVER (Source B — fast EMA(close) above slow SMA(close) = bull)
 //=====================
-string groupMa = "Moving Averages"
-string maTypeSlow = input.string("SMA", "Slow MA Type", options=["SMA", "EMA", "HMA"], group=groupMa)
-int lengthMA = input.int(13, "Slow MA Length", minval=8, maxval=250, group=groupMa)
-string maTypeFast = input.string("EMA", "Fast MA Type", options=["SMA", "EMA", "HMA"], group=groupMa)
-int lengthEMA = input.int(6, "Fast MA Length", minval=3, maxval=100, group=groupMa)
-bool showMaLines = input.bool(true, "Show MA Trend Lines", group=groupMa)
+string groupMa = "EMA/MA Crossover"
+bool useMaGate = input.bool(true, "Use EMA/MA Gate", group=groupMa)
+int lengthMA = input.int(100, "MA Length (SMA, slow)", minval=1, maxval=500, group=groupMa)
+int lengthEMA = input.int(50, "EMA Length (close, fast)", minval=1, maxval=500, group=groupMa)
+bool showMaLines = input.bool(true, "Show EMA/MA Lines", group=groupMa)
+color maColorInput = input.color(color.white, "MA Color", inline="ma_color", group=groupMa)
+int maWidthInput = input.int(2, "", minval=1, maxval=5, inline="ma_color", group=groupMa)
+color emaColorInput = input.color(#0A7884, "EMA Color", inline="ema_color", group=groupMa)
+int emaWidthInput = input.int(2, "", minval=1, maxval=5, inline="ema_color", group=groupMa)
 
 //=====================
 // RSI CONTEXT (Source C)
@@ -124,14 +127,18 @@ bool useSessionVwap = input.bool(true, "Enable Session VWAP Feature", group=grou
 // CROSS-ASSET PACKAGE
 //=====================
 string groupXa = "Cross-Asset Context"
-bool useXaGate = input.bool(true, "Gate Entries With NQ Trend", group=groupXa)
+bool useXaGate = input.bool(true, "Use NQ/ZN/DXY/VIX Entry Gate", group=groupXa)
 string xaTrendTimeframe = input.timeframe("5", "Trend Timeframe", group=groupXa)
 string nqSymbol = input.symbol("CME_MINI:NQ1!", "NQ Symbol", group=groupXa)
 string znSymbol = input.symbol("CBOT:ZN1!", "ZN Symbol", group=groupXa)
 string dxySymbol = input.symbol("TVC:DXY", "DXY Symbol", group=groupXa)
 string vixSymbol = input.symbol("CBOE:VIX", "VIX Symbol", group=groupXa)
 int corrLength = input.int(20, "MES-NQ Correlation Length", minval=5, maxval=200, group=groupXa)
-int vixZLength = input.int(20, "VIX Z-Score Length", minval=5, maxval=100, group=groupXa)
+int vixMoveBars = input.int(3, "VIX Movement Bars", minval=1, maxval=50, group=groupXa)
+int vixAtrLength = input.int(14, "VIX ATR Length", minval=1, maxval=100, group=groupXa)
+float vixPressureBand = input.float(0.35, "VIX Movement Neutral Band", minval=0.0, maxval=5.0, step=0.05, group=groupXa)
+int xaMinAgreement = input.int(3, "Minimum Agreement (of 4)", minval=1, maxval=4, group=groupXa)
+string znGateDirection = input.string("Same Direction", "ZN Gate Direction", options=["Same Direction", "Inverse"], group=groupXa)
 
 //=====================
 // DAILY/WEEKLY S/R LEVELS
@@ -141,8 +148,8 @@ bool showPdh = input.bool(true, "Show PDH", group=groupLvl, inline="pd")
 bool showPdl = input.bool(true, "Show PDL", group=groupLvl, inline="pd")
 bool showPwh = input.bool(true, "Show PWH", group=groupLvl, inline="pw")
 bool showPwl = input.bool(true, "Show PWL", group=groupLvl, inline="pw")
-color lvlDayColor = input.color(#FF9800, "Day Color", group=groupLvl, inline="dc")
-color lvlWeekColor = input.color(#9C27B0, "Week Color", group=groupLvl, inline="wc")
+color lvlDayColor = input.color(#FF6D00, "Day Color", group=groupLvl, inline="dc")
+color lvlWeekColor = input.color(#E91E63, "Week Color", group=groupLvl, inline="wc")
 
 //=====================
 // FOOTPRINT (real intrabar bid/ask delta)
@@ -189,12 +196,12 @@ int fibRetracementAccentWidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, 
 string fibAccentStyle = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_accent", group=groupViz)
 color fibPivotColorInput = input.color(COLOR_PIVOT, "Pivot Zone", inline="fib_pivot", group=groupViz)
 int fibPivotWidthInput = input.int(WIDTH_PIVOT, "", minval=1, maxval=5, inline="fib_pivot", group=groupViz)
-string fibPivotStyle = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_pivot", group=groupViz)
+string fibPivotStyle = input.string("Dashed", "", options=["Solid", "Dashed", "Dotted"], inline="fib_pivot", group=groupViz)
 color fibTargetColorInput = input.color(color.new(COLOR_TARGET, 50), "Targets / TP", inline="fib_target", group=groupViz)
 int fibTargetWidthInput = input.int(WIDTH_TARGET, "", minval=1, maxval=5, inline="fib_target", group=groupViz)
 string fibTargetStyle = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_target", group=groupViz)
-bool showFibLevelLabelsInput = input.bool(false, "Show Fib Level Labels", group=groupViz)
-int fibLabelOffsetBarsInput = input.int(10, "Fib Label Offset (bars)", minval=0, maxval=30, group=groupViz)
+bool showFibLevelLabelsInput = input.bool(true, "Show Fib Level Labels", group=groupViz)
+int fibLabelOffsetBarsInput = input.int(8, "Fib Label Offset (bars)", minval=0, maxval=30, group=groupViz)
 string fibLabelSizeInput = input.string("Small", "Fib Label Size", options=["Tiny", "Small", "Normal", "Large"], group=groupViz)
 int zoneFillTransparencyInput = input.int(80, "Zone Fill Alpha", minval=0, maxval=100, group=groupViz)
 
@@ -250,17 +257,10 @@ bool provenBearishPattern = patBearEngulf or patMarubozuBlack or patTweezerTop
 float finalRsi = ta.rsi(close, rsiLength)
 
 //=====================
-// MA crossover (type-selectable SMA/EMA/HMA, fast above slow = bull)
+// EMA/MA crossover (fast EMA above slow SMA = bull)
 //=====================
-float _slowSma = ta.sma(close, lengthMA)
-float _slowEma = ta.ema(close, lengthMA)
-float _slowHma = ta.hma(close, lengthMA)
-float xMA = maTypeSlow == "EMA" ? _slowEma : maTypeSlow == "HMA" ? _slowHma : _slowSma
-
-float _fastSma = ta.sma(close, lengthEMA)
-float _fastEma = ta.ema(close, lengthEMA)
-float _fastHma = ta.hma(close, lengthEMA)
-float xEMA = maTypeFast == "EMA" ? _fastEma : maTypeFast == "HMA" ? _fastHma : _fastSma
+float xMA = ta.sma(close, lengthMA)
+float xEMA = ta.ema(close, lengthEMA)
 bool maBull = xEMA > xMA
 bool maBear = xEMA < xMA
 
@@ -282,12 +282,12 @@ int znCode = f_xa_code(znClose5, znSlow5, znFast5)
 int dxyCode = f_xa_code(dxyClose5, dxySlow5, dxyFast5)
 
 //=====================
-// Cross-asset advanced — VIX z-score, MES↔NQ rolling correlation, DXY divergence
+// Cross-asset advanced — VIX movement pressure, MES↔NQ rolling correlation, DXY divergence
 //=====================
-float vixClose = request.security(vixSymbol, xaTrendTimeframe, close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-float vixMean = ta.sma(vixClose, vixZLength)
-float vixSd = ta.stdev(vixClose, vixZLength)
-float vixZscore = vixSd > 0 and not na(vixClose) ? (vixClose - vixMean) / vixSd : 0.0
+[vixAtr, vixMove] = request.security(vixSymbol, xaTrendTimeframe, [ta.atr(vixAtrLength), close - close[vixMoveBars]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+float vixPressure = vixAtr > 0 and not na(vixMove) ? vixMove / vixAtr : 0.0
+bool vixLongVote = vixPressure < -vixPressureBand
+bool vixShortVote = vixPressure > vixPressureBand
 
 float corrMesNq = ta.correlation(close, nqClose5, corrLength)
 
@@ -588,14 +588,20 @@ float entryLevel = touched786Long ? level786 : touched618Long ? level618 : touch
 
 bool longPatternOk = not usePatternConfirm or provenBullishPattern
 bool shortPatternOk = not usePatternConfirm or provenBearishPattern
+bool maLongOk = not useMaGate or maBull
+bool maShortOk = not useMaGate or maBear
 
-bool xaLongOk = not useXaGate or nqCode >= 0
-bool xaShortOk = not useXaGate or nqCode <= 0
+bool znLongVote = znGateDirection == "Same Direction" ? znCode > 0 : znCode < 0
+bool znShortVote = znGateDirection == "Same Direction" ? znCode < 0 : znCode > 0
+int xaLongAgreement = (nqCode > 0 ? 1 : 0) + (znLongVote ? 1 : 0) + (dxyCode < 0 ? 1 : 0) + (vixLongVote ? 1 : 0)
+int xaShortAgreement = (nqCode < 0 ? 1 : 0) + (znShortVote ? 1 : 0) + (dxyCode > 0 ? 1 : 0) + (vixShortVote ? 1 : 0)
+bool xaLongOk = not useXaGate or xaLongAgreement >= xaMinAgreement
+bool xaShortOk = not useXaGate or xaShortAgreement >= xaMinAgreement
 bool recentLiqBull = not useLiqGate or (not na(barsSinceLiqBull) and barsSinceLiqBull < liqRecencyBars)
 bool recentLiqBear = not useLiqGate or (not na(barsSinceLiqBear) and barsSinceLiqBear < liqRecencyBars)
 
-bool qualifiedLong = confirmed and isValid and triggerLong and longPatternOk and xaLongOk and recentLiqBull
-bool qualifiedShort = confirmed and isValid and triggerShort and shortPatternOk and xaShortOk and recentLiqBear
+bool qualifiedLong = confirmed and isValid and triggerLong and longPatternOk and maLongOk and xaLongOk and recentLiqBull
+bool qualifiedShort = confirmed and isValid and triggerShort and shortPatternOk and maShortOk and xaShortOk and recentLiqBear
 
 //=====================
 // Trade engine — single source of truth for entry events
@@ -788,8 +794,8 @@ if barstate.islast
     _slLbl    := setFibLevelLabel(_slLbl,    tradeActive, tradeStopPrice,  "SL",    fibStopColorInput)
     _tpLbl    := setFibLevelLabel(_tpLbl,    tradeActive, tradeTargetPrice,"TP",    fibTargetColorInput)
 
-plot(showMaLines ? xMA : na, title="MA (SMA)", color=color.white, linewidth=2, display=display.all)
-plot(showMaLines ? xEMA : na, title="EMA (close)", color=#26A69A, linewidth=2, display=display.all)
+plot(showMaLines ? xMA : na, title="MA (SMA, slow)", color=maColorInput, linewidth=maWidthInput, display=display.all)
+plot(showMaLines ? xEMA : na, title="EMA (close, fast)", color=emaColorInput, linewidth=emaWidthInput, display=display.all)
 
 //=====================
 // Status table — black bg, white body, dark gray dividers; headers unchanged
@@ -1034,7 +1040,7 @@ plot(float(znCode), "ml_xa_zn_code", display=display.none, editable=false)
 plot(float(dxyCode), "ml_xa_dxy_code", display=display.none, editable=false)
 
 // cross-asset advanced (VIX, MES↔NQ correlation, DXY divergence)
-plot(vixZscore, "ml_xa_vix_zscore", display=display.none, editable=false)
+plot(vixPressure, "ml_xa_vix_pressure", display=display.none, editable=false)
 plot(corrMesNq, "ml_xa_corr_nq", display=display.none, editable=false)
 plot(dxyDivergeFloat, "ml_xa_dxy_diverge", display=display.none, editable=false)
 

@@ -98,7 +98,7 @@ The campaign is phase-scoped and timeframe-scoped.
 | Phase | Scope |
 |---|---|
 | A | Structure + execution anchor (`requireAcceptRetest`, `retestBars`, `optEntryLevelInput`, `signalCooldownBars`, fib hysteresis/range controls) |
-| B | EMA/MA crossover gate (`useMaGate`, `lengthMA`, `lengthEMA`, short-gate controls) |
+| B | EMA/MA crossover gate (`useMaGate`, fixed SMA(close) slow vs EMA(close) fast, `lengthMA` 90-110, `lengthEMA` 40-60, short-gate controls) |
 | C | Pattern and exhaustion strictness (`usePatternConfirm`, `useLiquiditySweepConfirm`, sweep lookback, `useExhaustion`, exhaustion tolerance) |
 | D | ML filter surface (`useMlFilter`, RSI/KNN/filter parameters, thresholds, smoothing) |
 

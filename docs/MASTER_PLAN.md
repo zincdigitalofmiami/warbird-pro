@@ -46,8 +46,12 @@ visuals, and EMA/MA setup until a champion is approved for Pine promotion.
   toggles, stop/target policy, signal frequency, profit factor, drawdown,
   stability, direction balance, and operator usability.
 - External feature stacking is out of scope. No FRED, macro, news, options,
-  cross-asset, Supabase, or mislabeled Databento/TradingView artifacts are
-  admitted into the active modeling dataset.
+  external cross-asset joins, Supabase, or mislabeled Databento/TradingView
+  artifacts are admitted into the active modeling dataset. Pine-native
+  NQ/ZN/DXY/VIX values emitted by `warbird-pro-v9.pine` are part of the active
+  indicator behavior. NQ is same-direction, DXY is inverse-risk, VIX is
+  ATR-normalized movement pressure, and ZN follows the explicit Pine setting
+  `ZN Gate Direction`.
 - Cloud Supabase is runtime/support only. It is not a model-training mirror and
   does not receive raw trials, raw labels, or full research datasets.
 
@@ -93,7 +97,7 @@ The following are explicitly retired from the active plan:
 
 - building a daily-ingestion training warehouse
 - using local legacy warehouse training tables (`ag_training`) as the model source
-- training on FRED, macro, news, options, or cross-asset features
+- training on FRED, macro, news, options, or external cross-asset features
 - reconstructing Pine behavior from Python OHLCV as the canonical label path
 - recording Databento market-data rows as `TRADINGVIEW_INDICATOR_CSV` or as a
   Pine indicator source
@@ -197,10 +201,10 @@ Permitted modeling questions:
 
 Prohibited modeling questions:
 
-- Which macro/FRED/cross-asset feature should gate trades?
+- Which macro/FRED/external cross-asset feature should gate trades?
 - Which server-side model should score live alerts?
 - Which warehouse feature should be joined into the indicator decision?
-- Which NQ or cross-asset feature should gate V9 entries?
+- Which external/server-side cross-asset feature should override V9 entries?
 
 ### Phase 4 - Explainability And Recommendation
 
@@ -324,14 +328,19 @@ Core card. The Core card supersedes all four.
 | Confluence Tolerance % | **0.05** | `fibConfluenceTolPct` |
 | Min Fib Range (ATR) | **0.5** | `minFibRangeAtr` |
 | Midpoint Hysteresis % | **2.0** | `fibHysteresisPct` |
-| MA Length (SMA) | **13** | `lengthMA` |
-| EMA Length | **6** | `lengthEMA` |
+| Use EMA/MA Gate | **true** | `useMaGate` |
+| MA Length (SMA, slow) | **100** | `lengthMA` |
+| EMA Length (close, fast) | **50** | `lengthEMA` |
 
 **Rule:** Before every dataset build, read the live TradingView indicator
 inputs panel and verify the dataset-builder constants match exactly. Pine code
 `input.float(default, ...)` defaults are NOT authoritative — the user's saved
 TV settings are. Contamination incident (2026-05-05) used dev=4.0, depth=20,
 floor=0.50 — all wrong; do not repeat.
+
+**MA training rule:** entry-filter HPO may search `lengthMA` from 90-110 and
+`lengthEMA` from 40-60 around the live 100/50 defaults. The Pine gate itself is
+fixed SMA(close) slow vs EMA(close) fast; do not reintroduce MA type selection.
 
 ### V9 Pine Pattern Set (post-2026-05-09 trim)
 

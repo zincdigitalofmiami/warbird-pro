@@ -36,7 +36,7 @@ Disallowed active training inputs:
 
 - FRED or macro joins
 - news/options data
-- cross-asset joins
+- external cross-asset joins outside the active Pine indicator
 - Supabase daily/hourly runtime ingestion as a training feature source
 - local `ag_training` warehouse rows
 - Python OHLCV reconstruction as the canonical label source
@@ -73,14 +73,20 @@ Primary metrics:
 
 ## Active Pine Surfaces
 
-- `indicators/warbird-pro-v9.pine`
+  - `indicators/warbird-pro-v9.pine`
   - only active main chart indicator
   - TradingView indicator name: **Warbird Pro V9**
+  - TradingView short title: **Warbird V9**
   - live entry trigger: `entryLongTrigger` / `entryShortTrigger` from the
     selected fib execution-anchor reclaim plus structure context, winning
     candlestick confirmation, EMA/MA crossover alignment, optional ML RSI
-    filter, optional liquidity-sweep confirm, cooldown, and the bullish-trend
-    short gate
+    filter, optional liquidity-sweep confirm, cooldown, and the active
+    NQ/ZN/DXY/VIX cross-asset agreement gate when enabled; NQ is same-direction,
+    DXY is inverse-risk, VIX is ATR-normalized movement pressure, and ZN uses
+    the explicit Pine setting `ZN Gate Direction`
+  - EMA/MA gate is fixed to slow SMA(close) vs fast EMA(close), live defaults
+    `lengthMA=100` and `lengthEMA=50`; entry-filter HPO may search only
+    `lengthMA` 90-110 and `lengthEMA` 40-60
   - footprint/order-flow hidden exports now include Pine-native delta
     imbalance, delta acceleration, aggressor pulse, volume-spike ratio, POC
     shift, absorption candidate, and flush candidate fields for Core parity and
@@ -153,7 +159,9 @@ Not admitted:
 
 - server-side macro/fundamental context
 - FRED/economic calendar fields
-- Databento cross-asset context unless a separate contract explicitly reopens it
+- Databento cross-asset context unless a separate contract explicitly reopens it;
+  Pine-native NQ/ZN/DXY/VIX values emitted by the active indicator are part of
+  the indicator behavior
 - Supabase/cloud serving tables
 - local warehouse reconstructed fib rows
 - Databento rows recorded as `TRADINGVIEW_INDICATOR_CSV` or as a Pine indicator
