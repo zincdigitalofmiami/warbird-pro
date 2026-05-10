@@ -24,8 +24,8 @@ from the active `indicators/` surface.
 
 V9 lane update (2026-05-02): `warbird_pro_v9` is a separate Optuna lane over the
 same active Warbird Pro V9 indicator. It models ATR/risk exits from
-manifest-backed ES/MES training rows from TradingView exports or Databento
-market data, ignores NQ/MNQ rows,
+manifest-backed ES training rows (5m/15m) from TradingView exports or Databento
+market data, ignores MES/NQ/MNQ rows,
 excludes `-.236` and other negative fib extensions as stop candidates, keeps
 `-.236` only as optional context/export data, and freezes fib anchors, fib
 visuals, and EMA/MA setup until a champion is approved for Pine promotion.
@@ -35,8 +35,8 @@ visuals, and EMA/MA setup until a champion is approved for Pine promotion.
 - The canonical modeling object is the `Warbird Pro` Pine indicator behavior on
   TradingView.
 - Training truth comes from manifest-backed active-lane sources: Pine/TradingView
-  outputs emitted by `indicators/warbird-pro-v9.pine`, Databento ES/MES
-  market-data training rows when declared as Databento source data, and, for
+  outputs emitted by `indicators/warbird-pro-v9.pine`, Databento ES
+  market-data training rows (5m/15m) when declared as Databento source data, and, for
   Nexus work only, `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`.
 - Allowed evidence includes TradingView indicator exports, hidden `ml_*` /
   `nexus_fp_*` plots, Nexus TradingView/Pine `request.footprint()` evidence for
@@ -163,7 +163,7 @@ Capture training rows from manifest-backed active-lane sources.
 Allowed sources:
 
 - TradingView indicator CSV export from `warbird-pro-v9.pine`
-- Databento ES/MES market-data training rows with a Databento capture/source
+- Databento ES market-data training rows (5m/15m) with a Databento capture/source
   kind in the manifest
 - hidden `ml_*` export fields emitted by that indicator
 - retained Nexus `nexus_fp_*` footprint exports for `NEXUS_FOOTPRINT_DELTA`
@@ -194,7 +194,7 @@ Permitted modeling questions:
 - Which filter/module toggles improve or damage the signal?
 - Which stop/target policy works best inside the current Pine state machine?
 - In the `warbird_pro_v9` lane only, which ATR/risk exit policy works best for
-  existing Warbird Pro V9 entry triggers across ES/MES exports?
+  existing Warbird Pro V9 entry triggers across ES 5m/15m exports?
 - Which Pine states or `ml_*` / `nexus_fp_*` exports explain winners versus
   failures?
 - Which settings are robust across IS/OOS windows?
@@ -282,8 +282,8 @@ budgets must be repriced before any Nexus edit.
   `pivotHighInWindow` / `pivotLowInWindow`; it has repeatedly produced wide-fib
   failures.
 - No settings result is trusted without TradingView indicator export evidence.
-- `warbird_pro_v9` is isolated from `warbird_pro`: it admits ES/MES TradingView
-  exports only, ignores NQ/MNQ, and optimizes ATR/risk exits without touching
+- `warbird_pro_v9` is isolated from `warbird_pro`: it admits ES 5m/15m
+  TradingView/Databento exports only, ignores MES/NQ/MNQ, and optimizes ATR/risk exits without touching
   Pine.
 - `-.236` is removed as a V9 stop candidate. It may remain only as an optional
   exported context feature.
@@ -363,12 +363,12 @@ fixed SMA(close) slow vs EMA(close) fast; do not reintroduce MA type selection.
   Initial Balance + volume profile HVN/LVN + UTC-anchored economic-event
   features (CPI/NFP/PPI=13:30 UTC, FOMC=19:00/18:00 UTC seasonal).
 - **Label (triple barrier):** `winner_10pt_24bar` = 1 if +10 pts before -5 pts
-  within 24 5m bars (2:1 R:R, 2-hour window); 0 otherwise; rows where neither
+  within 24 bars (2:1 R:R; 2-hour window on 5m, 6-hour window on 15m); 0 otherwise; rows where neither
   barrier hits within the window are DROPPED (not relabeled as loss).
 
 ### Kirk's Trade Preferences
 
-- **Target move:** 10 MES points (40 ticks, $50/contract).
+- **Target move:** 10 ES points (40 ticks, $500/contract).
 - **Target SL:** 1.0 ATR. **Max SL:** 2.0 ATR. `stopAtrMult` range (0.75, 2.0).
 - **Target breakeven range:** 1–3R. `targetRiskMultiple` range (1.0, 3.0).
 - **Inference threshold:** `proba > 0.75` for Grade A+ entries.
@@ -380,7 +380,7 @@ fixed SMA(close) slow vs EMA(close) fast; do not reintroduce MA type selection.
 
 | Card | Profile | Status |
 |------|---------|--------|
-| Core | `scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py` | Smoke/validation Optuna wrapper wired; full 1y AG launch pending |
+| Core | `scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py` | AG modeling/results card in Optuna (alongside tuning cards); full 1y AG launch pending |
 
 **AG config (locked):**
 

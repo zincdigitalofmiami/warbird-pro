@@ -33,8 +33,8 @@ must preserve the protected Warbird Pro fib anchor ownership and ladder math
 unless explicitly reopened with evidence.
 
 V9 lane lock: `warbird_pro_v9` is a separate Optuna workspace/profile for
-ES/MES-only ATR/risk exit modeling over active Warbird Pro V9 training rows
-from TradingView exports or Databento market data. It ignores NQ/MNQ rows,
+ES-only (5m/15m) ATR/risk exit modeling over active Warbird Pro V9 training rows
+from TradingView exports or Databento market data. It ignores MES/NQ/MNQ rows,
 removes `-.236` as a stop candidate, keeps `-.236` only as optional
 context/export data, and does not authorize Pine edits until a champion is
 approved for promotion.
@@ -83,7 +83,7 @@ strategy-harness sessions.
 ## Canonical Split
 
 - **Pine/TradingView outputs** = active training/modeling truth
-- **Databento ES/MES market-data rows** = approved training data supplier when
+- **Databento ES 5m/15m market-data rows** = approved training data supplier when
   manifests identify Databento as source/capture kind; Databento is not the
   Pine indicator source
 - **Active Pine files** = `warbird-pro-v9.pine` plus retained Nexus

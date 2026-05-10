@@ -40,7 +40,7 @@ Cloud must not receive:
 ## Training Boundary
 
 Active training/modeling happens locally from manifest-backed active-lane data:
-Pine/TradingView outputs, approved Databento ES/MES market-data training rows,
+Pine/TradingView outputs, approved Databento ES 5m/15m market-data training rows,
 and Nexus footprint snapshots under the active contract. Cloud daily/hourly
 runtime ingestion is not a training source. If runtime ingestion remains for the
 dashboard, it is not evidence for model training unless explicitly admitted by

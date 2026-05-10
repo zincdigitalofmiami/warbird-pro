@@ -41,9 +41,9 @@ OPTUNA_DIR = workspace_dir(PROFILE_KEY)
 EXPORT_ENV = "WARBIRD_PRO_EXPORT"
 MANIFEST_ENV = "WARBIRD_PRO_MANIFEST"
 
-ALLOWED_SYMBOL_ROOTS = frozenset({"MES"})
-IGNORED_SYMBOL_ROOTS = frozenset({"ES", "NQ", "MNQ"})
-ALLOWED_TIMEFRAMES = frozenset({"5", "5m"})
+ALLOWED_SYMBOL_ROOTS = frozenset({"ES"})
+IGNORED_SYMBOL_ROOTS = frozenset({"MES", "NQ", "MNQ"})
+ALLOWED_TIMEFRAMES = frozenset({"5", "5m", "15", "15m"})
 DATABENTO_CAPTURE_METHODS = frozenset(
     {
         "DATABENTO_OHLCV_CSV",
@@ -54,7 +54,7 @@ DATABENTO_CAPTURE_METHODS = frozenset(
 )
 ALLOWED_CAPTURE_METHODS = DATABENTO_CAPTURE_METHODS
 
-POINT_VALUE_BY_ROOT = {"MES": 5.0}
+POINT_VALUE_BY_ROOT = {"ES": 50.0}
 COMMISSION_SIDE_USD = 1.0
 MINTICK = 0.25
 DATA_FLOOR = "2025-05-01"
@@ -326,7 +326,7 @@ def _prepare_export_frame(frame: pd.DataFrame, manifest: dict[str, Any], source_
         return empty
     if symbol_root not in ALLOWED_SYMBOL_ROOTS:
         raise ValueError(
-            f"Warbird Pro V9 admits MES-only Databento exports; got {symbol!r}."
+            f"Warbird Pro V9 admits ES-only Databento exports; got {symbol!r}."
         )
 
     required = {"ts", "open", "high", "low", "close", "volume"}
@@ -366,7 +366,7 @@ def load_data() -> pd.DataFrame:
     export_files = _discover_export_files()
     if not export_files:
         raise FileNotFoundError(
-            "No Warbird Pro V9 exports found. Put MES 5m Databento exports at "
+            "No Warbird Pro V9 exports found. Put ES 5m/15m Databento exports at "
             f"{OPTUNA_DIR / 'export.csv'} or {OPTUNA_DIR / 'exports'}/*.csv, "
             "with a .manifest.json next to each CSV (capture_method must be "
             "DATABENTO_OHLCV_CSV / DATABENTO_TRAINING_CSV / DATABENTO_BARS_CSV)."
@@ -384,10 +384,14 @@ def load_data() -> pd.DataFrame:
 
     if not frames:
         raise ValueError(
-            f"Warbird Pro V9 found no usable MES 5m export rows. Ignored non-MES files: {ignored}"
+            f"Warbird Pro V9 found no usable ES 5m/15m export rows. Ignored non-ES files: {ignored}"
         )
 
-    df = pd.concat(frames, ignore_index=True).sort_values(["symbol_root", "ts"]).reset_index(drop=True)
+    df = (
+        pd.concat(frames, ignore_index=True)
+        .sort_values(["symbol_root", "timeframe", "ts"])
+        .reset_index(drop=True)
+    )
     df.attrs["ignored_exports"] = ignored
     return df
 
@@ -440,7 +444,7 @@ def _passes_short_filter(row: pd.Series, params: dict[str, Any]) -> bool:
 
 def _extract_signals(df: pd.DataFrame, params: dict[str, Any]) -> list[dict[str, Any]]:
     signals: list[dict[str, Any]] = []
-    for _, group in df.groupby("symbol_root", sort=False):
+    for _, group in df.groupby(["symbol_root", "timeframe"], sort=False):
         rows = group.sort_values("ts").reset_index(drop=True)
         for idx, row in rows.iterrows():
             atr = float(row.get("ml_atr14", np.nan))

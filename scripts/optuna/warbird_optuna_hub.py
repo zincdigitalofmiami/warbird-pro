@@ -457,8 +457,8 @@ def build_run_command(spec: IndicatorSpec) -> str:
             [
                 "python scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py",
                 "--mode smoke",
-                "--csv artifacts/v9_core_smoke_may2025/mes_5m_core.csv",
-                "--manifest artifacts/v9_core_smoke_may2025/mes_5m_core.manifest.json",
+                "--symbol-root ES",
+                "--timeframe 5",
             ]
         )
     parts = [

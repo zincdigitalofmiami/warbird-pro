@@ -38,7 +38,7 @@ agent-ready.
 Training/modeling uses manifest-backed source data for the active lane:
 
 - TradingView indicator CSV exports for non-Nexus lanes
-- Databento ES/MES market-data training rows when the manifest declares a
+- Databento ES market-data training rows (5m/15m) when the manifest declares a
   Databento capture/source kind
 - TradingView/Pine `request.footprint()` `nexus_fp_*` snapshots for Nexus ML RSI
 - deterministic features derived from those approved sources
@@ -118,7 +118,7 @@ The Hybrid+ 4-card system (`warbird_pro_v9_exit_cpcv`,
 - All OpenMP families single-threaded; `OMP_NUM_THREADS=1` env guard at script top
 
 **Label (locked):** triple-barrier `winner_10pt_24bar` =
-`1` if price hits +10pts before -5pts within 24 5m bars (2:1 R:R, 2-hour window);
+`1` if price hits +10pts before -5pts within 24 bars (2:1 R:R; 2h on 5m, 6h on 15m);
 `0` otherwise; rows where neither barrier hits within 24 bars are DROPPED
 (not relabeled as loss).
 
@@ -126,8 +126,8 @@ The Hybrid+ 4-card system (`warbird_pro_v9_exit_cpcv`,
 Session is a feature (`ml_session_ny/london/asia`, `ml_minutes_from_open`),
 NOT a pre-filter — let AG learn regime-conditional precision.
 
-**Data window:** Core trains on Databento MES 2025-05 → 2026-05 (1y, dense feature
-coverage). Footprint reconstruction from Databento MES Trades 365d. The newer
+**Data window:** Core trains on Databento ES 2025-05 → 2026-05 (1y, dense feature
+coverage). Footprint reconstruction from Databento ES Trades 365d. The newer
 OHLCV-1s 2315d (~6.3y) Databento download is reserved for a future v10
 long-horizon ensemble card, NOT Core (would NaN out 2/3 of feature surface).
 
@@ -255,7 +255,7 @@ EMA(close) fast.
   `.tradingview-mcp` path is historical only.
 - Use 15m behavior as the baseline reference when evaluating 5m tuning changes.
 - If a strategy/backtest harness is explicitly reopened, commission floor for
-  MES evidence is $1.00/side and slippage floor is 1 tick.
+  ES evidence is $1.00/side and slippage floor is 1 tick.
 - If a strategy/backtest harness is explicitly reopened, Bar Magnifier must be
   enabled when reported results depend on intrabar stop or target behavior.
 - Walk-forward or IS/OOS-style validation is required before a champion setting

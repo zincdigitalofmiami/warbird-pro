@@ -77,7 +77,7 @@ The goal is pure PineScript trading-indicator modeling:
 - promote settings/build changes back into Pine after approval
 - keep `indicators/warbird-pro-v9.pine` as the only active main chart
   indicator, named **Warbird Pro V9** in TradingView
-- keep `warbird_pro_v9` as a separate Optuna lane for ES/MES-only ATR/risk exit
+- keep `warbird_pro_v9` as a separate Optuna lane for ES-only (5m/15m) ATR/risk exit
   modeling over active Warbird Pro V9 training rows
 - keep the Nexus Pine files as the only active support/research indicator lane
 - retire and remove all other Pine indicator/strategy variants from the active
@@ -114,12 +114,12 @@ context, or agent-facing notes pointing at an older trigger or training surface.
   - `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine` —
     Nexus Optuna/footprint evidence lane (retained support/research lane)
 - `scripts/optuna/`: active local optimization workspaces and runner.
-  - `warbird_pro_v9` is isolated from `warbird_pro`; it admits ES/MES
+  - `warbird_pro_v9` is isolated from `warbird_pro`; it admits ES 5m/15m
     training rows from TradingView exports or Databento market data, ignores
-    NQ/MNQ rows, and models ATR/risk exits without Pine edits.
+    MES/NQ/MNQ rows, and models ATR/risk exits without Pine edits.
   - Hybrid+ 4-card chain is deprecated; active direction is the single
     `warbird_pro_core` training card (Core module scaffold under construction).
-  - Dataset: `workspaces/warbird_pro_v9/exports/mes_5m.csv` (441,852 5m bars, clean build dd81ebf)
+  - Dataset: `workspaces/warbird_pro_v9/exports/es_5m.csv` (plus ES 15m lane artifacts as built)
   - Build script: `workspaces/warbird_pro_v9/build_v9_dataset.py` — params MUST match live TV settings
 - `scripts/ag/tv_auto_tune.py`, `scripts/ag/tune_strategy_params.py`: TradingView
   settings-trial helpers retained for Pine-derived modeling.
@@ -161,7 +161,7 @@ The Pine code `input.float(default, ...)` values are NOT authoritative.
 - Pine/TradingView output is the active training truth.
 - Modeling inputs come from manifest-backed training data for the active lane:
   TradingView/Pine outputs emitted by `indicators/warbird-pro-v9.pine`,
-  Databento ES/MES market-data training rows when declared as Databento source
+  Databento ES market-data training rows (5m/15m) when declared as Databento source
   data, and, for Nexus-only work,
   `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
   TradingView/Pine `request.footprint()` evidence.
@@ -200,7 +200,7 @@ The Pine code `input.float(default, ...)` values are NOT authoritative.
 
 - No mock, demo, placeholder, or fake data.
 - Training/modeling rows must come from real manifest-backed active-lane
-  sources: Warbird Pro V9 Pine/TradingView exports, approved Databento ES/MES
+  sources: Warbird Pro V9 Pine/TradingView exports, approved Databento ES
   market-data training rows, or Nexus Pine/TradingView footprint evidence.
 - Do not use daily ingestion, FRED, macro, news, options, or cross-asset joins as
   active training features.
@@ -278,7 +278,7 @@ If any `.pine` file is touched, run:
 
 ### Backtesting And Modeling
 
-- If a strategy/backtest harness is explicitly reopened, MES commission floor is
+- If a strategy/backtest harness is explicitly reopened, ES commission floor is
   $1.00/side and slippage floor is 1 tick.
 - If a strategy/backtest harness is explicitly reopened, use Bar Magnifier when
   reported results depend on intrabar stop/target behavior.
@@ -289,8 +289,8 @@ If any `.pine` file is touched, run:
 - Warbird Pro V9 must not use `-.236` or other negative fib extensions as stop
   candidates. `-.236` may remain only as a context/export feature while V9
   models ATR/risk exits.
-- Warbird Pro V9 must ingest ES/MES training rows only, whether sourced from
-  TradingView exports or Databento market data, and must ignore NQ/MNQ rows.
+- Warbird Pro V9 must ingest ES 5m/15m training rows only, whether sourced from
+  TradingView exports or Databento market data, and must ignore MES/NQ/MNQ rows.
 - Do not start training/modeling unless explicitly asked.
 - Nexus ML RSI Optuna must use TradingView/Pine `request.footprint()`
   `nexus_fp_*` evidence only. Do not tune Nexus from CSV exports, local OHLCV

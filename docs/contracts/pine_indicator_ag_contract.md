@@ -21,8 +21,8 @@ settings still match the current contract.
 V9 lane contract (2026-05-02): `warbird_pro_v9` is a separate Optuna lane over
 the active **Warbird Pro V9** indicator at `indicators/warbird-pro-v9.pine`. It does not create a new Pine source,
 does not authorize Pine edits, and does not mutate the canonical fib anchor,
-fib visual, or EMA/MA setup. It admits manifest-backed ES/MES training rows
-from TradingView exports or Databento market data and ignores NQ/MNQ rows.
+fib visual, or EMA/MA setup. It admits manifest-backed ES training rows (5m/15m)
+from TradingView exports or Databento market data and ignores MES/NQ/MNQ rows.
 
 Operational preflight contract (2026-05-05): V9 has no active strategy
 harness. Use `python3 scripts/ag/tv_auto_tune.py --storage jsonl preflight --indicator-only`
@@ -34,7 +34,7 @@ explicitly reopened strategy-harness sessions.
 Training rows may come only from manifest-backed active-lane sources:
 
 - TradingView indicator CSV exports for non-Nexus lanes
-- Databento ES/MES market-data training rows when the manifest declares a
+- Databento ES market-data training rows (5m/15m) when the manifest declares a
   Databento capture/source kind
 - TradingView/Pine `request.footprint()` `nexus_fp_*` snapshots for
   `NEXUS_FOOTPRINT_DELTA`
@@ -42,11 +42,11 @@ Training rows may come only from manifest-backed active-lane sources:
 
 No external feature stack is admitted.
 
-`warbird_pro_v9` may load ES and MES exports as separate rows from the same
-active Warbird Pro V9 training lane. NQ/MNQ rows are ignored. No external
+`warbird_pro_v9` may load ES exports across 5m/15m from the same
+active Warbird Pro V9 training lane. MES/NQ/MNQ rows are ignored. No external
 cross-symbol join, cloud table, or external feature stack is admitted into this
 lane. Pine-native NQ/ZN/DXY/VIX values emitted by the active indicator are part
-of the indicator behavior. Databento may supply ES/MES market-data training
+of the indicator behavior. Databento may supply ES market-data training
 rows, but it is not the Pine indicator, not a trigger family, and not a
 TradingView indicator CSV export.
 
@@ -95,7 +95,7 @@ them with a new active strategy/backtest harness:
 ## Locked Fib Baseline (2026-04-30)
 
 Warbird Pro fib core in `indicators/warbird-pro-v9.pine` is the
-protected baseline. It must remain stable while 5m tuning iterates.
+protected baseline. It must remain stable while 5m/15m tuning iterates.
 
 Protected scope:
 
@@ -180,7 +180,7 @@ Valid recommendations:
 - threshold changes
 - stop/target policy changes
 - Pine code-change proposals for explicit approval
-- V9 ATR/risk exit policy recommendations from ES/MES export evidence
+- V9 ATR/risk exit policy recommendations from ES 5m/15m export evidence
 
 Invalid recommendations:
 

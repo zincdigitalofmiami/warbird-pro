@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Warbird Pro V9 Optuna profile.
 
-This lane models ATR/risk exits from manifest-backed Databento ES 5m training
+This lane models ATR/risk exits from manifest-backed Databento ES 5m/15m training
 rows for Warbird Pro V9. Databento is the only admitted historical data source;
 non-ES symbols (including MES/NQ/MNQ) and other timeframes are ignored. This profile intentionally does
 not mutate Pine or optimize fib-anchor, visual, or EMA/MA setup inputs.
@@ -35,7 +35,7 @@ MANIFEST_ENV = "WARBIRD_PRO_V9_MANIFEST"
 
 ALLOWED_SYMBOL_ROOTS = frozenset({"ES"})
 IGNORED_SYMBOL_ROOTS = frozenset({"MES", "NQ", "MNQ"})
-ALLOWED_TIMEFRAMES = frozenset({"5", "5m"})
+ALLOWED_TIMEFRAMES = frozenset({"5", "5m", "15", "15m"})
 DATABENTO_CAPTURE_METHODS = frozenset(
     {
         "DATABENTO_OHLCV_CSV",
@@ -329,7 +329,7 @@ def _atr(high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int) -> n
 
 def _with_trial_atr(df: pd.DataFrame, period: int) -> pd.DataFrame:
     chunks: list[pd.DataFrame] = []
-    for _, group in df.groupby("symbol_root", sort=False):
+    for _, group in df.groupby(["symbol_root", "timeframe"], sort=False):
         work = group.sort_values("ts").copy()
         work["_atr_trial"] = _atr(
             work["high"].to_numpy(dtype=float),
@@ -338,15 +338,19 @@ def _with_trial_atr(df: pd.DataFrame, period: int) -> pd.DataFrame:
             period=period,
         )
         chunks.append(work)
-    return pd.concat(chunks, ignore_index=True).sort_values(["symbol_root", "ts"]).reset_index(drop=True)
+    return (
+        pd.concat(chunks, ignore_index=True)
+        .sort_values(["symbol_root", "timeframe", "ts"])
+        .reset_index(drop=True)
+    )
 
 
 def load_data() -> pd.DataFrame:
     export_files = _discover_export_files()
     if not export_files:
         raise FileNotFoundError(
-            "No Warbird Pro V9 ES 5m Databento exports found. Put Databento "
-            "ES 5m CSV files at "
+            "No Warbird Pro V9 ES 5m/15m Databento exports found. Put Databento "
+            "ES 5m/15m CSV files at "
             f"{OPTUNA_DIR / 'export.csv'} or {OPTUNA_DIR / 'exports'}/*.csv, "
             "with a .manifest.json next to each CSV (capture_method must be "
             "DATABENTO_OHLCV_CSV / DATABENTO_TRAINING_CSV / DATABENTO_BARS_CSV)."
@@ -364,11 +368,15 @@ def load_data() -> pd.DataFrame:
 
     if not frames:
         raise ValueError(
-            "Warbird Pro V9 found no usable ES 5m export rows. "
+            "Warbird Pro V9 found no usable ES 5m/15m export rows. "
             f"Ignored non-ES files: {ignored}"
         )
 
-    df = pd.concat(frames, ignore_index=True).sort_values(["symbol_root", "ts"]).reset_index(drop=True)
+    df = (
+        pd.concat(frames, ignore_index=True)
+        .sort_values(["symbol_root", "timeframe", "ts"])
+        .reset_index(drop=True)
+    )
     df.attrs["ignored_exports"] = ignored
     return df
 
@@ -378,7 +386,7 @@ def _extract_signals(df: pd.DataFrame, params: dict[str, Any]) -> list[dict[str,
     allow_shorts = bool(params.get("allowShorts", True))
     signals: list[dict[str, Any]] = []
 
-    for _, group in df.groupby("symbol_root", sort=False):
+    for _, group in df.groupby(["symbol_root", "timeframe"], sort=False):
         rows = group.sort_values("ts").reset_index(drop=True)
         for idx, row in rows.iterrows():
             atr = float(row.get("_atr_trial", np.nan))

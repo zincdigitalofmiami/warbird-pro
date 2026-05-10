@@ -55,7 +55,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.optuna.cpcv import embargoed_chronological_split
 
-CSV_PATH = REPO_ROOT / "scripts/optuna/workspaces/warbird_pro/exports/databento_mes_5m_2020-2026_strict.csv"
+CSV_PATH = REPO_ROOT / "scripts/optuna/workspaces/warbird_pro_core/exports/es_5m_core.csv"
 OUTPUT_ROOT = REPO_ROOT / "models/warbird_pro_v9"
 
 # Features matching the locked Warbird Pro V9 Core surface.
@@ -85,7 +85,7 @@ ML_FEATURES = [
     "ml_cvd_div_bull", "ml_cvd_div_bear",
     # cross-asset 5m
     "ml_xa_nq_code", "ml_xa_zn_code", "ml_xa_dxy_code",
-    # cross-asset advanced (VIX movement pressure, MES↔NQ correlation, DXY divergence)
+    # cross-asset advanced (VIX movement pressure, ES↔NQ correlation, DXY divergence)
     "ml_xa_vix_pressure", "ml_xa_corr_nq", "ml_xa_dxy_diverge",
     # HTF confluence
     "ml_htf_conf_total",
@@ -145,7 +145,7 @@ def validate_trade_features(trades: pd.DataFrame) -> None:
 def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFrame:
     """Build fixed 10/-5/24 triple-barrier labels at entry bars.
 
-    A win is +10 MES points before -5 MES points within 24 5m bars. Rows where
+    A win is +10 ES points before -5 ES points within 24 bars. Rows where
     neither barrier is hit are dropped. If target and stop are both touched in
     the same future bar, the label is pessimistically a loss because 5m OHLC
     cannot prove target-before-stop ordering.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build Warbird Pro V9 research replay rows from MES (or ES) 1m bars.
+"""Build Warbird Pro V9 research replay rows from ES (or MES) 1m bars.
 
 Reads data/<symbol>_1m.parquet, resamples to 5m, computes Pine indicator entry
 triggers and fib context features in Python, writes a research CSV + manifest.
@@ -24,7 +24,7 @@ Output columns (CSV):
 
 Run:
   python scripts/optuna/workspaces/warbird_pro_v9/build_v9_dataset.py \\
-      --symbol MES --source data/mes_1m.parquet
+      --symbol ES --source data/es_1m.parquet
 """
 
 from __future__ import annotations
@@ -97,18 +97,38 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-_OUTRIGHT_RE = __import__("re").compile(r"^MES[FGHJKMNQUVXZ]\d{1,2}$")
+_OUTRIGHT_BY_ROOT = {
+    "MES": __import__("re").compile(r"^MES[FGHJKMNQUVXZ]\d{1,2}$"),
+    "ES": __import__("re").compile(r"^ES[FGHJKMNQUVXZ]\d{1,2}$"),
+}
 
 
-def load_databento_csv(csv_path: Path) -> pd.DataFrame:
-    """Load Databento OHLCV-1m CSV (decimal prices, ISO timestamps, all contracts).
+def _normalize_symbol_root(symbol: str) -> str:
+    token = str(symbol).upper().strip()
+    if ":" in token:
+        token = token.split(":", 1)[1]
+    token = token.replace("!", "")
+    root = ""
+    for char in token:
+        if char.isalpha():
+            root += char
+        else:
+            break
+    return "MES" if root.startswith("MES") else "ES" if root.startswith("ES") else root
 
-    Filters to outright MES futures contracts only (no calendar spreads, no
-    butterflies, no flies — those trade at tiny absolute prices and contaminate
-    aggregation). Then collapses to continuous front-month by selecting the
-    highest-volume outright contract per timestamp (matches TradingView MES1!).
+
+def load_databento_csv(csv_path: Path, symbol_root: str) -> pd.DataFrame:
+    """Load Databento OHLCV-1m CSV for one outright symbol family.
+
+    Filters to outright ES or MES futures contracts only (no calendar spreads,
+    no butterflies, no flies — those trade at tiny absolute prices and
+    contaminate aggregation). Then collapses to continuous front-month by
+    selecting the highest-volume outright contract per timestamp.
     Returns DataFrame with: ts (UTC), open, high, low, close, volume, symbol.
     """
+    outright_re = _OUTRIGHT_BY_ROOT.get(symbol_root)
+    if outright_re is None:
+        raise ValueError(f"Unsupported symbol root for Databento loader: {symbol_root!r}")
     raw = pd.read_csv(csv_path)
     required = {"ts_event", "open", "high", "low", "close", "volume", "symbol"}
     missing = required.difference(raw.columns)
@@ -120,19 +140,21 @@ def load_databento_csv(csv_path: Path) -> pd.DataFrame:
     raw["volume"] = pd.to_numeric(raw["volume"], errors="coerce").fillna(0).astype("int64")
     raw = raw.dropna(subset=["open", "high", "low", "close"]).reset_index(drop=True)
     pre_n = len(raw)
-    raw = raw.loc[raw["symbol"].astype(str).str.match(_OUTRIGHT_RE)].reset_index(drop=True)
+    raw = raw.loc[raw["symbol"].astype(str).str.match(outright_re)].reset_index(drop=True)
     dropped = pre_n - len(raw)
     if dropped:
         print(f"  filtered {dropped:,} non-outright rows ({dropped/pre_n*100:.1f}%) — spreads/flies excluded")
+    if raw.empty:
+        raise ValueError(f"No outright {symbol_root} rows found in {csv_path}")
     front_idx = raw.groupby("ts")["volume"].idxmax()
     front = raw.loc[front_idx, ["ts", "open", "high", "low", "close", "volume", "symbol"]].copy()
     front = front.sort_values("ts").reset_index(drop=True)
     return front
 
 
-def resample_to_5m(df_1m: pd.DataFrame) -> pd.DataFrame:
+def resample_to_timeframe(df_1m: pd.DataFrame, timeframe_minutes: int) -> pd.DataFrame:
     s = df_1m.set_index("ts").sort_index()
-    agg = s.resample("5min", label="left", closed="left").agg(
+    agg = s.resample(f"{timeframe_minutes}min", label="left", closed="left").agg(
         open=("open", "first"),
         high=("high", "max"),
         low=("low", "min"),
@@ -261,9 +283,9 @@ def zigzag_pivots(
     return anchor_high, anchor_low, anchor_high_bar, anchor_low_bar
 
 
-def htf_1h_levels(df_5m: pd.DataFrame) -> pd.DataFrame:
-    """Resample 5m to 1h, compute rolling 55-bar fib levels, broadcast back to 5m index."""
-    s = df_5m.set_index("ts").sort_index()
+def htf_1h_levels(frame: pd.DataFrame) -> pd.DataFrame:
+    """Resample the active bar frame to 1h and broadcast levels back to that index."""
+    s = frame.set_index("ts").sort_index()
     h_1h = s["high"].resample("1h", label="left", closed="left").max()
     l_1h = s["low"].resample("1h", label="left", closed="left").min()
     htf_high = h_1h.rolling(55, min_periods=55).max()
@@ -283,8 +305,8 @@ def htf_1h_levels(df_5m: pd.DataFrame) -> pd.DataFrame:
     return aligned
 
 
-def compute_features(df_5m: pd.DataFrame) -> pd.DataFrame:
-    df = df_5m.copy().reset_index(drop=True)
+def compute_features(frame: pd.DataFrame) -> pd.DataFrame:
+    df = frame.copy().reset_index(drop=True)
     n = len(df)
     open_ = df["open"].to_numpy(dtype=float)
     high = df["high"].to_numpy(dtype=float)
@@ -578,7 +600,7 @@ def write_outputs(
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Build Warbird Pro V9 dataset from 1m parquet")
+    ap = argparse.ArgumentParser(description="Build Warbird Pro V9 dataset from 1m source bars")
     ap.add_argument("--symbol", required=True, help="Symbol root (MES, ES, MES1!, ES1!).")
     ap.add_argument("--source", required=True, type=Path,
                     help="Path to source 1m bars: Databento OHLCV-1m CSV/CSV.zst, "
@@ -588,15 +610,14 @@ def main() -> int:
     ap.add_argument("--end", default=None, help="ISO end date (UTC).")
     ap.add_argument("--timeframe", default="5", choices=["5", "15"], help="Output timeframe in minutes.")
     args = ap.parse_args()
+    symbol_root = _normalize_symbol_root(args.symbol)
 
     if not args.source.exists():
         raise SystemExit(f"Source not found: {args.source}")
-    if args.timeframe != "5":
-        raise SystemExit("Only 5m output is supported in V9 lane.")
 
     suffix = "".join(args.source.suffixes).lower()
     if suffix.endswith(".csv") or suffix.endswith(".csv.zst"):
-        df = load_databento_csv(args.source)
+        df = load_databento_csv(args.source, symbol_root)
     elif suffix.endswith(".parquet"):
         df = pd.read_parquet(args.source)
         if "ts" not in df.columns:
@@ -613,9 +634,10 @@ def main() -> int:
         raise SystemExit("No rows in selected window.")
 
     print(f"  loaded {len(df):,} 1m bars from {df['ts'].min()} to {df['ts'].max()}")
-    df_5m = resample_to_5m(df)
-    print(f"  resampled to {len(df_5m):,} 5m bars")
-    features = compute_features(df_5m)
+    timeframe_minutes = int(args.timeframe)
+    df_tf = resample_to_timeframe(df, timeframe_minutes)
+    print(f"  resampled to {len(df_tf):,} {timeframe_minutes}m bars")
+    features = compute_features(df_tf)
     print(f"  computed features for {len(features):,} bars")
     long_n = int(features["ml_entry_long_trigger"].sum())
     short_n = int(features["ml_entry_short_trigger"].sum())

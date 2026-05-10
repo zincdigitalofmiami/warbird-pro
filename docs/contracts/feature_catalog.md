@@ -19,7 +19,7 @@ Allowed feature families:
 - Pine `ml_*` hidden exports
 - Strategy Tester trade fields
 - OHLCV fields included in the TradingView export
-- Databento ES/MES market-data rows when the manifest identifies Databento as
+- Databento ES 5m/15m market-data rows when the manifest identifies Databento as
   the source/capture kind
 - deterministic transformations of the same approved source data
 

@@ -17,7 +17,7 @@ Allowed label sources:
 - Strategy Tester closed-trade profit/loss
 - Strategy Tester entry/exit fields
 - Pine exported state fields such as `ml_last_exit_outcome`
-- Databento-backed ES/MES market-data training rows when the manifest declares
+- Databento-backed ES 5m/15m market-data training rows when the manifest declares
   Databento as the source/capture kind
 - deterministic labels computed from the same approved source data
 

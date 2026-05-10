@@ -27,7 +27,7 @@ ready for reuse by another agent.
 Allowed training inputs are only manifest-backed active-lane sources:
 
 - TradingView indicator CSV exports for non-Nexus lanes
-- Databento ES/MES market-data training rows when declared as Databento source
+- Databento ES market-data training rows (5m/15m) when declared as Databento source
   data in the manifest
 - TradingView/Pine `request.footprint()` `nexus_fp_*` snapshots for Nexus ML RSI
 - deterministic features derived from those approved sources
@@ -148,7 +148,7 @@ Admitted feature families:
 - Pine input settings
 - Pine state-machine fields
 - Pine `ml_*` hidden exports
-- Databento ES/MES market-data training rows when the run manifest declares a
+- Databento ES market-data training rows (5m/15m) when the run manifest declares a
   Databento source/capture kind
 - Nexus `nexus_fp_*` footprint fields from TradingView/Pine
   `request.footprint()`
@@ -215,7 +215,7 @@ The promotion artifact is a Pine settings/build brief containing:
 
 Supabase ingestion may remain for live chart/runtime support, but it is not an
 active training source. Databento is an approved training data supplier for
-manifest-backed ES/MES market-data rows; it is not the Pine indicator and must
+manifest-backed ES 5m/15m market-data rows; it is not the Pine indicator and must
 not be labeled as a TradingView indicator CSV. Cloud must not receive raw trial
 data, raw labels, or full research datasets.
 

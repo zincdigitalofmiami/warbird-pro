@@ -80,6 +80,7 @@ class ProfileAdapter:
     run_backtest_fn: Callable[[pd.DataFrame, dict[str, Any], str], dict[str, Any]]
     objective_score_fn: Callable[[dict[str, Any]], float] | None = None
     objective_metric_name: str | None = None
+    contract_label: str | None = None
     # Optional: {parent_categorical: {value: [dependent_param_name, ...]}}.
     # When present, dependent params are ONLY suggested for their activating
     # parent value, avoiding wasted trials on irrelevant dimensions.
@@ -195,6 +196,16 @@ def load_custom_profile(module_name: str) -> ProfileAdapter:
     conditional = getattr(module, "CONDITIONAL_PARAMS", None)
     objective_score_fn = getattr(module, "objective_score", None)
     objective_metric_name = getattr(module, "OBJECTIVE_METRIC", None)
+    allowed_roots = sorted(str(v).upper() for v in getattr(module, "ALLOWED_SYMBOL_ROOTS", []))
+    allowed_timeframes = sorted(
+        {
+            f"{str(v).lower().removesuffix('m')}m"
+            for v in getattr(module, "ALLOWED_TIMEFRAMES", [])
+        }
+    )
+    contract_label = None
+    if allowed_roots and allowed_timeframes:
+        contract_label = f"{'+'.join(allowed_roots)}_{'_'.join(allowed_timeframes)}"
     return ProfileAdapter(
         name=module_name,
         bool_params=list(getattr(module, "BOOL_PARAMS")),
@@ -206,6 +217,7 @@ def load_custom_profile(module_name: str) -> ProfileAdapter:
         run_backtest_fn=getattr(module, "run_backtest"),
         objective_score_fn=objective_score_fn if callable(objective_score_fn) else None,
         objective_metric_name=str(objective_metric_name).strip() if objective_metric_name else None,
+        contract_label=contract_label,
         conditional_params=dict(conditional) if conditional else None,
     )
 
@@ -435,11 +447,12 @@ def register_study_metadata(
     indicator_key: str,
     start_date: str,
     profile_name: str,
+    contract_label: str | None,
     ranking_policy: str = DEFAULT_RANKING_POLICY,
     objective_primary: str | None = None,
 ) -> None:
     study.set_user_attr("project", "warbird-pro")
-    study.set_user_attr("contract", "MES_5m")
+    study.set_user_attr("contract", contract_label or "UNSPECIFIED")
     study.set_user_attr("indicator_key", indicator_key)
     study.set_user_attr("profile", profile_name)
     study.set_user_attr("ranking_policy", ranking_policy)
@@ -762,6 +775,7 @@ def main():
         args.indicator_key,
         args.start,
         profile.name,
+        profile.contract_label,
         ranking_policy,
         objective_primary=objective_metric_name,
     )

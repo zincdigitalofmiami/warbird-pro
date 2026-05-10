@@ -1,13 +1,13 @@
-# Warbird Pro 5m Tuning Runbook
+# Warbird Pro 5m/15m Tuning Runbook
 
 **Date:** 2026-05-05
 **Status:** Active — Warbird Pro main-indicator tuning lane
 
 ## Purpose
 
-Tune `indicators/warbird-pro-v9.pine` on MES using manifest-backed active-lane
+Tune `indicators/warbird-pro-v9.pine` on ES (5m/15m) using manifest-backed active-lane
 training data and produce defensible Pine settings or build recommendations.
-TradingView/Pine exports and approved Databento ES/MES market-data training
+TradingView/Pine exports and approved Databento ES 5m/15m market-data training
 rows are valid when the manifest declares the true source/capture kind. Nexus
 remains a separate retained lane and is tuned only from TradingView/Pine
 `request.footprint()` evidence for `NEXUS_FOOTPRINT_DELTA`.

@@ -29,7 +29,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.ag.report_v9_core_smoke import build_report
 from scripts.ag.train_v9_locked import LABEL_COL
-from scripts.optuna.paths import study_db_path, workspace_dir
+from scripts.optuna.paths import contract_study_db_path, study_db_path, workspace_dir
 
 CARD_KEY = "warbird_pro_core"
 CARD_TITLE = "2026-05-09 - Warbird Pro Autogluon Core"
@@ -38,8 +38,10 @@ OBJECTIVE_METRIC = "core_validation_gate_score"
 
 WORKSPACE = workspace_dir(CARD_KEY)
 STUDY_DB = study_db_path(CARD_KEY)
-DEFAULT_CSV = REPO_ROOT / "artifacts" / "v9_core_smoke_may2025" / "mes_5m_core.csv"
-DEFAULT_MANIFEST = DEFAULT_CSV.with_name("mes_5m_core.manifest.json")
+DEFAULT_SYMBOL_ROOT = "ES"
+DEFAULT_TIMEFRAME = "5"
+DEFAULT_CSV = REPO_ROOT / "artifacts" / "v9_core_smoke_may2025" / "es_5m_core.csv"
+DEFAULT_MANIFEST = DEFAULT_CSV.with_name("es_5m_core.manifest.json")
 
 # Runner-compatible adapter surface. The Core card is not an HPO search space;
 # direct CLI execution below is the preferred path.
@@ -62,6 +64,29 @@ def _ensure_inputs(csv_path: Path, manifest_path: Path) -> None:
         )
     if not manifest_path.exists():
         raise FileNotFoundError(f"Core manifest not found: {manifest_path}")
+
+
+def _default_csv_path(symbol_root: str, timeframe: str) -> Path:
+    return REPO_ROOT / "artifacts" / "v9_core_smoke_may2025" / f"{symbol_root.lower()}_{timeframe}m_core.csv"
+
+
+def _default_manifest_path(symbol_root: str, timeframe: str) -> Path:
+    return _default_csv_path(symbol_root, timeframe).with_name(
+        f"{symbol_root.lower()}_{timeframe}m_core.manifest.json"
+    )
+
+
+def _load_manifest(manifest_path: Path) -> dict[str, Any]:
+    return json.loads(manifest_path.read_text())
+
+
+def resolve_study_db_path(study_db: Path | None, manifest_path: Path) -> Path:
+    if study_db is not None:
+        return study_db
+    manifest = _load_manifest(manifest_path)
+    symbol = str(manifest.get("symbol", "ES1!")).strip() or "ES1!"
+    timeframe = str(manifest.get("timeframe", "5")).strip() or "5"
+    return contract_study_db_path(CARD_KEY, symbol=symbol, timeframe=timeframe)
 
 
 def validation_result(csv_path: Path, manifest_path: Path, max_hold_bars: int) -> dict[str, Any]:
@@ -218,18 +243,26 @@ def get_card_manifest() -> dict[str, Any]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=CARD_TITLE)
     ap.add_argument("--mode", choices=["smoke", "validate-only"], default="smoke")
-    ap.add_argument("--csv", type=Path, default=DEFAULT_CSV)
-    ap.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    ap.add_argument("--study-db", type=Path, default=STUDY_DB)
+    ap.add_argument("--symbol-root", choices=["ES"], default=DEFAULT_SYMBOL_ROOT)
+    ap.add_argument("--timeframe", choices=["5", "15"], default=DEFAULT_TIMEFRAME)
+    ap.add_argument("--csv", type=Path, default=None)
+    ap.add_argument("--manifest", type=Path, default=None)
+    ap.add_argument("--study-db", type=Path, default=None)
     ap.add_argument("--study-name", default=CARD_TITLE)
     ap.add_argument("--max-hold-bars", type=int, default=24)
     ap.add_argument("--out-json", type=Path, default=None)
     args = ap.parse_args()
 
-    report = validation_result(args.csv, args.manifest, args.max_hold_bars)
+    symbol_root = str(args.symbol_root).upper()
+    timeframe = str(args.timeframe)
+    csv_path = args.csv if args.csv else _default_csv_path(symbol_root, timeframe)
+    manifest_path = args.manifest if args.manifest else _default_manifest_path(symbol_root, timeframe)
+
+    report = validation_result(csv_path, manifest_path, args.max_hold_bars)
+    study_db = resolve_study_db_path(args.study_db, manifest_path)
     trial_no = write_optuna_trial(
         report,
-        db_path=args.study_db,
+        db_path=study_db,
         study_name=args.study_name,
         mode=args.mode,
     )
@@ -237,8 +270,12 @@ def main() -> int:
     payload = {
         "card": get_card_manifest(),
         "mode": args.mode,
+        "symbol_root": symbol_root,
+        "timeframe": timeframe,
+        "csv": str(csv_path),
+        "manifest": str(manifest_path),
         "study_name": args.study_name,
-        "study_db": str(args.study_db),
+        "study_db": str(study_db),
         "trial_number": trial_no,
         "report": report,
     }

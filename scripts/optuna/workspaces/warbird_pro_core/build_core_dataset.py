@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Build the Warbird Pro V9 Core training dataset.
 
-This is the AG/Core ETL surface, not a Pine edit. It builds manifest-backed 5m
-MES rows with the locked V9 feature schema, Yahoo DXY parity, VIX movement
-pressure fallback, and optional Databento trade-side order-flow reconstruction
-for CVD/divergence/absorption.
+This is the AG/Core ETL surface, not a Pine edit. It builds manifest-backed
+ES rows at 5m or 15m with the locked V9 feature schema, Yahoo DXY parity,
+VIX movement pressure fallback, and optional Databento trade-side order-flow
+reconstruction for CVD/divergence/absorption.
 
 Core mode:
-  - bars: MES OHLCV, normalized to 5m
+  - bars: ES OHLCV, normalized to selected timeframe (5m or 15m)
   - cross-asset: NQ/ZN from local Databento 1h bars when available
-  - DXY: Yahoo Finance DX-Y.NYB, aligned to the MES 5m clock
+  - DXY: Yahoo Finance DX-Y.NYB, aligned to the selected bar clock
   - VIX: movement pressure from VIXCLS daily close fallback when available
-  - order flow: Databento trades zip, MES outright contracts only
+  - order flow: Databento trades zip, outright contract rows for the selected symbol root only
   - labels are built by scripts/ag/train_v9_locked.py, not here
 
 The builder emits the exact feature names expected by train_v9_locked.ML_FEATURES
@@ -43,12 +43,15 @@ from scripts.ag.train_v9_locked import LABEL_COL, ML_FEATURES
 
 WORKSPACE = REPO_ROOT / "scripts" / "optuna" / "workspaces" / "warbird_pro_core"
 EXPORTS_DIR = WORKSPACE / "exports"
-DEFAULT_SOURCE = REPO_ROOT / "data" / "mes_1m.parquet"
 DEFAULT_TRADES_ZIP = REPO_ROOT / "data" / "MES ES Trades GLBX-20260508-SAGMRP8P3H.zip"
 DEFAULT_CROSS_ASSET_1H = Path(
     "/Volumes/Satechi Hub/Historical Data/Databento/raw/databento_futures_ohlcv_1h.parquet"
 )
 DEFAULT_VIX_CSV = Path("/Volumes/Satechi Hub/ZINC-FUSION-V15/data/downloads/VIXCLS.csv")
+DEFAULT_SOURCE_BY_ROOT = {
+    "ES": REPO_ROOT / "data" / "es_1m_20260503.parquet",
+    "MES": REPO_ROOT / "data" / "mes_1m.parquet",
+}
 
 TRIGGER_FAMILY = "LIVE_ANCHOR_FOOTPRINT"
 PINE_FILE = "indicators/warbird-pro-v9.pine"
@@ -90,7 +93,9 @@ ORDERFLOW_FLUSH_DELTA_PCT = 35.0
 ORDERFLOW_EVENT_VOLUME_SPIKE = 1.5
 ORDERFLOW_COMPRESSED_RANGE_ATR = 0.75
 
-OUTRIGHT_MES_RE = re.compile(r"^MES[FGHJKMNQUVXZ]\d{1,2}$")
+OUTRIGHT_ROOT_PATTERNS = {
+    "ES": re.compile(r"^ES[FGHJKMNQUVXZ]\d{1,2}$"),
+}
 TRADES_MEMBER_RE = re.compile(r"(\d{8})-(\d{8})\.trades\.csv\.zst$")
 
 
@@ -115,6 +120,28 @@ def utc_ts(value: str | None) -> pd.Timestamp | None:
     if value is None:
         return None
     return pd.Timestamp(value, tz="UTC")
+
+
+def normalize_symbol_root(symbol: str) -> str:
+    token = str(symbol).upper().strip()
+    if ":" in token:
+        token = token.split(":", 1)[1]
+    token = token.replace("!", "")
+    root = ""
+    for char in token:
+        if char.isalpha():
+            root += char
+        else:
+            break
+    if root.startswith("MES"):
+        return "MES"
+    if root.startswith("ES"):
+        return "ES"
+    return root
+
+
+def default_source_for_symbol(symbol: str) -> Path:
+    return DEFAULT_SOURCE_BY_ROOT.get(normalize_symbol_root(symbol), DEFAULT_SOURCE_BY_ROOT["ES"])
 
 
 def rma(values: np.ndarray, period: int) -> np.ndarray:
@@ -217,13 +244,14 @@ def load_bars(source: Path) -> pd.DataFrame:
     return df[["ts", "open", "high", "low", "close", "volume"]].reset_index(drop=True)
 
 
-def normalize_to_5m(df: pd.DataFrame) -> pd.DataFrame:
+def normalize_to_timeframe(df: pd.DataFrame, timeframe_min: int) -> pd.DataFrame:
     ts = pd.to_datetime(df["ts"], utc=True)
     diffs = ts.sort_values().diff().dropna()
-    median_seconds = diffs.dt.total_seconds().median() if not diffs.empty else 300
+    target_seconds = timeframe_min * 60
+    median_seconds = diffs.dt.total_seconds().median() if not diffs.empty else target_seconds
     if median_seconds <= 90:
         s = df.set_index("ts").sort_index()
-        out = s.resample("5min", label="left", closed="left").agg(
+        out = s.resample(f"{timeframe_min}min", label="left", closed="left").agg(
             open=("open", "first"),
             high=("high", "max"),
             low=("low", "min"),
@@ -614,9 +642,23 @@ def trade_members_for_window(zip_path: Path, start: pd.Timestamp, end: pd.Timest
     return selected
 
 
-def read_trade_chunks(zip_path: Path, members: list[str], start: pd.Timestamp, end: pd.Timestamp):
+def _outright_pattern_for_root(symbol_root: str) -> re.Pattern[str]:
+    root = str(symbol_root).upper().strip()
+    if root not in OUTRIGHT_ROOT_PATTERNS:
+        raise ValueError(f"Unsupported symbol root for order-flow filter: {symbol_root!r}")
+    return OUTRIGHT_ROOT_PATTERNS[root]
+
+
+def read_trade_chunks(
+    zip_path: Path,
+    members: list[str],
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    symbol_root: str,
+):
     import zstandard as zstd
 
+    symbol_re = _outright_pattern_for_root(symbol_root)
     usecols = ["ts_event", "side", "price", "size", "symbol"]
     with zipfile.ZipFile(zip_path) as zf:
         for member in members:
@@ -628,7 +670,7 @@ def read_trade_chunks(zip_path: Path, members: list[str], start: pd.Timestamp, e
                     chunk = chunk.loc[(chunk["ts_event"] >= start) & (chunk["ts_event"] <= end)]
                     if chunk.empty:
                         continue
-                    chunk = chunk.loc[chunk["symbol"].astype(str).str.match(OUTRIGHT_MES_RE)]
+                    chunk = chunk.loc[chunk["symbol"].astype(str).str.match(symbol_re)]
                     if chunk.empty:
                         continue
                     chunk["price"] = pd.to_numeric(chunk["price"], errors="coerce")
@@ -638,7 +680,14 @@ def read_trade_chunks(zip_path: Path, members: list[str], start: pd.Timestamp, e
                         yield chunk
 
 
-def build_orderflow_features(df: pd.DataFrame, trades_zip: Path | None, gate_mode: str, warnings: list[str]) -> pd.DataFrame:
+def build_orderflow_features(
+    df: pd.DataFrame,
+    trades_zip: Path | None,
+    gate_mode: str,
+    warnings: list[str],
+    symbol_root: str,
+    bar_freq: str,
+) -> pd.DataFrame:
     out = df.copy()
     idx = pd.DatetimeIndex(pd.to_datetime(out["ts"], utc=True))
     zeros = np.zeros(len(out), dtype=float)
@@ -646,8 +695,9 @@ def build_orderflow_features(df: pd.DataFrame, trades_zip: Path | None, gate_mod
         warnings.append("Databento trades zip unavailable; order-flow features set to 0")
         return assign_empty_orderflow(out, zeros)
 
+    freq_delta = pd.to_timedelta(bar_freq)
     start = idx.min()
-    end = idx.max() + pd.Timedelta(minutes=5)
+    end = idx.max() + freq_delta
     members = trade_members_for_window(trades_zip, start, end)
     if not members:
         warnings.append("No trades zip members overlap selected window; order-flow features set to 0")
@@ -655,8 +705,8 @@ def build_orderflow_features(df: pd.DataFrame, trades_zip: Path | None, gate_mod
 
     bar_aggs: list[pd.DataFrame] = []
     price_aggs: list[pd.DataFrame] = []
-    for chunk in read_trade_chunks(trades_zip, members, start, end):
-        chunk["bar_ts"] = chunk["ts_event"].dt.floor("5min")
+    for chunk in read_trade_chunks(trades_zip, members, start, end, symbol_root):
+        chunk["bar_ts"] = chunk["ts_event"].dt.floor(bar_freq)
         side = chunk["side"].astype(str)
         size = chunk["size"].astype(float)
         chunk["buy_vol"] = np.where(side.eq("B"), size, 0.0)
@@ -674,7 +724,7 @@ def build_orderflow_features(df: pd.DataFrame, trades_zip: Path | None, gate_mod
         price_aggs.append(chunk.groupby(["bar_ts", "price"], as_index=False)["size"].sum())
 
     if not bar_aggs:
-        warnings.append("No MES outright trade rows after filtering; order-flow features set to 0")
+        warnings.append(f"No {symbol_root} outright trade rows after filtering; order-flow features set to 0")
         return assign_empty_orderflow(out, zeros)
 
     bars = pd.concat(bar_aggs).groupby(level=0).sum().sort_index()
@@ -834,19 +884,30 @@ def validate_core_frame(df: pd.DataFrame, gate_mode: str) -> None:
             raise RuntimeError("strict gate failed: all-zero footprint delta")
 
 
-def write_outputs(df: pd.DataFrame, out_dir: Path, symbol: str, source: Path, trades_zip: Path | None, manifest_extra: dict[str, Any]) -> tuple[Path, Path]:
+def write_outputs(
+    df: pd.DataFrame,
+    out_dir: Path,
+    symbol: str,
+    timeframe: str,
+    source: Path,
+    trades_zip: Path | None,
+    manifest_extra: dict[str, Any],
+) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
-    csv_path = out_dir / f"{symbol.lower()}_5m_core.csv"
+    symbol_root = normalize_symbol_root(symbol)
+    timeframe_text = str(timeframe).strip().removesuffix("m")
+    csv_path = out_dir / f"{symbol_root.lower()}_{timeframe_text}m_core.csv"
     manifest_path = csv_path.with_suffix(".manifest.json")
     export = df.copy()
     export["ts"] = pd.to_datetime(export["ts"], utc=True).dt.strftime("%Y-%m-%dT%H:%M:%S%z")
     export.to_csv(csv_path, index=False)
     manifest = {
         "repo_commit": repo_commit(),
-        "symbol": symbol,
-        "timeframe": "5",
+        "symbol": symbol_root,
+        "symbol_root": symbol_root,
+        "timeframe": timeframe_text,
         "trigger_family": TRIGGER_FAMILY,
-        "source_kind": "DATABENTO_MES_CORE_ETL",
+        "source_kind": f"DATABENTO_{symbol_root}_CORE_ETL",
         "source_bars": str(source),
         "source_trades_zip": str(trades_zip) if trades_zip else None,
         "pine_file": PINE_FILE,
@@ -867,9 +928,10 @@ def write_outputs(df: pd.DataFrame, out_dir: Path, symbol: str, source: Path, tr
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Build Warbird Pro V9 Core 5m dataset")
-    ap.add_argument("--symbol", default="MES")
-    ap.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
+    ap = argparse.ArgumentParser(description="Build Warbird Pro V9 Core 5m/15m dataset")
+    ap.add_argument("--symbol", choices=["ES"], default="ES")
+    ap.add_argument("--timeframe", choices=["5", "15"], default="5")
+    ap.add_argument("--source", type=Path, default=None)
     ap.add_argument("--trades-zip", type=Path, default=DEFAULT_TRADES_ZIP)
     ap.add_argument("--cross-asset-1h", type=Path, default=DEFAULT_CROSS_ASSET_1H)
     ap.add_argument("--vix-csv", type=Path, default=DEFAULT_VIX_CSV)
@@ -878,17 +940,19 @@ def main() -> int:
     ap.add_argument("--end", default=None)
     ap.add_argument("--dxy-interval", default="1h", choices=["5m", "1h", "1d"])
     ap.add_argument("--base-regime-only", action="store_true",
-                    help="Allow order-flow features to be zero-filled for a 5y base/regime build.")
+                    help="Allow order-flow features to be zero-filled for a base/regime build.")
     ap.add_argument("--skip-yahoo-dxy", action="store_true")
     ap.add_argument("--gate-mode", choices=["schema", "smoke", "strict"], default="smoke")
     args = ap.parse_args()
+    symbol_root = normalize_symbol_root(args.symbol)
+    source_path = args.source or default_source_for_symbol(symbol_root)
 
-    if not args.source.exists():
-        raise SystemExit(f"Source bars not found: {args.source}")
+    if not source_path.exists():
+        raise SystemExit(f"Source bars not found: {source_path}")
 
     start = utc_ts(args.start)
     end = utc_ts(args.end)
-    raw = load_bars(args.source)
+    raw = load_bars(source_path)
     if start is not None:
         raw = raw.loc[raw["ts"] >= start]
     if end is not None:
@@ -896,12 +960,15 @@ def main() -> int:
     if raw.empty:
         raise SystemExit("No bar rows in selected window")
 
-    bars_5m = normalize_to_5m(raw)
-    print(f"bars: {len(raw):,} source rows -> {len(bars_5m):,} 5m rows")
-    print(f"range: {bars_5m['ts'].min()} -> {bars_5m['ts'].max()}")
+    timeframe_min = int(args.timeframe)
+    bar_freq = f"{timeframe_min}min"
+
+    bars_tf = normalize_to_timeframe(raw, timeframe_min)
+    print(f"bars: {len(raw):,} source rows -> {len(bars_tf):,} {timeframe_min}m rows")
+    print(f"range: {bars_tf['ts'].min()} -> {bars_tf['ts'].max()}")
 
     warnings: list[str] = []
-    features = compute_base_features(bars_5m)
+    features = compute_base_features(bars_tf)
     features = merge_cross_assets(
         features,
         args.cross_asset_1h,
@@ -911,15 +978,23 @@ def main() -> int:
         warnings,
     )
     trades_zip = None if args.base_regime_only else args.trades_zip
-    features = build_orderflow_features(features, trades_zip, args.gate_mode, warnings)
+    features = build_orderflow_features(
+        features,
+        trades_zip,
+        args.gate_mode,
+        warnings,
+        symbol_root=symbol_root,
+        bar_freq=bar_freq,
+    )
     features = finalize_entries(features)
 
     validate_core_frame(features, args.gate_mode)
     csv_path, manifest_path = write_outputs(
         features,
         args.out_dir,
-        args.symbol,
-        args.source,
+        symbol_root,
+        args.timeframe,
+        source_path,
         trades_zip,
         {
             "gate_mode": args.gate_mode,

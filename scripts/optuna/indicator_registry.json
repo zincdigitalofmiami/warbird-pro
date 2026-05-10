@@ -6,11 +6,11 @@
     "category": "chart-core-entry-filter",
     "pine_file": "indicators/warbird-pro-v9.pine",
     "profile_module": "scripts.optuna.warbird_pro_profile",
-    "default_study_name": "Warbird Pro V9 MES 5m Entry Filter Optimization",
-    "symbol": "MES1!",
-    "allowed_symbol_roots": ["MES"],
-    "ignored_symbol_roots": ["ES", "NQ", "MNQ"],
-    "timeframe": "5",
+    "default_study_name": "Warbird Pro V9 ES 5/15m Entry Filter Optimization",
+    "symbol": "ES1!",
+    "allowed_symbol_roots": ["ES"],
+    "ignored_symbol_roots": ["MES", "NQ", "MNQ"],
+    "timeframe": "5/15",
     "data_floor": "2025-05-01",
     "label_column": "ml_entry_long_trigger/ml_entry_short_trigger",
     "output_budget": "60/64 output-consuming calls (58 plot + 2 alertcondition); 9 request.security; 1 request.footprint (pine-lint counting)",
@@ -67,7 +67,7 @@
       "DATABENTO_BARS_CSV",
       "DATABENTO_TRADES_CSV"
     ],
-    "notes": "V9 entry-filter HPO. MES 5m only, Databento historical only. Treats Pine V9 ml_entry_long_trigger / ml_entry_short_trigger as candidates and tunes a post-trigger filter. 2026-05-09: pattern set trimmed to 4 (RisingWindow + BearEngulf/MarubozuBlack/TweezerTop). Removed stale OHLCV-delta params: requirePositiveDeltaLong, requireNegativeDeltaShort, blockOnExhaustionLong/Short, minNetDelta20Long, maxNetDelta20Short. useMaGate is restored as the live Pine EMA/MA gate switch. MA lengths are tunable only +/-10 around live defaults (SMA 90-110, EMA 40-60); MA type params stay removed. Negative-fib stop candidates banned by contract."
+    "notes": "V9 entry-filter HPO. ES 5m/15m only, Databento historical only. Treats Pine V9 ml_entry_long_trigger / ml_entry_short_trigger as candidates and tunes a post-trigger filter. 2026-05-09: pattern set trimmed to 4 (RisingWindow + BearEngulf/MarubozuBlack/TweezerTop). Removed stale OHLCV-delta params: requirePositiveDeltaLong, requireNegativeDeltaShort, blockOnExhaustionLong/Short, minNetDelta20Long, maxNetDelta20Short. useMaGate is restored as the live Pine EMA/MA gate switch. MA lengths are tunable only +/-10 around live defaults (SMA 90-110, EMA 40-60); MA type params stay removed. Negative-fib stop candidates banned by contract."
   },
   {
     "key": "warbird_pro_v9",
@@ -76,11 +76,11 @@
     "category": "chart-core-exit-modeling",
     "pine_file": "indicators/warbird-pro-v9.pine",
     "profile_module": "scripts.optuna.warbird_pro_v9_profile",
-    "default_study_name": "Warbird Pro V9 MES 5m ATR Risk Exit Modeling",
-    "symbol": "MES1!",
-    "allowed_symbol_roots": ["MES"],
-    "ignored_symbol_roots": ["ES", "NQ", "MNQ"],
-    "timeframe": "5",
+    "default_study_name": "Warbird Pro V9 ES 5/15m ATR Risk Exit Modeling",
+    "symbol": "ES1!",
+    "allowed_symbol_roots": ["ES"],
+    "ignored_symbol_roots": ["MES", "NQ", "MNQ"],
+    "timeframe": "5/15",
     "data_floor": "2025-05-01",
     "label_column": "ml_entry_long_trigger/ml_entry_short_trigger",
     "output_budget": "60/64 output-consuming calls (58 plot + 2 alertcondition); 9 request.security; 1 request.footprint (pine-lint counting)",
@@ -120,7 +120,7 @@
       "DATABENTO_BARS_CSV",
       "DATABENTO_TRADES_CSV"
     ],
-    "notes": "V9 exit-policy HPO. MES 5m only, Databento historical only. Models ATR/risk exits on the same Pine V9 entry triggers. Negative-fib extension stops banned. 2026-05-09: pattern set trimmed to 4. MA setup remains frozen in this exit lane. Pine source frozen until promotion approval."
+    "notes": "V9 exit-policy HPO. ES 5m/15m only, Databento historical only. Models ATR/risk exits on the same Pine V9 entry triggers. Negative-fib extension stops banned. 2026-05-09: pattern set trimmed to 4. MA setup remains frozen in this exit lane. Pine source frozen until promotion approval."
   },
   {
     "key": "warbird_pro_core",
@@ -130,10 +130,10 @@
     "pine_file": "indicators/warbird-pro-v9.pine",
     "profile_module": "scripts.optuna.cards.core_training.2026_05_09_warbird_pro_autogluon_core",
     "default_study_name": "2026-05-09 - Warbird Pro Autogluon Core",
-    "symbol": "MES1!",
-    "allowed_symbol_roots": ["MES"],
-    "ignored_symbol_roots": ["ES", "NQ", "MNQ"],
-    "timeframe": "5",
+    "symbol": "ES1!",
+    "allowed_symbol_roots": ["ES"],
+    "ignored_symbol_roots": ["MES", "NQ", "MNQ"],
+    "timeframe": "5/15",
     "data_floor": "2025-05-01",
     "label_column": "winner_10pt_24bar",
     "output_budget": "60/64 output-consuming calls (58 plot + 2 alertcondition); 9 request.security; 1 request.footprint (pine-lint counting)",
@@ -177,7 +177,7 @@
       "threshold": 0.75,
       "session_filter": "feature_only_not_prefilter"
     },
-    "notes": "Single Core training card supersedes the deprecated Hybrid+ 4-card chain (warbird_pro_v9_exit_cpcv, warbird_pro_v9_entry_filter_cpcv, warbird_pro_v9_ag_meta_cpcv, warbird_pro_v9_joint_challenger removed 2026-05-09). Binary classifier on V9 ml_* feature surface + ETL CVD divergence + microstructure + IB + HVN/LVN + UTC-anchored events. Triple-barrier label: +10pts before -5pts within 24 5m bars (2h, 2:1 R:R), drop neither-hit rows. Best_quality preset with explicit no-bag/no-stack overrides keeps it time-series safe. Hard gate enforced via scripts/ag/train_hard_gate.py."
+    "notes": "Single Core training card supersedes the deprecated Hybrid+ 4-card chain (warbird_pro_v9_exit_cpcv, warbird_pro_v9_entry_filter_cpcv, warbird_pro_v9_ag_meta_cpcv, warbird_pro_v9_joint_challenger removed 2026-05-09). Binary classifier on V9 ml_* feature surface + ETL CVD divergence + microstructure + IB + HVN/LVN + UTC-anchored events. Triple-barrier label: +10pts before -5pts within 24 bars (2h on 5m / 6h on 15m, 2:1 R:R), drop neither-hit rows. Best_quality preset with explicit no-bag/no-stack overrides keeps it time-series safe. AG modeling results are tracked in Optuna alongside tuning studies. Hard gate enforced via scripts/ag/train_hard_gate.py."
   },
   {
     "key": "warbird_nexus_ml_rsi",

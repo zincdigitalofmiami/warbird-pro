@@ -16,14 +16,20 @@ Smoke card command:
 ```bash
 python scripts/optuna/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py \
   --mode smoke \
-  --csv artifacts/v9_core_smoke_may2025/mes_5m_core.csv \
-  --manifest artifacts/v9_core_smoke_may2025/mes_5m_core.manifest.json
+  --symbol-root ES \
+  --timeframe 5
 ```
 
-Expected active study DB:
+Expected default active study DB:
 
 ```text
-scripts/optuna/workspaces/warbird_pro_core/study.db
+scripts/optuna/workspaces/warbird_pro_core/experiments/es_5m/study.db
+```
+
+For the 15m prep lane, use:
+
+```text
+scripts/optuna/workspaces/warbird_pro_core/experiments/es_15m/study.db
 ```
 
 Do not run full AutoGluon training from this workspace until the full 1y Core

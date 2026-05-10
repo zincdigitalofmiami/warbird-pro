@@ -48,12 +48,16 @@ Rules:
 - Study names are operator-facing titles in `optuna-dashboard`. Use clear words with spaces that state the study purpose. Do not use snake_case, version labels, or generic names such as `<indicator>_study`.
 - `warbird_pro` is the only active main chart indicator key and maps to
   **Warbird Pro V9** at `indicators/warbird-pro-v9.pine`.
-- `warbird_pro_v9` is a separate Warbird Pro V9 experiment lane for ES/MES-only
-  ATR/risk exit modeling. It reuses active Warbird Pro V9 training rows from
-  TradingView exports or Databento market data, ignores NQ/MNQ rows, excludes
-  `-.236` as a stop candidate, and keeps `-.236` only as optional context when
-  present.
-- Databento is an approved ES/MES market-data supplier for training rows when
+- `warbird_pro_v9` is a separate Warbird Pro V9 experiment lane for ES-only
+  ATR/risk exit modeling. Prep supports both `5m` and `15m` datasets; keep the
+  canonical workspace at `workspaces/warbird_pro_v9/`, store exports under
+  `exports/`, and keep timeframe-specific studies under `experiments/es_5m/`
+  and `experiments/es_15m/` when you need separate study DBs.
+- `warbird_pro_core` is the Core AutoGluon card workspace. Prep supports ES
+  `5m` and `15m` datasets with the same separation rule: dataset exports at the
+  workspace root `exports/`, contract-specific study DBs under
+  `experiments/es_5m/` and `experiments/es_15m/`.
+- Databento is an approved ES 5m/15m market-data supplier for training rows when
   manifests declare a Databento capture/source kind such as
   `DATABENTO_OHLCV_CSV`. Databento is not the Pine indicator and must not be
   labeled `TRADINGVIEW_INDICATOR_CSV`.
