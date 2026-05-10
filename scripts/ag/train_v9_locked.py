@@ -258,7 +258,11 @@ def main() -> int:
     ap.add_argument("--val-frac", type=float, default=0.15)
     ap.add_argument("--validate-only", action="store_true",
                     help="Build labels/splits and run hard schema gates without fitting AutoGluon.")
+    ap.add_argument("--smoke-ok", action="store_true",
+                    help="With --validate-only, accept a small smoke CSV below full-training trade/split floors.")
     args = ap.parse_args()
+    if args.smoke_ok and not args.validate_only:
+        raise SystemExit("--smoke-ok is only valid with --validate-only")
     if not (0.0 < args.train_frac < 1.0):
         raise SystemExit("--train-frac must be in (0, 1)")
     if not (0.0 < args.val_frac < 1.0):
@@ -272,6 +276,21 @@ def main() -> int:
     validate_input_schema(df)
 
     trades = build_trade_dataset(df, max_hold_bars=args.max_hold_bars)
+    feature_cols = list(ML_FEATURES)
+    if args.validate_only and args.smoke_ok:
+        if len(trades) == 0:
+            raise RuntimeError("Smoke validation requires at least one resolved trade")
+        if trades[LABEL_COL].nunique() != 2:
+            raise RuntimeError(f"Smoke validation requires both {LABEL_COL} classes")
+        print("\nsmoke validate-only PASS")
+        print(f"  resolved trades: {len(trades):,}")
+        print(f"  positives: {int(trades[LABEL_COL].sum()):,}")
+        print(f"  negatives: {int((1 - trades[LABEL_COL]).sum()):,}")
+        print(f"  features: {len(feature_cols)}")
+        print(f"  label: {LABEL_COL}")
+        print(f"  max_hold_bars: {args.max_hold_bars}")
+        return 0
+
     if len(trades) < 200:
         raise RuntimeError(f"Too few resolved trades: {len(trades):,}")
     if trades[LABEL_COL].nunique() != 2:
@@ -307,7 +326,6 @@ def main() -> int:
         if slice_df[LABEL_COL].nunique() != 2:
             raise RuntimeError(f"{name} split missing one label class")
 
-    feature_cols = list(ML_FEATURES)
     train = train_df[feature_cols + [LABEL_COL]].copy()
     val = val_df[feature_cols + [LABEL_COL]].copy()
     test = test_df[feature_cols + [LABEL_COL]].copy()

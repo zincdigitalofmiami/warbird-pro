@@ -81,7 +81,8 @@ docs/backtest-reports/PowerDrill Research/
 
 # PowerDrill reference material and local audit bundles (keep on disk, not in git)
 Powerdrill/
-docs/audits/
+docs/audits/*
+!docs/audits/2026-05-10-v9-core-smoke-verification.md
 
 # archived/stale plans (history preserved in git, not tracked going forward)
 docs/plans/archive/

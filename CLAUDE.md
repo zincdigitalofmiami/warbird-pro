@@ -148,7 +148,12 @@ claim — validate in Python first before reserving Pine plot budget.
 Core ETL/trainer partial — DXY parity, fixed 10/-5/24 labels, strict feature
 schema, Yahoo `DX-Y.NYB`, and Databento trade-side CVD/order-flow features are
 wired in code. Pending: full 1y Core build, Core card body + hard-gate launch
-wiring, Optuna hub wiring, and pre-launch gate report.
+wiring, Optuna hub wiring, and pre-launch gate report. Owner/next trigger:
+Codex resumes when Kirk approves the full 1y Core build/training path.
+
+Smoke verification evidence is recorded in
+`docs/audits/2026-05-10-v9-core-smoke-verification.md`; use
+`scripts/ag/report_v9_core_smoke.py` for exact reproducible metrics.
 
 ### Live Pine Settings (Canonical — read TV inputs panel, not Pine code defaults)
 

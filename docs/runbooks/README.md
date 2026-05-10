@@ -31,6 +31,9 @@ strategy-harness sessions.
 - `docs/runbooks/strategy_tuning.md`
   - TradingView/Pine settings sweep workflow; must be interpreted through the
     2026-04-30 Warbird Pro + Nexus active surface
+- `docs/runbooks/v9_core_smoke_verification.md`
+  - reproducible small-window Core ETL smoke verification commands and metric
+    reporting path; not a full 1y Core training gate
 - `scripts/ag/tv_connection_doctor.py`
   - read-only TradingView CDP/MCP readiness check; run before any live TV
     operation

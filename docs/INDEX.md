@@ -73,6 +73,8 @@ strategy-harness sessions.
   - the operational runbook index
 - `docs/runbooks/startup_repo_review.md`
   - required fresh-chat/start-of-day read-only initialization report checklist
+- `docs/runbooks/v9_core_smoke_verification.md`
+  - reproducible Core ETL smoke verification commands and exact metric reporting
 - `CLAUDE.md`
   - current operational truth and runtime status
 - `WARBIRD_MODEL_SPEC.md`
