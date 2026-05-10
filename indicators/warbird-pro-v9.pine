@@ -13,7 +13,7 @@
 //   lines and labels reuse the SAME drawAnchoredLine + setFibLevelLabel
 //   plumbing with the same widths, styles, label sizes, and label offsets
 // - Liquidity is its own first-class package: BSL/SSL sweep+reclaim,
-//   equal-highs/lows pools, session VWAP+bands, volume z-score
+//   equal-highs/lows pools, session VWAP context, volume z-score
 // - Cross-asset: NQ/ZN/DXY trend codes + VIX z-score + MES↔NQ rolling
 //   correlation + DXY divergence
 // - Daily/weekly S/R: PDH/PDL/PWH/PWL distance features + thin lines
@@ -78,20 +78,18 @@ int WIDTH_PIVOT       = 3
 int WIDTH_TARGET      = 2
 
 //=====================
-// SIGNAL LOGIC SETTINGS
+// TRADE SETUP / FILTER SETTINGS
 //=====================
-string groupSignal = "Signal Logic"
-bool usePatternConfirm = input.bool(false, "Require Winning Candlestick Pattern", group=groupSignal)
-int liqLookbackBars = input.int(20, "Liquidity Pool Lookback", minval=5, maxval=200, group=groupSignal)
+string groupSetup = "Trade Setup"
+bool usePatternConfirm = input.bool(false, "Require Candlestick Pattern", group=groupSetup)
 
-string groupTriggerGate = "Trigger Gates"
-bool useXaGate = input.bool(true, "NQ Cross-Asset Agreement", group=groupTriggerGate)
-bool useLiqGate = input.bool(true, "Recent Liquidity Event", group=groupTriggerGate)
-int liqRecencyBars = input.int(8, "Liquidity Recency (bars)", minval=1, maxval=50, group=groupTriggerGate)
+string groupEntryFilters = "Entry Filters"
+bool useLiqGate = input.bool(true, "Require Recent Liquidity Event", group=groupEntryFilters)
+int liqRecencyBars = input.int(8, "Liquidity Recency (bars)", minval=1, maxval=50, group=groupEntryFilters)
 
-string groupExecution = "Execution"
-float tradeStopAtrMult = input.float(1.50, "Trade Telemetry ATR Stop", minval=0.25, maxval=10.0, step=0.25, group=groupExecution)
-int tradeMaxHoldBars = input.int(72, "Trade Time Exit (bars)", minval=0, maxval=500, group=groupExecution)
+string groupExecution = "Trade Management"
+float tradeStopAtrMult = input.float(1.50, "ATR Stop Multiplier", minval=0.25, maxval=10.0, step=0.25, group=groupExecution)
+int tradeMaxHoldBars = input.int(72, "Max Hold (bars)", minval=0, maxval=500, group=groupExecution)
 
 //=====================
 // MA CROSSOVER (Source B — fast EMA(close) above slow SMA(close) = bull)
@@ -101,11 +99,7 @@ string maTypeSlow = input.string("SMA", "Slow MA Type", options=["SMA", "EMA", "
 int lengthMA = input.int(13, "Slow MA Length", minval=8, maxval=250, group=groupMa)
 string maTypeFast = input.string("EMA", "Fast MA Type", options=["SMA", "EMA", "HMA"], group=groupMa)
 int lengthEMA = input.int(6, "Fast MA Length", minval=3, maxval=100, group=groupMa)
-bool showMaLines = input.bool(true, "Show MA Lines", group=groupMa)
-color maColorInput = input.color(color.white, "Slow MA Color", group=groupMa, inline="ma")
-int maWidthInput = input.int(2, "", minval=1, maxval=5, group=groupMa, inline="ma")
-color emaColorInput = input.color(#26A69A, "Fast MA Color", group=groupMa, inline="ema")
-int emaWidthInput = input.int(2, "", minval=1, maxval=5, group=groupMa, inline="ema")
+bool showMaLines = input.bool(true, "Show MA Trend Lines", group=groupMa)
 
 //=====================
 // RSI CONTEXT (Source C)
@@ -118,18 +112,25 @@ float rsiOversold = input.float(25.0, "Bullish Extreme Below", minval=0.0, maxva
 //=====================
 // LIQUIDITY PACKAGE
 //=====================
-string groupLiq = "Liquidity"
+string groupLiq = "Liquidity & VWAP"
+int liqLookbackBars = input.int(20, "BSL/SSL Pool Lookback", minval=5, maxval=200, group=groupLiq)
 int eqhTolPct = input.int(5, "Equal H/L Tolerance (1/100 of ATR)", minval=1, maxval=50, group=groupLiq)
 int eqhMinTaps = input.int(2, "Equal H/L Min Taps", minval=2, maxval=10, group=groupLiq)
 int eqhLookback = input.int(100, "Equal H/L Lookback Bars", minval=20, maxval=500, group=groupLiq)
 int volZLength = input.int(20, "Volume Z-Score Length", minval=5, maxval=100, group=groupLiq)
-bool useVwapBands = input.bool(true, "Show Session VWAP + Bands", group=groupLiq)
+bool useSessionVwap = input.bool(true, "Enable Session VWAP Feature", group=groupLiq)
 
 //=====================
 // CROSS-ASSET PACKAGE
 //=====================
-string groupXa = "Cross-Asset"
-int corrLength = input.int(20, "MES↔NQ Correlation Length", minval=5, maxval=200, group=groupXa)
+string groupXa = "Cross-Asset Context"
+bool useXaGate = input.bool(true, "Use NQ Trend As Entry Gate", group=groupXa)
+string xaTrendTimeframe = input.timeframe("5", "Trend Timeframe", group=groupXa)
+string nqSymbol = input.symbol("CME_MINI:NQ1!", "NQ Symbol", group=groupXa)
+string znSymbol = input.symbol("CBOT:ZN1!", "ZN Symbol", group=groupXa)
+string dxySymbol = input.symbol("TVC:DXY", "DXY Symbol", group=groupXa)
+string vixSymbol = input.symbol("CBOE:VIX", "VIX Symbol", group=groupXa)
+int corrLength = input.int(20, "MES-NQ Correlation Length", minval=5, maxval=200, group=groupXa)
 int vixZLength = input.int(20, "VIX Z-Score Length", minval=5, maxval=100, group=groupXa)
 
 //=====================
@@ -270,11 +271,11 @@ int adxLength = 14
 [adxDiPlus, adxDiMinus, adxValue] = ta.dmi(adxLength, adxLength)
 
 //=====================
-// Cross-asset 5m trend codes (NQ/ZN/DXY)
+// Cross-asset trend codes (NQ/ZN/DXY)
 //=====================
-[nqClose5, nqSlow5, nqFast5] = request.security("CME_MINI:NQ1!", "5", [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[znClose5, znSlow5, znFast5] = request.security("CBOT:ZN1!", "5", [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[dxyClose5, dxySlow5, dxyFast5] = request.security("TVC:DXY", "5", [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[nqClose5, nqSlow5, nqFast5] = request.security(nqSymbol, xaTrendTimeframe, [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[znClose5, znSlow5, znFast5] = request.security(znSymbol, xaTrendTimeframe, [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[dxyClose5, dxySlow5, dxyFast5] = request.security(dxySymbol, xaTrendTimeframe, [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 int nqCode = f_xa_code(nqClose5, nqSlow5, nqFast5)
 int znCode = f_xa_code(znClose5, znSlow5, znFast5)
@@ -283,7 +284,7 @@ int dxyCode = f_xa_code(dxyClose5, dxySlow5, dxyFast5)
 //=====================
 // Cross-asset advanced — VIX z-score, MES↔NQ rolling correlation, DXY divergence
 //=====================
-float vixClose = request.security("CBOE:VIX", "5", close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+float vixClose = request.security(vixSymbol, xaTrendTimeframe, close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 float vixMean = ta.sma(vixClose, vixZLength)
 float vixSd = ta.stdev(vixClose, vixZLength)
 float vixZscore = vixSd > 0 and not na(vixClose) ? (vixClose - vixMean) / vixSd : 0.0
@@ -345,9 +346,10 @@ float eqhDistAtr = atr14 > 0 and not na(lastEqHigh) ? (lastEqHigh - close) / atr
 float eqlDistAtr = atr14 > 0 and not na(lastEqLow) ? (close - lastEqLow) / atr14 : 0.0
 
 //=====================
-// Session VWAP + ±1σ bands
+// Session VWAP (model/export feature)
 //=====================
-[vwap1, vwapUpper1, vwapLower1] = ta.vwap(hlc3, timeframe.change("D"), 1.0)
+float vwapRaw = ta.vwap(hlc3, timeframe.change("D"))
+float vwap1 = useSessionVwap ? vwapRaw : na
 float vwapDistAtr = atr14 > 0 and not na(vwap1) ? (close - vwap1) / atr14 : 0.0
 
 //=====================
@@ -360,7 +362,7 @@ float volZscore = volSd > 0 ? (volume - volMean) / volSd : 0.0
 //=====================
 // HTF confluence
 //=====================
-float htfConfTolPct = input.float(1.5, "HTF Confluence Tolerance (%)", minval=0.1, maxval=10.0, step=0.1, group=groupSignal)
+float htfConfTolPct = input.float(1.5, "HTF Confluence Tolerance (%)", minval=0.1, maxval=10.0, step=0.1, group=groupFibEngine)
 [htf1hHigh, htf1hLow] = request.security(syminfo.tickerid, "60", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [htfDHigh, htfDLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [htfMHigh, htfMLow] = request.security(syminfo.tickerid, "M", [high[1], low[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
@@ -786,8 +788,8 @@ if barstate.islast
     _slLbl    := setFibLevelLabel(_slLbl,    tradeActive, tradeStopPrice,  "SL",    fibStopColorInput)
     _tpLbl    := setFibLevelLabel(_tpLbl,    tradeActive, tradeTargetPrice,"TP",    fibTargetColorInput)
 
-plot(showMaLines ? xMA : na, "MA (SMA)", maColorInput, maWidthInput)
-plot(showMaLines ? xEMA : na, "EMA (close)", emaColorInput, emaWidthInput)
+plot(showMaLines ? xMA : na, title="Slow MA", color=color.white, linewidth=2, display=display.all)
+plot(showMaLines ? xEMA : na, title="Fast MA", color=#26A69A, linewidth=2, display=display.all)
 
 //=====================
 // Status table — black bg, white body, dark gray dividers; headers unchanged
@@ -983,7 +985,7 @@ alertcondition(entryLongTrigger, title="Warbird Pro V9 - Long Entry", message="W
 alertcondition(entryShortTrigger, title="Warbird Pro V9 - Short Entry", message="Warbird Pro V9 SHORT entry on {{ticker}} {{interval}} @ {{close}}")
 
 //=====================
-// Hidden Optuna / AG / SHAP exports
+// Optuna export fields (not chart visuals)
 //=====================
 // structural / regime
 plot(atr14, "ml_atr14", display=display.none, editable=false)
@@ -1026,7 +1028,7 @@ plot(eqlDistAtr, "ml_liq_eql_dist_atr", display=display.none, editable=false)
 plot(vwapDistAtr, "ml_liq_vwap_dist_atr", display=display.none, editable=false)
 plot(volZscore, "ml_liq_vol_zscore", display=display.none, editable=false)
 
-// cross-asset (5m aligned)
+// cross-asset (configured timeframe)
 plot(float(nqCode), "ml_xa_nq_code", display=display.none, editable=false)
 plot(float(znCode), "ml_xa_zn_code", display=display.none, editable=false)
 plot(float(dxyCode), "ml_xa_dxy_code", display=display.none, editable=false)

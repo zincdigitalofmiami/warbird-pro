@@ -251,12 +251,14 @@ Promotion is manual. A champion means:
 
 ## Pine Budget Baseline
 
-Verified 2026-05-09 by `scripts/guards/pine-lint.sh`:
+Verified 2026-05-10 by `scripts/guards/pine-lint.sh`:
 
-- `warbird-pro-v9.pine`: 53 output-consuming calls
-  (51 `plot()` + 2 `alertcondition()`), 9 `request.security()` calls after
+- `warbird-pro-v9.pine`: 60 output-consuming calls
+  (58 `plot()` + 2 `alertcondition()`), 9 `request.security()` calls after
   comment-line normalization, 1 `request.footprint()` call, 19 `line.new()`
-  calls, 1 `box.new()`, and 1 `table.new()`.
+  calls, 1 `box.new()`, and 1 `table.new()`. Session VWAP is intentionally
+  modeling/export-only through `ml_liq_vwap_dist_atr`; it is not a visible
+  chart overlay.
 
 Any Pine addition must be priced before code is written. Nexus request/output
 budgets must be repriced before any Nexus edit.

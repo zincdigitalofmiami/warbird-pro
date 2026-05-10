@@ -70,8 +70,10 @@ Budget verification from 2026-05-10 by `scripts/guards/pine-lint.sh`:
 - Warbird Pro V9: 60 output-consuming calls
   (58 `plot()` + 2 `alertcondition()`), 9 `request.security()` after
   comment-line normalization, 1 `request.footprint()`, 19 `line.new()`,
-  1 `box.new()`, and 1 `table.new()`. The new footprint diagnostics leave
-  only 4 output slots; price every additional plot before editing Pine.
+  1 `box.new()`, and 1 `table.new()`. Session VWAP remains modeling/export-only
+  via `ml_liq_vwap_dist_atr`; the settings label must not imply a visible VWAP
+  overlay. The new footprint diagnostics leave only 4 output slots; price every
+  additional plot before editing Pine.
 
 Checkpoint summary from 2026-04-27 operator TradingView snapshots:
 
