@@ -76,7 +76,7 @@ ML_FEATURES = [
     "knob_eqh_min_taps", "knob_eqh_lookback", "knob_vol_z_length",
     "knob_use_session_vwap",
     "knob_use_xa_gate", "knob_nq_symbol", "knob_zn_symbol",
-    "knob_dxy_symbol", "knob_vix_symbol", "knob_corr_length",
+    "knob_6e_symbol", "knob_vix_symbol", "knob_corr_length",
     "knob_vix_move_bars", "knob_vix_atr_length",
     "knob_vix_pressure_band", "knob_xa_min_agreement",
     "knob_zn_gate_direction",
@@ -119,11 +119,19 @@ ML_FEATURES = [
     "ml_liq_vwap_dist_atr", "ml_liq_vol_zscore",
     # ETL CVD divergence features (Python-only, no Pine budget impact)
     "ml_cvd_div_bull", "ml_cvd_div_bear",
-    # cross-asset 5m
-    "ml_xa_nq_code", "ml_xa_zn_code", "ml_xa_dxy_code",
-    # cross-asset advanced (VIX movement pressure, ES↔NQ correlation, DXY divergence)
-    "ml_xa_vix_pressure", "ml_xa_corr_nq", "ml_xa_dxy_diverge",
+    # cross-asset trend codes (NQ/ZN/6E — DXY removed 2026-05-11)
+    "ml_xa_nq_code", "ml_xa_zn_code", "ml_xa_6e_code",
+    # cross-asset advanced (VIX movement pressure, ES↔NQ correlation)
+    "ml_xa_vix_pressure", "ml_xa_corr_nq",
     "ml_xa_long_agreement", "ml_xa_short_agreement",
+    # cross-asset continuous (locked 2026-05-11 gate-as-feature pivot — XA agreement
+    # is no longer a hard gate; these normalized continuous signals let AG learn
+    # regime-relative interactions instead of absolute-level cliffs. 6E momentum
+    # z-score replaces the original DXY momentum z-score).
+    "ml_xa_nq_rel_strength_atr",
+    "ml_xa_zn_rate_pressure",
+    "ml_xa_hg_growth_proxy",
+    "ml_xa_6e_momentum_zscore",
     # HTF confluence
     "ml_htf_conf_total",
     # daily/weekly S/R distances
@@ -135,6 +143,23 @@ ML_FEATURES = [
     "ml_aggressor_pulse", "ml_absorption_candidate",
     "ml_flush_candidate", "ml_volume_spike_ratio", "ml_poc_shift",
 ]
+
+# Trade-surface discoverables (derived at label-build time).
+# TP families use fib ladder ratios relative to entry anchor.
+DISCOVERABLE_SL_ATR_MULTS: tuple[float, ...] = (1.0, 1.5, 2.0)
+DISCOVERABLE_TP_RATIOS: tuple[float, ...] = (1.0, 1.236, 1.618)
+ENTRY_RATIO_BY_TOUCH_CODE: dict[int, float] = {500: 0.5, 618: 0.618, 786: 0.786}
+
+TRADE_DISCOVERABLE_FEATURES = [
+    "sl_atr_mult",
+    "tp_ratio",
+    "tp_family_code",
+    "target_distance_points",
+    "stop_distance_points",
+    "rr_ratio",
+]
+
+MODEL_FEATURES = [*ML_FEATURES, *TRADE_DISCOVERABLE_FEATURES]
 LABEL_COL = "winner_10pt_24bar"
 TP_LABEL_COL = "tp_hit"
 STOP_LABEL_COL = "stop_hit"
@@ -175,28 +200,51 @@ def validate_input_schema(df: pd.DataFrame) -> None:
 
 
 def validate_trade_features(trades: pd.DataFrame) -> None:
-    missing = [col for col in ML_FEATURES if col not in trades.columns]
+    missing = [col for col in MODEL_FEATURES if col not in trades.columns]
     if missing:
         raise RuntimeError(f"Trade feature set missing required columns: {missing}")
     bad_inf = [
-        col for col in ML_FEATURES
+        col for col in MODEL_FEATURES
         if np.isinf(pd.to_numeric(trades[col], errors="coerce")).any()
     ]
     if bad_inf:
         raise RuntimeError(f"Trade feature set contains +/-inf values: {bad_inf}")
-    all_null = [col for col in ML_FEATURES if trades[col].isna().all()]
+    all_null = [col for col in MODEL_FEATURES if trades[col].isna().all()]
     if all_null:
         raise RuntimeError(f"Trade feature columns are entirely null: {all_null}")
 
 
 
-def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFrame:
-    """Build fixed 10/-5/24 triple-barrier labels at entry bars.
+def _entry_ratio_from_touch_code(touch_code: float) -> float:
+    code = int(round(float(touch_code))) if pd.notna(touch_code) else 618
+    return ENTRY_RATIO_BY_TOUCH_CODE.get(code, 0.618)
 
-    A win is +10 ES points before -5 ES points within 24 bars. Rows where
-    neither barrier is hit are dropped. If target and stop are both touched in
-    the same future bar, the label is pessimistically a loss because 5m OHLC
-    cannot prove target-before-stop ordering.
+
+def _tp_price_from_ratio(entry_price: float, tp1_price: float, touch_code: float, tp_ratio: float, is_long: bool) -> float:
+    tp1_dist = abs(float(tp1_price) - float(entry_price))
+    if tp1_dist <= 1e-9:
+        fallback = 10.0 * (tp_ratio / 1.236)
+        return float(entry_price + fallback if is_long else entry_price - fallback)
+    entry_ratio = _entry_ratio_from_touch_code(touch_code)
+    denom = (1.236 - entry_ratio)
+    if denom <= 1e-9:
+        scale = 1.0
+    else:
+        scale = (tp_ratio - entry_ratio) / denom
+    target_dist = max(tp1_dist * float(scale), 0.25)
+    return float(entry_price + target_dist if is_long else entry_price - target_dist)
+
+
+def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFrame:
+    """Build TP×SL discoverable triple-barrier labels at entry bars.
+
+    For each entry candidate, the trainer expands six combinations:
+      - TP ratios: {1.000, 1.236, 1.618}
+      - SL ATR multipliers: {1.0, 1.5, 2.0}
+
+    Outcome is winner_10pt_24bar-style binary resolution (target hit before
+    stop within max_hold_bars). Same-bar TP/SL conflict is pessimistically
+    treated as loss.
     """
     df = df.sort_values("ts").reset_index(drop=True)
     long_mask = df["ml_entry_long_trigger"].astype(float) > 0
@@ -223,24 +271,48 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFra
         else np.full(len(df), np.nan)
     )
     closes = df["close"].to_numpy(dtype=float)
+    touch_codes = (
+        df["ml_fib_touch_level_code"].to_numpy(dtype=float)
+        if "ml_fib_touch_level_code" in df.columns
+        else np.full(len(df), 618.0)
+    )
+    atr_vals = (
+        pd.to_numeric(df["ml_atr14"], errors="coerce").to_numpy(dtype=float)
+        if "ml_atr14" in df.columns
+        else np.full(len(df), np.nan)
+    )
 
-    rows = []
+    rows: list[dict[str, Any]] = []
     dropped_neither = 0
 
     for i in entry_idx:
         entry_price = entries[i] if pd.notna(entries[i]) and entries[i] > 0 else closes[i]
         is_long = bool(long_mask.iloc[i])
+        touch_code = touch_codes[i]
 
-        target_hit_idx = -1
-        stop_hit_idx = -1
+        tp1_price = (
+            targets[i]
+            if pd.notna(targets[i]) and targets[i] > 0
+            else (entry_price + 10.0 if is_long else entry_price - 10.0)
+        )
+        tp_prices_by_ratio = {
+            float(tp_ratio): _tp_price_from_ratio(entry_price, tp1_price, touch_code, float(tp_ratio), is_long)
+            for tp_ratio in DISCOVERABLE_TP_RATIOS
+        }
 
-        tp_price = targets[i] if pd.notna(targets[i]) and targets[i] > 0 else entry_price + 10.0 if is_long else entry_price - 10.0
-        sl_price = stops[i] if pd.notna(stops[i]) and stops[i] > 0 else entry_price - 5.0 if is_long else entry_price + 5.0
-        resolution_bar = -1
-        outcome = 0
+        atr_i = atr_vals[i]
+        if not pd.notna(atr_i) or float(atr_i) <= 1e-9:
+            existing_stop = (
+                stops[i]
+                if pd.notna(stops[i]) and stops[i] > 0
+                else (entry_price - 5.0 if is_long else entry_price + 5.0)
+            )
+            atr_i = abs(float(existing_stop) - float(entry_price)) / 1.5
+            if atr_i <= 1e-9:
+                atr_i = 1.0
+
         mfe_points = 0.0
         mae_points = 0.0
-
         end_idx = min(i + max_hold_bars + 1, len(df))
         if end_idx > i + 1:
             future_high = highs[i + 1:end_idx]
@@ -253,59 +325,79 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFra
                 mae_points = float(np.nanmax(future_high - entry_price))
             mfe_points = max(mfe_points, 0.0)
             mae_points = max(mae_points, 0.0)
-        for j in range(i + 1, end_idx):
-            h = highs[j]
-            l = lows[j]
 
-            if is_long and l <= sl_price:
-                stop_hit_idx = j
-            elif not is_long and h >= sl_price:
-                stop_hit_idx = j
+        for sl_mult in DISCOVERABLE_SL_ATR_MULTS:
+            stop_dist = max(float(atr_i) * float(sl_mult), 0.25)
+            sl_price = float(entry_price - stop_dist if is_long else entry_price + stop_dist)
 
-            if is_long and h >= tp_price:
-                target_hit_idx = j
-            elif not is_long and l <= tp_price:
-                target_hit_idx = j
+            for tp_family_code, tp_ratio in enumerate(DISCOVERABLE_TP_RATIOS, start=1):
+                tp_price = float(tp_prices_by_ratio[float(tp_ratio)])
+                target_dist = abs(tp_price - entry_price)
 
-            if target_hit_idx != -1 and stop_hit_idx != -1:
+                target_hit_idx = -1
+                stop_hit_idx = -1
+                resolution_bar = -1
                 outcome = 0
-                resolution_bar = j
-                break
-            elif target_hit_idx != -1:
-                outcome = 1
-                resolution_bar = j
-                break
-            elif stop_hit_idx != -1:
-                outcome = 0
-                resolution_bar = j
-                break
-        else:
-            # Neither hit within max_hold_bars
-            dropped_neither += 1
-            continue
 
-        rec = {col: df[col].iloc[i] for col in ML_FEATURES}
-        rec["ts"] = df["ts"].iloc[i]
-        rec["direction"] = 1 if is_long else -1
-        rec["entry_price"] = float(entry_price)
-        rec["target_price"] = float(tp_price)
-        rec["stop_price"] = float(sl_price)
-        rec[LABEL_COL] = outcome
-        rec[TP_LABEL_COL] = 1 if target_hit_idx != -1 else 0
-        rec[STOP_LABEL_COL] = 1 if stop_hit_idx != -1 else 0
-        rec["time_to_tp_bars"] = target_hit_idx - i if target_hit_idx != -1 else max_hold_bars + 1
-        rec["time_to_stop_bars"] = stop_hit_idx - i if stop_hit_idx != -1 else max_hold_bars + 1
-        rec[MFE_LABEL_COL] = mfe_points
-        rec[MAE_LABEL_COL] = mae_points
-        atr = pd.to_numeric(pd.Series([df["ml_atr14"].iloc[i]]), errors="coerce").iloc[0] if "ml_atr14" in df.columns else np.nan
-        rec["stop_required_atr"] = float(mae_points / atr) if pd.notna(atr) and abs(float(atr)) > 1e-12 else 0.0
-        rec["_outcome_code"] = 1 if outcome == 1 else -1
-        rec["_bars_to_resolution"] = resolution_bar - i
-        rows.append(rec)
+                for j in range(i + 1, end_idx):
+                    h = highs[j]
+                    l = lows[j]
+
+                    if is_long and l <= sl_price:
+                        stop_hit_idx = j
+                    elif (not is_long) and h >= sl_price:
+                        stop_hit_idx = j
+
+                    if is_long and h >= tp_price:
+                        target_hit_idx = j
+                    elif (not is_long) and l <= tp_price:
+                        target_hit_idx = j
+
+                    if target_hit_idx != -1 and stop_hit_idx != -1:
+                        outcome = 0
+                        resolution_bar = j
+                        break
+                    if target_hit_idx != -1:
+                        outcome = 1
+                        resolution_bar = j
+                        break
+                    if stop_hit_idx != -1:
+                        outcome = 0
+                        resolution_bar = j
+                        break
+                else:
+                    dropped_neither += 1
+                    continue
+
+                rec = {col: df[col].iloc[i] for col in ML_FEATURES}
+                rec["sl_atr_mult"] = float(sl_mult)
+                rec["tp_ratio"] = float(tp_ratio)
+                rec["tp_family_code"] = int(tp_family_code)
+                rec["tp_is_t2"] = 1.0 if abs(float(tp_ratio) - 1.618) < 1e-12 else 0.0
+                rec["target_distance_points"] = float(target_dist)
+                rec["stop_distance_points"] = float(stop_dist)
+                rec["rr_ratio"] = float(target_dist / stop_dist) if stop_dist > 1e-9 else 0.0
+                rec["ts"] = df["ts"].iloc[i]
+                rec["direction"] = 1 if is_long else -1
+                rec["entry_price"] = float(entry_price)
+                rec["target_price"] = float(tp_price)
+                rec["stop_price"] = float(sl_price)
+                rec[LABEL_COL] = outcome
+                rec[TP_LABEL_COL] = 1 if target_hit_idx != -1 else 0
+                rec[STOP_LABEL_COL] = 1 if stop_hit_idx != -1 else 0
+                rec["time_to_tp_bars"] = target_hit_idx - i if target_hit_idx != -1 else max_hold_bars + 1
+                rec["time_to_stop_bars"] = stop_hit_idx - i if stop_hit_idx != -1 else max_hold_bars + 1
+                rec[MFE_LABEL_COL] = mfe_points
+                rec[MAE_LABEL_COL] = mae_points
+                rec["stop_required_atr"] = float(mae_points / atr_i) if pd.notna(atr_i) and abs(float(atr_i)) > 1e-12 else 0.0
+                rec["_outcome_code"] = 1 if outcome == 1 else -1
+                rec["_bars_to_resolution"] = resolution_bar - i
+                rec["_combo_id"] = f"tp{tp_family_code}_sl{sl_mult:.1f}"
+                rows.append(rec)
 
     if not rows:
         out_cols = [
-            *ML_FEATURES,
+            *MODEL_FEATURES,
             "ts",
             "direction",
             "entry_price",
@@ -321,8 +413,9 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFra
             "stop_required_atr",
             "_outcome_code",
             "_bars_to_resolution",
+            "_combo_id",
         ]
-        print(f"  resolved trades: 0")
+        print("  resolved trades: 0")
         print(f"  dropped neither-hit: {dropped_neither:,}")
         return pd.DataFrame(columns=out_cols)
 
@@ -330,7 +423,10 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFra
     print(f"  resolved trades: {len(out):,}")
     print(f"  dropped neither-hit: {dropped_neither:,}")
     if len(out) > 0:
-        print(f"  {LABEL_COL} rate: {out[LABEL_COL].mean():.4f}  ({int(out[LABEL_COL].sum()):,} positives / {len(out):,} total)")
+        print(
+            f"  {LABEL_COL} rate: {out[LABEL_COL].mean():.4f}"
+            f"  ({int(out[LABEL_COL].sum()):,} positives / {len(out):,} total)"
+        )
     validate_trade_features(out)
     return out
 
@@ -473,7 +569,7 @@ def main() -> int:
     validate_input_schema(df)
 
     trades = build_trade_dataset(df, max_hold_bars=args.max_hold_bars)
-    feature_cols = list(ML_FEATURES)
+    feature_cols = list(MODEL_FEATURES)
     if args.validate_only and args.smoke_ok:
         if len(trades) == 0:
             raise RuntimeError("Smoke validation requires at least one resolved trade")

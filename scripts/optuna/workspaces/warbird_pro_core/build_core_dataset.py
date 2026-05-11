@@ -106,7 +106,7 @@ DEFAULT_INDICATOR_KNOBS: dict[str, Any] = {
     "knob_fib_hysteresis_pct": FIB_HYSTERESIS_PCT,
     "knob_htf_conf_tol_pct": HTF_CONF_TOL_PCT,
     "knob_use_pattern_confirm": False,
-    "knob_use_liq_gate": True,
+    "knob_use_liq_gate": False,  # locked 2026-05-11: gate-as-feature pivot; liquidity is ML features only
     "knob_liq_recency_bars": LIQ_RECENCY_BARS,
     "knob_trade_stop_atr_mult": 1.50,
     "knob_trade_max_hold_bars": 72,
@@ -122,10 +122,10 @@ DEFAULT_INDICATOR_KNOBS: dict[str, Any] = {
     "knob_eqh_lookback": EQH_LOOKBACK,
     "knob_vol_z_length": VOL_Z_LEN,
     "knob_use_session_vwap": True,
-    "knob_use_xa_gate": True,
+    "knob_use_xa_gate": False,  # locked 2026-05-11: gate-as-feature pivot; XA is now ML features only
     "knob_nq_symbol": "CME_MINI:NQ1!",
     "knob_zn_symbol": "CBOT:ZN1!",
-    "knob_dxy_symbol": "TVC:DXY",
+    "knob_6e_symbol": "CME:6E1!",
     "knob_vix_symbol": "CBOE:VIX",
     "knob_corr_length": CORR_LEN,
     "knob_vix_move_bars": VIX_MOVE_BARS,
@@ -798,40 +798,20 @@ def session_vwap(df: pd.DataFrame, volume: np.ndarray) -> np.ndarray:
 
 
 def align_series_to_index(series: pd.Series, target_index: pd.DatetimeIndex) -> pd.Series:
+    # Prediction-time-safe alignment: forward-fill only, never backward-fill.
+    # The earlier bfill() at the tail was a lookahead leak for leading bars
+    # before the first cross-asset close anchor — bars would pull from a
+    # FUTURE cross-asset value. Leading NaN is allowed and imputed by AG's
+    # feature generator. Locked 2026-05-11.
     s = series.copy()
     s.index = pd.to_datetime(s.index, utc=True)
     s = s[~s.index.duplicated(keep="last")].sort_index()
-    return s.reindex(target_index, method="ffill").ffill().bfill()
-
-
-def load_yahoo_dxy(target_index: pd.DatetimeIndex, start: pd.Timestamp, end: pd.Timestamp, interval: str) -> pd.Series:
-    import yfinance as yf
-
-    yf_start = (start - pd.Timedelta(days=7)).date().isoformat()
-    yf_end = (end + pd.Timedelta(days=2)).date().isoformat()
-    data = yf.download(
-        "DX-Y.NYB",
-        start=yf_start,
-        end=yf_end,
-        interval=interval,
-        progress=False,
-        auto_adjust=False,
-        threads=False,
-    )
-    if data.empty:
-        raise RuntimeError("Yahoo DX-Y.NYB returned no rows")
-    if isinstance(data.columns, pd.MultiIndex):
-        data.columns = [col[0] for col in data.columns]
-    close_col = "Close" if "Close" in data.columns else "Adj Close"
-    dxy = data[close_col].dropna()
-    return align_series_to_index(dxy, target_index)
+    return s.reindex(target_index, method="ffill")
 
 
 def merge_cross_assets(
     df: pd.DataFrame,
     cross_asset_path: Path | None,
-    dxy_interval: str,
-    use_yahoo_dxy: bool,
     vix_csv: Path | None,
     warnings: list[str],
     knobs: dict[str, Any] | None = None,
@@ -842,8 +822,14 @@ def merge_cross_assets(
     start = idx.min()
     end = idx.max()
 
+    # Cross-asset trend codes plus the raw closes that compute_xa_continuous_features
+    # needs for NQ rel-strength, ZN rate-pressure, and HG growth proxy (locked
+    # 2026-05-11 gate-as-feature pivot).
     out["_nq_close"] = np.nan
-    for symbol, col in (("NQ", "ml_xa_nq_code"), ("ZN", "ml_xa_zn_code")):
+    out["_zn_close"] = np.nan
+    out["_hg_close"] = np.nan
+    out["_6e_close"] = np.nan
+    for symbol, col in (("NQ", "ml_xa_nq_code"), ("ZN", "ml_xa_zn_code"), ("6E", "ml_xa_6e_code")):
         out[col] = 0.0
     if cross_asset_path and cross_asset_path.exists():
         xa = pd.read_parquet(cross_asset_path)
@@ -851,32 +837,36 @@ def merge_cross_assets(
         xa[ts_col] = pd.to_datetime(xa[ts_col], utc=True)
         xa["close"] = pd.to_numeric(xa["close"], errors="coerce")
         xa = xa.dropna(subset=[ts_col, "close", "symbol"])
-        for symbol, col in (("NQ", "ml_xa_nq_code"), ("ZN", "ml_xa_zn_code")):
+        # Cross-asset trend codes + raw closes (gate-as-feature pivot, locked
+        # 2026-05-11). NQ/ZN/6E provide BOTH a trend code (for the agreement
+        # count feature) AND a raw close (consumed by compute_xa_continuous_features).
+        # HG provides close only. DXY (Yahoo) was removed 2026-05-11 — 6E is the
+        # CME-native USD-pressure proxy now.
+        xa_close_targets = (
+            ("NQ", "ml_xa_nq_code", "_nq_close"),
+            ("ZN", "ml_xa_zn_code", "_zn_close"),
+            ("HG", None, "_hg_close"),  # close only, no trend code in existing schema
+            ("6E", "ml_xa_6e_code", "_6e_close"),  # EUR/USD continuous; replaces DXY 2026-05-11
+        )
+        for symbol, code_col, close_col in xa_close_targets:
             sym = xa.loc[xa["symbol"].astype(str).eq(symbol), [ts_col, "close"]].sort_values(ts_col)
             if sym.empty:
-                warnings.append(f"cross-asset source missing {symbol}; {col}=0")
+                if code_col is not None:
+                    warnings.append(f"cross-asset source missing {symbol}; {code_col}=0")
+                else:
+                    warnings.append(f"cross-asset source missing {symbol}; {close_col}=NaN")
                 continue
             close = sym.drop_duplicates(ts_col).set_index(ts_col)["close"]
-            code = xa_code(close)
-            out[col] = align_series_to_index(code, idx).to_numpy(dtype=float)
-            if symbol == "NQ":
-                out["_nq_close"] = align_series_to_index(close, idx).to_numpy(dtype=float)
+            if code_col is not None:
+                code = xa_code(close)
+                out[code_col] = align_series_to_index(code, idx).to_numpy(dtype=float)
+            out[close_col] = align_series_to_index(close, idx).to_numpy(dtype=float)
     else:
-        warnings.append("cross-asset 1h source unavailable; NQ/ZN codes set to 0")
+        warnings.append("cross-asset 1h source unavailable; NQ/ZN codes set to 0; HG/ZN/NQ/6E closes set to NaN")
 
-    if use_yahoo_dxy:
-        dxy = load_yahoo_dxy(idx, start, end, dxy_interval)
-        out["ml_xa_dxy_code"] = xa_code(dxy).to_numpy(dtype=float)
-        dxy_arr = dxy.to_numpy(dtype=float)
-        dxy_up = dxy_arr > np.r_[np.nan, dxy_arr[:-1]]
-        close_arr = out["close"].to_numpy(dtype=float)
-        es_up = close_arr > np.r_[np.nan, close_arr[:-1]]
-        out["ml_xa_dxy_diverge"] = ((es_up & dxy_up) | (~es_up & ~dxy_up)).astype(float)
-        out["_dxy_close"] = dxy.to_numpy(dtype=float)
-    else:
-        out["ml_xa_dxy_code"] = 0.0
-        out["ml_xa_dxy_diverge"] = 0.0
-        warnings.append("Yahoo DXY disabled; DXY features set to 0")
+    # DXY was removed 2026-05-11 — 6E.c.0 (Databento CME) replaces it as the
+    # USD-pressure proxy. NQ/ZN/6E codes are computed in the cross-asset for-loop
+    # above; 6E momentum z-score is derived in compute_xa_continuous_features.
 
     if vix_csv and vix_csv.exists():
         vix = pd.read_csv(vix_csv)
@@ -895,7 +885,10 @@ def merge_cross_assets(
         out["ml_xa_vix_pressure"] = 0.0
         warnings.append("VIX CSV unavailable; VIX movement pressure set to 0")
 
-    nq_close = pd.Series(out["_nq_close"], index=out.index).replace(0, np.nan).ffill().bfill()
+    # nq_close used only for rolling correlation. Forward-fill only (no bfill —
+    # bfill is a lookahead leak for the leading bars before the first NQ anchor).
+    # Locked 2026-05-11.
+    nq_close = pd.Series(out["_nq_close"], index=out.index).replace(0, np.nan).ffill()
     if nq_close.isna().all():
         nq_close = out["ml_xa_nq_code"].replace(0, np.nan).ffill().fillna(0.0)
         warnings.append("NQ close unavailable; ml_xa_corr_nq fell back to NQ trend code")
@@ -907,6 +900,150 @@ def merge_cross_assets(
         .fillna(0.0)
     )
     return out
+
+
+def compute_xa_continuous_features(
+    df: pd.DataFrame,
+    warnings: list[str],
+    knobs: dict[str, Any] | None = None,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Derive Phase 1 continuous cross-asset features and per-symbol freshness.
+
+    Locked 2026-05-11 gate-as-feature pivot. Replaces the brittle XA boolean
+    gate (knob_xa_min_agreement) with normalized continuous features AG can
+    weigh per-bar.
+
+    Adds:
+      ml_xa_nq_rel_strength_atr   — session-return diff (NQ vs ES), ATR-percent normalized
+      ml_xa_dxy_momentum_zscore   — 16-bar rolling Z of DXY log-returns
+      ml_xa_zn_rate_pressure      — 4-bar ZN price change normalized by 20-bar return stdev
+      ml_xa_hg_growth_proxy       — sma5 of 20-bar HG percent change
+
+    Returns (augmented_df, freshness_dict). The freshness_dict records, per
+    cross-asset symbol, max forward-fill age in bars and presence coverage.
+    Session boundaries use UTC midnight as a coarse proxy for trading-day open
+    (documented limitation; ES Globex session is 23:00 UTC-prior to 22:00 UTC).
+    """
+    knobs = dict(DEFAULT_INDICATOR_KNOBS if knobs is None else knobs)
+    out = df.copy()
+    idx = pd.DatetimeIndex(pd.to_datetime(out["ts"], utc=True))
+    es_close = out["close"].astype(float).reset_index(drop=True)
+    es_atr14 = out["ml_atr14"].astype(float).reset_index(drop=True)
+    work_index = pd.RangeIndex(len(out))
+    es_close.index = work_index
+    es_atr14.index = work_index
+
+    utc_day = pd.Series(idx.floor("D"), index=work_index)
+
+    # --- Symbol-aware freshness ---
+    # FF age approximation: count consecutive bars where the value did not
+    # change from the prior bar. For 1h cross-asset closes against 15m bars,
+    # the "natural" FF age inside a single hour is up to 3 bars; threshold of
+    # 5 catches >1h source gaps.
+    freshness: dict[str, Any] = {}
+    # All four cross-asset sources are CME 1h via Databento (locked 2026-05-11).
+    # DXY (Yahoo) was removed; 6E is the USD-pressure proxy.
+    SYMBOL_THRESHOLDS = {
+        "_nq_close": 5,
+        "_zn_close": 5,
+        "_hg_close": 5,
+        "_6e_close": 5,
+    }
+    for col, threshold in SYMBOL_THRESHOLDS.items():
+        if col not in out.columns:
+            freshness[col] = {"present": False}
+            continue
+        s = out[col].astype(float).reset_index(drop=True)
+        s.index = work_index
+        present_count = int(s.notna().sum())
+        if present_count == 0:
+            freshness[col] = {"present": False, "coverage_fraction": 0.0}
+            warnings.append(f"freshness: {col} all-NaN")
+            continue
+        diff = s.diff().fillna(0.0).abs()
+        changed = diff > 0
+        run_groups = changed.cumsum()
+        ff_age = (~changed).astype(int).groupby(run_groups).cumcount()
+        max_age = int(ff_age.max())
+        freshness[col] = {
+            "present": True,
+            "coverage_fraction": float(present_count / max(len(s), 1)),
+            "max_forward_fill_age_bars": max_age,
+        }
+        if max_age > threshold:
+            warnings.append(
+                f"freshness: {col} max forward-fill age {max_age} > {threshold} bars"
+            )
+
+    # --- ml_xa_nq_rel_strength_atr ---
+    if "_nq_close" in out.columns and out["_nq_close"].notna().any():
+        nq_close = out["_nq_close"].astype(float).reset_index(drop=True)
+        nq_close.index = work_index
+        es_day_open = es_close.groupby(utc_day).transform("first")
+        nq_day_open = nq_close.groupby(utc_day).transform("first")
+        es_session_return = (es_close / es_day_open.replace(0, np.nan) - 1.0).replace([np.inf, -np.inf], np.nan)
+        nq_session_return = (nq_close / nq_day_open.replace(0, np.nan) - 1.0).replace([np.inf, -np.inf], np.nan)
+        rel_return = nq_session_return - es_session_return
+        atr_pct = (es_atr14 / es_close.replace(0, np.nan)).replace(0, np.nan)
+        rel_strength = (rel_return / atr_pct).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        out["ml_xa_nq_rel_strength_atr"] = rel_strength.to_numpy(dtype=float)
+    else:
+        out["ml_xa_nq_rel_strength_atr"] = 0.0
+        warnings.append("ml_xa_nq_rel_strength_atr: NQ close unavailable, set to 0")
+
+    # ml_xa_dxy_momentum_zscore removed 2026-05-11 — 6E momentum (below) replaces.
+
+    # --- ml_xa_zn_rate_pressure ---
+    # ZN price down => yields up => tightening; we sign the metric so positive
+    # means rates are pressuring risk. Normalized by 20-bar return stdev
+    # because the loader has ZN close only (no OHLC for a real ATR).
+    if "_zn_close" in out.columns and out["_zn_close"].notna().any():
+        zn_close = out["_zn_close"].astype(float).reset_index(drop=True)
+        zn_close.index = work_index
+        zn_returns = zn_close.pct_change().replace([np.inf, -np.inf], np.nan)
+        zn_return_std = zn_returns.rolling(20, min_periods=20).std()
+        zn_return_4 = (
+            (zn_close.shift(4) - zn_close)
+            / zn_close.shift(4).replace(0, np.nan)
+        )
+        zn_pressure = (zn_return_4 / zn_return_std.replace(0, np.nan)).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+        out["ml_xa_zn_rate_pressure"] = zn_pressure.to_numpy(dtype=float)
+    else:
+        out["ml_xa_zn_rate_pressure"] = 0.0
+        warnings.append("ml_xa_zn_rate_pressure: ZN close unavailable, set to 0")
+
+    # --- ml_xa_hg_growth_proxy ---
+    if "_hg_close" in out.columns and out["_hg_close"].notna().any():
+        hg_close = out["_hg_close"].astype(float).reset_index(drop=True)
+        hg_close.index = work_index
+        hg_pct20 = hg_close.pct_change(20).replace([np.inf, -np.inf], np.nan)
+        out["ml_xa_hg_growth_proxy"] = (
+            hg_pct20.rolling(5, min_periods=5).mean().fillna(0.0).to_numpy(dtype=float)
+        )
+    else:
+        out["ml_xa_hg_growth_proxy"] = 0.0
+        warnings.append("ml_xa_hg_growth_proxy: HG close unavailable, set to 0")
+
+    # --- ml_xa_6e_momentum_zscore ---
+    # 6E (EUR/USD futures) is a CME-native inverse USD-pressure proxy. Same
+    # 16-bar rolling Z formula as DXY momentum so AG sees a directly
+    # comparable signal from two independent USD sources. Positive z = 6E up
+    # = USD weakening; AG learns the sign per regime.
+    if "_6e_close" in out.columns and out["_6e_close"].notna().any():
+        sixe_close = out["_6e_close"].astype(float).reset_index(drop=True)
+        sixe_close.index = work_index
+        sixe_logret = np.log(sixe_close.replace(0, np.nan)) - np.log(sixe_close.shift(1).replace(0, np.nan))
+        mu_6e = sixe_logret.rolling(16, min_periods=16).mean()
+        sigma_6e = sixe_logret.rolling(16, min_periods=16).std()
+        z_6e = (sixe_logret - mu_6e) / sigma_6e.replace(0, np.nan)
+        out["ml_xa_6e_momentum_zscore"] = (
+            z_6e.replace([np.inf, -np.inf], np.nan).fillna(0.0).to_numpy(dtype=float)
+        )
+    else:
+        out["ml_xa_6e_momentum_zscore"] = 0.0
+        warnings.append("ml_xa_6e_momentum_zscore: 6E close unavailable, set to 0")
+
+    return out, freshness
 
 
 def trade_members_for_window(zip_path: Path, start: pd.Timestamp, end: pd.Timestamp) -> list[str]:
@@ -1124,6 +1261,14 @@ def build_volume_profile(price_aggs: list[pd.DataFrame], target_index: pd.Dateti
 
 
 def finalize_entries(df: pd.DataFrame, knobs: dict[str, Any] | None = None) -> pd.DataFrame:
+    # Gate-as-feature pivot (locked 2026-05-11):
+    # - Candidate trigger = fib touch/reclaim at .500/.618/.786 AND MA bias aligned.
+    # - XA agreement and liquidity recency are NO LONGER hard filters; they are
+    #   continuous ML features (ml_xa_*_agreement, ml_recent_liq_*, ml_liq_*,
+    #   ml_swept_*, ml_reclaimed_*, ml_xa_nq_rel_strength_atr, etc.). AG learns
+    #   how to weight them per bar.
+    # - knob_use_xa_gate and knob_use_liq_gate remain in the schema so a future
+    #   Optuna sweep can re-enable them, but their defaults are now False.
     knobs = dict(DEFAULT_INDICATOR_KNOBS if knobs is None else knobs)
     out = df.copy()
     ma_long_ok = (out["ml_ma_bias"] > 0) if bool(_knob(knobs, "knob_use_ma_gate")) else True
@@ -1132,22 +1277,40 @@ def finalize_entries(df: pd.DataFrame, knobs: dict[str, Any] | None = None) -> p
     zn_long_vote = out["ml_xa_zn_code"] > 0 if zn_same_direction else out["ml_xa_zn_code"] < 0
     zn_short_vote = out["ml_xa_zn_code"] < 0 if zn_same_direction else out["ml_xa_zn_code"] > 0
     vix_band = float(_knob(knobs, "knob_vix_pressure_band"))
+    # xa_*_agreement are still emitted as features (0..4 ints reflecting how many
+    # of the four cross-asset votes agree with direction). They are inputs to
+    # AG, not gates.
+    # DXY removed 2026-05-11; 6E replaces. 6E up = USD weakening = risk-on
+    # (so long-vote uses 6E > 0, mirror of the old dxy < 0).
     xa_long_agreement = (
         (out["ml_xa_nq_code"] > 0).astype(int)
         + zn_long_vote.astype(int)
-        + (out["ml_xa_dxy_code"] < 0).astype(int)
+        + (out["ml_xa_6e_code"] > 0).astype(int)
         + (out["ml_xa_vix_pressure"] < -vix_band).astype(int)
     )
     xa_short_agreement = (
         (out["ml_xa_nq_code"] < 0).astype(int)
         + zn_short_vote.astype(int)
-        + (out["ml_xa_dxy_code"] > 0).astype(int)
+        + (out["ml_xa_6e_code"] < 0).astype(int)
         + (out["ml_xa_vix_pressure"] > vix_band).astype(int)
     )
-    xa_long_ok = (xa_long_agreement >= int(_knob(knobs, "knob_xa_min_agreement"))) if bool(_knob(knobs, "knob_use_xa_gate")) else True
-    xa_short_ok = (xa_short_agreement >= int(_knob(knobs, "knob_xa_min_agreement"))) if bool(_knob(knobs, "knob_use_xa_gate")) else True
-    liq_long_ok = out["__recent_liq_bull"] if bool(_knob(knobs, "knob_use_liq_gate")) else True
-    liq_short_ok = out["__recent_liq_bear"] if bool(_knob(knobs, "knob_use_liq_gate")) else True
+    # Gate-as-feature pivot: drop xa_*_ok and liq_*_ok from the qualification
+    # chain. If the knobs are explicitly re-enabled (defaults are now False),
+    # honor them — otherwise pass through.
+    use_xa_gate = bool(_knob(knobs, "knob_use_xa_gate"))
+    use_liq_gate = bool(_knob(knobs, "knob_use_liq_gate"))
+    if use_xa_gate:
+        xa_long_ok = xa_long_agreement >= int(_knob(knobs, "knob_xa_min_agreement"))
+        xa_short_ok = xa_short_agreement >= int(_knob(knobs, "knob_xa_min_agreement"))
+    else:
+        xa_long_ok = True
+        xa_short_ok = True
+    if use_liq_gate:
+        liq_long_ok = out["__recent_liq_bull"]
+        liq_short_ok = out["__recent_liq_bear"]
+    else:
+        liq_long_ok = True
+        liq_short_ok = True
     long_ok = out["__is_valid"] & out["__trigger_long"] & ma_long_ok & xa_long_ok & liq_long_ok
     short_ok = out["__is_valid"] & out["__trigger_short"] & ma_short_ok & xa_short_ok & liq_short_ok
     out["ml_xa_long_agreement"] = xa_long_agreement.astype(float)
@@ -1164,16 +1327,20 @@ def validate_core_frame(df: pd.DataFrame, gate_mode: str) -> None:
     missing = [col for col in ML_FEATURES if col not in df.columns]
     if missing:
         raise RuntimeError(f"missing locked ML_FEATURES: {missing}")
-    if "ml_xa_dxy_code" not in df.columns or "ml_xa_dxy_diverge" not in df.columns:
-        raise RuntimeError("DXY feature columns missing")
+    if "ml_xa_6e_code" not in df.columns:
+        raise RuntimeError("6E feature column missing")
     if gate_mode == "strict":
         all_null = [col for col in ML_FEATURES if df[col].isna().all()]
         if all_null:
             raise RuntimeError(f"all-null feature columns: {all_null}")
     if gate_mode == "strict":
+        # Under the gate-as-feature architecture (locked 2026-05-11), entry
+        # triggers are MA-filtered fib triggers (XA + liq are features, not
+        # gates). The floor moves from 25 (legacy gated-entries semantics) to
+        # 250 — for a 1y 15m build, this should be in the low thousands.
         entries = int(df["ml_entry_long_trigger"].sum() + df["ml_entry_short_trigger"].sum())
-        if entries < 25:
-            raise RuntimeError(f"strict gate failed: only {entries} entry candidates")
+        if entries < 250:
+            raise RuntimeError(f"strict gate failed: only {entries} MA-filtered fib trigger candidates (floor 250)")
         if "_nq_close" not in df.columns or df["_nq_close"].isna().all():
             raise RuntimeError("strict gate failed: NQ close unavailable for ml_xa_corr_nq")
         if float(df["ml_fp_delta_pct"].abs().sum()) == 0.0:
@@ -1234,10 +1401,8 @@ def main() -> int:
     ap.add_argument("--out-dir", type=Path, default=EXPORTS_DIR)
     ap.add_argument("--start", default=None)
     ap.add_argument("--end", default=None)
-    ap.add_argument("--dxy-interval", default="1h", choices=["5m", "1h", "1d"])
     ap.add_argument("--base-regime-only", action="store_true",
                     help="Allow order-flow features to be zero-filled for a base/regime build.")
-    ap.add_argument("--skip-yahoo-dxy", action="store_true")
     ap.add_argument("--gate-mode", choices=["schema", "smoke", "strict"], default="smoke")
     ap.add_argument("--profile-mode", choices=["base", "ma-grid"], default="base",
                     help="Emit one base indicator profile or the full EMA/SMA 10-up/10-down grid.")
@@ -1269,17 +1434,23 @@ def main() -> int:
     trades_zip = None if args.base_regime_only else args.trades_zip
     profiles = generate_indicator_profiles(args.profile_mode)
     profile_frames: list[pd.DataFrame] = []
-    for profile in profiles:
+    cross_asset_freshness: dict[str, Any] = {}
+    for i, profile in enumerate(profiles):
         profile_features = compute_base_features(bars_tf, profile)
         profile_features = merge_cross_assets(
             profile_features,
             args.cross_asset_1h,
-            args.dxy_interval,
-            not args.skip_yahoo_dxy,
             args.vix_csv,
             warnings,
             profile,
         )
+        # All profiles share the same underlying cross-asset data, so freshness
+        # is computed once from the first profile (locked 2026-05-11).
+        profile_features, freshness = compute_xa_continuous_features(
+            profile_features, warnings, profile
+        )
+        if i == 0:
+            cross_asset_freshness = freshness
         profile_features = build_orderflow_features(
             profile_features,
             trades_zip,
@@ -1303,9 +1474,9 @@ def main() -> int:
         {
             "gate_mode": args.gate_mode,
             "base_regime_only": bool(args.base_regime_only),
-            "dxy_source": None if args.skip_yahoo_dxy else "Yahoo Finance DX-Y.NYB",
-            "dxy_interval": None if args.skip_yahoo_dxy else args.dxy_interval,
+            "usd_pressure_source": "Databento GLBX.MDP3 6E.c.0 continuous (replaces Yahoo DXY as of 2026-05-11)",
             "cross_asset_source": str(args.cross_asset_1h) if args.cross_asset_1h else None,
+            "cross_asset_freshness": cross_asset_freshness,
             "profile_mode": args.profile_mode,
             "profile_count": len(profiles),
             "indicator_knob_columns": KNOB_COLUMNS,
@@ -1314,6 +1485,9 @@ def main() -> int:
             "ma_fast_grid": MA_FAST_GRID,
             "ma_slow_grid": MA_SLOW_GRID,
             "warnings": warnings,
+            "architecture": "gate_as_feature_2026_05_11",
+            "entry_qualification_rule": "fib_trigger_AND_ma_bias",
+            "xa_zn_rate_pressure_denominator": "rolling_20bar_return_stdev",
             "orderflow_candidate_thresholds": {
                 "rolling_len": ORDERFLOW_ROLLING_LEN,
                 "absorption_delta_pct": ORDERFLOW_ABSORPTION_DELTA_PCT,

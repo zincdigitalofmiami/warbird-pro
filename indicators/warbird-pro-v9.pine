@@ -14,8 +14,8 @@
 //   plumbing with the same widths, styles, label sizes, and label offsets
 // - Liquidity is its own first-class package: BSL/SSL sweep+reclaim,
 //   equal-highs/lows pools, session VWAP context, volume z-score
-// - Cross-asset: NQ/ZN/DXY trend codes + VIX movement pressure + MES↔NQ rolling
-//   correlation + DXY divergence
+// - Cross-asset: NQ/ZN/6E trend codes + VIX movement pressure + ES↔NQ rolling
+//   correlation (6E replaces DXY as USD-pressure proxy 2026-05-11)
 // - Daily/weekly S/R: PDH/PDL/PWH/PWL distance features + thin lines
 // - Footprint: real intrabar bid/ask delta + POC distance + VA position
 // - Unified entry: trigger fires only when trade engine actually opens a trade
@@ -88,7 +88,23 @@ bool useLiqGate = input.bool(true, "Require Recent Liquidity Event", group=group
 int liqRecencyBars = input.int(8, "Liquidity Recency (bars)", minval=1, maxval=50, group=groupEntryFilters)
 
 string groupExecution = "Trade Management"
-float tradeStopAtrMult = input.float(1.50, "ATR Stop Multiplier", minval=0.25, maxval=10.0, step=0.25, group=groupExecution)
+// Combo selectors match AG trade-surface discoverables (locked 2026-05-11):
+//   DISCOVERABLE_TP_RATIOS = (1.000, 1.236, 1.618)        fib-extension targets
+//   DISCOVERABLE_SL_ATR_MULTS = (1.0, 1.5, 2.0)           ATR-scaled stops
+//
+// Operator should normally leave both on "Auto". AG scores all 9 combos
+// per candidate off-chart and entry_decision_v9.py picks the EV-max combo
+// at decision time. The manual combo overrides exist only so the operator
+// can visually validate each combo's geometry during live-TV testing —
+// changing them does NOT affect AG training or AG inference; only the
+// chart's active-trade lines/labels move.
+//
+// "Auto" today maps to (TP=1.236, SL=1.5). After AG training, "Auto" should
+// be updated to the global EV-winning combo identified by entry_decision_v9.py.
+string tpRatioMode = input.string("Auto", "TP Ratio (combo)", options=["Auto", "1.000", "1.236", "1.618"], group=groupExecution)
+string slMultMode = input.string("Auto", "SL ATR Mult (combo)", options=["Auto", "1.0", "1.5", "2.0"], group=groupExecution)
+float tradeTpRatio = tpRatioMode == "1.000" ? 1.000 : tpRatioMode == "1.618" ? 1.618 : 1.236
+float tradeStopAtrMult = slMultMode == "1.0" ? 1.0 : slMultMode == "2.0" ? 2.0 : 1.5
 int tradeMaxHoldBars = input.int(72, "Max Hold (bars)", minval=0, maxval=500, group=groupExecution)
 
 //=====================
@@ -127,11 +143,11 @@ bool useSessionVwap = input.bool(true, "Enable Session VWAP Feature", group=grou
 // CROSS-ASSET PACKAGE
 //=====================
 string groupXa = "Cross-Asset Context"
-bool useXaGate = input.bool(true, "Use NQ/ZN/DXY/VIX Entry Gate", group=groupXa)
+bool useXaGate = input.bool(true, "Use NQ/ZN/6E/VIX Entry Gate", group=groupXa)
 string xaTrendTimeframe = input.timeframe("5", "Trend Timeframe", group=groupXa)
 string nqSymbol = input.symbol("CME_MINI:NQ1!", "NQ Symbol", group=groupXa)
 string znSymbol = input.symbol("CBOT:ZN1!", "ZN Symbol", group=groupXa)
-string dxySymbol = input.symbol("TVC:DXY", "DXY Symbol", group=groupXa)
+string eurUsdSymbol = input.symbol("CME:6E1!", "6E Symbol (EUR/USD — replaces DXY)", group=groupXa)
 string vixSymbol = input.symbol("CBOE:VIX", "VIX Symbol", group=groupXa)
 int corrLength = input.int(20, "MES-NQ Correlation Length", minval=5, maxval=200, group=groupXa)
 int vixMoveBars = input.int(3, "VIX Movement Bars", minval=1, maxval=50, group=groupXa)
@@ -174,6 +190,7 @@ string fomcDates = input.text_area("2026-01-28 19:00\n2026-03-18 18:00\n2026-04-
 string groupTable = "Table"
 bool showMlTable = input.bool(true, "Show ML Table", group=groupTable)
 string tablePositionInput = input.string("Bottom Left", "Table Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=groupTable)
+string tableTextSizeInput = input.string("Small", "Table Text Size", options=["Tiny", "Small", "Large"], group=groupTable)
 
 //=====================
 // FIB VISUAL SETTINGS (Source A — PROTECTED draw span)
@@ -283,18 +300,19 @@ int adxLength = 14
 [adxDiPlus, adxDiMinus, adxValue] = ta.dmi(adxLength, adxLength)
 
 //=====================
-// Cross-asset trend codes (NQ/ZN/DXY)
+// Cross-asset trend codes (NQ/ZN/6E — 6E replaces DXY 2026-05-11)
 //=====================
 [nqClose5, nqSlow5, nqFast5] = request.security(nqSymbol, xaTrendTimeframe, [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [znClose5, znSlow5, znFast5] = request.security(znSymbol, xaTrendTimeframe, [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[dxyClose5, dxySlow5, dxyFast5] = request.security(dxySymbol, xaTrendTimeframe, [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[eurUsdClose5, eurUsdSlow5, eurUsdFast5] = request.security(eurUsdSymbol, xaTrendTimeframe, [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 int nqCode = f_xa_code(nqClose5, nqSlow5, nqFast5)
 int znCode = f_xa_code(znClose5, znSlow5, znFast5)
-int dxyCode = f_xa_code(dxyClose5, dxySlow5, dxyFast5)
+int eurUsdCode = f_xa_code(eurUsdClose5, eurUsdSlow5, eurUsdFast5)
 
 //=====================
-// Cross-asset advanced — VIX movement pressure, MES↔NQ rolling correlation, DXY divergence
+// Cross-asset advanced — VIX movement pressure, ES↔NQ rolling correlation
+// (DXY divergence removed 2026-05-11; the ETL/AG side does not expose it.)
 //=====================
 [vixAtr, vixMove] = request.security(vixSymbol, xaTrendTimeframe, [ta.atr(vixAtrLength), close - close[vixMoveBars]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 float vixPressure = vixAtr > 0 and not na(vixMove) ? vixMove / vixAtr : 0.0
@@ -303,10 +321,19 @@ bool vixShortVote = vixPressure > vixPressureBand
 
 float corrMesNq = ta.correlation(close, nqClose5, corrLength)
 
-bool mesUp = close > close[1]
-bool dxyUp = not na(dxyClose5) and not na(dxyClose5[1]) and dxyClose5 > dxyClose5[1]
-bool dxyDiverge = (mesUp and dxyUp) or (not mesUp and not dxyUp)
-float dxyDivergeFloat = dxyDiverge ? 1.0 : 0.0
+//=====================
+// Multi-TF trend codes for table — same f_xa_code grading on chart symbol
+// across 5m/15m/1h/4h. These are table-only context; they are NOT new
+// AG features and do not consume plot budget (no plot() / no alertcondition()).
+//=====================
+[tfTrend5C, tfTrend5Slow, tfTrend5Fast] = request.security(syminfo.tickerid, "5", [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[tfTrend15C, tfTrend15Slow, tfTrend15Fast] = request.security(syminfo.tickerid, "15", [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[tfTrend60C, tfTrend60Slow, tfTrend60Fast] = request.security(syminfo.tickerid, "60", [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+[tfTrend240C, tfTrend240Slow, tfTrend240Fast] = request.security(syminfo.tickerid, "240", [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+int tfTrend5Code = f_xa_code(tfTrend5C, tfTrend5Slow, tfTrend5Fast)
+int tfTrend15Code = f_xa_code(tfTrend15C, tfTrend15Slow, tfTrend15Fast)
+int tfTrend60Code = f_xa_code(tfTrend60C, tfTrend60Slow, tfTrend60Fast)
+int tfTrend240Code = f_xa_code(tfTrend240C, tfTrend240Slow, tfTrend240Fast)
 
 //=====================
 // Liquidity pools (BSL/SSL) — minimal moving parts, 2-bar reclaim (1e/3d)
@@ -605,8 +632,10 @@ bool maShortOk = not useMaGate or maBear
 
 bool znLongVote = znGateDirection == "Same Direction" ? znCode > 0 : znCode < 0
 bool znShortVote = znGateDirection == "Same Direction" ? znCode < 0 : znCode > 0
-int xaLongAgreement = (nqCode > 0 ? 1 : 0) + (znLongVote ? 1 : 0) + (dxyCode < 0 ? 1 : 0) + (vixLongVote ? 1 : 0)
-int xaShortAgreement = (nqCode < 0 ? 1 : 0) + (znShortVote ? 1 : 0) + (dxyCode > 0 ? 1 : 0) + (vixShortVote ? 1 : 0)
+// 6E up = EUR strong vs USD = USD weakening = long-favorable (mirrors the old
+// dxyCode<0 vote). 6E down = USD strengthening = short-favorable.
+int xaLongAgreement = (nqCode > 0 ? 1 : 0) + (znLongVote ? 1 : 0) + (eurUsdCode > 0 ? 1 : 0) + (vixLongVote ? 1 : 0)
+int xaShortAgreement = (nqCode < 0 ? 1 : 0) + (znShortVote ? 1 : 0) + (eurUsdCode < 0 ? 1 : 0) + (vixShortVote ? 1 : 0)
 bool xaLongOk = not useXaGate or xaLongAgreement >= xaMinAgreement
 bool xaShortOk = not useXaGate or xaShortAgreement >= xaMinAgreement
 bool recentLiqBull = not useLiqGate or (not na(barsSinceLiqBull) and barsSinceLiqBull < liqRecencyBars)
@@ -620,8 +649,11 @@ bool qualifiedShort = confirmed and isValid and triggerShort and shortPatternOk 
 //=====================
 float longStopCandidate = not na(entryLevel) ? entryLevel - atr14 * tradeStopAtrMult : na
 float shortStopCandidate = not na(entryLevel) ? entryLevel + atr14 * tradeStopAtrMult : na
-float longTargetCandidate = pT1
-float shortTargetCandidate = pT1
+// Target = selected fib-extension ratio applied via the protected fibPrice()
+// helper. fibPrice handles direction (long picks the extension above, short
+// picks the mirrored extension below) and returns na if fib_range invalid.
+float longTargetCandidate = fibPrice(tradeTpRatio)
+float shortTargetCandidate = fibPrice(tradeTpRatio)
 
 bool tradeActivePrev = tradeActive
 if not tradeActive
@@ -802,9 +834,11 @@ if barstate.islast
     _fibLbl1382 := setFibLevelLabel(_fibLbl1382, showFibLevelLabelsInput and fibsVisible, p1382, "1.382", fibRetracementColorInput)
     _fibLbl150 := setFibLevelLabel(_fibLbl150, showFibLevelLabelsInput and fibsVisible, p150, "1.500", fibRetracementColorInput)
     _fibLblT2 := setFibLevelLabel(_fibLblT2, showFibLevelLabelsInput and fibsVisible, pT2, "T2", fibTargetColorInput)
-    _entryLbl := setFibLevelLabel(_entryLbl, tradeActive, tradeEntryPrice, "ENTRY", fibAnchorColorInput)
-    _slLbl    := setFibLevelLabel(_slLbl,    tradeActive, tradeStopPrice,  "SL",    fibStopColorInput)
-    _tpLbl    := setFibLevelLabel(_tpLbl,    tradeActive, tradeTargetPrice,"TP",    fibTargetColorInput)
+    string _slLblText = "SL@" + str.tostring(tradeStopAtrMult, "#.#") + "x" + (slMultMode == "Auto" ? " (Auto)" : "")
+    string _tpLblText = "TP@" + str.tostring(tradeTpRatio, "#.###") + (tpRatioMode == "Auto" ? " (Auto)" : "")
+    _entryLbl := setFibLevelLabel(_entryLbl, tradeActive, tradeEntryPrice, "ENTRY",   fibAnchorColorInput)
+    _slLbl    := setFibLevelLabel(_slLbl,    tradeActive, tradeStopPrice,  _slLblText, fibStopColorInput)
+    _tpLbl    := setFibLevelLabel(_tpLbl,    tradeActive, tradeTargetPrice,_tpLblText, fibTargetColorInput)
 
 plot(showMaLines ? xMA : na, title="MA (SMA, slow)", color=maColorInput, linewidth=maWidthInput, display=display.all)
 plot(showMaLines ? xEMA : na, title="EMA (close, fast)", color=emaColorInput, linewidth=emaWidthInput, display=display.all)
@@ -813,9 +847,9 @@ plot(showMaLines ? xEMA : na, title="EMA (close, fast)", color=emaColorInput, li
 // Status table — black bg, white body, dark gray dividers; headers unchanged
 //=====================
 color TBL_BG_BODY    = #000000
-color TBL_BG_HEADER  = #0A7884
+color TBL_BG_HEADER  = #FFFFFF
 color TBL_TEXT_BODY  = #FFFFFF
-color TBL_TEXT_HDR   = #FFFFFF
+color TBL_TEXT_HDR   = #000000
 color TBL_BORDER     = #333333
 
 //=====================
@@ -904,16 +938,9 @@ if barstate.islast
     lblPwh := f_set_level_label(lblPwh, showPwh, pwh, "PWH", lvlWeekColor)
     lblPwl := f_set_level_label(lblPwl, showPwl, pwl, "PWL", lvlWeekColor)
 
-string maDirText = (maBull and close >= xEMA) ? "STRONG BULLISH" : maBull ? "BULLISH" : (maBear and close <= xEMA) ? "STRONG BEARISH" : maBear ? "BEARISH" : "NEUTRAL"
-string rsiText = (rsiStanceBull ? "BULL EXTREME " : rsiStanceBear ? "BEAR EXTREME " : "NEUTRAL ") + str.tostring(finalRsi, "#.##")
-string liquidityText = reclaimedSsl ? "SSL RECLAIM" : reclaimedBsl ? "BSL RECLAIM" : sweptSslBar ? "SSL SWEEP" : sweptBslBar ? "BSL SWEEP" : not na(barsSinceLiqBull) and barsSinceLiqBull < liqRecencyBars ? "BULL " + str.tostring(barsSinceLiqBull) + " ago" : not na(barsSinceLiqBear) and barsSinceLiqBear < liqRecencyBars ? "BEAR " + str.tostring(barsSinceLiqBear) + " ago" : "NONE"
-
-string adxDir = adxValue >= 25 ? (adxDiPlus > adxDiMinus ? "BULLISH" : "BEARISH") : "NEUTRAL"
-string adxText = adxDir + " " + str.tostring(adxValue, "#.#")
-
 string positionText = tradeActive ? (tradeSide == 1 ? "LONG" : "SHORT") : "WAITING"
 string entryPriceText = tradeActive ? str.tostring(tradeEntryPrice, format.mintick) : "--"
-string tpSlText = tradeActive ? "TP " + str.tostring(tradeTargetPrice, format.mintick) + " / SL " + str.tostring(tradeStopPrice, format.mintick) : "-- / --"
+string tpSlText = tradeActive ? "TP@" + str.tostring(tradeTpRatio, "#.###") + (tpRatioMode == "Auto" ? "(A)" : "") + " " + str.tostring(tradeTargetPrice, format.mintick) + " / SL@" + str.tostring(tradeStopAtrMult, "#.#") + "x" + (slMultMode == "Auto" ? "(A)" : "") + " " + str.tostring(tradeStopPrice, format.mintick) : "-- / --"
 string barsInTradeText = tradeActive ? str.tostring(tradeBarsActive) : "--"
 
 float winRatePct = tradeClosedCount > 0 ? float(tradeWinCount) / float(tradeClosedCount) * 100.0 : na
@@ -923,40 +950,54 @@ string totalTradesText = str.tostring(tradeClosedCount)
 string winLossText = str.tostring(tradeWinCount) + " / " + str.tostring(tradeLossCount)
 string profitFactorText = na(profitFactor) ? "--" : str.tostring(profitFactor, "#.##")
 
-float volPct = atr14 / close * 100.0
-string volatilityText = na(volPct) ? "--" : volPct >= 0.15 ? "HIGH" : volPct >= 0.06 ? "MEDIUM" : "LOW"
-string nqTrend = f_xa_label(nqCode)
-string znTrend = f_xa_label(znCode)
-string dxyTrend = f_xa_label(dxyCode)
-string fpDeltaText = str.tostring(fpDeltaPct, "#.##") + "%"
-string fpVolumeSpikeText = str.tostring(fpVolumeSpikeRatio, "#.##") + "x"
-string fpEventText = fpAbsorptionCandidate ? "ABSORPTION" : fpFlushCandidate ? "FLUSH" : "NONE"
-color fpEventColor = fpAbsorptionCandidate ? #26A69A : fpFlushCandidate ? COLOR_STOP : TBL_TEXT_BODY
+// Per-TF trend labels (same 5-grade f_xa_label scheme as cross-asset)
+string trend5Text = f_xa_label(tfTrend5Code)
+string trend15Text = f_xa_label(tfTrend15Code)
+string trend60Text = f_xa_label(tfTrend60Code)
+string trend240Text = f_xa_label(tfTrend240Code)
+
+// XA rollup — single bull/bear summary across NQ/ZN/6E/VIX votes.
+// xaLongAgreement and xaShortAgreement are each 0..4. Net is -4..+4.
+// Mapped to the same 5-grade scale as f_xa_label for consistency.
+int xaNet = xaLongAgreement - xaShortAgreement
+string xaText = xaNet >= 3 ? "VERY BULLISH" : xaNet >= 1 ? "BULLISH" : xaNet <= -3 ? "VERY BEARISH" : xaNet <= -1 ? "BEARISH" : "NEUTRAL"
+
+// XA Corr — how many of the 4 cross-assets are pushing in the same direction
+// as the dominant XA bias. When NEUTRAL (net=0), shows the larger side (e.g.
+// a 2/2 split renders as "2 / 4"). Respects the operator's znGateDirection
+// toggle because xaLongAgreement/xaShortAgreement already factor it in.
+int xaCorrCount = xaNet > 0 ? xaLongAgreement : xaNet < 0 ? xaShortAgreement : math.max(xaLongAgreement, xaShortAgreement)
+string xaCorrText = str.tostring(xaCorrCount) + " / 4"
+
+// Volume Pressure rollup — uses footprint aggressor pulse (delta z-score)
+// when footprint is enabled, otherwise falls back to signed volume z-score
+// (sign = bar direction). Same 5-grade label scheme as XA.
+float volPressureRaw = useFootprint ? fpAggressorPulse : (bullishCandle ? volZscore : bearishCandle ? -volZscore : 0.0)
+string volPressureText = volPressureRaw >= 2.0 ? "VERY BULLISH" : volPressureRaw >= 0.5 ? "BULLISH" : volPressureRaw <= -2.0 ? "VERY BEARISH" : volPressureRaw <= -0.5 ? "BEARISH" : "NEUTRAL"
 
 f_cell_h(table t, int c, int r, string txt) =>
-    table.cell(t, c, r, txt, text_color=TBL_TEXT_HDR, bgcolor=color.new(TBL_BG_HEADER, 0), text_size=size.tiny)
+    table.cell(t, c, r, txt, text_color=TBL_TEXT_HDR, bgcolor=color.new(TBL_BG_HEADER, 0), text_size=f_label_size(tableTextSizeInput))
 
 f_cell_b(table t, int c, int r, string txt) =>
-    table.cell(t, c, r, txt, text_color=TBL_TEXT_BODY, bgcolor=color.new(TBL_BG_BODY, 0), text_size=size.tiny)
-
-f_cell_v(table t, int c, int r, string txt, color tcol) =>
-    table.cell(t, c, r, txt, text_color=tcol, bgcolor=color.new(TBL_BG_BODY, 0), text_size=size.tiny)
+    table.cell(t, c, r, txt, text_color=TBL_TEXT_BODY, bgcolor=color.new(TBL_BG_BODY, 0), text_size=f_label_size(tableTextSizeInput))
 
 var table mlTable = na
 if barstate.isfirst and showMlTable
-    mlTable := table.new(f_table_pos(tablePositionInput), 2, 24, bgcolor=color.new(TBL_BG_BODY, 0), border_color=color.new(TBL_BORDER, 0), border_width=1, frame_color=color.new(TBL_BORDER, 0), frame_width=1, force_overlay=true)
+    mlTable := table.new(f_table_pos(tablePositionInput), 2, 19, bgcolor=color.new(TBL_BG_BODY, 0), border_color=color.new(TBL_BORDER, 0), border_width=1, frame_color=color.new(TBL_BORDER, 0), frame_width=1, force_overlay=true)
 
 if showMlTable and not na(mlTable) and barstate.islast
+    // TREND — chart symbol on 5m/15m/1h/4h (same 5-grade scale as XA)
     f_cell_h(mlTable, 0, 0, "TREND")
     f_cell_h(mlTable, 1, 0, "")
-    f_cell_b(mlTable, 0, 1, "LIQUIDITY")
-    f_cell_b(mlTable, 1, 1, liquidityText)
-    f_cell_b(mlTable, 0, 2, "ADX")
-    f_cell_b(mlTable, 1, 2, adxText)
-    f_cell_b(mlTable, 0, 3, "MOVING AVERAGES")
-    f_cell_b(mlTable, 1, 3, maDirText)
-    f_cell_b(mlTable, 0, 4, "RSI")
-    f_cell_b(mlTable, 1, 4, rsiText)
+    f_cell_b(mlTable, 0, 1, "5M")
+    f_cell_b(mlTable, 1, 1, trend5Text)
+    f_cell_b(mlTable, 0, 2, "15M")
+    f_cell_b(mlTable, 1, 2, trend15Text)
+    f_cell_b(mlTable, 0, 3, "1H")
+    f_cell_b(mlTable, 1, 3, trend60Text)
+    f_cell_b(mlTable, 0, 4, "4H")
+    f_cell_b(mlTable, 1, 4, trend240Text)
+    // TRADES — live position state
     f_cell_h(mlTable, 0, 5, "TRADES")
     f_cell_h(mlTable, 1, 5, "")
     f_cell_b(mlTable, 0, 6, "POSITION")
@@ -967,6 +1008,7 @@ if showMlTable and not na(mlTable) and barstate.islast
     f_cell_b(mlTable, 1, 8, tpSlText)
     f_cell_b(mlTable, 0, 9, "BARS IN TRADE")
     f_cell_b(mlTable, 1, 9, barsInTradeText)
+    // STATISTICS — cumulative closed-trade counters
     f_cell_h(mlTable, 0, 10, "STATISTICS")
     f_cell_h(mlTable, 1, 10, "")
     f_cell_b(mlTable, 0, 11, "WIN RATE")
@@ -977,24 +1019,15 @@ if showMlTable and not na(mlTable) and barstate.islast
     f_cell_b(mlTable, 1, 13, winLossText)
     f_cell_b(mlTable, 0, 14, "PROFIT FACTOR")
     f_cell_b(mlTable, 1, 14, profitFactorText)
+    // ANALYTICS — rolled-up signals only (NQ/ZN/6E/VIX → XA, footprint → Volume Pressure)
     f_cell_h(mlTable, 0, 15, "ANALYTICS")
     f_cell_h(mlTable, 1, 15, "")
-    f_cell_b(mlTable, 0, 16, "VOLATILITY")
-    f_cell_b(mlTable, 1, 16, volatilityText)
-    f_cell_b(mlTable, 0, 17, "NQ")
-    f_cell_b(mlTable, 1, 17, nqTrend)
-    f_cell_b(mlTable, 0, 18, "ZN")
-    f_cell_b(mlTable, 1, 18, znTrend)
-    f_cell_b(mlTable, 0, 19, "DXY")
-    f_cell_b(mlTable, 1, 19, dxyTrend)
-    f_cell_h(mlTable, 0, 20, "FOOTPRINT")
-    f_cell_h(mlTable, 1, 20, "")
-    f_cell_b(mlTable, 0, 21, "DELTA")
-    f_cell_b(mlTable, 1, 21, fpDeltaText)
-    f_cell_b(mlTable, 0, 22, "VOL SPIKE")
-    f_cell_b(mlTable, 1, 22, fpVolumeSpikeText)
-    f_cell_b(mlTable, 0, 23, "EVENT")
-    f_cell_v(mlTable, 1, 23, fpEventText, fpEventColor)
+    f_cell_b(mlTable, 0, 16, "XA")
+    f_cell_b(mlTable, 1, 16, xaText)
+    f_cell_b(mlTable, 0, 17, "XA CORR")
+    f_cell_b(mlTable, 1, 17, xaCorrText)
+    f_cell_b(mlTable, 0, 18, "VOLUME PRESSURE")
+    f_cell_b(mlTable, 1, 18, volPressureText)
 
 //=====================
 // Alerts
@@ -1049,12 +1082,11 @@ plot(volZscore, "ml_liq_vol_zscore", display=display.none, editable=false)
 // cross-asset (configured timeframe)
 plot(float(nqCode), "ml_xa_nq_code", display=display.none, editable=false)
 plot(float(znCode), "ml_xa_zn_code", display=display.none, editable=false)
-plot(float(dxyCode), "ml_xa_dxy_code", display=display.none, editable=false)
+plot(float(eurUsdCode), "ml_xa_6e_code", display=display.none, editable=false)
 
-// cross-asset advanced (VIX, MES↔NQ correlation, DXY divergence)
+// cross-asset advanced (VIX, ES↔NQ correlation; DXY divergence removed 2026-05-11)
 plot(vixPressure, "ml_xa_vix_pressure", display=display.none, editable=false)
 plot(corrMesNq, "ml_xa_corr_nq", display=display.none, editable=false)
-plot(dxyDivergeFloat, "ml_xa_dxy_diverge", display=display.none, editable=false)
 
 // HTF confluence
 plot(float(htfConfTotal), "ml_htf_conf_total", display=display.none, editable=false)

@@ -92,14 +92,29 @@ def _resolve_shap_model(predictor: Any) -> str:
 
 def _build_trade_dataset(
     df: pd.DataFrame,
-    feature_cols: list[str],
     max_hold_bars: int,
 ) -> pd.DataFrame:
     from scripts.ag.train_v9_locked import build_trade_dataset as build_locked_trade_dataset
 
     trades = build_locked_trade_dataset(df, max_hold_bars=max_hold_bars)
-    keep = [c for c in [*feature_cols, "ts", LABEL_COL, "tp_hit", "stop_hit", "mfe_points", "mae_points"] if c in trades.columns]
-    return trades[keep].sort_values("ts").reset_index(drop=True)
+    return trades.sort_values("ts").reset_index(drop=True)
+
+
+def _predictor_feature_columns(predictor: Any, trades: pd.DataFrame) -> list[str]:
+    if hasattr(predictor, "features"):
+        expected = list(predictor.features())
+    elif hasattr(predictor, "feature_metadata_in"):
+        expected = list(predictor.feature_metadata_in.get_features())
+    else:
+        raise SystemExit("Unable to resolve predictor feature columns")
+    missing = [c for c in expected if c not in trades.columns]
+    if missing:
+        raise SystemExit(
+            "Resolved trade dataset missing predictor features: "
+            + ", ".join(missing[:20])
+            + (" ..." if len(missing) > 20 else "")
+        )
+    return expected
 
 
 def _explain_model(
@@ -274,11 +289,14 @@ def _compute_cohort_importance(
         "ml_fib_touch_level_code",
         "ml_recent_liq_bull",
         "ml_recent_liq_bear",
+        "sl_atr_mult",
+        "tp_ratio",
+        "tp_family_code",
         "knob_length_ema",
         "knob_length_ma",
         "knob_nq_symbol",
         "knob_zn_symbol",
-        "knob_dxy_symbol",
+        "knob_6e_symbol",
         "knob_vix_symbol",
         "ml_absorption_candidate",
         "ml_flush_candidate",
@@ -447,14 +465,12 @@ def _write_summary_md(
 
 
 def main() -> int:
-    from scripts.ag.train_v9_locked import ML_FEATURES
-
     ap = argparse.ArgumentParser()
     ap.add_argument("--predictor-dir", type=Path, required=True,
                     help="Path to trained AG predictor directory")
     ap.add_argument("--csv", type=Path, required=True,
                     help="Source CSV with ml_* columns")
-    ap.add_argument("--max-hold-bars", type=int, default=72)
+    ap.add_argument("--max-hold-bars", type=int, default=24)
     ap.add_argument("--max-rows", type=int, default=None,
                     help="Cap rows for fast smoke runs")
     ap.add_argument("--output-dir", type=Path, default=None)
@@ -472,8 +488,7 @@ def main() -> int:
     df = pd.read_csv(args.csv, parse_dates=["ts"])
     print(f"  rows={len(df):,}  range={df['ts'].iloc[0]} → {df['ts'].iloc[-1]}", flush=True)
 
-    feature_cols = [c for c in ML_FEATURES if c in df.columns]
-    trades = _build_trade_dataset(df, feature_cols, max_hold_bars=args.max_hold_bars)
+    trades = _build_trade_dataset(df, max_hold_bars=args.max_hold_bars)
     if args.label_col not in trades.columns:
         raise SystemExit(f"Label column not found in resolved trade dataset: {args.label_col}")
     label_col = args.label_col
@@ -489,6 +504,7 @@ def main() -> int:
     print(f"\nloading predictor from {args.predictor_dir}", flush=True)
     predictor = TabularPredictor.load(str(args.predictor_dir))
     predictor.persist_models()
+    feature_cols = _predictor_feature_columns(predictor, trades)
 
     model_name = _resolve_shap_model(predictor)
     X = trades[feature_cols]

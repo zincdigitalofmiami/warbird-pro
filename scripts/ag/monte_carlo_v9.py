@@ -54,27 +54,51 @@ IS_END = pd.Timestamp("2024-12-31T23:59:59", tz="UTC")
 
 
 def _build_trades(
-    df: pd.DataFrame, feature_cols: list[str], max_hold_bars: int
+    df: pd.DataFrame, max_hold_bars: int
 ) -> pd.DataFrame:
     from scripts.ag.train_v9_locked import build_trade_dataset as build_locked_trade_dataset
 
     trades = build_locked_trade_dataset(df, max_hold_bars=max_hold_bars)
-    keep = [
-        c for c in [
-            *feature_cols,
-            "ts",
-            LABEL_COL,
-            "tp_hit",
-            "stop_hit",
-            "mfe_points",
-            "mae_points",
-            "direction",
-            "entry_price",
-            "target_price",
-            "stop_price",
-        ] if c in trades.columns
-    ]
-    return trades[keep].sort_values("ts").reset_index(drop=True)
+    return trades.sort_values("ts").reset_index(drop=True)
+
+
+def _predictor_feature_columns(predictor: Any, trades: pd.DataFrame) -> list[str]:
+    if hasattr(predictor, "features"):
+        expected = list(predictor.features())
+    elif hasattr(predictor, "feature_metadata_in"):
+        expected = list(predictor.feature_metadata_in.get_features())
+    else:
+        raise SystemExit("Unable to resolve predictor feature columns")
+    missing = [c for c in expected if c not in trades.columns]
+    if missing:
+        raise SystemExit(
+            "Resolved trade dataset missing predictor features: "
+            + ", ".join(missing[:20])
+            + (" ..." if len(missing) > 20 else "")
+        )
+    return expected
+
+
+def _resolve_payoff_arrays(
+    trades: pd.DataFrame,
+    fallback_sl_pts: float,
+    fallback_tp_pts: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    if {"entry_price", "target_price", "stop_price"}.issubset(trades.columns):
+        entry = pd.to_numeric(trades["entry_price"], errors="coerce").to_numpy(dtype=float)
+        target = pd.to_numeric(trades["target_price"], errors="coerce").to_numpy(dtype=float)
+        stop = pd.to_numeric(trades["stop_price"], errors="coerce").to_numpy(dtype=float)
+        tp_pts = np.abs(target - entry)
+        sl_pts = np.abs(stop - entry)
+        valid = np.isfinite(tp_pts) & np.isfinite(sl_pts) & (tp_pts > 0) & (sl_pts > 0)
+        if valid.all():
+            win = tp_pts * ES_POINT_VALUE - COMMISSION_ROUND_TRIP
+            loss = -(sl_pts * ES_POINT_VALUE + COMMISSION_ROUND_TRIP)
+            return win, loss
+    win_payoff = fallback_tp_pts * ES_POINT_VALUE - COMMISSION_ROUND_TRIP
+    loss_payoff = -(fallback_sl_pts * ES_POINT_VALUE + COMMISSION_ROUND_TRIP)
+    n = len(trades)
+    return np.full(n, win_payoff, dtype=float), np.full(n, loss_payoff, dtype=float)
 
 
 def _compute_payoffs(
@@ -89,8 +113,8 @@ def _compute_payoffs(
 
 def simulate_paths(
     proba_pos: np.ndarray,
-    payoffs_win: float,
-    payoffs_loss: float,
+    payoffs_win: np.ndarray,
+    payoffs_loss: np.ndarray,
     n_paths: int,
     rng: np.random.Generator,
 ) -> dict[str, Any]:
@@ -99,7 +123,7 @@ def simulate_paths(
         return {"total_pnl": np.zeros(n_paths), "max_drawdown": np.zeros(n_paths),
                 "win_rate": np.zeros(n_paths), "n_trades": 0}
     outcomes = rng.random((n_paths, N)) < proba_pos[None, :]
-    realized = np.where(outcomes, payoffs_win, payoffs_loss)
+    realized = np.where(outcomes, payoffs_win[None, :], payoffs_loss[None, :])
     running = np.cumsum(realized, axis=1)
     running_max = np.maximum.accumulate(running, axis=1)
     drawdown = (running_max - running).max(axis=1)
@@ -121,10 +145,14 @@ def quantiles(arr: np.ndarray, qs=(0.05, 0.25, 0.50, 0.75, 0.95)) -> dict[str, f
     return {f"p{int(q*100)}": float(np.quantile(arr, q)) for q in qs}
 
 
-def rollup(proba_pos: np.ndarray, y_true: np.ndarray, n_paths: int,
-           rng: np.random.Generator, sl_pts: float, tp_pts: float) -> dict[str, Any]:
-    payoffs_win = tp_pts * ES_POINT_VALUE - COMMISSION_ROUND_TRIP
-    payoffs_loss = -(sl_pts * ES_POINT_VALUE + COMMISSION_ROUND_TRIP)
+def rollup(
+    proba_pos: np.ndarray,
+    y_true: np.ndarray,
+    payoffs_win: np.ndarray,
+    payoffs_loss: np.ndarray,
+    n_paths: int,
+    rng: np.random.Generator,
+) -> dict[str, Any]:
     ev_per_trade = proba_pos * payoffs_win + (1 - proba_pos) * payoffs_loss
     ev_mean = float(ev_per_trade.mean()) if ev_per_trade.size else 0.0
     ev_std = float(ev_per_trade.std(ddof=1)) if ev_per_trade.size > 1 else 0.0
@@ -151,7 +179,7 @@ def rollup(proba_pos: np.ndarray, y_true: np.ndarray, n_paths: int,
 
 def task_C_threshold_sweep(
     proba_pos: np.ndarray, y_true: np.ndarray, n_paths: int,
-    rng_root: np.random.Generator, sl_pts: float, tp_pts: float,
+    rng_root: np.random.Generator, payoffs_win: np.ndarray, payoffs_loss: np.ndarray,
     thresholds: list[float] | None = None,
 ) -> dict[str, Any]:
     if thresholds is None:
@@ -163,7 +191,14 @@ def task_C_threshold_sweep(
             results[str(tau)] = {"n_gated": int(mask.sum()), "status": "too_few"}
             continue
         rng = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
-        r = rollup(proba_pos[mask], y_true[mask], n_paths, rng, sl_pts, tp_pts)
+        r = rollup(
+            proba_pos[mask],
+            y_true[mask],
+            payoffs_win[mask],
+            payoffs_loss[mask],
+            n_paths,
+            rng,
+        )
         r["n_gated"] = int(mask.sum())
         r["gated_wr"] = float(y_true[mask].mean())
         r["lift"] = r["gated_wr"] - float(y_true.mean())
@@ -203,7 +238,8 @@ def task_G_calibration(
 
 def task_H_regime_stability(
     proba_pos: np.ndarray, y_true: np.ndarray, ts: np.ndarray,
-    n_paths: int, rng_root: np.random.Generator, sl_pts: float, tp_pts: float,
+    payoffs_win: np.ndarray, payoffs_loss: np.ndarray,
+    n_paths: int, rng_root: np.random.Generator,
 ) -> dict[str, Any]:
     ts_num = pd.to_datetime(ts, utc=True).astype("int64")
     mid = np.median(ts_num)
@@ -211,8 +247,22 @@ def task_H_regime_stability(
     late_mask = ~early_mask
     rng_e = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
     rng_l = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
-    early = rollup(proba_pos[early_mask], y_true[early_mask], n_paths, rng_e, sl_pts, tp_pts)
-    late = rollup(proba_pos[late_mask], y_true[late_mask], n_paths, rng_l, sl_pts, tp_pts)
+    early = rollup(
+        proba_pos[early_mask],
+        y_true[early_mask],
+        payoffs_win[early_mask],
+        payoffs_loss[early_mask],
+        n_paths,
+        rng_e,
+    )
+    late = rollup(
+        proba_pos[late_mask],
+        y_true[late_mask],
+        payoffs_win[late_mask],
+        payoffs_loss[late_mask],
+        n_paths,
+        rng_l,
+    )
     ev_diff = abs(early["ev_per_trade"] - late["ev_per_trade"])
     verdict = "STABLE" if ev_diff < early["ev_std_per_trade"] else "FRAGILE"
     return {
@@ -225,7 +275,7 @@ def task_H_regime_stability(
 
 def task_I_streaks(
     proba_pos: np.ndarray, n_paths: int, rng: np.random.Generator,
-    payoffs_win: float, payoffs_loss: float,
+    payoffs_win: np.ndarray, payoffs_loss: np.ndarray,
 ) -> dict[str, Any]:
     sim = simulate_paths(proba_pos, payoffs_win, payoffs_loss, n_paths, rng)
     outcomes = sim["outcomes"]
@@ -264,15 +314,13 @@ def task_I_streaks(
 
 
 def main() -> int:
-    from scripts.ag.train_v9_locked import ML_FEATURES
-
     ap = argparse.ArgumentParser()
     ap.add_argument("--predictor-path", type=Path, required=True)
     ap.add_argument("--csv", type=Path, required=True)
     ap.add_argument("--split", choices=["is", "oos", "all"], default="oos")
     ap.add_argument("--n-paths", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--max-hold-bars", type=int, default=72)
+    ap.add_argument("--max-hold-bars", type=int, default=24)
     ap.add_argument("--sl-points", type=float, default=DEFAULT_SL_POINTS)
     ap.add_argument("--tp-points", type=float, default=DEFAULT_TP_POINTS)
     ap.add_argument("--output-dir", type=Path, default=None)
@@ -288,8 +336,7 @@ def main() -> int:
 
     print(f"loading {args.csv}", flush=True)
     df = pd.read_csv(args.csv, parse_dates=["ts"])
-    feature_cols = [c for c in ML_FEATURES if c in df.columns]
-    trades = _build_trades(df, feature_cols, max_hold_bars=args.max_hold_bars)
+    trades = _build_trades(df, max_hold_bars=args.max_hold_bars)
     trades["ts"] = pd.to_datetime(trades["ts"], utc=True)
     print(f"  total trades: {len(trades):,}  WR={trades[LABEL_COL].mean():.4f}", flush=True)
 
@@ -303,15 +350,17 @@ def main() -> int:
         print("Too few trades for MC analysis", flush=True)
         return 1
 
+    feature_cols = _predictor_feature_columns(pred, trades)
     y_true = trades[LABEL_COL].to_numpy()
     proba = pred.predict_proba(trades[feature_cols])
     proba_pos = proba.iloc[:, 1].to_numpy() if isinstance(proba, pd.DataFrame) else np.asarray(proba)
+    payoffs_win, payoffs_loss = _resolve_payoff_arrays(trades, args.sl_points, args.tp_points)
 
     rng_root = np.random.default_rng(args.seed)
 
     print("\n=== Task A — Overall ===", flush=True)
     rng_a = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
-    task_a = rollup(proba_pos, y_true, args.n_paths, rng_a, args.sl_points, args.tp_points)
+    task_a = rollup(proba_pos, y_true, payoffs_win, payoffs_loss, args.n_paths, rng_a)
     print(f"  EV/trade=${task_a['ev_per_trade']:.2f}  PF={task_a['profit_factor']:.3f}"
           f"  MC p50 PnL=${task_a['mc_total_pnl']['p50']:.0f}", flush=True)
 
@@ -324,14 +373,26 @@ def main() -> int:
                 task_b[d_label] = {"n_trades": int(mask.sum()), "status": "too_few"}
                 continue
             rng_b = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
-            task_b[d_label] = rollup(proba_pos[mask], y_true[mask], args.n_paths, rng_b,
-                                     args.sl_points, args.tp_points)
+            task_b[d_label] = rollup(
+                proba_pos[mask],
+                y_true[mask],
+                payoffs_win[mask],
+                payoffs_loss[mask],
+                args.n_paths,
+                rng_b,
+            )
             print(f"  {d_label}: EV=${task_b[d_label]['ev_per_trade']:.2f}"
                   f"  n={task_b[d_label]['n_trades']}", flush=True)
 
     print("\n=== Task C — Threshold sweep ===", flush=True)
-    task_c = task_C_threshold_sweep(proba_pos, y_true, args.n_paths, rng_root,
-                                    args.sl_points, args.tp_points)
+    task_c = task_C_threshold_sweep(
+        proba_pos,
+        y_true,
+        args.n_paths,
+        rng_root,
+        payoffs_win,
+        payoffs_loss,
+    )
     for tau, r in task_c.items():
         if r.get("status") == "too_few":
             continue
@@ -345,13 +406,18 @@ def main() -> int:
               f"  real={row['realized']:.3f}  {row['verdict']}", flush=True)
 
     print("\n=== Task H — Regime stability ===", flush=True)
-    task_h = task_H_regime_stability(proba_pos, y_true, trades["ts"].to_numpy(),
-                                     args.n_paths, rng_root, args.sl_points, args.tp_points)
+    task_h = task_H_regime_stability(
+        proba_pos,
+        y_true,
+        trades["ts"].to_numpy(),
+        payoffs_win,
+        payoffs_loss,
+        args.n_paths,
+        rng_root,
+    )
     print(f"  verdict={task_h['verdict']}  EV_diff=${task_h['ev_absolute_diff']:.2f}", flush=True)
 
     print("\n=== Task I — Streak profile ===", flush=True)
-    payoffs_win = args.tp_points * ES_POINT_VALUE - COMMISSION_ROUND_TRIP
-    payoffs_loss = -(args.sl_points * ES_POINT_VALUE + COMMISSION_ROUND_TRIP)
     rng_i = np.random.default_rng(rng_root.integers(0, 2**31 - 1))
     task_i = task_I_streaks(proba_pos, args.n_paths, rng_i, payoffs_win, payoffs_loss)
     if task_i:
@@ -364,6 +430,7 @@ def main() -> int:
         "csv": str(args.csv),
         "split": args.split,
         "n_paths": args.n_paths,
+        "predictor_feature_count": len(feature_cols),
         "sl_points": args.sl_points,
         "tp_points": args.tp_points,
         "point_value": ES_POINT_VALUE,

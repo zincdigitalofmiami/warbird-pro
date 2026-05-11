@@ -1,4 +1,4 @@
-from scripts.ag.train_v9_locked import ML_FEATURES
+from scripts.ag.train_v9_locked import ML_FEATURES, MODEL_FEATURES, TRADE_DISCOVERABLE_FEATURES
 from scripts.optuna.workspaces.warbird_pro_core import build_core_dataset as core
 
 
@@ -30,7 +30,7 @@ REQUIRED_KNOBS = {
     "knob_use_xa_gate",
     "knob_nq_symbol",
     "knob_zn_symbol",
-    "knob_dxy_symbol",
+    "knob_6e_symbol",
     "knob_vix_symbol",
     "knob_corr_length",
     "knob_vix_move_bars",
@@ -75,6 +75,13 @@ REQUIRED_FEATURES = {
     "ml_liq_bars_since_bear",
     "ml_xa_long_agreement",
     "ml_xa_short_agreement",
+    # Phase 1 continuous cross-asset features (locked 2026-05-11 gate-as-feature pivot).
+    # DXY (Yahoo) removed 2026-05-11; 6E (Databento CME) replaces.
+    "ml_xa_6e_code",
+    "ml_xa_nq_rel_strength_atr",
+    "ml_xa_zn_rate_pressure",
+    "ml_xa_hg_growth_proxy",
+    "ml_xa_6e_momentum_zscore",
 }
 
 
@@ -86,6 +93,10 @@ def test_entry_fib_liquidity_symbol_context_is_in_ag_features():
     assert REQUIRED_FEATURES.issubset(set(ML_FEATURES))
 
 
+def test_trade_discoverables_are_in_model_feature_surface():
+    assert set(TRADE_DISCOVERABLE_FEATURES).issubset(set(MODEL_FEATURES))
+
+
 def test_manifest_declares_indicator_knobs_and_feature_columns():
     profiles = core.generate_indicator_profiles("base")
     assert len(profiles) == 1
@@ -93,5 +104,5 @@ def test_manifest_declares_indicator_knobs_and_feature_columns():
     assert REQUIRED_KNOBS.issubset(profile.keys())
     assert profile["knob_nq_symbol"] == "CME_MINI:NQ1!"
     assert profile["knob_zn_symbol"] == "CBOT:ZN1!"
-    assert profile["knob_dxy_symbol"] == "TVC:DXY"
+    assert profile["knob_6e_symbol"] == "CME:6E1!"
     assert profile["knob_vix_symbol"] == "CBOE:VIX"
