@@ -32,8 +32,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import duckdb
 import numpy as np
+import pandera.pandas as pa
 import pandas as pd
+from data_profiling import ProfileReport
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
@@ -143,6 +146,16 @@ DEFAULT_INDICATOR_KNOBS: dict[str, Any] = {
     "knob_fp_compressed_range_atr": ORDERFLOW_COMPRESSED_RANGE_ATR,
 }
 KNOB_COLUMNS = tuple(DEFAULT_INDICATOR_KNOBS.keys())
+
+LOCKED_DUCKDB_VERSION = "1.5.2"
+LOCKED_PANDERA_VERSION = "0.31.1"
+LOCKED_DATA_PROFILING_VERSION = "4.19.1"
+FORBIDDEN_LINEAGE_TOKENS = (
+    "postgres",
+    "psycopg2",
+    "ag_training",
+    "local_warehouse",
+)
 
 OUTRIGHT_ROOT_PATTERNS = {
     "ES": re.compile(r"^ES[FGHJKMNQUVXZ]\d{1,2}$"),
@@ -309,32 +322,79 @@ def xa_code(close: pd.Series) -> pd.Series:
     return code.fillna(0.0)
 
 
-def load_bars(source: Path) -> pd.DataFrame:
+def duckdb_path_literal(path: Path) -> str:
+    return str(path).replace("'", "''")
+
+
+def read_source_relation(con: duckdb.DuckDBPyConnection, source: Path) -> duckdb.DuckDBPyRelation:
     suffix = "".join(source.suffixes).lower()
     if suffix.endswith(".parquet"):
-        df = pd.read_parquet(source)
-        ts_col = "ts" if "ts" in df.columns else "ts_event"
-        required = {ts_col, "open", "high", "low", "close", "volume"}
-        missing = required.difference(df.columns)
-        if missing:
-            raise SystemExit(f"{source} missing columns: {sorted(missing)}")
-        df = df.rename(columns={ts_col: "ts"}).copy()
-    elif suffix.endswith(".csv") or suffix.endswith(".csv.zst"):
-        df = pd.read_csv(source)
-        ts_col = "ts" if "ts" in df.columns else "ts_event"
-        required = {ts_col, "open", "high", "low", "close", "volume"}
-        missing = required.difference(df.columns)
-        if missing:
-            raise SystemExit(f"{source} missing columns: {sorted(missing)}")
-        df = df.rename(columns={ts_col: "ts"}).copy()
-    else:
-        raise SystemExit(f"Unsupported source type: {source}")
+        return con.read_parquet(str(source))
+    if suffix.endswith(".csv") or suffix.endswith(".csv.zst"):
+        return con.read_csv(str(source), header=True, auto_detect=True, sample_size=-1)
+    raise SystemExit(f"Unsupported source type: {source}")
+
+
+def load_bars(source: Path) -> pd.DataFrame:
+    con = duckdb.connect()
+    rel = read_source_relation(con, source)
+    lower_cols = {name.lower(): name for name in rel.columns}
+    ts_col = lower_cols.get("ts") or lower_cols.get("ts_event")
+    required = {
+        "open": lower_cols.get("open"),
+        "high": lower_cols.get("high"),
+        "low": lower_cols.get("low"),
+        "close": lower_cols.get("close"),
+        "volume": lower_cols.get("volume"),
+    }
+    if ts_col is None:
+        raise SystemExit(f"{source} missing columns: ['ts' or 'ts_event']")
+    missing = sorted(name for name, col in required.items() if col is None)
+    if missing:
+        raise SystemExit(f"{source} missing columns: {missing}")
+
+    projection = (
+        f'"{ts_col}" AS ts, '
+        f'"{required["open"]}" AS open, '
+        f'"{required["high"]}" AS high, '
+        f'"{required["low"]}" AS low, '
+        f'"{required["close"]}" AS close, '
+        f'"{required["volume"]}" AS volume'
+    )
+    df = rel.project(projection).order("ts").df()
 
     df["ts"] = pd.to_datetime(df["ts"], utc=True)
     for col in ("open", "high", "low", "close", "volume"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.dropna(subset=["ts", "open", "high", "low", "close"]).sort_values("ts")
     return df[["ts", "open", "high", "low", "close", "volume"]].reset_index(drop=True)
+
+
+def duckdb_sort_filter_frame(
+    df: pd.DataFrame,
+    start: pd.Timestamp | None,
+    end: pd.Timestamp | None,
+) -> pd.DataFrame:
+    def as_utc(value: pd.Timestamp) -> pd.Timestamp:
+        stamp = pd.Timestamp(value)
+        return stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
+
+    con = duckdb.connect()
+    con.register("bars_df", df)
+    where: list[str] = []
+    params: list[Any] = []
+    if start is not None:
+        where.append("ts >= ?")
+        params.append(as_utc(start))
+    if end is not None:
+        where.append("ts <= ?")
+        params.append(as_utc(end))
+    query = "SELECT ts, open, high, low, close, volume FROM bars_df"
+    if where:
+        query = f"{query} WHERE {' AND '.join(where)}"
+    query = f"{query} ORDER BY ts"
+    out = con.execute(query, params).df()
+    return out.reset_index(drop=True)
 
 
 def normalize_to_timeframe(df: pd.DataFrame, timeframe_min: int) -> pd.DataFrame:
@@ -809,6 +869,40 @@ def align_series_to_index(series: pd.Series, target_index: pd.DatetimeIndex) -> 
     return s.reindex(target_index, method="ffill")
 
 
+def duckdb_asof_align(
+    source_frame: pd.DataFrame,
+    ts_col: str,
+    value_col: str,
+    target_index: pd.DatetimeIndex,
+) -> pd.Series:
+    if source_frame.empty:
+        return pd.Series(np.nan, index=target_index, dtype=float)
+
+    frame = source_frame[[ts_col, value_col]].copy()
+    frame[ts_col] = pd.to_datetime(frame[ts_col], utc=True)
+    frame[value_col] = pd.to_numeric(frame[value_col], errors="coerce")
+    frame = frame.dropna(subset=[ts_col]).sort_values(ts_col)
+    if frame.empty:
+        return pd.Series(np.nan, index=target_index, dtype=float)
+
+    base = pd.DataFrame({"ts": pd.to_datetime(target_index, utc=True)})
+    right = frame.rename(columns={ts_col: "src_ts", value_col: "src_value"})
+
+    con = duckdb.connect()
+    con.register("base_ts", base)
+    con.register("src_ts", right)
+    aligned = con.execute(
+        """
+        SELECT b.ts AS ts, s.src_value AS value
+        FROM base_ts b
+        ASOF LEFT JOIN src_ts s
+        ON b.ts >= s.src_ts
+        ORDER BY b.ts
+        """
+    ).df()
+    return pd.Series(aligned["value"].to_numpy(dtype=float), index=target_index)
+
+
 def merge_cross_assets(
     df: pd.DataFrame,
     cross_asset_path: Path | None,
@@ -856,11 +950,14 @@ def merge_cross_assets(
                 else:
                     warnings.append(f"cross-asset source missing {symbol}; {close_col}=NaN")
                 continue
-            close = sym.drop_duplicates(ts_col).set_index(ts_col)["close"]
+            sym = sym.drop_duplicates(ts_col)
+            close = sym.set_index(ts_col)["close"]
             if code_col is not None:
                 code = xa_code(close)
-                out[code_col] = align_series_to_index(code, idx).to_numpy(dtype=float)
-            out[close_col] = align_series_to_index(close, idx).to_numpy(dtype=float)
+                code_frame = code.rename("code").to_frame().reset_index()
+                code_ts_col = code_frame.columns[0]
+                out[code_col] = duckdb_asof_align(code_frame, code_ts_col, "code", idx).to_numpy(dtype=float)
+            out[close_col] = duckdb_asof_align(sym, ts_col, "close", idx).to_numpy(dtype=float)
     else:
         warnings.append("cross-asset 1h source unavailable; NQ/ZN codes set to 0; HG/ZN/NQ/6E closes set to NaN")
 
@@ -874,8 +971,8 @@ def merge_cross_assets(
         value_col = "VIXCLS"
         vix[date_col] = pd.to_datetime(vix[date_col], utc=True)
         vix[value_col] = pd.to_numeric(vix[value_col], errors="coerce")
-        vix_series = vix.dropna(subset=[value_col]).set_index(date_col)[value_col].sort_index()
-        vix_aligned = align_series_to_index(vix_series, idx)
+        vix_frame = vix.dropna(subset=[value_col])[[date_col, value_col]].sort_values(date_col)
+        vix_aligned = duckdb_asof_align(vix_frame, date_col, value_col, idx)
         out["ml_xa_vix_pressure"] = close_movement_pressure(
             vix_aligned,
             int(_knob(knobs, "knob_vix_move_bars")),
@@ -1347,6 +1444,128 @@ def validate_core_frame(df: pd.DataFrame, gate_mode: str) -> None:
             raise RuntimeError("strict gate failed: all-zero footprint delta")
 
 
+def validate_export_with_pandera(df: pd.DataFrame) -> None:
+    required_cols = ["ts", "open", "high", "low", "close", "volume", *ML_FEATURES]
+    missing = [col for col in required_cols if col not in df.columns]
+    if missing:
+        raise RuntimeError(f"pandera export schema missing columns: {missing}")
+
+    bool_cols = {
+        "knob_auto_tune_zz",
+        "knob_use_pattern_confirm",
+        "knob_use_liq_gate",
+        "knob_use_ma_gate",
+        "knob_use_session_vwap",
+        "knob_use_xa_gate",
+        "knob_use_footprint",
+        "profile_is_ma_base",
+    }
+    string_cols = {
+        "profile_id",
+        "profile_mode",
+        "knob_nq_symbol",
+        "knob_zn_symbol",
+        "knob_6e_symbol",
+        "knob_vix_symbol",
+        "knob_zn_gate_direction",
+    }
+
+    schema_cols: dict[str, pa.Column] = {
+        "ts": pa.Column(pa.DateTime, nullable=False, coerce=True),
+    }
+    for col in required_cols:
+        if col == "ts":
+            continue
+        if col in bool_cols:
+            schema_cols[col] = pa.Column(pa.Bool, nullable=True, coerce=True)
+        elif col in string_cols:
+            schema_cols[col] = pa.Column(pa.String, nullable=True, coerce=True)
+        else:
+            schema_cols[col] = pa.Column(float, nullable=True, coerce=True)
+
+    export_schema = pa.DataFrameSchema(schema_cols, strict=False, coerce=True)
+    validated = export_schema.validate(df[required_cols].copy(), lazy=True)
+
+    if not validated["ts"].is_monotonic_increasing:
+        raise RuntimeError("pandera export schema failed: ts is not monotonically increasing")
+
+    non_numeric = [
+        col
+        for col in required_cols
+        if col not in {"ts", *string_cols, *bool_cols}
+        and not pd.api.types.is_numeric_dtype(validated[col])
+    ]
+    if non_numeric:
+        raise RuntimeError(f"pandera export schema failed dtype policy for numeric columns: {non_numeric}")
+
+    required_label_policy = [
+        "ml_entry_long_trigger",
+        "ml_entry_short_trigger",
+        "ml_trade_entry",
+        "ml_trade_stop",
+        "ml_trade_tp",
+    ]
+    missing_policy = [col for col in required_label_policy if col not in validated.columns]
+    if missing_policy:
+        raise RuntimeError(f"pandera export schema missing label-policy columns: {missing_policy}")
+
+
+def generate_profile_artifact(
+    df: pd.DataFrame,
+    out_dir: Path,
+    symbol_root: str,
+    timeframe: str,
+) -> tuple[Path, int, bool]:
+    timeframe_text = str(timeframe).strip().removesuffix("m")
+    profile_path = out_dir / f"{symbol_root.lower()}_{timeframe_text}m_core.profile.html"
+    profile_limit = 50_000
+    sampled = len(df) > profile_limit
+    profile_frame = df.head(profile_limit).copy() if sampled else df.copy()
+
+    report = ProfileReport(
+        profile_frame,
+        title=f"Warbird Pro V9 Core Profile ({symbol_root} {timeframe_text}m)",
+        minimal=True,
+        progress_bar=False,
+    )
+    report.to_file(str(profile_path))
+    return profile_path, int(len(profile_frame)), sampled
+
+
+def validate_manifest_contract(manifest: dict[str, Any]) -> None:
+    manifest_schema = pa.DataFrameSchema(
+        {
+            "repo_commit": pa.Column(pa.String, nullable=False, coerce=True),
+            "symbol": pa.Column(pa.String, nullable=False, coerce=True),
+            "symbol_root": pa.Column(pa.String, nullable=False, coerce=True),
+            "timeframe": pa.Column(pa.String, nullable=False, coerce=True),
+            "trigger_family": pa.Column(pa.String, nullable=False, coerce=True),
+            "source_kind": pa.Column(
+                pa.String,
+                nullable=False,
+                coerce=True,
+                checks=pa.Check(lambda s: s.str.startswith("DATABENTO_")),
+            ),
+            "source_bars": pa.Column(pa.String, nullable=False, coerce=True),
+            "label_column": pa.Column(pa.String, nullable=False, coerce=True),
+            "feature_count_locked": pa.Column(int, nullable=False, coerce=True, checks=pa.Check.eq(len(ML_FEATURES))),
+            "row_count": pa.Column(int, nullable=False, coerce=True, checks=pa.Check.ge(1)),
+            "entry_long_count": pa.Column(int, nullable=False, coerce=True, checks=pa.Check.ge(0)),
+            "entry_short_count": pa.Column(int, nullable=False, coerce=True, checks=pa.Check.ge(0)),
+            "profiling_report_path": pa.Column(pa.String, nullable=False, coerce=True),
+            "profiling_rows_profiled": pa.Column(int, nullable=False, coerce=True, checks=pa.Check.ge(1)),
+        },
+        strict=False,
+        coerce=True,
+    )
+    manifest_schema.validate(pd.DataFrame([manifest]), lazy=True)
+
+    serialized = json.dumps(manifest).lower()
+    banned = [token for token in FORBIDDEN_LINEAGE_TOKENS if token in serialized]
+    if banned:
+        raise RuntimeError(f"manifest contract failed forbidden lineage tokens: {sorted(set(banned))}")
+
+
 def write_outputs(
     df: pd.DataFrame,
     out_dir: Path,
@@ -1354,6 +1573,9 @@ def write_outputs(
     timeframe: str,
     source: Path,
     trades_zip: Path | None,
+    profiling_report_path: Path,
+    profiling_rows_profiled: int,
+    profiling_sampled: bool,
     manifest_extra: dict[str, Any],
 ) -> tuple[Path, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1363,7 +1585,13 @@ def write_outputs(
     manifest_path = csv_path.with_suffix(".manifest.json")
     export = df.copy()
     export["ts"] = pd.to_datetime(export["ts"], utc=True).dt.strftime("%Y-%m-%dT%H:%M:%S%z")
-    export.to_csv(csv_path, index=False)
+    con = duckdb.connect()
+    con.register("export_df", export)
+    order_cols = [col for col in ("ts", "profile_id") if col in export.columns]
+    order_clause = f" ORDER BY {', '.join(order_cols)}" if order_cols else ""
+    con.execute(
+        f"COPY (SELECT * FROM export_df{order_clause}) TO '{duckdb_path_literal(csv_path)}' (HEADER, DELIMITER ',')"
+    )
     manifest = {
         "repo_commit": repo_commit(),
         "symbol": symbol_root,
@@ -1383,9 +1611,18 @@ def write_outputs(
         "ts_first": pd.to_datetime(df["ts"], utc=True).min().isoformat(),
         "ts_last": pd.to_datetime(df["ts"], utc=True).max().isoformat(),
         "sha256": sha256_file(csv_path),
+        "profiling_report_path": str(profiling_report_path),
+        "profiling_rows_profiled": int(profiling_rows_profiled),
+        "profiling_sampled": bool(profiling_sampled),
+        "data_layer_stack": {
+            "duckdb": LOCKED_DUCKDB_VERSION,
+            "pandera": LOCKED_PANDERA_VERSION,
+            "fg_data_profiling": LOCKED_DATA_PROFILING_VERSION,
+        },
         "build_utc": datetime.now(timezone.utc).isoformat(),
         **manifest_extra,
     }
+    validate_manifest_contract(manifest)
     manifest_path.write_text(json.dumps(manifest, indent=2, default=str))
     return csv_path, manifest_path
 
@@ -1416,10 +1653,7 @@ def main() -> int:
     start = utc_ts(args.start)
     end = utc_ts(args.end)
     raw = load_bars(source_path)
-    if start is not None:
-        raw = raw.loc[raw["ts"] >= start]
-    if end is not None:
-        raw = raw.loc[raw["ts"] <= end]
+    raw = duckdb_sort_filter_frame(raw, start, end)
     if raw.empty:
         raise SystemExit("No bar rows in selected window")
 
@@ -1464,6 +1698,13 @@ def main() -> int:
     features = pd.concat(profile_frames, ignore_index=True).sort_values(["ts", "profile_id"]).reset_index(drop=True)
 
     validate_core_frame(features, args.gate_mode)
+    validate_export_with_pandera(features)
+    profile_path, profile_rows, profile_sampled = generate_profile_artifact(
+        features,
+        args.out_dir,
+        symbol_root,
+        args.timeframe,
+    )
     csv_path, manifest_path = write_outputs(
         features,
         args.out_dir,
@@ -1471,6 +1712,9 @@ def main() -> int:
         args.timeframe,
         source_path,
         trades_zip,
+        profile_path,
+        profile_rows,
+        profile_sampled,
         {
             "gate_mode": args.gate_mode,
             "base_regime_only": bool(args.base_regime_only),
