@@ -69,20 +69,44 @@ Data-layer + sequencing update (locked 2026-05-11):
 
 ## Active Surfaces
 
-- Main chart indicator:
-  - `indicators/warbird-pro-v9.pine`
-- Retained Nexus support/research lane:
-  - `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine`
-- Optimization and modeling tools:
-  - `scripts/duckdb_local/`
-  - `scripts/duckdb_local/warbird_pro_v9_profile.py`
-  - `scripts/duckdb_local/workspaces/warbird_pro_v9/`
-  - `scripts/ag/tv_auto_tune.py`
-  - `scripts/ag/tune_strategy_params.py`
-  - `scripts/ag/tv_connection_doctor.py`
-- Artifacts:
-  - `artifacts/tuning/`
-  - `scripts/duckdb_local/workspaces/<indicator_key>/`
+**Canonical paths (2026-05-12):**
+
+| Role | Path |
+|------|------|
+| Main chart Pine indicator | `indicators/warbird-pro-v9.pine` |
+| Retained Nexus research/support Pine | `indicators/warbird-nexus-machine-learning-rsi-optuna-fast-test.pine` |
+| Locked 1y 15m Core export (CSV) | `scripts/duckdb_local/workspaces/warbird_pro_core/exports/es_15m_core.csv` |
+| Manifest for that export | `scripts/duckdb_local/workspaces/warbird_pro_core/exports/es_15m_core.manifest.json` |
+| Pandera profiling report | `scripts/duckdb_local/workspaces/warbird_pro_core/exports/es_15m_core.profile.html` |
+| Core ETL builder | `scripts/duckdb_local/workspaces/warbird_pro_core/build_core_dataset.py` |
+| **Production V9 trainer** | `scripts/ag/train_v9_locked.py` |
+| SHAP gate runner | `scripts/ag/shap_v9.py` |
+| Monte Carlo gate runner | `scripts/ag/monte_carlo_v9.py` |
+| Smoke-validation card (no AG) | `scripts/duckdb_local/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py` |
+| Trade-dataset semantics (single source of truth) | `scripts/ag/train_v9_locked.py::build_trade_dataset` |
+| Trained model output root | `models/warbird_pro_v9/locked_<tag>/` |
+| SHAP artifacts root | `artifacts/shap_v9/shap_<tag>/` |
+| Monte Carlo artifacts root | `artifacts/mc_v9/<tag>/` |
+| TV settings/tuning helpers (non-V9) | `scripts/ag/tv_auto_tune.py`, `scripts/ag/tune_strategy_params.py` |
+| TradingView readiness doctor | `scripts/ag/tv_connection_doctor.py` |
+| Indicator-only AG contract | `docs/contracts/pine_indicator_ag_contract.md` |
+| Startup review runbook | `docs/runbooks/startup_repo_review.md` |
+| Legacy (do not use without architecture reopen) | `scripts/ag/train_hard_gate.py`, `scripts/ag/train_ag_baseline.py`, local Postgres `warbird` warehouse |
+
+**Workspace layout:**
+
+```
+scripts/duckdb_local/                          # renamed from scripts/optuna/ on 2026-05-12
+├── cards/core_training/                       # Optuna validation cards (smoke only)
+├── cards/side_models/                         # MAE side-model scaffolds (post-Core)
+├── workspaces/<indicator_key>/                # per-indicator workspace
+│   ├── exports/                               # canonical export CSVs + manifests
+│   ├── experiments/<symbol>_<tf>/study.db     # local study DB
+│   └── champion.json                          # promoted settings snapshot
+├── cpcv.py, cpcv_helpers.py                   # embargoed chronological / CPCV splits
+├── paths.py                                   # canonical path helpers
+└── runner.py + warbird_optuna_hub.py          # legacy Optuna runner/hub (Nexus + v7 lanes)
+```
 
 ## Research Reference Surface
 
@@ -234,6 +258,74 @@ The output is a settings/build brief:
 - known failure modes
 - recommended Pine edits, if any
 
+### Phase 4.5 - Validation Gating Before Live Trade Routing
+
+**Mental model:** a trained classifier that posts strong log_loss / AUC / WR is
+**not yet trustworthy**. Those metrics rank predictions but say nothing about
+*why* the model is good or whether the apparent edge translates to live P&L.
+Two independent gates run between a clean fit and any live TradingView alert
+that depends on the model's output:
+
+**Gate 1 — SHAP**
+(`scripts/ag/shap_v9.py --predictor-dir <model> --csv <15m-export>`).
+
+Catches feature-level pathology that aggregate metrics hide:
+
+- **Top-feature audit** — is the model leaning on plausibly causal features
+  (entry triggers, fib reaction, liquidity, ATR-normalized distances) or on
+  proxies that smell like leakage (raw timestamps, label-adjacent fields,
+  bar-of-day in a way that codes regime)?
+- **Per-class importance** — winners and losers should be driven by an
+  overlapping but not identical feature set; total drift between classes
+  implies the model is mostly fitting label noise.
+- **Temporal stability** (early-half vs. late-half SHAP) — if importances
+  shift dramatically, the model is regime-fitting and OOS performance will
+  collapse the moment the regime ends.
+- **Calibration check** (predicted vs. realized in probability bins) — is the
+  `proba > 0.75` gate actually delivering ~75% real WR, or is the isotonic
+  calibration miscalibrated for the high-confidence tail?
+- **Redundancy + drop candidates** — high-|r| feature pairs and
+  DEAD / REDUNDANT / UNSTABLE features inform the next Core feature trim.
+
+**Gate 2 — Monte Carlo**
+(`scripts/ag/monte_carlo_v9.py --predictor-path <model> --csv <15m-export> --split oos`).
+
+Catches P&L-level pathology that SHAP can't see:
+
+- **Overall P&L distribution + drawdown + WR + profit factor** under
+  realistic resampling — does the OOS distribution have a tail that's
+  fundable, or do drawdowns wipe accounts before the edge realizes?
+- **Per-direction breakdown** — does the model work both long and short, or
+  is it riding one regime?
+- **Threshold sweep** (`P(winner_10pt_24bar) >= τ` for τ ∈ [0.50, 0.95]) —
+  where is the EV maximum? Is `0.75` (the locked inference threshold)
+  near it or far from it?
+- **Calibration cohort check** — predicted vs. realized broken out by time
+  of day, session, regime quartile. A miscalibrated cohort can dominate
+  losses even if global calibration looks fine.
+- **Regime stability** (early-half vs. late-half) — does the model survive
+  the same period split that SHAP audits structurally?
+- **Win/loss streak profile** — serial correlation of outcomes drives
+  drawdown depth far more than headline WR.
+
+**Promotion rule:** only after Gate 1 *and* Gate 2 both clear do you
+*enable* (toggle from disabled → active) any TradingView alert that depends
+on this model's output — i.e., an alert whose firing condition is
+"V9 entry trigger AND model_proba >= 0.75" (whether wired via webhook,
+TV alert action, or any downstream notification). The phrase "flip an
+alert" in operator shorthand means exactly this toggle.
+
+A model that passes log_loss but fails either gate will push high-confidence
+"entries" that lose real money. The OOS WR being *higher* than IS WR (the
+2026-05-12 baseline showed IS 41.67% / VAL 43.60% / OOS 46.90%) is exactly
+the pattern where gating is non-optional: it could mean genuine headroom or
+it could mean the OOS window is a friendly regime that won't repeat. The
+gates tell you which.
+
+Failure of either gate routes back to Phase 3 or Phase 1 (settings change,
+feature change, Pine change) — NOT to "tune the threshold" or "lower the
+bar." The threshold is locked at 0.75 per the inference contract.
+
 ### Phase 5 - Pine Implementation
 
 Only after Kirk approval, apply Pine changes or default-setting changes.
@@ -306,22 +398,63 @@ budgets must be repriced before any Nexus edit.
 - Live TradingView operations are one explicit command at a time; no retry loops.
 - No champion is accepted without IS/OOS or walk-forward-style review.
 
-## Current Blocker
+## Current State (2026-05-12)
 
-V9 Core training surface is ready as of 2026-05-12. DXY parity, fixed 10/-5/24
-labels, strict feature schema, Yahoo `DX-Y.NYB`, and Databento trade-side
-CVD/order-flow features are wired in code. The May smoke order-flow threshold
-review lowered absorption/flush candidate delta thresholds to `35%` with the
-existing `1.5x` volume-spike and `0.75 ATR` range split, producing nonzero
-smoke candidates. The 15m export is built (23,513 bars, 19,850 resolved trades,
-WR 0.4265) and `scripts/ag/train_v9_locked.py` is the production trainer.
-Pending: full 1y entry-only AG run, then SHAP + Monte Carlo gates before
-promoting any TV alert. Owner/next trigger: Kirk's go for the live training
-launch.
+**The V9 Core training surface is ready to launch.** Open blockers below are
+operator-gated only.
 
-Smoke verification evidence is recorded in
-`docs/audits/2026-05-10-v9-core-smoke-verification.md`; use
-`scripts/ag/report_v9_core_smoke.py` for exact reproducible metrics.
+Recently landed (commit `5e5e6f3`):
+
+- Directory rename `scripts/optuna/ → scripts/duckdb_local/` and
+  `tests/optuna/ → tests/duckdb_local/`. Optuna is no longer a runtime
+  dependency of the V9 Core path. Optuna methodology + the Python library
+  remain in use only for the Nexus footprint research lane and legacy v7
+  profile adapters (kept under the renamed directory).
+- `scripts/ag/train_v9_locked.py` is the production V9 trainer. Default CSV
+  fixed (5m → 15m, pointing at the locked 1y Core export). `--model-suite`
+  flag adds the optional TP/SL touch + MFE/MAE side models. Docstring no
+  longer points at the smoke card or `train_hard_gate.py`.
+- `build_trade_dataset` semantics canonicalized in the docstring: 3×3
+  TP/SL grid, touch-event labels for `tp_hit`/`stop_hit`, pessimistic
+  same-bar collision for `winner_10pt_24bar`. `monte_carlo_v9.py` and
+  `shap_v9.py` both import this function — single source of truth.
+- Core ETL/Pandera/fg-data-profiling stack wired. DXY parity (Yahoo
+  `DX-Y.NYB`), Databento trade-side CVD/order-flow features, May 2026
+  order-flow threshold review (35% absorption/flush delta, 1.5x volume
+  spike, 0.75 ATR range split) are in code. Smoke verification recorded
+  in `docs/audits/2026-05-10-v9-core-smoke-verification.md`.
+- The locked 15m export exists and validates: 23,513 bars (2025-05-11
+  22:00 UTC → 2026-05-10 23:45 UTC), 1,414 long triggers, 1,284 short
+  triggers, 19,850 resolved trades after the 3×3 grid expansion, WR
+  0.4265, chronological IS/VAL/OOS split 13,895 / 2,952 / 2,953 with
+  25-bar embargo (WR 41.67% / 43.60% / 46.90%).
+- Auxiliary smoke-validation card defaults updated to point at the same
+  15m export — passes end-to-end against the new schema.
+
+**Open work, in order:**
+
+1. Launch the entry-only AG training run:
+   `python3 scripts/ag/train_v9_locked.py` (≈2h with the locked 7200s
+   time budget; produces predictor + leaderboard + feature_importance
+   under `models/warbird_pro_v9/locked_<tag>/entry/`).
+2. Run the SHAP gate (Phase 4.5, Gate 1) against the 15m export. See the
+   *Validation Gating Before Live Trade Routing* section for what
+   counts as a pass.
+3. Run the Monte Carlo gate (Phase 4.5, Gate 2) against the OOS split.
+4. Only after both gates clear, enable any TradingView alert that filters
+   on `model_proba >= 0.75`.
+5. After the entry classifier is in production, schedule a `--model-suite`
+   run to add the auxiliary TP-touch / SL-touch / MFE / MAE side models
+   for the downstream EV/policy layer.
+
+Owner/next trigger: Kirk's go for step 1.
+
+The previous "Hybrid+ 4-card" Optuna chain
+(`warbird_pro_v9_exit_cpcv`, `warbird_pro_v9_entry_filter_cpcv`,
+`warbird_pro_v9_ag_meta_cpcv`, `warbird_pro_v9_joint_challenger`) is
+formally deprecated and superseded by the single `train_v9_locked.py`
+trainer. Those profile modules remain on disk for archival reference
+only; do not invoke them as a chain.
 
 ---
 
@@ -367,18 +500,45 @@ fixed SMA(close) slow vs EMA(close) fast; do not reintroduce MA type selection.
 
 ### Core Training Dataset Contract
 
-- **Source:** Databento MES — Trades 365d (footprint reconstruction) + OHLCV
-  bars 5m (training resolution) + OHLCV 1m (microstructure features only).
-- **Window:** 2025-05-01 → 2026-05-09 (1y, dense feature coverage).
-  The newer Databento OHLCV-1s 2315d download is reserved for a future v10
-  long-horizon ensemble card, NOT Core (would NaN 2/3 of feature surface).
-- **Feature surface:** V9 Pine ml_* + ETL-derived `ml_cvd_div_bull/bear` (CVD
-  divergence, Python-only, zero Pine cost) + 1m microstructure features +
-  Initial Balance + volume profile HVN/LVN + UTC-anchored economic-event
-  features (CPI/NFP/PPI=13:30 UTC, FOMC=19:00/18:00 UTC seasonal).
-- **Label (triple barrier):** `winner_10pt_24bar` = 1 if +10 pts before -5 pts
-  within 24 bars (2:1 R:R; 2-hour window on 5m, 6-hour window on 15m); 0 otherwise; rows where neither
-  barrier hits within the window are DROPPED (not relabeled as loss).
+- **Source:** Databento ES — Trades 365d (footprint reconstruction) + OHLCV
+  bars 15m (training resolution; ES 5m only after 15m success per locked
+  sequence) + OHLCV 1m (microstructure features only). DXY parity uses
+  Yahoo `DX-Y.NYB` for AG/ETL; ICE futures DXY is not licensed to the
+  operator account, so the V9 Pine reads `TVC:DXY` instead. DXY was
+  subsequently removed from the V9 feature set on the 2026-05-11
+  gate-as-feature pivot and replaced by 6E momentum z-score and 6E trend
+  code as continuous cross-asset signals.
+- **Window:** 2025-05-11 → 2026-05-10 (1y, dense feature coverage; the actual
+  built export covers that range). The newer Databento OHLCV-1s 2315d
+  download is reserved for a future v10 long-horizon ensemble card, NOT
+  Core (would NaN 2/3 of feature surface).
+- **Feature surface (123 ml_\* + 6 trade-discoverable = 129 total):**
+  V9 Pine ml_* + ETL-derived `ml_cvd_div_bull/bear` (CVD divergence,
+  Python-only, zero Pine cost) + 1m microstructure features + Initial
+  Balance + volume profile HVN/LVN + UTC-anchored economic-event features
+  (CPI/NFP/PPI=13:30 UTC, FOMC=19:00/18:00 UTC seasonal) + Pine input
+  knobs (43 of them, e.g. `knob_fib_deviation_manual`, `knob_length_ma`).
+- **Label (triple barrier):** `winner_10pt_24bar` = 1 if **this combo's**
+  TP price touched before its SL price within `max_hold_bars` (24 bars =
+  6h on 15m, 2h on 5m); 0 if SL touched first OR if TP and SL touched on
+  the same bar (pessimistic same-bar policy — intrabar sequencing is
+  unobservable). Rows where neither barrier resolves within the window
+  are DROPPED, not relabeled. The literal "10pt" in the column name is
+  historical — it denotes the operator's minimum-acceptable winner and
+  is only used as the fallback TP1 distance when no `ml_trade_tp` is
+  supplied; the actual TP price is derived from the 3-TP fib ladder.
+- **Discoverable trade grid:** Each entry candidate expands into 9 rows —
+  3 TP ratios {1.000, 1.236, 1.618} × 3 SL ATR multiples {1.0, 1.5, 2.0}.
+  Each row carries its own (`sl_atr_mult`, `tp_ratio`, `tp_family_code`,
+  `target_distance_points`, `stop_distance_points`, `rr_ratio`) plus
+  the resolution label. The classifier learns from the entire grid so
+  inference can rank trade-shape variants, not just entry direction.
+- **Auxiliary touch-event labels** (`tp_hit`, `stop_hit`) record physical
+  barrier touches at the resolution bar, NOT resolution outcomes — see
+  the canonical docstring at
+  `scripts/ag/train_v9_locked.py::build_trade_dataset`. On same-bar
+  collisions both auxiliary flags are 1 even though `winner_10pt_24bar=0`.
+  Trained separately under `--model-suite` for the downstream EV layer.
 
 ### Kirk's Trade Preferences
 
@@ -415,7 +575,40 @@ regression model that predicts maximum adverse excursion per trade. Used for
 SL sizing AFTER the Core binary classifier ranks setups. Trained separately;
 NOT grafted into Core.
 
-### Hard Gate
+### Production Launch Sequence (2026-05-12)
 
-Production runs go through `scripts/ag/train_hard_gate.py`. Manual chains of
-train → SHAP → MC are forbidden. See `.claude/skills/training-hard-gate`.
+The V9 Core path is invoked directly — there is no Optuna wrapper, and the
+legacy `scripts/ag/train_hard_gate.py` (Postgres `ag_training_runs` table,
+`baseline.DEFAULT_DSN`) is on the *legacy* path, not the V9 path. The
+training-hard-gate skill describes that legacy flow and does not apply here.
+
+```bash
+# 1. Train the entry classifier (default 15m export, 2h time budget)
+python3 scripts/ag/train_v9_locked.py
+#    → models/warbird_pro_v9/locked_<tag>/entry/predictor.pkl
+#    → models/warbird_pro_v9/locked_<tag>/entry/leaderboard.csv
+#    → models/warbird_pro_v9/locked_<tag>/entry/feature_importance.csv
+#    → models/warbird_pro_v9/locked_<tag>/v9_winner_clf_summary.json
+
+# 2. SHAP gate (Phase 4.5, Gate 1)
+python3 scripts/ag/shap_v9.py \
+    --predictor-dir models/warbird_pro_v9/locked_<tag> \
+    --csv scripts/duckdb_local/workspaces/warbird_pro_core/exports/es_15m_core.csv
+#    → artifacts/shap_v9/shap_<ts>/shap_feature_summary.csv (+ per_class,
+#      temporal_stability, calibration, redundancy, drop_candidates, summary.md)
+
+# 3. Monte Carlo gate (Phase 4.5, Gate 2)
+python3 scripts/ag/monte_carlo_v9.py \
+    --predictor-path models/warbird_pro_v9/locked_<tag> \
+    --csv scripts/duckdb_local/workspaces/warbird_pro_core/exports/es_15m_core.csv \
+    --split oos
+#    → artifacts/mc_v9/<tag>/ (overall + per-direction P&L, threshold sweep,
+#      calibration, regime stability, streak profile)
+
+# 4. Only after both gates pass — enable the TV alert that filters on
+#    model_proba >= 0.75. Until then, the alert stays disabled.
+```
+
+The `--model-suite` flag on `train_v9_locked.py` additionally fits TP-touch,
+SL-touch, MFE-regression, and MAE-regression predictors (~10h total).
+Entry-only first; suite later, once the entry classifier passes both gates.
