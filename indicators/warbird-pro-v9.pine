@@ -105,7 +105,12 @@ string tpRatioMode = input.string("Auto", "TP Ratio (combo)", options=["Auto", "
 string slMultMode = input.string("Auto", "SL ATR Mult (combo)", options=["Auto", "1.0", "1.5", "2.0"], group=groupExecution)
 float tradeTpRatio = tpRatioMode == "1.000" ? 1.000 : tpRatioMode == "1.618" ? 1.618 : 1.236
 float tradeStopAtrMult = slMultMode == "1.0" ? 1.0 : slMultMode == "2.0" ? 2.0 : 1.5
-int tradeMaxHoldBars = input.int(72, "Max Hold (bars)", minval=0, maxval=500, group=groupExecution)
+// Locked at 24 bars to mirror the trainer's FORWARD_SCAN_BARS contract
+// (ES 15m entry-precision, 2026-05-12). Previously an operator-toggleable
+// input (default 72); removed so live trades resolve under the same 24-bar
+// time horizon the entry classifier is trained on. Live chart and model
+// now answer the same trade-duration question.
+int tradeMaxHoldBars = 24
 
 //=====================
 // EMA/MA CROSSOVER (Source B — fast EMA(close) above slow SMA(close) = bull)
@@ -154,7 +159,10 @@ int vixMoveBars = input.int(3, "VIX Movement Bars", minval=1, maxval=50, group=g
 int vixAtrLength = input.int(14, "VIX ATR Length", minval=1, maxval=100, group=groupXa)
 float vixPressureBand = input.float(0.35, "VIX Movement Neutral Band", minval=0.0, maxval=5.0, step=0.05, group=groupXa)
 int xaMinAgreement = input.int(3, "Minimum Agreement (of 4)", minval=1, maxval=4, group=groupXa)
-string znGateDirection = input.string("Same Direction", "ZN Gate Direction", options=["Same Direction", "Inverse"], group=groupXa)
+// ZN direction was previously an operator-toggleable input (`znGateDirection`,
+// "Same Direction" vs "Inverse"). Removed 2026-05-12 per Kirk's directive —
+// the ZN trend code now feeds raw into xa agreement, and AG learns the
+// direction relationship from ml_xa_zn_code instead of being told via a knob.
 
 //=====================
 // DAILY/WEEKLY S/R LEVELS
@@ -630,8 +638,11 @@ bool shortPatternOk = not usePatternConfirm or provenBearishPattern
 bool maLongOk = not useMaGate or maBull
 bool maShortOk = not useMaGate or maBear
 
-bool znLongVote = znGateDirection == "Same Direction" ? znCode > 0 : znCode < 0
-bool znShortVote = znGateDirection == "Same Direction" ? znCode < 0 : znCode > 0
+// ZN vote: raw direction only (znGateDirection toggle removed 2026-05-12).
+// AG is trusted to learn the regime-dependent ZN/ES relationship from the
+// ml_xa_zn_code feature.
+bool znLongVote = znCode > 0
+bool znShortVote = znCode < 0
 // 6E up = EUR strong vs USD = USD weakening = long-favorable (mirrors the old
 // dxyCode<0 vote). 6E down = USD strengthening = short-favorable.
 int xaLongAgreement = (nqCode > 0 ? 1 : 0) + (znLongVote ? 1 : 0) + (eurUsdCode > 0 ? 1 : 0) + (vixLongVote ? 1 : 0)
@@ -964,8 +975,8 @@ string xaText = xaNet >= 3 ? "VERY BULLISH" : xaNet >= 1 ? "BULLISH" : xaNet <= 
 
 // XA Corr — how many of the 4 cross-assets are pushing in the same direction
 // as the dominant XA bias. When NEUTRAL (net=0), shows the larger side (e.g.
-// a 2/2 split renders as "2 / 4"). Respects the operator's znGateDirection
-// toggle because xaLongAgreement/xaShortAgreement already factor it in.
+// a 2/2 split renders as "2 / 4"). Uses raw ZN direction (znGateDirection
+// toggle removed 2026-05-12 — AG owns the direction relationship).
 int xaCorrCount = xaNet > 0 ? xaLongAgreement : xaNet < 0 ? xaShortAgreement : math.max(xaLongAgreement, xaShortAgreement)
 string xaCorrText = str.tostring(xaCorrCount) + " / 4"
 
@@ -1114,5 +1125,12 @@ plot(entryLongTrigger ? 1.0 : 0.0, "ml_entry_long_trigger", display=display.none
 plot(entryShortTrigger ? 1.0 : 0.0, "ml_entry_short_trigger", display=display.none, editable=false)
 plot(tradeEntryPrice, "ml_trade_entry", display=display.none, editable=false)
 plot(tradeStopPrice, "ml_trade_stop", display=display.none, editable=false)
-plot(tradeTargetPrice, "ml_trade_tp", display=display.none, editable=false)
+// Fib-ladder TPs (always emitted from current fib geometry; not live-trade-only).
+// Replaces the single `ml_trade_tp` plot 2026-05-12. The trainer reads these
+// three columns directly to size each (sl_mult, tp_ratio) combo's TP price
+// without reconstruction via _tp_price_from_ratio. Fib levels 1.000 / 1.236 /
+// 1.618 map to DISCOVERABLE_TP_RATIOS in scripts/ag/train_v9_locked.py.
+plot(pOne, "ml_trade_tp1", display=display.none, editable=false)
+plot(pT1,  "ml_trade_tp2", display=display.none, editable=false)
+plot(pT2,  "ml_trade_tp3", display=display.none, editable=false)
 plot(float(tradeLastExitOutcome), "ml_last_exit_outcome", display=display.none, editable=false)
