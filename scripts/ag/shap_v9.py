@@ -17,6 +17,8 @@ Usage:
   python scripts/ag/shap_v9.py \
       --predictor-dir models/warbird_pro_v9/locked_20260508_... \
       --csv exports/es_15m_core.csv \
+    [--split oos] \
+    [--run-summary models/warbird_pro_v9/locked_.../v9_winner_clf_summary.json] \
       [--max-rows 5000] \
       [--output-dir artifacts/shap_v9/<tag>]
 """
@@ -43,8 +45,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from scripts.ag.v9_run_provenance import (
+    apply_time_split,
+    check_summary_csv_hash,
+    discover_run_summary_path,
+    load_run_summary,
+)
+
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "shap_v9"
 LABEL_COL = "winner_tp_before_sl"
+OOS_START = pd.Timestamp("2025-01-01", tz="UTC")
+IS_END = pd.Timestamp("2024-12-31T23:59:59", tz="UTC")
 
 _SHAP_TREE_FAMILIES = {"GBM", "CAT", "XGB", "RF", "XT"}
 
@@ -128,6 +139,13 @@ def _resolve_predictor_dir(path: Path) -> Path:
     raise SystemExit(
         f"Unable to locate predictor.pkl in {path} or {entry}"
     )
+
+
+def _persist_predictor(predictor: Any) -> None:
+    if hasattr(predictor, "persist"):
+        predictor.persist()
+    elif hasattr(predictor, "persist_models"):
+        predictor.persist_models()
 
 
 def _explain_model(
@@ -483,6 +501,10 @@ def main() -> int:
                     help="Path to trained AG predictor directory")
     ap.add_argument("--csv", type=Path, required=True,
                     help="Source CSV with ml_* columns")
+    ap.add_argument("--split", choices=["all", "is", "val", "oos"], default="oos",
+                    help="Time split to explain; uses run-summary split ranges when available.")
+    ap.add_argument("--run-summary", type=Path, default=None,
+                    help="Optional path to v9_winner_clf_summary.json for split/hash enforcement.")
     ap.add_argument("--max-rows", type=int, default=None,
                     help="Cap rows for fast smoke runs")
     ap.add_argument("--output-dir", type=Path, default=None)
@@ -501,6 +523,39 @@ def main() -> int:
     print(f"  rows={len(df):,}  range={df['ts'].iloc[0]} → {df['ts'].iloc[-1]}", flush=True)
 
     trades = _build_trade_dataset(df)
+    trades["ts"] = pd.to_datetime(trades["ts"], utc=True)
+
+    run_summary_path = discover_run_summary_path(args.predictor_dir, args.run_summary)
+    run_summary = load_run_summary(run_summary_path)
+    if run_summary is not None:
+        csv_hash_check = check_summary_csv_hash(args.csv, run_summary)
+    else:
+        csv_hash_check = {
+            "checked": False,
+            "expected": None,
+            "actual": None,
+            "matches": None,
+            "reason": "no_run_summary",
+        }
+    if csv_hash_check.get("checked") and not csv_hash_check.get("matches"):
+        raise SystemExit(
+            "CSV hash mismatch against run summary: "
+            f"expected={csv_hash_check.get('expected')} actual={csv_hash_check.get('actual')}"
+        )
+
+    trades, split_source = apply_time_split(
+        trades,
+        split=args.split,
+        ts_col="ts",
+        summary=run_summary,
+        legacy_oos_start=OOS_START,
+        legacy_is_end=IS_END,
+    )
+    print(f"  split={args.split} source={split_source} rows={len(trades):,}", flush=True)
+
+    if len(trades) == 0:
+        raise SystemExit("No rows remain after split filtering")
+
     if args.label_col not in trades.columns:
         raise SystemExit(f"Label column not found in resolved trade dataset: {args.label_col}")
     label_col = args.label_col
@@ -516,7 +571,7 @@ def main() -> int:
     predictor_dir = _resolve_predictor_dir(args.predictor_dir)
     print(f"\nloading predictor from {predictor_dir}", flush=True)
     predictor = TabularPredictor.load(str(predictor_dir))
-    predictor.persist_models()
+    _persist_predictor(predictor)
     feature_cols = _predictor_feature_columns(predictor, trades)
 
     model_name = _resolve_shap_model(predictor)
@@ -572,6 +627,10 @@ def main() -> int:
         "predictor_dir_input": str(args.predictor_dir),
         "predictor_dir": str(predictor_dir),
         "csv": str(args.csv),
+        "split": args.split,
+        "split_source": split_source,
+        "run_summary_path": str(run_summary_path) if run_summary_path else None,
+        "csv_hash_check": csv_hash_check,
         "label_col": label_col,
         "model_name": model_name,
         "n_rows": len(trades),

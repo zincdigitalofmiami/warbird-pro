@@ -18,6 +18,7 @@ Usage:
       --predictor-path models/warbird_pro_v9/locked_<tag> \
       --csv exports/es_15m_core.csv \
       --split oos \
+    [--run-summary models/warbird_pro_v9/locked_<tag>/v9_winner_clf_summary.json] \
       [--n-paths 2000] [--seed 42] \
       [--output-dir artifacts/mc_v9/<tag>]
 """
@@ -43,6 +44,13 @@ import pandas as pd
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.ag.v9_run_provenance import (
+    apply_time_split,
+    check_summary_csv_hash,
+    discover_run_summary_path,
+    load_run_summary,
+)
 
 LABEL_COL = "winner_tp_before_sl"
 ES_POINT_VALUE = 50.0
@@ -92,6 +100,13 @@ def _resolve_predictor_path(path: Path) -> Path:
     raise SystemExit(
         f"Unable to locate predictor.pkl in {path} or {entry}"
     )
+
+
+def _persist_predictor(predictor: Any) -> None:
+    if hasattr(predictor, "persist"):
+        predictor.persist()
+    elif hasattr(predictor, "persist_models"):
+        predictor.persist_models()
 
 
 def _resolve_payoff_arrays(
@@ -332,7 +347,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--predictor-path", type=Path, required=True)
     ap.add_argument("--csv", type=Path, required=True)
-    ap.add_argument("--split", choices=["is", "oos", "all"], default="oos")
+    ap.add_argument("--split", choices=["is", "val", "oos", "all"], default="oos")
+    ap.add_argument("--run-summary", type=Path, default=None,
+                    help="Optional path to v9_winner_clf_summary.json for split/hash enforcement.")
     ap.add_argument("--n-paths", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--sl-points", type=float, default=DEFAULT_SL_POINTS)
@@ -343,7 +360,7 @@ def main() -> int:
     from autogluon.tabular import TabularPredictor
     predictor_path = _resolve_predictor_path(args.predictor_path)
     pred = TabularPredictor.load(str(predictor_path), require_py_version_match=False)
-    pred.persist_models()
+    _persist_predictor(pred)
 
     tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_dir = args.output_dir or (REPO_ROOT / "artifacts" / "mc_v9" / f"mc_{tag}")
@@ -355,11 +372,37 @@ def main() -> int:
     trades["ts"] = pd.to_datetime(trades["ts"], utc=True)
     print(f"  total trades: {len(trades):,}  WR={trades[LABEL_COL].mean():.4f}", flush=True)
 
-    if args.split == "oos":
-        trades = trades[trades["ts"] >= OOS_START].reset_index(drop=True)
-    elif args.split == "is":
-        trades = trades[trades["ts"] <= IS_END].reset_index(drop=True)
-    print(f"  {args.split} trades: {len(trades):,}  WR={trades[LABEL_COL].mean():.4f}", flush=True)
+    run_summary_path = discover_run_summary_path(args.predictor_path, args.run_summary)
+    run_summary = load_run_summary(run_summary_path)
+    if run_summary is not None:
+        csv_hash_check = check_summary_csv_hash(args.csv, run_summary)
+    else:
+        csv_hash_check = {
+            "checked": False,
+            "expected": None,
+            "actual": None,
+            "matches": None,
+            "reason": "no_run_summary",
+        }
+    if csv_hash_check.get("checked") and not csv_hash_check.get("matches"):
+        raise SystemExit(
+            "CSV hash mismatch against run summary: "
+            f"expected={csv_hash_check.get('expected')} actual={csv_hash_check.get('actual')}"
+        )
+
+    trades, split_source = apply_time_split(
+        trades,
+        split=args.split,
+        ts_col="ts",
+        summary=run_summary,
+        legacy_oos_start=OOS_START,
+        legacy_is_end=IS_END,
+    )
+    print(
+        f"  split={args.split} source={split_source} trades={len(trades):,}"
+        f"  WR={trades[LABEL_COL].mean():.4f}",
+        flush=True,
+    )
 
     if len(trades) < 30:
         print("Too few trades for MC analysis", flush=True)
@@ -445,6 +488,9 @@ def main() -> int:
         "predictor_path": str(predictor_path),
         "csv": str(args.csv),
         "split": args.split,
+        "split_source": split_source,
+        "run_summary_path": str(run_summary_path) if run_summary_path else None,
+        "csv_hash_check": csv_hash_check,
         "n_paths": args.n_paths,
         "predictor_feature_count": len(feature_cols),
         "sl_points": args.sl_points,

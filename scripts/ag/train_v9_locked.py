@@ -17,7 +17,7 @@ training-ag-feature-finder):
   - chronological train/val/test split with 24-bar embargo
     (FORWARD_SCAN_BARS = 24, EMBARGO_BARS = 25; enforced by
     scripts/duckdb_local/cpcv.py)
-  - predictor.persist_models() after fit for fast repeated predic
+  - predictor.persist() after fit for fast repeated prediction
   - leaderboard(extra_info=True) for hyperparameter visibility
   - Apple Silicon OpenMP guards set BEFORE any AG/lightgbm impor
   - Drop AG-flagged useless features (ml_in_zone constant=1, stale dx_code,
@@ -50,6 +50,7 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.duckdb_local.cpcv import embargoed_chronological_split
+from scripts.ag.v9_run_provenance import build_csv_provenance
 
 CSV_PATH = REPO_ROOT / "scripts/duckdb_local/workspaces/warbird_pro_core/exports/es_15m_core.csv"
 OUTPUT_ROOT = REPO_ROOT / "models/warbird_pro_v9"
@@ -601,6 +603,30 @@ def _fit_locked_predictor(
     }
 
 
+def _git_commit_hash() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        return "unknown"
+    value = result.stdout.strip()
+    return value if value else "unknown"
+
+
+def _split_bounds_payload(df: pd.DataFrame) -> dict[str, str | None]:
+    if df.empty:
+        return {"ts_start": None, "ts_end": None}
+    ts = pd.to_datetime(df["ts"], utc=True)
+    return {
+        "ts_start": ts.min().isoformat(),
+        "ts_end": ts.max().isoformat(),
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", type=Path, default=CSV_PATH)
@@ -724,9 +750,11 @@ def main() -> int:
         model_summaries[model_key] = summary
         print(f"  top model: {summary['leaderboard_top_model']} score_test={summary['leaderboard_top_score_test']}", flush=True)
 
+    csv_provenance = build_csv_provenance(args.csv)
     summary = {
         "trained_at": ts_tag,
-        "csv_sha256_assumed_via_manifest": "see exports/*.manifest.json",
+        "csv_sha256_assumed_via_manifest": csv_provenance.get("manifest_declared_csv_sha256"),
+        "csv_sha256": csv_provenance["csv_sha256"],
         "csv_path": str(args.csv),
         "is_rows": int(len(train_df)),
         "val_rows": int(len(val_df)),
@@ -737,6 +765,21 @@ def main() -> int:
         "feature_count": len(feature_cols),
         "time_limit_sec": args.time_limit,
         "model_suite": bool(args.model_suite),
+        "run_provenance": {
+            **csv_provenance,
+            "repo_commit": _git_commit_hash(),
+        },
+        "split_contract": {
+            "train_frac": float(args.train_frac),
+            "val_frac": float(args.val_frac),
+            "label_horizon_bars": int(label_horizon_bars),
+            "embargo_bars": int(embargo_bars),
+        },
+        "split_ranges_utc": {
+            "train": _split_bounds_payload(train_df),
+            "val": _split_bounds_payload(val_df),
+            "oos": _split_bounds_payload(test_df),
+        },
         "models": model_summaries,
     }
     summary_path = out_dir / "v9_winner_clf_summary.json"
