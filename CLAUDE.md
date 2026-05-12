@@ -167,6 +167,18 @@ split uses `EMBARGO_BARS = 25` (= FORWARD_SCAN_BARS + 1), enforced by
 so the classifier conditions on combo, not on average win rate across
 combos.
 
+**Feature-count surfaces (locked 2026-05-12):**
+- `ML_FEATURES = 120` — CSV-emitted columns AG trains on (manifest's
+  `feature_count_locked` / `feature_columns_locked` describe this set).
+- `TRADE_DISCOVERABLE_FEATURES = 6` — appended per combo row at label-build
+  time by `build_trade_dataset` (the combo identifiers above).
+- `MODEL_FEATURES = ML_FEATURES + TRADE_DISCOVERABLE_FEATURES = 126` —
+  full AG input width per training row.
+- `LABEL_INPUT_TP_COLUMNS = ("ml_trade_tp1", "ml_trade_tp2",
+  "ml_trade_tp3")` — required CSV inputs for label construction; NOT in
+  `ML_FEATURES` (Pine ladder geometry already learnable via `ml_fib_*`
+  and `ml_atr14`).
+
 **Inference:** Apply `proba > 0.75` confidence threshold for Grade A+ entries.
 Session is a feature (`ml_session_ny/london/asia`, `ml_minutes_from_open`),
 NOT a pre-filter — let AG learn regime-conditional precision.
