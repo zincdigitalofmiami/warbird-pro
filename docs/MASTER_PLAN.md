@@ -296,7 +296,7 @@ Catches P&L-level pathology that SHAP can't see:
   fundable, or do drawdowns wipe accounts before the edge realizes?
 - **Per-direction breakdown** — does the model work both long and short, or
   is it riding one regime?
-- **Threshold sweep** (`P(winner_10pt_24bar) >= τ` for τ ∈ [0.50, 0.95]) —
+- **Threshold sweep** (`P(winner_tp_before_sl) >= τ` for τ ∈ [0.50, 0.95]) —
   where is the EV maximum? Is `0.75` (the locked inference threshold)
   near it or far from it?
 - **Calibration cohort check** — predicted vs. realized broken out by time
@@ -413,7 +413,7 @@ Recently landed (commit `5e5e6f3`):
   longer points at the smoke card or `train_hard_gate.py`.
 - `build_trade_dataset` semantics canonicalized in the docstring: 3×3
   TP/SL grid, touch-event labels for `tp_hit`/`stop_hit`, pessimistic
-  same-bar collision for `winner_10pt_24bar`. `monte_carlo_v9.py` and
+  same-bar collision for `winner_tp_before_sl`. `monte_carlo_v9.py` and
   `shap_v9.py` both import this function — single source of truth.
 - Core ETL/Pandera/fg-data-profiling stack wired. DXY parity (Yahoo
   `DX-Y.NYB`), Databento trade-side CVD/order-flow features, May 2026
@@ -515,15 +515,14 @@ fixed SMA(close) slow vs EMA(close) fast; do not reintroduce MA type selection.
   Balance + volume profile HVN/LVN + UTC-anchored economic-event features
   (CPI/NFP/PPI=13:30 UTC, FOMC=19:00/18:00 UTC seasonal) + Pine input
   knobs (43 of them, e.g. `knob_fib_deviation_manual`, `knob_length_ma`).
-- **Label (triple barrier):** `winner_10pt_24bar` = 1 if **this combo's**
+- **Label (triple barrier):** `winner_tp_before_sl` = 1 if **this combo's**
   TP price touched before its SL price within `max_hold_bars` (24 bars =
   6h on 15m, 2h on 5m); 0 if SL touched first OR if TP and SL touched on
   the same bar (pessimistic same-bar policy — intrabar sequencing is
   unobservable). Rows where neither barrier resolves within the window
-  are DROPPED, not relabeled. The literal "10pt" in the column name is
-  historical — it denotes the operator's minimum-acceptable winner and
-  is only used as the fallback TP1 distance when no `ml_trade_tp` is
-  supplied; the actual TP price is derived from the 3-TP fib ladder.
+  are DROPPED, not relabeled. TP price is derived from the 3-TP fib
+  ladder (1.000, 1.236, 1.618) scaled from Pine's per-row `ml_trade_tp`
+  via `_tp_price_from_ratio`; SL price is `entry ± ml_atr14 × sl_mult`.
 - **Discoverable trade grid:** Each entry candidate expands into 9 rows —
   3 TP ratios {1.000, 1.236, 1.618} × 3 SL ATR multiples {1.0, 1.5, 2.0}.
   Each row carries its own (`sl_atr_mult`, `tp_ratio`, `tp_family_code`,
@@ -534,7 +533,7 @@ fixed SMA(close) slow vs EMA(close) fast; do not reintroduce MA type selection.
   barrier touches at the resolution bar, NOT resolution outcomes — see
   the canonical docstring at
   `scripts/ag/train_v9_locked.py::build_trade_dataset`. On same-bar
-  collisions both auxiliary flags are 1 even though `winner_10pt_24bar=0`.
+  collisions both auxiliary flags are 1 even though `winner_tp_before_sl=0`.
   Trained separately under `--model-suite` for the downstream EV layer.
 
 ### Kirk's Trade Preferences

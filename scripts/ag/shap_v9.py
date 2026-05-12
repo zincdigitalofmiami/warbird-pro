@@ -45,7 +45,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "artifacts" / "shap_v9"
-LABEL_COL = "winner_10pt_24bar"
+LABEL_COL = "winner_tp_before_sl"
 
 _SHAP_TREE_FAMILIES = {"GBM", "CAT", "XGB", "RF", "XT"}
 
@@ -492,7 +492,7 @@ def main() -> int:
                     help="Cap rows for fast smoke runs")
     ap.add_argument("--output-dir", type=Path, default=None)
     ap.add_argument("--label-col", default=LABEL_COL,
-                    help="Resolved trade label to explain: winner_10pt_24bar, tp_hit, stop_hit, mfe_points, or mae_points.")
+                    help="Resolved trade label to explain: winner_tp_before_sl, tp_hit, stop_hit, mfe_points, or mae_points.")
     ap.add_argument("--corr-threshold", type=float, default=0.95,
                     help="Pearson threshold for redundancy detection")
     args = ap.parse_args()

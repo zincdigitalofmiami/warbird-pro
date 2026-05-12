@@ -8,7 +8,7 @@ and runs vectorized Monte Carlo simulation over resampled trade sequences.
 Tasks:
   A — Overall P&L distribution, drawdown, win rate, profit factor
   B — Per-direction (long/short) breakdown
-  C — Threshold sweep: P(winner_10pt_24bar) >= tau gating
+  C — Threshold sweep: P(winner_tp_before_sl) >= tau gating
   G — Calibration: predicted vs realized per cohort
   H — Regime stability: early/late half comparison
   I — Win/loss streak profile
@@ -44,7 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-LABEL_COL = "winner_10pt_24bar"
+LABEL_COL = "winner_tp_before_sl"
 ES_POINT_VALUE = 50.0
 COMMISSION_ROUND_TRIP = 2.0
 DEFAULT_SL_POINTS = 7.0

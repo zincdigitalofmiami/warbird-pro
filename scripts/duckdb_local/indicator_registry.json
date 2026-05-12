@@ -135,7 +135,7 @@
     "ignored_symbol_roots": ["MES", "NQ", "MNQ"],
     "timeframe": "5/15",
     "data_floor": "2025-05-01",
-    "label_column": "winner_10pt_24bar",
+    "label_column": "winner_tp_before_sl",
     "output_budget": "60/64 output-consuming calls (58 plot + 2 alertcondition); 9 request.security; 1 request.footprint (pine-lint counting)",
     "trigger_family": "LIVE_ANCHOR_FOOTPRINT",
     "objective_metric": "ag_test_log_loss",

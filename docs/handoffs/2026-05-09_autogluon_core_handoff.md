@@ -223,13 +223,13 @@ for col in [c for c in ML_FEATURES if c.startswith('ml_pat_')]:
     assert fire_rate < 0.30, f"FATAL: {col} fires > 30% — pattern threshold too loose"
 
 # 6. Trade dataset is non-degenerate
-assert trades['winner_10pt_24bar'].sum() > 100, "FATAL: < 100 winning trades — labels broken"
-assert trades['winner_10pt_24bar'].nunique() == 2, "FATAL: only one outcome class in dataset"
-assert 0.10 < trades['winner_10pt_24bar'].mean() < 0.50, f"FATAL: WR {trades['winner_10pt_24bar'].mean():.2f} out of expected range"
+assert trades['winner_tp_before_sl'].sum() > 100, "FATAL: < 100 winning trades — labels broken"
+assert trades['winner_tp_before_sl'].nunique() == 2, "FATAL: only one outcome class in dataset"
+assert 0.10 < trades['winner_tp_before_sl'].mean() < 0.50, f"FATAL: WR {trades['winner_tp_before_sl'].mean():.2f} out of expected range"
 
 # 7. Train/val/test all have both classes
 for name, slice_df in [('train', train_df), ('val', val_df), ('test', test_df)]:
-    assert slice_df['winner_10pt_24bar'].nunique() == 2, f"FATAL: {name} split missing a class"
+    assert slice_df['winner_tp_before_sl'].nunique() == 2, f"FATAL: {name} split missing a class"
     assert len(slice_df) >= 100, f"FATAL: {name} split has < 100 trades"
 
 # 8. No timestamp leakage between splits (embargo violated check)
@@ -249,7 +249,7 @@ If ANY assertion fails, log the exact reason and exit nonzero. Don't run trainin
 |---|---|
 | **Filename** | `scripts/duckdb_local/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py` |
 | **Display title** | `2026-05-09 - Warbird Pro Autogluon Core` (literal in Optuna hub UI) |
-| **AG objective** | Binary classification: `winner_10pt_24bar` (1=+10pts before -5pts within 24 bars; neither-hit rows dropped) |
+| **AG objective** | Binary classification: `winner_tp_before_sl` (1 if this combo's fib-ladder TP touches before its ATR-multiple SL within `max_hold_bars`; pessimistic same-bar; neither-hit rows dropped) |
 | **Eval metric** | `log_loss` (proper probability scoring + isotonic calibration) |
 | **Data** | NEW dataset rebuilt from new V9 indicator + Databento trades + Yahoo DXY + VIX movement pressure fallback (see § Data inventory) |
 | **Train/val/test** | Chronological with 73-bar embargo (max_hold_bars + 1). Window split per Kirk's decision on item #9. |

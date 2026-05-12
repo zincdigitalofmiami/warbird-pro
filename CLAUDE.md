@@ -127,7 +127,7 @@ The Hybrid+ 4-card system (`warbird_pro_v9_exit_cpcv`,
 2 cards → single Core card. The Core card supersedes all four.
 
 **Production trainer:** `scripts/ag/train_v9_locked.py` — fits the entry classifier
-(`winner_10pt_24bar`) on the 15m Core export at
+(`winner_tp_before_sl`) on the 15m Core export at
 `scripts/duckdb_local/workspaces/warbird_pro_core/exports/es_15m_core.csv`.
 `--model-suite` additionally fits TP/SL touch-probability + MFE/MAE regressors
 for downstream EV layer. Auxiliary smoke-validation card at
@@ -148,10 +148,19 @@ and trains AFTER Core lands.
 - `ag_args_ensemble={'fold_fitting_strategy': 'sequential_local'}`
 - All OpenMP families single-threaded; `OMP_NUM_THREADS=1` env guard at script top
 
-**Label (locked):** triple-barrier `winner_10pt_24bar` =
-`1` if price hits +10pts before -5pts within 24 bars (2:1 R:R; 2h on 5m, 6h on 15m);
-`0` otherwise; rows where neither barrier hits within 24 bars are DROPPED
-(not relabeled as loss).
+**Label (locked):** triple-barrier `winner_tp_before_sl`. Each entry expands
+into a 3×3 grid of (TP ratio × SL ATR multiple) combos: TP ratios
+{1.000, 1.236, 1.618} are fib-ladder extensions scaled from Pine's per-row
+`ml_trade_tp`; SL multiples {1.0, 1.5, 2.0} multiply the entry-bar `ml_atr14`.
+For each combo row, label = `1` if THIS combo's TP price touches strictly
+before its SL price within `max_hold_bars` (24 = 6h on 15m, 2h on 5m), `0` if
+SL touches first OR if both touch on the same bar (pessimistic — intrabar
+sequencing unobservable). Rows where neither barrier resolves within the
+window are DROPPED (not relabeled as loss). Combo identifiers
+(`sl_atr_mult`, `tp_ratio`, `tp_family_code`, `target_distance_points`,
+`stop_distance_points`, `rr_ratio`) ride with each row in `MODEL_FEATURES`
+so the classifier conditions on combo, not on average win rate across
+combos.
 
 **Inference:** Apply `proba > 0.75` confidence threshold for Grade A+ entries.
 Session is a feature (`ml_session_ny/london/asia`, `ml_minutes_from_open`),

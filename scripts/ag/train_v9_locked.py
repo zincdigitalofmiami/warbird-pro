@@ -167,7 +167,7 @@ TRADE_DISCOVERABLE_FEATURES = [
 ]
 
 MODEL_FEATURES = [*ML_FEATURES, *TRADE_DISCOVERABLE_FEATURES]
-LABEL_COL = "winner_10pt_24bar"
+LABEL_COL = "winner_tp_before_sl"
 TP_LABEL_COL = "tp_hit"
 STOP_LABEL_COL = "stop_hit"
 MFE_LABEL_COL = "mfe_points"
@@ -246,38 +246,38 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFra
     """Build TP×SL discoverable triple-barrier labels at entry bars.
 
     Each entry candidate expands into a 3×3 grid:
-      - TP ratios:        {1.000, 1.236, 1.618}   (higher is preferred)
-      - SL ATR multiples: {1.0,   1.5,   2.0}     (tighter is preferred)
+      - TP ratios:        {1.000, 1.236, 1.618}   fib-ladder extensions, scaled
+                                                  from Pine's per-row
+                                                  `ml_trade_tp` via
+                                                  `_tp_price_from_ratio`.
+      - SL ATR multiples: {1.0,   1.5,   2.0}     ATR-based stop, multiples of
+                                                  the entry-bar `ml_atr14`.
 
     Three label columns are emitted per combo row:
 
-      winner_10pt_24bar (LABEL_COL):
+      winner_tp_before_sl (LABEL_COL):
         Pessimistic resolution outcome FOR THE SPECIFIC (tp_ratio, sl_mult)
-        COMBO ENCODED IN THIS ROW. The "10pt" in the column name is historical
-        — it denotes the operator's minimum-acceptable winner ("I'd like to
-        hit at least 10pt") and is used only as the fallback TP1 distance
-        when no per-trade ml_trade_tp is supplied. The actual TP price each
-        row evaluates against is derived from the 3-TP fib ladder
-        (1.000, 1.236, 1.618) scaled from the entry's fib touch code via
-        _tp_price_from_ratio — NOT a literal +10pt offset. 1 iff this combo's
-        TP touched strictly before its SL within max_hold_bars; 0 if SL
-        touched first OR both touched on the same bar (same-bar collision is
-        intentionally treated as loss because intrabar sequencing is
+        combo encoded in this row. 1 iff this combo's TP price touched
+        strictly before its SL price within `max_hold_bars`. 0 if the SL
+        touched first OR both touched on the same bar (same-bar collisions
+        are pessimistically scored as loss because intrabar sequencing is
         unobservable). Rows where neither barrier resolves within the window
         are DROPPED, not relabeled. This is the entry classifier's
-        supervision target.
+        supervision target — production-faithful: the model trains on the
+        same fib-ladder TP × ATR-based SL exit family the Pine indicator
+        live-trades.
 
       tp_hit (TP_LABEL_COL), stop_hit (STOP_LABEL_COL):
         TOUCH EVENTS at the resolution bar — NOT resolution outcomes. tp_hit=1
         means the TP price was crossed on the bar where the trade resolved.
         On same-bar collisions both flags are 1 (TP was touched, SL was touched)
-        even though winner_10pt_24bar=0. These are the supervision targets for
-        the auxiliary --model-suite predictors, which estimate "P(TP touched
-        at resolution)" and "P(SL touched at resolution)" — physically valid
-        probabilities the downstream EV/policy layer combines with the entry
-        probability. Do not interpret tp_hit=1 as 'trade won'.
+        even though winner_tp_before_sl=0. These are the supervision targets
+        for the auxiliary --model-suite predictors, which estimate "P(TP
+        touched at resolution)" and "P(SL touched at resolution)" — physically
+        valid probabilities the downstream EV/policy layer combines with the
+        entry probability. Do not interpret tp_hit=1 as 'trade won'.
 
-    Same-bar conflict handling: pessimistic loss for winner_10pt_24bar; raw
+    Same-bar conflict handling: pessimistic loss for winner_tp_before_sl; raw
     touch flags preserved for tp_hit/stop_hit. This is the canonical contract
     consumed by scripts.ag.monte_carlo_v9 and scripts.ag.shap_v9 via shared
     import — do not reimplement.
