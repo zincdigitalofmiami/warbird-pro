@@ -53,12 +53,19 @@ from scripts.ag.v9_run_provenance import (
 )
 
 LABEL_COL = "winner_tp_before_sl"
+TP_LABEL_COL = "tp_hit"
+STOP_LABEL_COL = "stop_hit"
+MFE_LABEL_COL = "mfe_points"
+MAE_LABEL_COL = "mae_points"
 ES_POINT_VALUE = 50.0
+ES_TICK_SIZE = 0.25
 COMMISSION_ROUND_TRIP = 2.0
+DEFAULT_SLIPPAGE_TICKS = 1  # CLAUDE.md ES slippage floor: 1 tick/side
 DEFAULT_SL_POINTS = 7.0
 DEFAULT_TP_POINTS = 14.0
 OOS_START = pd.Timestamp("2025-01-01", tz="UTC")
 IS_END = pd.Timestamp("2024-12-31T23:59:59", tz="UTC")
+SUITE_HEADS: tuple[str, ...] = ("entry", "tp", "stop", "mfe", "mae")
 
 
 # Trade dataset semantics (3 TP × 3 SL grid, touch-event labels, same-bar
@@ -109,35 +116,102 @@ def _persist_predictor(predictor: Any) -> None:
         predictor.persist_models()
 
 
+def _is_suite_root(path: Path) -> bool:
+    """A run root is a suite if all five head subdirs each carry a predictor.pkl."""
+    if (path / "predictor.pkl").exists():
+        return False
+    return all((path / head / "predictor.pkl").exists() for head in SUITE_HEADS)
+
+
+def _load_suite_predictors(suite_root: Path) -> dict[str, Any]:
+    """Load entry/tp/stop/mfe/mae predictors from a model-suite run directory."""
+    from autogluon.tabular import TabularPredictor
+
+    suite: dict[str, Any] = {}
+    for head in SUITE_HEADS:
+        head_dir = suite_root / head
+        pred = TabularPredictor.load(str(head_dir), require_py_version_match=False)
+        _persist_predictor(pred)
+        suite[head] = pred
+    return suite
+
+
+def _head_proba_or_pred(predictor: Any, X: pd.DataFrame) -> np.ndarray:
+    """Return P(class=1) for binary heads or point prediction for regression."""
+    problem_type = getattr(predictor, "problem_type", None)
+    if problem_type == "regression":
+        out = predictor.predict(X)
+        return np.asarray(out, dtype=float)
+    proba = predictor.predict_proba(X)
+    if isinstance(proba, pd.DataFrame):
+        labels = list(getattr(predictor, "class_labels", proba.columns))
+        if 1 in labels:
+            col = labels.index(1)
+        elif True in labels:
+            col = labels.index(True)
+        else:
+            col = len(labels) - 1
+        return proba.iloc[:, col].to_numpy(dtype=float)
+    return np.asarray(proba, dtype=float)
+
+
+def _suite_feature_columns(suite: dict[str, Any], trades: pd.DataFrame) -> dict[str, list[str]]:
+    cols: dict[str, list[str]] = {}
+    for head, pred in suite.items():
+        if hasattr(pred, "features"):
+            expected = list(pred.features())
+        else:
+            expected = list(pred.feature_metadata_in.get_features())
+        missing = [c for c in expected if c not in trades.columns]
+        if missing:
+            raise SystemExit(
+                f"Suite head '{head}' expects features missing from trades: "
+                + ", ".join(missing[:10])
+            )
+        cols[head] = expected
+    return cols
+
+
+def _slippage_cost_rt(slippage_ticks: float) -> float:
+    """One-side slippage applied to BOTH entry and exit -> 2 * ticks * tick_value."""
+    return 2.0 * float(slippage_ticks) * ES_TICK_SIZE * ES_POINT_VALUE
+
+
 def _resolve_payoff_arrays(
     trades: pd.DataFrame,
     fallback_sl_pts: float,
     fallback_tp_pts: float,
+    slippage_ticks: float = DEFAULT_SLIPPAGE_TICKS,
 ) -> tuple[np.ndarray, np.ndarray]:
-    if {"entry_price", "target_price", "stop_price"}.issubset(trades.columns):
-        entry = pd.to_numeric(trades["entry_price"], errors="coerce").to_numpy(dtype=float)
-        target = pd.to_numeric(trades["target_price"], errors="coerce").to_numpy(dtype=float)
-        stop = pd.to_numeric(trades["stop_price"], errors="coerce").to_numpy(dtype=float)
-        tp_pts = np.abs(target - entry)
-        sl_pts = np.abs(stop - entry)
-        valid = np.isfinite(tp_pts) & np.isfinite(sl_pts) & (tp_pts > 0) & (sl_pts > 0)
-        if valid.all():
-            win = tp_pts * ES_POINT_VALUE - COMMISSION_ROUND_TRIP
-            loss = -(sl_pts * ES_POINT_VALUE + COMMISSION_ROUND_TRIP)
-            return win, loss
-    win_payoff = fallback_tp_pts * ES_POINT_VALUE - COMMISSION_ROUND_TRIP
-    loss_payoff = -(fallback_sl_pts * ES_POINT_VALUE + COMMISSION_ROUND_TRIP)
+    slip = _slippage_cost_rt(slippage_ticks)
+    trade_cost = COMMISSION_ROUND_TRIP + slip
     n = len(trades)
-    return np.full(n, win_payoff, dtype=float), np.full(n, loss_payoff, dtype=float)
+    fallback_win = fallback_tp_pts * ES_POINT_VALUE - trade_cost
+    fallback_loss = -(fallback_sl_pts * ES_POINT_VALUE + trade_cost)
+    win = np.full(n, fallback_win, dtype=float)
+    loss = np.full(n, fallback_loss, dtype=float)
+    if not {"entry_price", "target_price", "stop_price"}.issubset(trades.columns):
+        return win, loss
+    entry = pd.to_numeric(trades["entry_price"], errors="coerce").to_numpy(dtype=float)
+    target = pd.to_numeric(trades["target_price"], errors="coerce").to_numpy(dtype=float)
+    stop = pd.to_numeric(trades["stop_price"], errors="coerce").to_numpy(dtype=float)
+    tp_pts = np.abs(target - entry)
+    sl_pts = np.abs(stop - entry)
+    valid = np.isfinite(tp_pts) & np.isfinite(sl_pts) & (tp_pts > 0) & (sl_pts > 0)
+    win[valid] = tp_pts[valid] * ES_POINT_VALUE - trade_cost
+    loss[valid] = -(sl_pts[valid] * ES_POINT_VALUE + trade_cost)
+    return win, loss
 
 
 def _compute_payoffs(
     y_true: np.ndarray,
     sl_pts: float = DEFAULT_SL_POINTS,
     tp_pts: float = DEFAULT_TP_POINTS,
+    slippage_ticks: float = DEFAULT_SLIPPAGE_TICKS,
 ) -> np.ndarray:
-    win_payoff = tp_pts * ES_POINT_VALUE - COMMISSION_ROUND_TRIP
-    loss_payoff = -(sl_pts * ES_POINT_VALUE + COMMISSION_ROUND_TRIP)
+    trade_cost = COMMISSION_ROUND_TRIP + _slippage_cost_rt(slippage_ticks)
+    win_payoff = tp_pts * ES_POINT_VALUE - trade_cost
+    loss_payoff = -(sl_pts * ES_POINT_VALUE + trade_cost)
     return np.where(y_true == 1, win_payoff, loss_payoff)
 
 
@@ -343,6 +417,115 @@ def task_I_streaks(
     }
 
 
+def task_J_multi_head(
+    trades: pd.DataFrame,
+    suite_predictions: dict[str, np.ndarray],
+    payoffs_win: np.ndarray,
+    payoffs_loss: np.ndarray,
+    trade_cost_rt: float,
+) -> dict[str, Any]:
+    """Per-row multi-head diagnostics + conservative EV decomposition.
+
+    suite_predictions keys: entry, tp, stop (binary P(class=1)) and mfe, mae (regression points).
+    """
+    n = len(trades)
+    if n == 0:
+        return {}
+
+    p_entry = suite_predictions.get("entry", np.zeros(n))
+    p_tp = suite_predictions.get("tp", np.zeros(n))
+    p_stop = suite_predictions.get("stop", np.zeros(n))
+    pred_mfe = suite_predictions.get("mfe", np.zeros(n))
+    pred_mae = suite_predictions.get("mae", np.zeros(n))
+
+    target_pts = pd.to_numeric(trades.get("target_distance_points", pd.Series(np.zeros(n))), errors="coerce").to_numpy(dtype=float)
+    stop_pts = pd.to_numeric(trades.get("stop_distance_points", pd.Series(np.zeros(n))), errors="coerce").to_numpy(dtype=float)
+
+    ev_entry = p_entry * payoffs_win + (1.0 - p_entry) * payoffs_loss
+    p_tp_conditional = np.minimum(p_entry, p_tp)
+    p_stop_conservative = np.maximum(1.0 - p_entry, p_stop)
+    p_tp_conditional_norm = np.where(
+        (p_tp_conditional + p_stop_conservative) > 0,
+        p_tp_conditional / (p_tp_conditional + p_stop_conservative),
+        p_entry,
+    )
+    ev_conservative = p_tp_conditional_norm * payoffs_win + (1.0 - p_tp_conditional_norm) * payoffs_loss
+
+    realized_mfe = pd.to_numeric(trades.get(MFE_LABEL_COL, pd.Series(np.zeros(n))), errors="coerce").to_numpy(dtype=float)
+    realized_mae = pd.to_numeric(trades.get(MAE_LABEL_COL, pd.Series(np.zeros(n))), errors="coerce").to_numpy(dtype=float)
+
+    def _calibration(probs: np.ndarray, hits: np.ndarray, n_bins: int = 10) -> list[dict[str, Any]]:
+        if probs.size == 0:
+            return []
+        edges = np.linspace(0.0, 1.0, n_bins + 1)
+        rows: list[dict[str, Any]] = []
+        for i in range(n_bins):
+            lo, hi = edges[i], edges[i + 1]
+            mask = (probs >= lo) & (probs < hi) if i < n_bins - 1 else (probs >= lo)
+            cnt = int(mask.sum())
+            if cnt == 0:
+                continue
+            rows.append({
+                "bin": f"[{lo:.2f},{hi:.2f})",
+                "n": cnt,
+                "predicted": float(probs[mask].mean()),
+                "realized": float(hits[mask].mean()),
+            })
+        return rows
+
+    realized_tp_hit = trades[TP_LABEL_COL].to_numpy(dtype=float) if TP_LABEL_COL in trades.columns else np.zeros(n)
+    realized_stop_hit = trades[STOP_LABEL_COL].to_numpy(dtype=float) if STOP_LABEL_COL in trades.columns else np.zeros(n)
+
+    def _regression_quality(pred: np.ndarray, actual: np.ndarray) -> dict[str, float]:
+        finite = np.isfinite(pred) & np.isfinite(actual)
+        if finite.sum() < 5:
+            return {"n": int(finite.sum()), "rmse_pts": 0.0, "bias_pts": 0.0, "corr": 0.0}
+        residual = pred[finite] - actual[finite]
+        rmse = float(np.sqrt(np.mean(residual ** 2)))
+        bias = float(np.mean(residual))
+        corr = float(np.corrcoef(pred[finite], actual[finite])[0, 1]) if pred[finite].std() > 1e-9 and actual[finite].std() > 1e-9 else 0.0
+        return {"n": int(finite.sum()), "rmse_pts": rmse, "bias_pts": bias, "corr": corr}
+
+    head_corr = {}
+    for a, b in [("entry", "tp"), ("entry", "stop"), ("tp", "stop"), ("mfe", "mae")]:
+        if a in suite_predictions and b in suite_predictions:
+            xa, xb = suite_predictions[a], suite_predictions[b]
+            if xa.std() > 1e-9 and xb.std() > 1e-9:
+                head_corr[f"{a}_vs_{b}"] = float(np.corrcoef(xa, xb)[0, 1])
+
+    return {
+        "n_trades": int(n),
+        "trade_cost_rt": float(trade_cost_rt),
+        "head_correlations": head_corr,
+        "ev_entry_only": {
+            "mean": float(ev_entry.mean()),
+            "p25": float(np.quantile(ev_entry, 0.25)),
+            "p50": float(np.quantile(ev_entry, 0.50)),
+            "p75": float(np.quantile(ev_entry, 0.75)),
+        },
+        "ev_multi_head_conservative": {
+            "mean": float(ev_conservative.mean()),
+            "p25": float(np.quantile(ev_conservative, 0.25)),
+            "p50": float(np.quantile(ev_conservative, 0.50)),
+            "p75": float(np.quantile(ev_conservative, 0.75)),
+            "delta_vs_entry_only_mean": float(ev_conservative.mean() - ev_entry.mean()),
+        },
+        "tp_head_calibration": _calibration(p_tp, realized_tp_hit),
+        "stop_head_calibration": _calibration(p_stop, realized_stop_hit),
+        "entry_head_calibration": _calibration(p_entry, trades[LABEL_COL].to_numpy(dtype=float) if LABEL_COL in trades.columns else np.zeros(n)),
+        "mfe_regressor_quality": _regression_quality(pred_mfe, realized_mfe),
+        "mae_regressor_quality": _regression_quality(pred_mae, realized_mae),
+        "target_distance_pts_summary": {
+            "mean": float(target_pts.mean()) if target_pts.size else 0.0,
+            "p50": float(np.quantile(target_pts, 0.50)) if target_pts.size else 0.0,
+        },
+        "stop_distance_pts_summary": {
+            "mean": float(stop_pts.mean()) if stop_pts.size else 0.0,
+            "p50": float(np.quantile(stop_pts, 0.50)) if stop_pts.size else 0.0,
+        },
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--predictor-path", type=Path, required=True)
@@ -354,13 +537,30 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--sl-points", type=float, default=DEFAULT_SL_POINTS)
     ap.add_argument("--tp-points", type=float, default=DEFAULT_TP_POINTS)
+    ap.add_argument("--slippage-ticks", type=float, default=DEFAULT_SLIPPAGE_TICKS,
+                    help="One-side ES slippage in ticks; applied to both entry and exit (CLAUDE.md floor=1).")
+    ap.add_argument("--model-suite", action="store_true",
+                    help="When --predictor-path is a run root containing entry/tp/stop/mfe/mae subdirs, load all five heads for multi-head diagnostics.")
     ap.add_argument("--output-dir", type=Path, default=None)
     args = ap.parse_args()
 
     from autogluon.tabular import TabularPredictor
+    suite_root: Path | None = None
+    suite_predictors: dict[str, Any] = {}
+    if args.model_suite:
+        if _is_suite_root(args.predictor_path):
+            suite_root = args.predictor_path.resolve()
+        else:
+            raise SystemExit(
+                f"--model-suite requires a run root containing {list(SUITE_HEADS)} subdirs "
+                f"each with a predictor.pkl. Got: {args.predictor_path}"
+            )
     predictor_path = _resolve_predictor_path(args.predictor_path)
     pred = TabularPredictor.load(str(predictor_path), require_py_version_match=False)
     _persist_predictor(pred)
+    if suite_root is not None:
+        print(f"loading model suite from {suite_root}", flush=True)
+        suite_predictors = _load_suite_predictors(suite_root)
 
     tag = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     output_dir = args.output_dir or (REPO_ROOT / "artifacts" / "mc_v9" / f"mc_{tag}")
@@ -410,9 +610,22 @@ def main() -> int:
 
     feature_cols = _predictor_feature_columns(pred, trades)
     y_true = trades[LABEL_COL].to_numpy()
-    proba = pred.predict_proba(trades[feature_cols])
-    proba_pos = proba.iloc[:, 1].to_numpy() if isinstance(proba, pd.DataFrame) else np.asarray(proba)
-    payoffs_win, payoffs_loss = _resolve_payoff_arrays(trades, args.sl_points, args.tp_points)
+    proba_pos = _head_proba_or_pred(pred, trades[feature_cols])
+    payoffs_win, payoffs_loss = _resolve_payoff_arrays(
+        trades, args.sl_points, args.tp_points, slippage_ticks=args.slippage_ticks,
+    )
+    trade_cost_rt = COMMISSION_ROUND_TRIP + _slippage_cost_rt(args.slippage_ticks)
+
+    suite_predictions: dict[str, np.ndarray] = {}
+    suite_feature_cols: dict[str, list[str]] = {}
+    if suite_predictors:
+        suite_feature_cols = _suite_feature_columns(suite_predictors, trades)
+        for head, head_pred in suite_predictors.items():
+            cols = suite_feature_cols[head]
+            suite_predictions[head] = _head_proba_or_pred(head_pred, trades[cols])
+        # Pin entry-head outputs to the suite's own entry predictor for consistency.
+        if "entry" in suite_predictions:
+            proba_pos = suite_predictions["entry"]
 
     rng_root = np.random.default_rng(args.seed)
 
@@ -482,6 +695,22 @@ def main() -> int:
         print(f"  win streak p50={task_i['winning_streak']['p50']:.0f}"
               f"  loss streak p50={task_i['losing_streak']['p50']:.0f}", flush=True)
 
+    task_j: dict[str, Any] = {}
+    if suite_predictions:
+        print("\n=== Task J — Multi-head diagnostics ===", flush=True)
+        task_j = task_J_multi_head(
+            trades, suite_predictions, payoffs_win, payoffs_loss, trade_cost_rt
+        )
+        if task_j:
+            print(
+                f"  EV entry-only mean=${task_j['ev_entry_only']['mean']:.2f}"
+                f"  EV multi-head mean=${task_j['ev_multi_head_conservative']['mean']:.2f}"
+                f"  delta=${task_j['ev_multi_head_conservative']['delta_vs_entry_only_mean']:+.2f}",
+                flush=True,
+            )
+            for pair, corr in task_j["head_correlations"].items():
+                print(f"  corr({pair}) = {corr:+.3f}", flush=True)
+
     full_output = {
         "generated_at": tag,
         "predictor_path_input": str(args.predictor_path),
@@ -495,6 +724,9 @@ def main() -> int:
         "predictor_feature_count": len(feature_cols),
         "sl_points": args.sl_points,
         "tp_points": args.tp_points,
+        "slippage_ticks": args.slippage_ticks,
+        "trade_cost_rt_usd": trade_cost_rt,
+        "model_suite_loaded": bool(suite_predictors),
         "point_value": ES_POINT_VALUE,
         "commission_rt": COMMISSION_ROUND_TRIP,
         "task_A_overall": task_a,
@@ -503,6 +735,7 @@ def main() -> int:
         "task_G_calibration": task_g,
         "task_H_regime_stability": task_h,
         "task_I_streaks": task_i,
+        "task_J_multi_head": task_j,
     }
     (output_dir / "mc_v9_results.json").write_text(json.dumps(full_output, indent=2, default=str))
     print(f"\nwrote {output_dir / 'mc_v9_results.json'}", flush=True)
