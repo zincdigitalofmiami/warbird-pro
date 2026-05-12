@@ -249,10 +249,10 @@ If ANY assertion fails, log the exact reason and exit nonzero. Don't run trainin
 |---|---|
 | **Filename** | `scripts/duckdb_local/cards/core_training/2026_05_09_warbird_pro_autogluon_core.py` |
 | **Display title** | `2026-05-09 - Warbird Pro Autogluon Core` (literal in Optuna hub UI) |
-| **AG objective** | Binary classification: `winner_tp_before_sl` (1 if this combo's fib-ladder TP touches before its ATR-multiple SL within `max_hold_bars`; pessimistic same-bar; neither-hit rows dropped) |
+| **AG objective** | Binary classification: `winner_tp_before_sl` (1 if this combo's fib-ladder TP touches before its ATR-multiple SL within `FORWARD_SCAN_BARS = 24`; pessimistic same-bar; neither-hit rows labeled 0; entries with <24 future bars dropped — 2026-05-12 contract refresh) |
 | **Eval metric** | `log_loss` (proper probability scoring + isotonic calibration) |
 | **Data** | NEW dataset rebuilt from new V9 indicator + Databento trades + Yahoo DXY + VIX movement pressure fallback (see § Data inventory) |
-| **Train/val/test** | Chronological with 73-bar embargo (max_hold_bars + 1). Window split per Kirk's decision on item #9. |
+| **Train/val/test** | Chronological with 25-bar embargo (`EMBARGO_BARS = FORWARD_SCAN_BARS + 1`). Window split per Kirk's decision on item #9. (Originally 73-bar at 2026-05-09; refreshed to 25-bar with the 2026-05-12 24-bar contract.) |
 | **Feature set** | 45 features: 43 Pine-emitted features plus Python-only `ml_cvd_div_bull` / `ml_cvd_div_bear`. STRICT ASSERTION: no missing columns. |
 | **Model zoo** | Full canonical 7-family: GBM, CAT, XGB, RF, XT, **NN_TORCH, FASTAI** (FastAI explicitly required per Kirk) |
 | **Bagging / Stacking** | `num_bag_folds=0`, `num_stack_levels=0`, `use_bag_holdout=False`, `dynamic_stacking=False` |

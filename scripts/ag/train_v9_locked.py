@@ -14,8 +14,9 @@ training-ag-feature-finder):
     (no internal IID bagging/stacking)
   - dynamic_stacking=False (explicit, reproducible)
   - time_limit=7200s (2 hours so NN_TORCH/FASTAI fully converge)
-  - chronological train/val/test split with embargo = max_hold_bars + 1 bars
-    (label-horizon-aware; enforced by scripts/duckdb_local/cpcv.py)
+  - chronological train/val/test split with 24-bar embargo
+    (FORWARD_SCAN_BARS = 24, EMBARGO_BARS = 25; enforced by
+    scripts/duckdb_local/cpcv.py)
   - predictor.persist_models() after fit for fast repeated predic
   - leaderboard(extra_info=True) for hyperparameter visibility
   - Apple Silicon OpenMP guards set BEFORE any AG/lightgbm impor
@@ -76,7 +77,6 @@ ML_FEATURES = [
     "knob_htf_conf_tol_pct",
     "knob_use_pattern_confirm", "knob_use_liq_gate",
     "knob_liq_recency_bars", "knob_trade_stop_atr_mult",
-    "knob_trade_max_hold_bars",
     "knob_use_ma_gate", "knob_length_ema", "knob_length_ma",
     "knob_rsi_length", "knob_rsi_overbought", "knob_rsi_oversold",
     "knob_liq_lookback_bars", "knob_eqh_tol_pct",
@@ -86,7 +86,6 @@ ML_FEATURES = [
     "knob_6e_symbol", "knob_vix_symbol", "knob_corr_length",
     "knob_vix_move_bars", "knob_vix_atr_length",
     "knob_vix_pressure_band", "knob_xa_min_agreement",
-    "knob_zn_gate_direction",
     "knob_use_footprint", "knob_fp_ticks_per_row", "knob_fp_va_pct",
     "knob_fp_imbalance_pct", "knob_fp_absorption_delta_pct",
     "knob_fp_flush_delta_pct", "knob_fp_event_vol_spike",
@@ -153,9 +152,22 @@ ML_FEATURES = [
 
 # Trade-surface discoverables (derived at label-build time).
 # TP families use fib ladder ratios relative to entry anchor.
-DISCOVERABLE_SL_ATR_MULTS: tuple[float, ...] = (1.0, 1.5, 2.0)
+DISCOVERABLE_SL_ATR_MULTS: tuple[float, ...] = (0.75, 1.0, 1.5, 2.0)
 DISCOVERABLE_TP_RATIOS: tuple[float, ...] = (1.0, 1.236, 1.618)
 ENTRY_RATIO_BY_TOUCH_CODE: dict[int, float] = {500: 0.5, 618: 0.618, 786: 0.786}
+
+# 24-bar forward-scan contract (ES 15m entry-precision priority, 2026-05-12).
+# Every triple-barrier label is computed over the same 24-bar window:
+#   - TP touched before SL within 24 bars     -> winner_tp_before_sl = 1
+#   - SL touched before TP within 24 bars     -> winner_tp_before_sl = 0
+#   - Same-bar TP+SL collision                -> winner_tp_before_sl = 0
+#   - Neither barrier touched within 24 bars  -> winner_tp_before_sl = 0
+#   - Fewer than 24 future bars available     -> entry is DROPPED
+# Pine's `tradeMaxHoldBars` must mirror this constant so the live chart and
+# the trainer answer the same trade-duration question.
+FORWARD_SCAN_BARS: int = 24
+MIN_FUTURE_BARS: int = 24
+EMBARGO_BARS: int = 25
 
 TRADE_DISCOVERABLE_FEATURES = [
     "sl_atr_mult",
@@ -242,30 +254,38 @@ def _tp_price_from_ratio(entry_price: float, tp1_price: float, touch_code: float
     return float(entry_price + target_dist if is_long else entry_price - target_dist)
 
 
-def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFrame:
+def build_trade_dataset(df: pd.DataFrame) -> pd.DataFrame:
     """Build TP×SL discoverable triple-barrier labels at entry bars.
 
-    Each entry candidate expands into a 3×3 grid:
+    Each entry candidate expands into a 4×3 grid:
+      - SL ATR multiples: {0.75, 1.0, 1.5, 2.0}   ATR-based stop, multiples of
+                                                  the entry-bar `ml_atr14`.
       - TP ratios:        {1.000, 1.236, 1.618}   fib-ladder extensions, scaled
                                                   from Pine's per-row
                                                   `ml_trade_tp` via
                                                   `_tp_price_from_ratio`.
-      - SL ATR multiples: {1.0,   1.5,   2.0}     ATR-based stop, multiples of
-                                                  the entry-bar `ml_atr14`.
+
+    Forward-scan window is fixed at `FORWARD_SCAN_BARS = 24` bars (the ES 15m
+    entry-precision contract). Every label is computed over that same 24-bar
+    window: entry classifier, tp_hit, stop_hit, MFE, MAE. Entries closer
+    than `MIN_FUTURE_BARS = 24` bars to end-of-data are DROPPED because they
+    cannot be fairly assessed. Embargo for the train/val/test split is
+    `EMBARGO_BARS = 25` (label horizon + 1).
 
     Three label columns are emitted per combo row:
 
       winner_tp_before_sl (LABEL_COL):
-        Pessimistic resolution outcome FOR THE SPECIFIC (tp_ratio, sl_mult)
-        combo encoded in this row. 1 iff this combo's TP price touched
-        strictly before its SL price within `max_hold_bars`. 0 if the SL
-        touched first OR both touched on the same bar (same-bar collisions
-        are pessimistically scored as loss because intrabar sequencing is
-        unobservable). Rows where neither barrier resolves within the window
-        are DROPPED, not relabeled. This is the entry classifier's
-        supervision target — production-faithful: the model trains on the
-        same fib-ladder TP × ATR-based SL exit family the Pine indicator
-        live-trades.
+        Pessimistic resolution outcome FOR THE SPECIFIC (sl_mult, tp_ratio)
+        combo encoded in this row.
+          1 iff this combo's TP price touched strictly before its SL price
+            within the 24-bar window.
+          0 if SL touched first, both touched same bar (intrabar sequencing
+            unobservable -> pessimistic loss), OR neither touched within 24
+            bars (sideways / avoid).
+        This is the entry classifier's supervision target —
+        production-faithful: the model trains on the same fib-ladder TP ×
+        ATR-based SL exit family the Pine indicator live-trades, with the
+        same 24-bar quality window.
 
       tp_hit (TP_LABEL_COL), stop_hit (STOP_LABEL_COL):
         TOUCH EVENTS at the resolution bar — NOT resolution outcomes. tp_hit=1
@@ -319,9 +339,15 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFra
     )
 
     rows: list[dict[str, Any]] = []
-    dropped_neither = 0
+    dropped_insufficient = 0
+    neither_hit_zeros = 0
 
     for i in entry_idx:
+        # Drop entries that cannot be fairly assessed: need at least
+        # FORWARD_SCAN_BARS future bars after i.
+        if (len(df) - i - 1) < FORWARD_SCAN_BARS:
+            dropped_insufficient += 1
+            continue
         entry_price = entries[i] if pd.notna(entries[i]) and entries[i] > 0 else closes[i]
         is_long = bool(long_mask.iloc[i])
         touch_code = touch_codes[i]
@@ -349,7 +375,7 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFra
 
         mfe_points = 0.0
         mae_points = 0.0
-        end_idx = min(i + max_hold_bars + 1, len(df))
+        end_idx = i + FORWARD_SCAN_BARS + 1
         if end_idx > i + 1:
             future_high = highs[i + 1:end_idx]
             future_low = lows[i + 1:end_idx]
@@ -402,8 +428,13 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFra
                         resolution_bar = j
                         break
                 else:
-                    dropped_neither += 1
-                    continue
+                    # Neither barrier touched within the 24-bar window.
+                    # Label = 0 (sideways / avoid). Resolution sentinel =
+                    # FORWARD_SCAN_BARS + 1 so embargo math and resolution
+                    # diagnostics treat this row as a full-window miss.
+                    neither_hit_zeros += 1
+                    outcome = 0
+                    resolution_bar = i + FORWARD_SCAN_BARS + 1
 
                 rec = {col: df[col].iloc[i] for col in ML_FEATURES}
                 rec["sl_atr_mult"] = float(sl_mult)
@@ -421,8 +452,8 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFra
                 rec[LABEL_COL] = outcome
                 rec[TP_LABEL_COL] = 1 if target_hit_idx != -1 else 0
                 rec[STOP_LABEL_COL] = 1 if stop_hit_idx != -1 else 0
-                rec["time_to_tp_bars"] = target_hit_idx - i if target_hit_idx != -1 else max_hold_bars + 1
-                rec["time_to_stop_bars"] = stop_hit_idx - i if stop_hit_idx != -1 else max_hold_bars + 1
+                rec["time_to_tp_bars"] = target_hit_idx - i if target_hit_idx != -1 else (FORWARD_SCAN_BARS + 1)
+                rec["time_to_stop_bars"] = stop_hit_idx - i if stop_hit_idx != -1 else (FORWARD_SCAN_BARS + 1)
                 rec[MFE_LABEL_COL] = mfe_points
                 rec[MAE_LABEL_COL] = mae_points
                 rec["stop_required_atr"] = float(mae_points / atr_i) if pd.notna(atr_i) and abs(float(atr_i)) > 1e-12 else 0.0
@@ -452,12 +483,14 @@ def build_trade_dataset(df: pd.DataFrame, max_hold_bars: int = 24) -> pd.DataFra
             "_combo_id",
         ]
         print("  resolved trades: 0")
-        print(f"  dropped neither-hit: {dropped_neither:,}")
+        print(f"  dropped (insufficient future bars): {dropped_insufficient:,}")
+        print(f"  neither-hit labeled 0: {neither_hit_zeros:,}")
         return pd.DataFrame(columns=out_cols)
 
     out = pd.DataFrame(rows).sort_values("ts").reset_index(drop=True)
     print(f"  resolved trades: {len(out):,}")
-    print(f"  dropped neither-hit: {dropped_neither:,}")
+    print(f"  dropped (insufficient future bars): {dropped_insufficient:,}")
+    print(f"  neither-hit labeled 0: {neither_hit_zeros:,}")
     if len(out) > 0:
         print(
             f"  {LABEL_COL} rate: {out[LABEL_COL].mean():.4f}"
@@ -580,7 +613,6 @@ def main() -> int:
     ap.add_argument("--csv", type=Path, default=CSV_PATH)
     ap.add_argument("--output-root", type=Path, default=OUTPUT_ROOT)
     ap.add_argument("--time-limit", type=int, default=7200)
-    ap.add_argument("--max-hold-bars", type=int, default=24)
     ap.add_argument("--train-frac", type=float, default=0.70)
     ap.add_argument("--val-frac", type=float, default=0.15)
     ap.add_argument("--validate-only", action="store_true",
@@ -604,7 +636,7 @@ def main() -> int:
     print(f"  rows={len(df):,}  range={df['ts'].iloc[0]} -> {df['ts'].iloc[-1]}", flush=True)
     validate_input_schema(df)
 
-    trades = build_trade_dataset(df, max_hold_bars=args.max_hold_bars)
+    trades = build_trade_dataset(df)
     feature_cols = list(MODEL_FEATURES)
     if args.validate_only and args.smoke_ok:
         if len(trades) == 0:
@@ -617,7 +649,6 @@ def main() -> int:
         print(f"  negatives: {int((1 - trades[LABEL_COL]).sum()):,}")
         print(f"  features: {len(feature_cols)}")
         print(f"  label: {LABEL_COL}")
-        print(f"  max_hold_bars: {args.max_hold_bars}")
         return 0
 
     if len(trades) < 200:
@@ -625,18 +656,18 @@ def main() -> int:
     if trades[LABEL_COL].nunique() != 2:
         raise RuntimeError(f"{LABEL_COL} must contain both classes")
 
-    # Label-horizon-aware embargo. The label looks forward up to
-    # max_hold_bars; the embargo around each split boundary must be at leas
-    # max_hold_bars + 1 to keep the resolution window from leaking across
-    # train/val/test. Enforced by cpcv._enforce_embargo_floor().
-    embargo_bars = args.max_hold_bars + 1
+    # Label-horizon-aware embargo. Fixed 24-bar forward-scan contract:
+    # every label is computed over the same 24-bar window, so the embargo is
+    # the constant EMBARGO_BARS (= FORWARD_SCAN_BARS + 1 = 25).
+    label_horizon_bars = FORWARD_SCAN_BARS
+    embargo_bars = EMBARGO_BARS
 
     train_pos, val_pos, test_pos = split_trade_positions(
         trades,
         train_frac=args.train_frac,
         val_frac=args.val_frac,
         embargo_bars=embargo_bars,
-        label_horizon_bars=args.max_hold_bars,
+        label_horizon_bars=label_horizon_bars,
     )
     train_df = trades.iloc[train_pos].copy()
     val_df = trades.iloc[val_pos].copy()
@@ -657,7 +688,8 @@ def main() -> int:
         print("\nvalidate-only PASS")
         print(f"  features: {len(feature_cols)}")
         print(f"  labels: {', '.join(spec['label'] for spec in selected_specs_for_log.values())}")
-        print(f"  max_hold_bars: {args.max_hold_bars}")
+        print(f"  label_horizon_bars: {label_horizon_bars} (data-derived)")
+        print(f"  embargo_bars: {embargo_bars}")
         return 0
 
     ts_tag = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")

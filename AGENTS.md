@@ -158,14 +158,20 @@ The Pine code `input.float(default, ...)` values are NOT authoritative.
 | MA Length SMA (lengthMA) | **100** |
 | EMA Length (lengthEMA) | **50** |
 
-## Kirk's Exit Trade Preferences (GOAL — Rewarded in Objective)
+## Kirk's Exit Trade Preferences (operator-stated targets — not in training objective)
 
-- **Target SL:** 1.0 ATR. **Max SL:** 2.0 ATR. Search range: `stopAtrMult` (0.75, 2.0).
-- **Target breakeven:** 1–3R. `targetRiskMultiple` range: (1.0, 3.0).
-- Objective scores `target_hit_rate` (fraction of trades exiting at TARGET) at weight 0.14.
-- Never freeze SL or target — the local search/training surface explores the
-  range (the discoverable 3 TP × 3 SL grid in `build_trade_dataset`); the goal
-  values above are the reward center.
+- **Target SL:** 1.0 ATR. **Max SL:** 2.0 ATR. The discoverable SL grid
+  `DISCOVERABLE_SL_ATR_MULTS = (0.75, 1.0, 1.5, 2.0)` brackets this range.
+- **Target breakeven:** 1–3R. The trainer's discoverable TP grid uses fib
+  extensions `DISCOVERABLE_TP_RATIOS = (1.000, 1.236, 1.618)` (not fixed
+  R-multiples); per-row `rr_ratio` is in `MODEL_FEATURES` so AG can condition
+  on the realized R per combo.
+- Training objective is `eval_metric='log_loss'` on `winner_tp_before_sl`
+  with isotonic calibration — no composite or weighted metric. The legacy
+  `target_hit_rate` 0.14-weight objective from the Optuna era is retired.
+- The discoverable 4×3 grid (4 SL ATR mults × 3 TP fib ratios) in
+  `build_trade_dataset` produces 12 combo rows per admitted entry; AG
+  selects the EV-winning combo at inference via the per-row identifiers.
 
 ## Contract First
 

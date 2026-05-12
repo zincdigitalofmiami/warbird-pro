@@ -17,7 +17,6 @@ Usage:
   python scripts/ag/shap_v9.py \
       --predictor-dir models/warbird_pro_v9/locked_20260508_... \
       --csv exports/es_15m_core.csv \
-      [--max-hold-bars 72] \
       [--max-rows 5000] \
       [--output-dir artifacts/shap_v9/<tag>]
 """
@@ -93,13 +92,10 @@ def _resolve_shap_model(predictor: Any) -> str:
 # Trade dataset semantics (3 TP × 3 SL grid, touch-event labels, same-bar
 # collision = pessimistic loss) are defined in
 # scripts.ag.train_v9_locked.build_trade_dataset — do not reimplement.
-def _build_trade_dataset(
-    df: pd.DataFrame,
-    max_hold_bars: int,
-) -> pd.DataFrame:
+def _build_trade_dataset(df: pd.DataFrame) -> pd.DataFrame:
     from scripts.ag.train_v9_locked import build_trade_dataset as build_locked_trade_dataset
 
-    trades = build_locked_trade_dataset(df, max_hold_bars=max_hold_bars)
+    trades = build_locked_trade_dataset(df)
     return trades.sort_values("ts").reset_index(drop=True)
 
 
@@ -487,7 +483,6 @@ def main() -> int:
                     help="Path to trained AG predictor directory")
     ap.add_argument("--csv", type=Path, required=True,
                     help="Source CSV with ml_* columns")
-    ap.add_argument("--max-hold-bars", type=int, default=24)
     ap.add_argument("--max-rows", type=int, default=None,
                     help="Cap rows for fast smoke runs")
     ap.add_argument("--output-dir", type=Path, default=None)
@@ -505,7 +500,7 @@ def main() -> int:
     df = pd.read_csv(args.csv, parse_dates=["ts"])
     print(f"  rows={len(df):,}  range={df['ts'].iloc[0]} → {df['ts'].iloc[-1]}", flush=True)
 
-    trades = _build_trade_dataset(df, max_hold_bars=args.max_hold_bars)
+    trades = _build_trade_dataset(df)
     if args.label_col not in trades.columns:
         raise SystemExit(f"Label column not found in resolved trade dataset: {args.label_col}")
     label_col = args.label_col

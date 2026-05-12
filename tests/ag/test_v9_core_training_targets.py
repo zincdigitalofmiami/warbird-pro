@@ -26,21 +26,28 @@ def _feature_defaults() -> dict[str, object]:
 def test_trade_dataset_uses_emitted_entry_tp_stop_and_adds_tp_sl_sidecar_labels():
     """One bullish entry expands into the TP/SL combo grid.
 
-    Trade-surface contract (locked 2026-05-11):
-      - Each entry candidate fans out to (#TP × #SL) combos.
-      - Combos that resolve (TP hit or SL hit within max_hold_bars) become rows.
-      - Combos that neither hit are dropped.
-      - Each combo row carries the 6 TRADE_DISCOVERABLE_FEATURES so AG can learn
-        per-combo trade geometry as a model input.
+    Trade-surface contract (locked 2026-05-12, ES 15m entry-precision):
+      - Each entry candidate fans out to (#SL × #TP) combos.
+      - Forward-scan window is fixed at FORWARD_SCAN_BARS = 24 bars; entries
+        with fewer than MIN_FUTURE_BARS = 24 future bars are DROPPED.
+      - Within the 24-bar window: TP-first -> winner=1; SL-first / same-bar /
+        neither -> winner=0 (not dropped).
+      - Each combo row carries the 6 TRADE_DISCOVERABLE_FEATURES so AG can
+        learn per-combo trade geometry as a model input.
     """
+    # Fixture must supply >= 25 bars so the entry at index 0 has >= 24 future
+    # bars and passes the MIN_FUTURE_BARS gate. Bar 1 reaches 108.5 (hits the
+    # 1.000 and 1.236 fib TPs); bar 2 reaches 113.5 (hits the 1.618 fib TP).
+    # Bars 3..24 are quiet filler so no further TP/SL touches occur.
+    fixture: list[tuple[float, float, float]] = [
+        (101.0, 99.0, 100.0),
+        (108.5, 99.5, 108.0),
+        (113.5, 100.0, 113.0),
+    ]
+    fixture.extend([(113.0, 100.0, 112.0)] * 22)
+
     rows = []
-    for i, (high, low, close) in enumerate(
-        [
-            (101.0, 99.0, 100.0),
-            (108.5, 99.5, 108.0),
-            (109.0, 100.0, 108.5),
-        ]
-    ):
+    for i, (high, low, close) in enumerate(fixture):
         rec = _feature_defaults()
         rec.update(
             {
@@ -58,17 +65,16 @@ def test_trade_dataset_uses_emitted_entry_tp_stop_and_adds_tp_sl_sidecar_labels(
         rows.append(rec)
     df = pd.DataFrame(rows)
 
-    trades = build_trade_dataset(df, max_hold_bars=2)
+    trades = build_trade_dataset(df)
 
-    # Combo expansion: 1 entry × N TP × N SL combos, minus neither-hit drops.
-    # Bullish fixture (high reaches 108.5 within 2 bars from entry=100) means
-    # the nearest TP families hit; the farthest (tp_ratio=1.618) drops in the
-    # 2-bar window. Resolved rows must be > 1 and contain the discoverables.
-    assert len(trades) > 1, "combo expansion should produce multiple rows per entry"
+    # Combo expansion: 1 entry × #SL × #TP combos. Under the 24-bar contract,
+    # all combos for an admitted entry become rows (neither-hit are labeled 0,
+    # not dropped). This bullish fixture is constructed so every TP family
+    # touches within 24 bars and no SL is breached, giving the full grid.
     n_tp = len(DISCOVERABLE_TP_RATIOS)
     n_sl = len(DISCOVERABLE_SL_ATR_MULTS)
-    assert len(trades) <= n_tp * n_sl, (
-        f"trades ({len(trades)}) exceeds full TP×SL grid ({n_tp * n_sl})"
+    assert len(trades) == n_tp * n_sl, (
+        f"trades ({len(trades)}) should equal full TP×SL grid ({n_tp * n_sl})"
     )
 
     # All discoverable features present as columns

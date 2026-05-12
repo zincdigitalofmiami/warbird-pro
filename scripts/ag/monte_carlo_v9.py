@@ -56,12 +56,10 @@ IS_END = pd.Timestamp("2024-12-31T23:59:59", tz="UTC")
 # Trade dataset semantics (3 TP × 3 SL grid, touch-event labels, same-bar
 # collision = pessimistic loss) are defined in
 # scripts.ag.train_v9_locked.build_trade_dataset — do not reimplement.
-def _build_trades(
-    df: pd.DataFrame, max_hold_bars: int
-) -> pd.DataFrame:
+def _build_trades(df: pd.DataFrame) -> pd.DataFrame:
     from scripts.ag.train_v9_locked import build_trade_dataset as build_locked_trade_dataset
 
-    trades = build_locked_trade_dataset(df, max_hold_bars=max_hold_bars)
+    trades = build_locked_trade_dataset(df)
     return trades.sort_values("ts").reset_index(drop=True)
 
 
@@ -337,7 +335,6 @@ def main() -> int:
     ap.add_argument("--split", choices=["is", "oos", "all"], default="oos")
     ap.add_argument("--n-paths", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument("--max-hold-bars", type=int, default=24)
     ap.add_argument("--sl-points", type=float, default=DEFAULT_SL_POINTS)
     ap.add_argument("--tp-points", type=float, default=DEFAULT_TP_POINTS)
     ap.add_argument("--output-dir", type=Path, default=None)
@@ -354,7 +351,7 @@ def main() -> int:
 
     print(f"loading {args.csv}", flush=True)
     df = pd.read_csv(args.csv, parse_dates=["ts"])
-    trades = _build_trades(df, max_hold_bars=args.max_hold_bars)
+    trades = _build_trades(df)
     trades["ts"] = pd.to_datetime(trades["ts"], utc=True)
     print(f"  total trades: {len(trades):,}  WR={trades[LABEL_COL].mean():.4f}", flush=True)
 

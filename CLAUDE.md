@@ -149,15 +149,18 @@ and trains AFTER Core lands.
 - All OpenMP families single-threaded; `OMP_NUM_THREADS=1` env guard at script top
 
 **Label (locked):** triple-barrier `winner_tp_before_sl`. Each entry expands
-into a 3×3 grid of (TP ratio × SL ATR multiple) combos: TP ratios
+into a 4×3 grid of (SL ATR multiple × TP ratio) combos: SL multiples
+{0.75, 1.0, 1.5, 2.0} multiply the entry-bar `ml_atr14`; TP ratios
 {1.000, 1.236, 1.618} are fib-ladder extensions scaled from Pine's per-row
-`ml_trade_tp`; SL multiples {1.0, 1.5, 2.0} multiply the entry-bar `ml_atr14`.
-For each combo row, label = `1` if THIS combo's TP price touches strictly
-before its SL price within `max_hold_bars` (24 = 6h on 15m, 2h on 5m), `0` if
-SL touches first OR if both touch on the same bar (pessimistic — intrabar
-sequencing unobservable). Rows where neither barrier resolves within the
-window are DROPPED (not relabeled as loss). Combo identifiers
-(`sl_atr_mult`, `tp_ratio`, `tp_family_code`, `target_distance_points`,
+`ml_trade_tp`. For each combo row, label = `1` if THIS combo's TP price
+touches strictly before its SL price within `FORWARD_SCAN_BARS = 24`
+(6h on 15m, 2h on 5m); `0` if SL touches first OR both touch on the same
+bar (pessimistic — intrabar sequencing unobservable) OR neither barrier
+touches within the 24-bar window (sideways → avoid). Entries closer than
+`MIN_FUTURE_BARS = 24` bars to end-of-data are DROPPED. The train/val/test
+split uses `EMBARGO_BARS = 25` (= FORWARD_SCAN_BARS + 1), enforced by
+`scripts/duckdb_local/cpcv.py`. Combo identifiers (`sl_atr_mult`,
+`tp_ratio`, `tp_family_code`, `target_distance_points`,
 `stop_distance_points`, `rr_ratio`) ride with each row in `MODEL_FEATURES`
 so the classifier conditions on combo, not on average win rate across
 combos.
@@ -224,11 +227,17 @@ Entry-filter HPO may search only +/-10 around those MA lengths: `lengthMA`
 90-110 and `lengthEMA` 40-60. The live Pine gate is fixed SMA(close) slow vs
 EMA(close) fast.
 
-### Kirk's Exit Preferences (GOAL — actively rewarded in objective)
+### Kirk's Exit Preferences (operator-stated targets — not in training objective)
 
-- **Target SL:** 1.0 ATR. **Max SL:** 2.0 ATR. `stopAtrMult` range: (0.75, 2.0).
-- **Target breakeven:** 1–3R. `targetRiskMultiple` range: (1.0, 3.0).
-- `target_hit_rate` (trades exiting at TARGET) carries 0.14 weight in objective.
+- **Target SL:** 1.0 ATR. **Max SL:** 2.0 ATR. The discoverable SL grid
+  `DISCOVERABLE_SL_ATR_MULTS = (0.75, 1.0, 1.5, 2.0)` brackets this range.
+- **Target breakeven:** 1–3R. The trainer's discoverable TP grid uses fib
+  extensions `DISCOVERABLE_TP_RATIOS = (1.000, 1.236, 1.618)` (not fixed
+  R-multiples); per-row `rr_ratio` is in `MODEL_FEATURES` so AG can condition
+  on the realized R per combo.
+- Training objective is `eval_metric='log_loss'` on `winner_tp_before_sl`
+  with isotonic calibration. No composite or weighted metric — the legacy
+  `target_hit_rate` 0.14-weight objective from the Optuna era is retired.
 
 ## Locked Rules
 

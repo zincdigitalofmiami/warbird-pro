@@ -22,7 +22,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.ag.train_v9_locked import LABEL_COL, ML_FEATURES, build_trade_dataset
+from scripts.ag.train_v9_locked import (
+    EMBARGO_BARS,
+    FORWARD_SCAN_BARS,
+    LABEL_COL,
+    MIN_FUTURE_BARS,
+    ML_FEATURES,
+    build_trade_dataset,
+)
 
 COUNT_COLUMNS = [
     # cross-asset (DXY removed 2026-05-11; 6E momentum z-score is the
@@ -61,7 +68,7 @@ def finite_bad_columns(df: pd.DataFrame, cols: list[str]) -> list[str]:
     return bad
 
 
-def build_report(csv_path: Path, manifest_path: Path, max_hold_bars: int) -> dict[str, Any]:
+def build_report(csv_path: Path, manifest_path: Path) -> dict[str, Any]:
     df = pd.read_csv(csv_path, parse_dates=["ts"])
     manifest = json.loads(manifest_path.read_text())
 
@@ -79,7 +86,7 @@ def build_report(csv_path: Path, manifest_path: Path, max_hold_bars: int) -> dic
     if bad_inf:
         raise RuntimeError(f"Smoke CSV has +/-inf in feature columns: {bad_inf}")
 
-    trades = build_trade_dataset(df, max_hold_bars=max_hold_bars)
+    trades = build_trade_dataset(df)
     if len(trades) == 0:
         raise RuntimeError("Smoke CSV produced zero resolved trades")
 
@@ -108,7 +115,9 @@ def build_report(csv_path: Path, manifest_path: Path, max_hold_bars: int) -> dic
         "loss_count": int((1 - trades[LABEL_COL]).sum()),
         "label_counts": label_counts,
         "winner_rate": float(trades[LABEL_COL].mean()),
-        "max_hold_bars": int(max_hold_bars),
+        "forward_scan_bars": FORWARD_SCAN_BARS,
+        "min_future_bars": MIN_FUTURE_BARS,
+        "embargo_bars": EMBARGO_BARS,
         "feature_count_locked": int(len(ML_FEATURES)),
         "missing_features": missing_features,
         "stale_columns": stale_columns,
@@ -122,7 +131,6 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Report exact V9 Core smoke metrics")
     ap.add_argument("--csv", type=Path, required=True)
     ap.add_argument("--manifest", type=Path, required=True)
-    ap.add_argument("--max-hold-bars", type=int, default=24)
     ap.add_argument("--out-json", type=Path, default=None)
     args = ap.parse_args()
 
@@ -131,7 +139,7 @@ def main() -> int:
     if not args.manifest.exists():
         raise SystemExit(f"Manifest not found: {args.manifest}")
 
-    report = build_report(args.csv, args.manifest, args.max_hold_bars)
+    report = build_report(args.csv, args.manifest)
     payload = json.dumps(report, indent=2, sort_keys=True)
     print(payload)
     if args.out_json:

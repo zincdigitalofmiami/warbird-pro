@@ -516,15 +516,18 @@ fixed SMA(close) slow vs EMA(close) fast; do not reintroduce MA type selection.
   (CPI/NFP/PPI=13:30 UTC, FOMC=19:00/18:00 UTC seasonal) + Pine input
   knobs (43 of them, e.g. `knob_fib_deviation_manual`, `knob_length_ma`).
 - **Label (triple barrier):** `winner_tp_before_sl` = 1 if **this combo's**
-  TP price touched before its SL price within `max_hold_bars` (24 bars =
-  6h on 15m, 2h on 5m); 0 if SL touched first OR if TP and SL touched on
+  TP price touched before its SL price within `FORWARD_SCAN_BARS = 24`
+  (6h on 15m, 2h on 5m); 0 if SL touched first OR if TP and SL touched on
   the same bar (pessimistic same-bar policy — intrabar sequencing is
-  unobservable). Rows where neither barrier resolves within the window
-  are DROPPED, not relabeled. TP price is derived from the 3-TP fib
-  ladder (1.000, 1.236, 1.618) scaled from Pine's per-row `ml_trade_tp`
-  via `_tp_price_from_ratio`; SL price is `entry ± ml_atr14 × sl_mult`.
-- **Discoverable trade grid:** Each entry candidate expands into 9 rows —
-  3 TP ratios {1.000, 1.236, 1.618} × 3 SL ATR multiples {1.0, 1.5, 2.0}.
+  unobservable) OR neither barrier touches within the 24-bar window
+  (sideways → avoid). Entries closer than `MIN_FUTURE_BARS = 24` bars to
+  end-of-data are DROPPED. TP price is derived from the 3-TP fib ladder
+  (1.000, 1.236, 1.618) scaled from Pine's per-row `ml_trade_tp` via
+  `_tp_price_from_ratio`; SL price is `entry ± ml_atr14 × sl_mult`. The
+  split embargo is `EMBARGO_BARS = 25`.
+- **Discoverable trade grid:** Each admitted entry expands into 12 rows —
+  4 SL ATR multiples {0.75, 1.0, 1.5, 2.0} × 3 TP ratios
+  {1.000, 1.236, 1.618}.
   Each row carries its own (`sl_atr_mult`, `tp_ratio`, `tp_family_code`,
   `target_distance_points`, `stop_distance_points`, `rr_ratio`) plus
   the resolution label. The classifier learns from the entire grid so
@@ -536,11 +539,16 @@ fixed SMA(close) slow vs EMA(close) fast; do not reintroduce MA type selection.
   collisions both auxiliary flags are 1 even though `winner_tp_before_sl=0`.
   Trained separately under `--model-suite` for the downstream EV layer.
 
-### Kirk's Trade Preferences
+### Kirk's Trade Preferences (operator targets — not in training objective)
 
 - **Target move:** 10 ES points (40 ticks, $500/contract).
-- **Target SL:** 1.0 ATR. **Max SL:** 2.0 ATR. `stopAtrMult` range (0.75, 2.0).
-- **Target breakeven range:** 1–3R. `targetRiskMultiple` range (1.0, 3.0).
+- **Target SL:** 1.0 ATR. **Max SL:** 2.0 ATR. The discoverable SL grid
+  `DISCOVERABLE_SL_ATR_MULTS = (0.75, 1.0, 1.5, 2.0)` brackets this range.
+- **Target breakeven range:** 1–3R. The trainer uses fib-extension TPs
+  `DISCOVERABLE_TP_RATIOS = (1.000, 1.236, 1.618)` rather than fixed
+  R-multiples; per-row `rr_ratio` is a model feature so AG can condition
+  on the realized R per combo. No composite objective — the legacy
+  Optuna-era `target_hit_rate` 0.14-weight metric is retired.
 - **Inference threshold:** `proba > 0.75` for Grade A+ entries.
   `eval_metric='log_loss'` + `calibrate=True` ensures the threshold = real WR.
 - **Session filter:** feature only (`ml_session_ny/london/asia`,
