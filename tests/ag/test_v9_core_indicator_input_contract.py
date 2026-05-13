@@ -57,12 +57,6 @@ REQUIRED_FEATURES = {
     # `ml_trade_tp` retired 2026-05-12 — Pine emits the fib ladder via
     # ml_trade_tp1/2/3 which are label-construction inputs (not ML_FEATURES).
     "ml_fib_touch_level_code",
-    "ml_fib_touch_500_long",
-    "ml_fib_touch_618_long",
-    "ml_fib_touch_786_long",
-    "ml_fib_touch_500_short",
-    "ml_fib_touch_618_short",
-    "ml_fib_touch_786_short",
     "ml_fib_entry_dist_atr",
     "ml_fib_pierce_atr",
     "ml_fib_close_reclaim_atr",
@@ -80,9 +74,42 @@ REQUIRED_FEATURES = {
     # DXY (Yahoo) removed 2026-05-11; 6E (Databento CME) replaces.
     "ml_xa_6e_code",
     "ml_xa_nq_rel_strength_atr",
-    "ml_xa_zn_rate_pressure",
-    "ml_xa_hg_growth_proxy",
     "ml_xa_6e_momentum_zscore",
+}
+
+
+LEAN_CUT_KEEPERS = {
+    "ml_xa_long_agreement",
+    "ml_xa_short_agreement",
+}
+
+
+LEAN_CUT_DROPS_MUST_BE_ABSENT = {
+    "ml_lvl_pdh_dist_atr",
+    "ml_lvl_pdl_dist_atr",
+    "ml_lvl_pwh_dist_atr",
+    "ml_lvl_pwl_dist_atr",
+    "ml_fib_touch_500_long",
+    "ml_fib_touch_618_long",
+    "ml_fib_touch_786_long",
+    "ml_fib_touch_500_short",
+    "ml_fib_touch_618_short",
+    "ml_fib_touch_786_short",
+    "ml_fp_delta_pct",
+    "ml_fp_poc_dist_atr",
+    "ml_fp_va_position",
+    "ml_delta_imbalance_pct",
+    "ml_delta_acceleration",
+    "ml_aggressor_pulse",
+    "ml_absorption_candidate",
+    "ml_flush_candidate",
+    "ml_poc_shift",
+    "ml_cvd_div_bull",
+    "ml_cvd_div_bear",
+    "ml_xa_zn_code",
+    "ml_xa_zn_rate_pressure",
+    "ml_xa_vix_pressure",
+    "ml_xa_hg_growth_proxy",
 }
 
 
@@ -96,6 +123,24 @@ def test_entry_fib_liquidity_symbol_context_is_in_ag_features():
 
 def test_trade_discoverables_are_in_model_feature_surface():
     assert set(TRADE_DISCOVERABLE_FEATURES).issubset(set(MODEL_FEATURES))
+
+
+def test_v9_feature_surface_counts_are_locked():
+    assert len(ML_FEATURES) == 82
+    assert len(MODEL_FEATURES) == 88
+
+
+def test_lean_cut_keeper_agreement_features_are_present():
+    assert LEAN_CUT_KEEPERS.issubset(set(ML_FEATURES))
+
+
+def test_lean_cut_dropped_features_absent_from_ml_features():
+    assert not (set(ML_FEATURES) & LEAN_CUT_DROPS_MUST_BE_ABSENT)
+
+
+def test_ml_features_do_not_intersect_dropped_feature_constant():
+    dropped = set(core.DROPPED_FEATURES_2026_05_12)
+    assert not (set(ML_FEATURES) & dropped)
 
 
 def test_manifest_declares_indicator_knobs_and_feature_columns():

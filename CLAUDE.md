@@ -220,27 +220,36 @@ Smoke verification evidence is recorded in
 `docs/audits/2026-05-10-v9-core-smoke-verification.md`; use
 `scripts/ag/report_v9_core_smoke.py` for exact reproducible metrics.
 
-### Live Pine Settings (Canonical — read TV inputs panel, not Pine code defaults)
+### Live Pine Settings (Canonical — verified 2026-05-13 via CDP read of Optuna layout)
 
 | Input | Live Value |
 |-------|-----------|
 | ZigZag Deviation | **3.0** |
 | ZigZag Depth | **10** |
-| ZigZag Threshold Floor % | **0.15** |
-| Confluence Tolerance % | **0.05** |
+| ZigZag Threshold Floor % | **0.25** |
+| HTF Confluence Tolerance % | **1.5** |
+| HTF 1H Lookback (bars) | **8** |
 | Min Fib Range ATR | **0.5** |
 | Midpoint Hysteresis % | **2.0** |
-| Use EMA/MA Gate | **true** |
-| MA Length (SMA, slow) | **50** |
-| EMA Length (close, fast) | **21** |
+| Primary EMA Length | **21** |
+| Primary EMA Source | **close** |
+| Primary EMA Offset | **1** |
+| Smoothing Type | **EMA** |
+| Smoothing Length | **9** |
 
-`build_v9_dataset.py` must match these exactly. The contamination incident
+Pine source defaults match this table exactly as of 2026-05-13. The MA section
+was rewritten 2026-05-13 to the TradingView built-in "Moving Average
+Exponential" pattern: primary EMA + optional smoothing MA over the EMA. The
+prior `fast EMA(21) > slow SMA(50)` cross-of-MAs gate is retired; the new
+gate is `close > out and close > smoothingMA` (bull) / opposite (bear) —
+"price above/below BOTH MAs." The `useMaGate` toggle is also retired; the
+gate is always evaluated. The `lengthMA` 40-60 / `lengthEMA` 11-31 HPO
+ranges referenced in earlier docs no longer apply — the search surface is
+now `len` (primary EMA) and `maLengthInput` (smoothing length).
+
+`build_v9_dataset.py` must match the table above. The contamination incident
 (2026-05-05) used dev=4.0, depth=20, floor=0.50 — all wrong. Always verify
 live TV settings before building a new dataset.
-
-Entry-filter HPO may search only +/-10 around those MA lengths: `lengthMA`
-40-60 and `lengthEMA` 11-31. The live Pine gate is fixed SMA(close) slow vs
-EMA(close) fast.
 
 ### Kirk's Exit Preferences (operator-stated targets — not in training objective)
 

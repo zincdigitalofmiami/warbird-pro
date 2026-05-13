@@ -4,7 +4,7 @@
 // Warbird Pro V9 — Fib Anchor + Liquidity + Patterns + Cross-Asset + Footprint
 // Source ownership:
 // - Fib engine/ladder math: Indicator A (PROTECTED — anchor ownership, ZigZag, ratios)
-// - MA gate: fast EMA(close) above slow SMA(close) = bull
+// - MA gate: price above BOTH primary EMA and smoothing MA = bull; below both = bear
 // - RSI context + curated candlestick patterns from real backtest performance
 //
 // Design contract:
@@ -14,8 +14,8 @@
 //   plumbing with the same widths, styles, label sizes, and label offsets
 // - Liquidity is its own first-class package: BSL/SSL sweep+reclaim,
 //   equal-highs/lows pools, session VWAP context, volume z-score
-// - Cross-asset: NQ/ZN/6E trend codes + VIX movement pressure + ES↔NQ rolling
-//   correlation (6E replaces DXY as USD-pressure proxy 2026-05-11)
+// - Cross-asset: NQ + 6E trend codes + ES↔NQ rolling correlation
+//   (6E replaces DXY as USD-pressure proxy 2026-05-11; ZN and VIX removed 2026-05-13)
 // - Daily/weekly S/R: PDH/PDL/PWH/PWL distance features + thin lines
 // - Footprint: real intrabar bid/ask delta + POC distance + VA position
 // - Unified entry: trigger fires only when trade engine actually opens a trade
@@ -36,7 +36,7 @@ string groupFibEngine = "Fib Structure"
 bool autoTuneZZ = input.bool(false, "Auto-tune ZigZag by Timeframe", group=groupFibEngine)
 float fibDeviationManual = input.float(3.0, "ZigZag Deviation (manual)", minval=0.5, maxval=20.0, step=0.5, group=groupFibEngine)
 int fibDepthManual = input.int(10, "ZigZag Depth (manual)", minval=2, maxval=80, group=groupFibEngine)
-float fibThresholdFloorPct = input.float(0.15, "ZigZag Threshold Floor (%)", minval=0.0, maxval=5.0, step=0.05, group=groupFibEngine)
+float fibThresholdFloorPct = input.float(0.25, "ZigZag Threshold Floor (%)", minval=0.0, maxval=5.0, step=0.05, group=groupFibEngine)
 float minFibRangeAtr = input.float(0.5, "Min Fib Range (ATR)", minval=0.2, maxval=10.0, step=0.1, group=groupFibEngine)
 float fibHysteresisPct = input.float(2.0, "Midpoint Hysteresis (%)", minval=0.1, maxval=10.0, step=0.1, group=groupFibEngine)
 
@@ -85,7 +85,7 @@ bool usePatternConfirm = input.bool(false, "Require Candlestick Pattern", group=
 
 string groupEntryFilters = "Entry Filters"
 bool useLiqGate = input.bool(true, "Require Recent Liquidity Event", group=groupEntryFilters)
-int liqRecencyBars = input.int(8, "Liquidity Recency (bars)", minval=1, maxval=50, group=groupEntryFilters)
+int liqRecencyBars = input.int(1, "Liquidity Recency (bars)", minval=1, maxval=50, group=groupEntryFilters)
 
 string groupExecution = "Trade Management"
 // Combo selectors match AG trade-surface discoverables (locked 2026-05-11):
@@ -105,64 +105,78 @@ string tpRatioMode = input.string("Auto", "TP Ratio (combo)", options=["Auto", "
 string slMultMode = input.string("Auto", "SL ATR Mult (combo)", options=["Auto", "1.0", "1.5", "2.0"], group=groupExecution)
 float tradeTpRatio = tpRatioMode == "1.000" ? 1.000 : tpRatioMode == "1.618" ? 1.618 : 1.236
 float tradeStopAtrMult = slMultMode == "1.0" ? 1.0 : slMultMode == "2.0" ? 2.0 : 1.5
-// Locked at 24 bars to mirror the trainer's FORWARD_SCAN_BARS contract
-// (ES 15m entry-precision, 2026-05-12). Previously an operator-toggleable
-// input (default 72); removed so live trades resolve under the same 24-bar
-// time horizon the entry classifier is trained on. Live chart and model
-// now answer the same trade-duration question.
-int tradeMaxHoldBars = 24
+int tradeMaxHoldBars = input.int(10, "Max Hold (bars)", minval=0, maxval=500, group=groupExecution)
 
 //=====================
-// EMA/MA CROSSOVER (Source B — fast EMA(close) above slow SMA(close) = bull)
+// Moving Average Exponential — pasted verbatim from TradingView built-in.
+// Two extra lines at the bottom define the gate (price above/below both MAs).
 //=====================
-string groupMa = "EMA/MA Crossover"
-bool useMaGate = input.bool(true, "Use EMA/MA Gate", group=groupMa)
-int lengthMA = input.int(100, "MA Length (SMA, slow)", minval=1, maxval=500, group=groupMa)
-int lengthEMA = input.int(50, "EMA Length (close, fast)", minval=1, maxval=500, group=groupMa)
-bool showMaLines = input.bool(true, "Show EMA/MA Lines", group=groupMa)
-color maColorInput = input.color(color.white, "MA Color", inline="ma_color", group=groupMa)
-int maWidthInput = input.int(2, "", minval=1, maxval=5, inline="ma_color", group=groupMa)
-color emaColorInput = input.color(#0A7884, "EMA Color", inline="ema_color", group=groupMa)
-int emaWidthInput = input.int(2, "", minval=1, maxval=5, inline="ema_color", group=groupMa)
+len = input.int(21, minval=1, title="Length")
+src = input(close, title="Source")
+offset = input.int(title="Offset", defval=1, minval=-500, maxval=500, display = display.none)
+out = ta.ema(src, len)
+plot(out, title="EMA", color=color.white, linewidth=2, offset=offset)
+
+// Smoothing MA inputs
+GRP = "Smoothing"
+TT_BB = "Only applies when 'SMA + Bollinger Bands' is selected. Determines the distance between the SMA and the bands."
+maTypeInput = input.string("EMA", "Type", options = ["None", "SMA", "SMA + Bollinger Bands", "EMA", "SMMA (RMA)", "WMA", "VWMA"], group = GRP, display = display.none)
+var isBB = maTypeInput == "SMA + Bollinger Bands"
+maLengthInput = input.int(9, "Length", group = GRP, display = display.none, active = maTypeInput != "None")
+bbMultInput = input.float(2.0, "BB StdDev", minval = 0.001, maxval = 50, step = 0.5, tooltip = TT_BB, group = GRP, display = display.none, active = isBB)
+var enableMA = maTypeInput != "None"
+
+// Smoothing MA Calculation
+ma(source, length, MAtype) =>
+	switch MAtype
+		"SMA"                   => ta.sma(source, length)
+		"SMA + Bollinger Bands" => ta.sma(source, length)
+		"EMA"                   => ta.ema(source, length)
+		"SMMA (RMA)"            => ta.rma(source, length)
+		"WMA"                   => ta.wma(source, length)
+		"VWMA"                  => ta.vwma(source, length)
+
+// Smoothing MA plots
+smoothingMA = enableMA ? ma(out, maLengthInput, maTypeInput) : na
+smoothingStDev = isBB ? ta.stdev(out, maLengthInput) * bbMultInput : na
+plot(smoothingMA, "EMA-based MA", color=#26A69A, linewidth=2, display = enableMA ? display.all : display.none, editable = enableMA)
+bbUpperBand = plot(smoothingMA + smoothingStDev, title = "Upper Bollinger Band", color=color.green, display = isBB ? display.all : display.none, editable = isBB)
+bbLowerBand = plot(smoothingMA - smoothingStDev, title = "Lower Bollinger Band", color=color.green, display = isBB ? display.all : display.none, editable = isBB)
+fill(bbUpperBand, bbLowerBand, color= isBB ? color.new(color.green, 90) : na, title="Bollinger Bands Background Fill", display = isBB ? display.all : display.none, editable = isBB)
+
+// Gate: price above OR below BOTH MAs.
+bool maBull = close > out and close > smoothingMA
+bool maBear = close < out and close < smoothingMA
 
 //=====================
 // RSI CONTEXT (Source C)
 //=====================
 string groupRsi = "RSI Context"
-int rsiLength = input.int(14, "RSI Length", minval=1, group=groupRsi)
-float rsiOverbought = input.float(75.0, "Bearish Extreme Above", minval=50.0, maxval=100.0, step=0.1, group=groupRsi)
-float rsiOversold = input.float(25.0, "Bullish Extreme Below", minval=0.0, maxval=50.0, step=0.1, group=groupRsi)
+int rsiLength = input.int(11, "RSI Length", minval=1, group=groupRsi)
+float rsiOverbought = input.float(80.0, "Bearish Extreme Above", minval=50.0, maxval=100.0, step=0.1, group=groupRsi)
+float rsiOversold = input.float(20.0, "Bullish Extreme Below", minval=0.0, maxval=50.0, step=0.1, group=groupRsi)
 
 //=====================
 // LIQUIDITY PACKAGE
 //=====================
 string groupLiq = "Liquidity & VWAP"
-int liqLookbackBars = input.int(20, "BSL/SSL Pool Lookback", minval=5, maxval=200, group=groupLiq)
+int liqLookbackBars = input.int(10, "BSL/SSL Pool Lookback", minval=5, maxval=200, group=groupLiq)
 int eqhTolPct = input.int(5, "Equal H/L Tolerance (1/100 of ATR)", minval=1, maxval=50, group=groupLiq)
 int eqhMinTaps = input.int(2, "Equal H/L Min Taps", minval=2, maxval=10, group=groupLiq)
-int eqhLookback = input.int(100, "Equal H/L Lookback Bars", minval=20, maxval=500, group=groupLiq)
-int volZLength = input.int(20, "Volume Z-Score Length", minval=5, maxval=100, group=groupLiq)
+int eqhLookback = input.int(50, "Equal H/L Lookback Bars", minval=20, maxval=500, group=groupLiq)
+int volZLength = input.int(10, "Volume Z-Score Length", minval=5, maxval=100, group=groupLiq)
 bool useSessionVwap = input.bool(true, "Enable Session VWAP Feature", group=groupLiq)
 
 //=====================
 // CROSS-ASSET PACKAGE
 //=====================
 string groupXa = "Cross-Asset Context"
-bool useXaGate = input.bool(true, "Use NQ/ZN/6E/VIX Entry Gate", group=groupXa)
-string xaTrendTimeframe = input.timeframe("5", "Trend Timeframe", group=groupXa)
+bool useXaGate = input.bool(true, "Use NQ/6E Entry Gate", group=groupXa)
+string xaTrendTimeframe = input.timeframe("15", "Trend Timeframe", group=groupXa)
 string nqSymbol = input.symbol("CME_MINI:NQ1!", "NQ Symbol", group=groupXa)
-string znSymbol = input.symbol("CBOT:ZN1!", "ZN Symbol", group=groupXa)
 string eurUsdSymbol = input.symbol("CME:6E1!", "6E Symbol (EUR/USD — replaces DXY)", group=groupXa)
-string vixSymbol = input.symbol("CBOE:VIX", "VIX Symbol", group=groupXa)
-int corrLength = input.int(20, "MES-NQ Correlation Length", minval=5, maxval=200, group=groupXa)
-int vixMoveBars = input.int(3, "VIX Movement Bars", minval=1, maxval=50, group=groupXa)
-int vixAtrLength = input.int(14, "VIX ATR Length", minval=1, maxval=100, group=groupXa)
-float vixPressureBand = input.float(0.35, "VIX Movement Neutral Band", minval=0.0, maxval=5.0, step=0.05, group=groupXa)
-int xaMinAgreement = input.int(3, "Minimum Agreement (of 4)", minval=1, maxval=4, group=groupXa)
-// ZN direction was previously an operator-toggleable input (`znGateDirection`,
-// "Same Direction" vs "Inverse"). Removed 2026-05-12 per Kirk's directive —
-// the ZN trend code now feeds raw into xa agreement, and AG learns the
-// direction relationship from ml_xa_zn_code instead of being told via a knob.
+int corrLength = input.int(5, "MES-NQ Correlation Length", minval=5, maxval=200, group=groupXa)
+int xaMinAgreement = input.int(2, "Minimum Agreement (of 2)", minval=1, maxval=2, group=groupXa)
 
 //=====================
 // DAILY/WEEKLY S/R LEVELS
@@ -183,20 +197,13 @@ bool useFootprint = input.bool(true, "Enable Footprint Features", group=groupFp)
 int fpTicksPerRow = input.int(4, "Ticks Per Row", minval=1, maxval=100, group=groupFp)
 float fpVaPct = input.float(70.0, "Value Area %", minval=50.0, maxval=95.0, step=1.0, group=groupFp)
 float fpImbalancePct = input.float(300.0, "Imbalance %", minval=100.0, maxval=1000.0, step=10.0, group=groupFp)
-float fpAbsorptionDeltaPct = input.float(35.0, "Absorption Delta %", minval=5.0, maxval=100.0, step=1.0, group=groupFp)
-float fpFlushDeltaPct = input.float(35.0, "Flush Delta %", minval=5.0, maxval=100.0, step=1.0, group=groupFp)
+float fpAbsorptionDeltaPct = input.float(20.0, "Absorption Delta %", minval=5.0, maxval=100.0, step=1.0, group=groupFp)
+float fpFlushDeltaPct = input.float(20.0, "Flush Delta %", minval=5.0, maxval=100.0, step=1.0, group=groupFp)
 float fpEventVolSpike = input.float(1.50, "Event Volume Spike", minval=0.50, maxval=10.0, step=0.10, group=groupFp)
 float fpCompressedRangeAtr = input.float(0.75, "Compressed Range ATR", minval=0.10, maxval=5.0, step=0.05, group=groupFp)
 
-//=====================
-// FOMC EVENT DATES (heads-up only — no plot budget)
-//=====================
-string groupFomc = "FOMC Events"
-bool showFomcLabels = input.bool(true, "Show FOMC Labels", group=groupFomc)
-string fomcDates = input.text_area("2026-01-28 19:00\n2026-03-18 18:00\n2026-04-29 18:00\n2026-06-17 18:00\n2026-07-29 18:00\n2026-09-16 18:00\n2026-10-28 18:00\n2026-12-09 19:00", "FOMC Dates (UTC, YYYY-MM-DD HH:MM)", group=groupFomc)
-
 string groupTable = "Table"
-bool showMlTable = input.bool(true, "Show ML Table", group=groupTable)
+bool showMlTable = input.bool(false, "Show ML Table", group=groupTable)
 string tablePositionInput = input.string("Bottom Left", "Table Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=groupTable)
 string tableTextSizeInput = input.string("Small", "Table Text Size", options=["Tiny", "Small", "Large"], group=groupTable)
 
@@ -210,37 +217,37 @@ bool useConfluenceAnchorSpan = input.bool(true, "Anchor Span = Active Fib Window
 color fibAnchorColorInput = input.color(COLOR_ANCHOR, "Anchor Fib", inline="fib_anchor", group=groupViz)
 int fibAnchorWidthInput = input.int(WIDTH_ANCHOR, "", minval=1, maxval=5, inline="fib_anchor", group=groupViz)
 string fibAnchorStyle = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_anchor", group=groupViz)
-color fibStopColorInput = input.color(COLOR_STOP, "Neg .236 / SL", inline="fib_stop", group=groupViz)
+color fibStopColorInput = input.color(COLOR_ANCHOR, "Neg .236 / SL", inline="fib_stop", group=groupViz)
 int fibStopWidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_stop", group=groupViz)
 string fibStopStyle = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_stop", group=groupViz)
 color fibRetracementColorInput = input.color(COLOR_RETRACEMENT, ".236/.786/Waypoints", inline="fib_retrace", group=groupViz)
 int fibRetracementWidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_retrace", group=groupViz)
 string fibRetraceStyle = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_retrace", group=groupViz)
-color fibRetracementAccentColorInput = input.color(COLOR_RETRACEMENT_ACCENT, ".382/.618", inline="fib_accent", group=groupViz)
+color fibRetracementAccentColorInput = input.color(COLOR_ANCHOR, ".382/.618", inline="fib_accent", group=groupViz)
 int fibRetracementAccentWidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_accent", group=groupViz)
 string fibAccentStyle = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_accent", group=groupViz)
 color fib500ColorInput = input.color(COLOR_ANCHOR, ".500", inline="fib_500", group=groupViz)
 int fib500WidthInput = input.int(WIDTH_PIVOT, "", minval=1, maxval=5, inline="fib_500", group=groupViz)
 string fib500Style = input.string("Dashed", "", options=["Solid", "Dashed", "Dotted"], inline="fib_500", group=groupViz)
-color fib618ColorInput = input.color(COLOR_RETRACEMENT_ACCENT, ".618", inline="fib_618", group=groupViz)
+color fib618ColorInput = input.color(COLOR_ANCHOR, ".618", inline="fib_618", group=groupViz)
 int fib618WidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_618", group=groupViz)
 string fib618Style = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_618", group=groupViz)
-color fib786ColorInput = input.color(COLOR_RETRACEMENT, ".786", inline="fib_786", group=groupViz)
+color fib786ColorInput = input.color(#0097A7, ".786", inline="fib_786", group=groupViz)
 int fib786WidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_786", group=groupViz)
-string fib786Style = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_786", group=groupViz)
+string fib786Style = input.string("Dotted", "", options=["Solid", "Dashed", "Dotted"], inline="fib_786", group=groupViz)
 color fibOneColorInput = input.color(COLOR_ANCHOR, "1.000", inline="fib_1000", group=groupViz)
 int fibOneWidthInput = input.int(WIDTH_ANCHOR, "", minval=1, maxval=5, inline="fib_1000", group=groupViz)
-string fibOneStyle = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_1000", group=groupViz)
+string fibOneStyle = input.string("Dotted", "", options=["Solid", "Dashed", "Dotted"], inline="fib_1000", group=groupViz)
 color fibPivotColorInput = input.color(COLOR_PIVOT, "Pivot Zone", inline="fib_pivot", group=groupViz)
 int fibPivotWidthInput = input.int(WIDTH_PIVOT, "", minval=1, maxval=5, inline="fib_pivot", group=groupViz)
 string fibPivotStyle = input.string("Dashed", "", options=["Solid", "Dashed", "Dotted"], inline="fib_pivot", group=groupViz)
-color fibTargetColorInput = input.color(color.new(COLOR_TARGET, 50), "Targets / TP", inline="fib_target", group=groupViz)
+color fibTargetColorInput = input.color(#E91E63, "Targets / TP", inline="fib_target", group=groupViz)
 int fibTargetWidthInput = input.int(WIDTH_TARGET, "", minval=1, maxval=5, inline="fib_target", group=groupViz)
-string fibTargetStyle = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_target", group=groupViz)
+string fibTargetStyle = input.string("Dotted", "", options=["Solid", "Dashed", "Dotted"], inline="fib_target", group=groupViz)
 bool showFibLevelLabelsInput = input.bool(true, "Show Fib Level Labels", group=groupViz)
 int fibLabelOffsetBarsInput = input.int(8, "Fib Label Offset (bars)", minval=0, maxval=30, group=groupViz)
-string fibLabelSizeInput = input.string("Small", "Fib Label Size", options=["Tiny", "Small", "Normal", "Large"], group=groupViz)
-int zoneFillTransparencyInput = input.int(80, "Zone Fill Alpha", minval=0, maxval=100, group=groupViz)
+string fibLabelSizeInput = input.string("Normal", "Fib Label Size", options=["Tiny", "Small", "Normal", "Large"], group=groupViz)
+int zoneFillTransparencyInput = input.int(75, "Zone Fill Alpha", minval=0, maxval=100, group=groupViz)
 
 //=====================
 // Helpers
@@ -277,29 +284,25 @@ float bodyRatio = barRange > 0 ? bodySize / barRange : 0.0
 //=====================
 // Candlestick patterns — curated from real backtest performance (return >= 0.5%)
 //=====================
-// Bullish — Rising Window
+// Bullish — Rising Window (gap up), Engulfing, Hammer, Marubozu White
 bool patRisingWindow  = bullishCandle and low > high[1]
+bool patBullEngulf    = bullishCandle and bearishCandle[1] and close > open[1] and open < close[1]
+bool patHammer        = bullishCandle and lowerWickRatio >= 0.60 and bodyRatio <= 0.30 and upperWickRatio <= 0.10
+bool patMarubozuWhite = bullishCandle and bodyRatio >= 0.85 and upperWickRatio <= 0.10 and lowerWickRatio <= 0.10
 
-// Bearish — Engulfing, Marubozu Black, Tweezer Top
+// Bearish — Engulfing, Marubozu Black, Tweezer Top, Falling Window (gap down)
 bool patBearEngulf    = bearishCandle and bullishCandle[1] and close < open[1] and open > close[1]
 bool patMarubozuBlack = bearishCandle and bodyRatio >= 0.85 and upperWickRatio <= 0.10 and lowerWickRatio <= 0.10
 bool patTweezerTop    = bearishCandle and math.abs(high - high[1]) <= atr14 * 0.05 and bullishCandle[1]
+bool patFallingWindow = bearishCandle and high < low[1]
 
-bool provenBullishPattern = patRisingWindow
-bool provenBearishPattern = patBearEngulf or patMarubozuBlack or patTweezerTop
+bool provenBullishPattern = patRisingWindow or patBullEngulf or patHammer or patMarubozuWhite
+bool provenBearishPattern = patBearEngulf or patMarubozuBlack or patTweezerTop or patFallingWindow
 
 //=====================
 // RSI context
 //=====================
 float finalRsi = ta.rsi(close, rsiLength)
-
-//=====================
-// EMA/MA crossover (fast EMA above slow SMA = bull)
-//=====================
-float xMA = ta.sma(close, lengthMA)
-float xEMA = ta.ema(close, lengthEMA)
-bool maBull = xEMA > xMA
-bool maBear = xEMA < xMA
 
 //=====================
 // ADX components (AG feature export)
@@ -308,24 +311,13 @@ int adxLength = 14
 [adxDiPlus, adxDiMinus, adxValue] = ta.dmi(adxLength, adxLength)
 
 //=====================
-// Cross-asset trend codes (NQ/ZN/6E — 6E replaces DXY 2026-05-11)
+// Cross-asset trend codes (NQ + 6E only; ZN and VIX removed 2026-05-13)
 //=====================
 [nqClose5, nqSlow5, nqFast5] = request.security(nqSymbol, xaTrendTimeframe, [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-[znClose5, znSlow5, znFast5] = request.security(znSymbol, xaTrendTimeframe, [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [eurUsdClose5, eurUsdSlow5, eurUsdFast5] = request.security(eurUsdSymbol, xaTrendTimeframe, [close, ta.sma(close, 21), ta.ema(close, 9)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
 int nqCode = f_xa_code(nqClose5, nqSlow5, nqFast5)
-int znCode = f_xa_code(znClose5, znSlow5, znFast5)
 int eurUsdCode = f_xa_code(eurUsdClose5, eurUsdSlow5, eurUsdFast5)
-
-//=====================
-// Cross-asset advanced — VIX movement pressure, ES↔NQ rolling correlation
-// (DXY divergence removed 2026-05-11; the ETL/AG side does not expose it.)
-//=====================
-[vixAtr, vixMove] = request.security(vixSymbol, xaTrendTimeframe, [ta.atr(vixAtrLength), close - close[vixMoveBars]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
-float vixPressure = vixAtr > 0 and not na(vixMove) ? vixMove / vixAtr : 0.0
-bool vixLongVote = vixPressure < -vixPressureBand
-bool vixShortVote = vixPressure > vixPressureBand
 
 float corrMesNq = ta.correlation(close, nqClose5, corrLength)
 
@@ -410,7 +402,8 @@ float volZscore = volSd > 0 ? (volume - volMean) / volSd : 0.0
 // HTF confluence
 //=====================
 float htfConfTolPct = input.float(1.5, "HTF Confluence Tolerance (%)", minval=0.1, maxval=10.0, step=0.1, group=groupFibEngine)
-[htf1hHigh, htf1hLow] = request.security(syminfo.tickerid, "60", [ta.highest(high, 55), ta.lowest(low, 55)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+int htf1hLookback = input.int(8, "HTF 1H Lookback (bars)", minval=2, maxval=60, group=groupFibEngine)
+[htf1hHigh, htf1hLow] = request.security(syminfo.tickerid, "60", [ta.highest(high, htf1hLookback), ta.lowest(low, htf1hLookback)], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [htfDHigh, htfDLow] = request.security(syminfo.tickerid, "D", [high[1], low[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 [htfMHigh, htfMLow] = request.security(syminfo.tickerid, "M", [high[1], low[1]], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
 
@@ -455,7 +448,6 @@ if useFootprint
         float val_ = na(valRow) ? na : valRow.down_price()
         fpVaPosition := not na(vah) and close > vah ? 1 : not na(val_) and close < val_ ? -1 : 0
 
-float fpDeltaImbalancePct = fpDeltaPct
 float fpDeltaAcceleration = fpDeltaVol - nz(fpDeltaVol[1])
 float fpDeltaVolSd = ta.stdev(fpDeltaVol, volZLength)
 float fpAggressorPulse = not na(fpDeltaVolSd) and fpDeltaVolSd > 0 ? fpDeltaVol / fpDeltaVolSd : 0.0
@@ -635,18 +627,13 @@ float entryLevel = touched786Long ? level786 : touched618Long ? level618 : touch
 
 bool longPatternOk = not usePatternConfirm or provenBullishPattern
 bool shortPatternOk = not usePatternConfirm or provenBearishPattern
-bool maLongOk = not useMaGate or maBull
-bool maShortOk = not useMaGate or maBear
+bool maLongOk = maBull
+bool maShortOk = maBear
 
-// ZN vote: raw direction only (znGateDirection toggle removed 2026-05-12).
-// AG is trusted to learn the regime-dependent ZN/ES relationship from the
-// ml_xa_zn_code feature.
-bool znLongVote = znCode > 0
-bool znShortVote = znCode < 0
-// 6E up = EUR strong vs USD = USD weakening = long-favorable (mirrors the old
-// dxyCode<0 vote). 6E down = USD strengthening = short-favorable.
-int xaLongAgreement = (nqCode > 0 ? 1 : 0) + (znLongVote ? 1 : 0) + (eurUsdCode > 0 ? 1 : 0) + (vixLongVote ? 1 : 0)
-int xaShortAgreement = (nqCode < 0 ? 1 : 0) + (znShortVote ? 1 : 0) + (eurUsdCode < 0 ? 1 : 0) + (vixShortVote ? 1 : 0)
+// 6E up = EUR strong vs USD = USD weakening = long-favorable.
+// 6E down = USD strengthening = short-favorable.
+int xaLongAgreement = (nqCode > 0 ? 1 : 0) + (eurUsdCode > 0 ? 1 : 0)
+int xaShortAgreement = (nqCode < 0 ? 1 : 0) + (eurUsdCode < 0 ? 1 : 0)
 bool xaLongOk = not useXaGate or xaLongAgreement >= xaMinAgreement
 bool xaShortOk = not useXaGate or xaShortAgreement >= xaMinAgreement
 bool recentLiqBull = not useLiqGate or (not na(barsSinceLiqBull) and barsSinceLiqBull < liqRecencyBars)
@@ -851,9 +838,6 @@ if barstate.islast
     _slLbl    := setFibLevelLabel(_slLbl,    tradeActive, tradeStopPrice,  _slLblText, fibStopColorInput)
     _tpLbl    := setFibLevelLabel(_tpLbl,    tradeActive, tradeTargetPrice,_tpLblText, fibTargetColorInput)
 
-plot(showMaLines ? xMA : na, title="MA (SMA, slow)", color=maColorInput, linewidth=maWidthInput, display=display.all)
-plot(showMaLines ? xEMA : na, title="EMA (close, fast)", color=emaColorInput, linewidth=emaWidthInput, display=display.all)
-
 //=====================
 // Status table — black bg, white body, dark gray dividers; headers unchanged
 //=====================
@@ -862,45 +846,6 @@ color TBL_BG_HEADER  = #FFFFFF
 color TBL_TEXT_BODY  = #FFFFFF
 color TBL_TEXT_HDR   = #000000
 color TBL_BORDER     = #333333
-
-//=====================
-// FOMC labels (parsed from input.text_area, rendered as floating labels — no plot budget)
-//=====================
-var array<int> fomcTimes = na
-var bool fomcParsed = false
-if barstate.isfirst and not fomcParsed
-    fomcTimes := array.new<int>()
-    string raw = fomcDates
-    int n = str.length(raw)
-    int start = 0
-    for i = 0 to n
-        bool atEnd = i == n
-        bool isNewline = atEnd ? false : str.substring(raw, i, i + 1) == "\n"
-        if atEnd or isNewline
-            string lineStr = str.substring(raw, start, i)
-            if str.length(lineStr) >= 16
-                int yr = int(math.round(str.tonumber(str.substring(lineStr, 0, 4))))
-                int mo = int(math.round(str.tonumber(str.substring(lineStr, 5, 7))))
-                int dy = int(math.round(str.tonumber(str.substring(lineStr, 8, 10))))
-                int hr = int(math.round(str.tonumber(str.substring(lineStr, 11, 13))))
-                int mn = int(math.round(str.tonumber(str.substring(lineStr, 14, 16))))
-                int t = timestamp("UTC", yr, mo, dy, hr, mn)
-                if not na(t)
-                    array.push(fomcTimes, t)
-            start := i + 1
-    fomcParsed := true
-
-bool isFomcBar = false
-if showFomcLabels and not na(fomcTimes) and array.size(fomcTimes) > 0
-    int barTime = time
-    int barTimeNext = time_close
-    for i = 0 to array.size(fomcTimes) - 1
-        int t = array.get(fomcTimes, i)
-        if t >= barTime and t < barTimeNext
-            isFomcBar := true
-
-if isFomcBar
-    label.new(bar_index, high + atr14 * 0.5, "FOMC", style=label.style_label_down, color=color.new(#FFC107, 0), textcolor=color.black, size=size.tiny)
 
 //=====================
 // D/W level horizontal lines (PDH/PDL/PWH/PWL)
@@ -967,18 +912,16 @@ string trend15Text = f_xa_label(tfTrend15Code)
 string trend60Text = f_xa_label(tfTrend60Code)
 string trend240Text = f_xa_label(tfTrend240Code)
 
-// XA rollup — single bull/bear summary across NQ/ZN/6E/VIX votes.
-// xaLongAgreement and xaShortAgreement are each 0..4. Net is -4..+4.
-// Mapped to the same 5-grade scale as f_xa_label for consistency.
+// XA rollup — single bull/bear summary across NQ + 6E votes.
+// xaLongAgreement and xaShortAgreement are each 0..2. Net is -2..+2.
+// Mapped to the 5-grade f_xa_label scale (2 = unanimous, 1 = single vote).
 int xaNet = xaLongAgreement - xaShortAgreement
-string xaText = xaNet >= 3 ? "VERY BULLISH" : xaNet >= 1 ? "BULLISH" : xaNet <= -3 ? "VERY BEARISH" : xaNet <= -1 ? "BEARISH" : "NEUTRAL"
+string xaText = xaNet >= 2 ? "VERY BULLISH" : xaNet >= 1 ? "BULLISH" : xaNet <= -2 ? "VERY BEARISH" : xaNet <= -1 ? "BEARISH" : "NEUTRAL"
 
-// XA Corr — how many of the 4 cross-assets are pushing in the same direction
-// as the dominant XA bias. When NEUTRAL (net=0), shows the larger side (e.g.
-// a 2/2 split renders as "2 / 4"). Uses raw ZN direction (znGateDirection
-// toggle removed 2026-05-12 — AG owns the direction relationship).
+// XA Corr — how many of the 2 cross-assets push in the dominant direction.
+// When NEUTRAL (net=0), shows the larger side (a 1/1 split renders "1 / 2").
 int xaCorrCount = xaNet > 0 ? xaLongAgreement : xaNet < 0 ? xaShortAgreement : math.max(xaLongAgreement, xaShortAgreement)
-string xaCorrText = str.tostring(xaCorrCount) + " / 4"
+string xaCorrText = str.tostring(xaCorrCount) + " / 2"
 
 // Volume Pressure rollup — uses footprint aggressor pulse (delta z-score)
 // when footprint is enabled, otherwise falls back to signed volume z-score
@@ -1030,7 +973,7 @@ if showMlTable and not na(mlTable) and barstate.islast
     f_cell_b(mlTable, 1, 13, winLossText)
     f_cell_b(mlTable, 0, 14, "PROFIT FACTOR")
     f_cell_b(mlTable, 1, 14, profitFactorText)
-    // ANALYTICS — rolled-up signals only (NQ/ZN/6E/VIX → XA, footprint → Volume Pressure)
+    // ANALYTICS — rolled-up signals only (NQ + 6E → XA, footprint → Volume Pressure)
     f_cell_h(mlTable, 0, 15, "ANALYTICS")
     f_cell_h(mlTable, 1, 15, "")
     f_cell_b(mlTable, 0, 16, "XA")
@@ -1062,19 +1005,23 @@ plot(breakInDir ? 1.0 : 0.0, "ml_break_in_dir", display=display.none, editable=f
 plot(finalRsi, "ml_rsi_value", display=display.none, editable=false)
 plot(rsiStanceBull ? 1.0 : rsiStanceBear ? -1.0 : 0.0, "ml_rsi_stance_code", display=display.none, editable=false)
 plot(maBull ? 1.0 : maBear ? -1.0 : 0.0, "ml_ma_bias", display=display.none, editable=false)
-plot(atr14 > 0 ? (close - xMA) / atr14 : 0.0, "ml_ma_slow_dist_atr", display=display.none, editable=false)
-plot(atr14 > 0 ? (close - xEMA) / atr14 : 0.0, "ml_ma_fast_dist_atr", display=display.none, editable=false)
+plot(atr14 > 0 and not na(smoothingMA) ? (close - smoothingMA) / atr14 : 0.0, "ml_ma_slow_dist_atr", display=display.none, editable=false)
+plot(atr14 > 0 ? (close - out) / atr14 : 0.0, "ml_ma_fast_dist_atr", display=display.none, editable=false)
 
 // ADX
 plot(adxValue, "ml_adx_value", display=display.none, editable=false)
 plot(adxDiPlus, "ml_adx_plus_di", display=display.none, editable=false)
 plot(adxDiMinus, "ml_adx_minus_di", display=display.none, editable=false)
 
-// candlestick patterns (curated 4 from real backtest performance)
+// candlestick patterns (4 bull + 4 bear; prune after backtest)
 plot(patRisingWindow ? 1.0 : 0.0, "ml_pat_rising_window", display=display.none, editable=false)
+plot(patBullEngulf ? 1.0 : 0.0, "ml_pat_bull_engulf", display=display.none, editable=false)
+plot(patHammer ? 1.0 : 0.0, "ml_pat_hammer", display=display.none, editable=false)
+plot(patMarubozuWhite ? 1.0 : 0.0, "ml_pat_marubozu_white", display=display.none, editable=false)
 plot(patBearEngulf ? 1.0 : 0.0, "ml_pat_bear_engulf", display=display.none, editable=false)
 plot(patMarubozuBlack ? 1.0 : 0.0, "ml_pat_marubozu_black", display=display.none, editable=false)
 plot(patTweezerTop ? 1.0 : 0.0, "ml_pat_tweezer_top", display=display.none, editable=false)
+plot(patFallingWindow ? 1.0 : 0.0, "ml_pat_falling_window", display=display.none, editable=false)
 
 // liquidity primitives (BSL/SSL sweep/reclaim)
 plot(atr14 > 0 ? (bsl - close) / atr14 : 0.0, "ml_bsl_dist_atr", display=display.none, editable=false)
@@ -1090,29 +1037,25 @@ plot(eqlDistAtr, "ml_liq_eql_dist_atr", display=display.none, editable=false)
 plot(vwapDistAtr, "ml_liq_vwap_dist_atr", display=display.none, editable=false)
 plot(volZscore, "ml_liq_vol_zscore", display=display.none, editable=false)
 
-// cross-asset (configured timeframe)
+// cross-asset (configured timeframe; ZN and VIX removed 2026-05-13)
 plot(float(nqCode), "ml_xa_nq_code", display=display.none, editable=false)
-plot(float(znCode), "ml_xa_zn_code", display=display.none, editable=false)
 plot(float(eurUsdCode), "ml_xa_6e_code", display=display.none, editable=false)
 
-// cross-asset advanced (VIX, ES↔NQ correlation; DXY divergence removed 2026-05-11)
-plot(vixPressure, "ml_xa_vix_pressure", display=display.none, editable=false)
+// cross-asset advanced (ES↔NQ correlation; DXY divergence removed 2026-05-11)
 plot(corrMesNq, "ml_xa_corr_nq", display=display.none, editable=false)
 
 // HTF confluence
 plot(float(htfConfTotal), "ml_htf_conf_total", display=display.none, editable=false)
 
-// daily/weekly S/R distances
+// daily/weekly S/R distances (pwh dropped 2026-05-13 to free 1 plot slot for BB fill)
 plot(pdhDistAtr, "ml_lvl_pdh_dist_atr", display=display.none, editable=false)
 plot(pdlDistAtr, "ml_lvl_pdl_dist_atr", display=display.none, editable=false)
-plot(pwhDistAtr, "ml_lvl_pwh_dist_atr", display=display.none, editable=false)
 plot(pwlDistAtr, "ml_lvl_pwl_dist_atr", display=display.none, editable=false)
 
 // footprint (real intrabar bid/ask delta, POC, VA position)
 plot(fpDeltaPct, "ml_fp_delta_pct", display=display.none, editable=false)
 plot(fpPocDistAtr, "ml_fp_poc_dist_atr", display=display.none, editable=false)
 plot(float(fpVaPosition), "ml_fp_va_position", display=display.none, editable=false)
-plot(fpDeltaImbalancePct, "ml_delta_imbalance_pct", display=display.none, editable=false)
 plot(fpDeltaAcceleration, "ml_delta_acceleration", display=display.none, editable=false)
 plot(fpAggressorPulse, "ml_aggressor_pulse", display=display.none, editable=false)
 plot(fpAbsorptionCandidate ? 1.0 : 0.0, "ml_absorption_candidate", display=display.none, editable=false)
