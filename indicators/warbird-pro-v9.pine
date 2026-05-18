@@ -1,3 +1,4 @@
+//@version=6
 // This Pine Script code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © Kirk / ZINC Digital
 //
@@ -25,7 +26,6 @@
 // - request.security() calls use lookahead_off with [1]-offset for HTF
 // - ZigZag pivots consumed only after confirmation from library output
 // - Liquidity reclaim uses bar[1] swept + bar[0] reclaimed (history-only)
-//@version=6
 indicator("Warbird Pro V9", shorttitle="Warbird V9", overlay=true, max_lines_count=80, max_labels_count=200, max_boxes_count=8)
 import TradingView/ZigZag/7 as zigzag
 
@@ -72,10 +72,10 @@ color COLOR_PIVOT              = #B0B0B0
 color COLOR_TARGET             = #006064
 color COLOR_STOP               = #CB3F3B
 
-int WIDTH_ANCHOR      = 1
+int WIDTH_ANCHOR      = 2
 int WIDTH_RETRACEMENT = 1
-int WIDTH_PIVOT       = 2
-int WIDTH_TARGET      = 2
+int WIDTH_PIVOT       = 1
+int WIDTH_TARGET      = 1
 
 //=====================
 // TRADE SETUP / FILTER SETTINGS
@@ -89,21 +89,22 @@ int liqRecencyBars = input.int(1, "Liquidity Recency (bars)", minval=1, maxval=5
 
 string groupExecution = "Trade Management"
 // Combo selectors match AG trade-surface discoverables (locked 2026-05-11):
-//   DISCOVERABLE_TP_RATIOS = (1.000, 1.236, 1.618)        fib-extension targets
-//   DISCOVERABLE_SL_ATR_MULTS = (1.0, 1.5, 2.0)           ATR-scaled stops
+//   DISCOVERABLE_TP_RATIOS = (1.000, 1.236, 1.618, 2.000, 2.236)
+//                                                            fib-extension targets
+//   DISCOVERABLE_SL_ATR_MULTS = (0.75, 1.0, 1.5, 2.0)     ATR-scaled stops
 //
-// Operator should normally leave both on "Auto". AG scores all 9 combos
+// Operator should normally leave both on "Auto". AG scores all TP×SL combos
 // per candidate off-chart and entry_decision_v9.py picks the EV-max combo
 // at decision time. The manual combo overrides exist only so the operator
 // can visually validate each combo's geometry during live-TV testing —
 // changing them does NOT affect AG training or AG inference; only the
 // chart's active-trade lines/labels move.
 //
-// "Auto" today maps to (TP=1.236, SL=1.5). After AG training, "Auto" should
-// be updated to the global EV-winning combo identified by entry_decision_v9.py.
-string tpRatioMode = input.string("Auto", "TP Ratio (combo)", options=["Auto", "1.000", "1.236", "1.618"], group=groupExecution)
-string slMultMode = input.string("Auto", "SL ATR Mult (combo)", options=["Auto", "1.0", "1.5", "2.0"], group=groupExecution)
-float tradeTpRatio = tpRatioMode == "1.000" ? 1.000 : tpRatioMode == "1.618" ? 1.618 : 1.236
+// Manual defaults mirror the current canonical chart (TP=1.618, SL=1.0).
+// "Auto" still maps to (TP=1.236, SL=1.5) until a promoted AG combo replaces it.
+string tpRatioMode = input.string("1.618", "TP Ratio (combo)", options=["Auto", "1.000", "1.236", "1.618", "2.000", "2.236"], group=groupExecution)
+string slMultMode = input.string("1.0", "SL ATR Mult (combo)", options=["Auto", "1.0", "1.5", "2.0"], group=groupExecution)
+float tradeTpRatio = tpRatioMode == "1.000" ? 1.000 : tpRatioMode == "1.618" ? 1.618 : tpRatioMode == "2.000" ? 2.000 : tpRatioMode == "2.236" ? 2.236 : 1.236
 float tradeStopAtrMult = slMultMode == "1.0" ? 1.0 : slMultMode == "2.0" ? 2.0 : 1.5
 int tradeMaxHoldBars = input.int(10, "Max Hold (bars)", minval=0, maxval=500, group=groupExecution)
 
@@ -140,9 +141,9 @@ ma(source, length, MAtype) =>
 smoothingMA = enableMA ? ma(out, maLengthInput, maTypeInput) : na
 smoothingStDev = isBB ? ta.stdev(out, maLengthInput) * bbMultInput : na
 plot(smoothingMA, "EMA-based MA", color=#26A69A, linewidth=2, display = enableMA ? display.all : display.none, editable = enableMA)
-bbUpperBand = plot(smoothingMA + smoothingStDev, title = "Upper Bollinger Band", color=color.green, display = isBB ? display.all : display.none, editable = isBB)
-bbLowerBand = plot(smoothingMA - smoothingStDev, title = "Lower Bollinger Band", color=color.green, display = isBB ? display.all : display.none, editable = isBB)
-fill(bbUpperBand, bbLowerBand, color= isBB ? color.new(color.green, 90) : na, title="Bollinger Bands Background Fill", display = isBB ? display.all : display.none, editable = isBB)
+// BB visuals are intentionally not plotted. The V9 export is at the Pine
+// 64-output cap after adding TP4/TP5 ladder exports; keep the MA value and
+// input surface, but do not spend output slots on non-default BB overlays.
 
 // Gate: price above OR below BOTH MAs.
 bool maBull = close > out and close > smoothingMA
@@ -186,8 +187,8 @@ bool showPdh = input.bool(true, "Show PDH", group=groupLvl, inline="pd")
 bool showPdl = input.bool(true, "Show PDL", group=groupLvl, inline="pd")
 bool showPwh = input.bool(true, "Show PWH", group=groupLvl, inline="pw")
 bool showPwl = input.bool(true, "Show PWL", group=groupLvl, inline="pw")
-color lvlDayColor = input.color(#FF6D00, "Day Color", group=groupLvl, inline="dc")
-color lvlWeekColor = input.color(#E91E63, "Week Color", group=groupLvl, inline="wc")
+color lvlDayColor = input.color(#808080, "Day Color", group=groupLvl, inline="dc")
+color lvlWeekColor = input.color(#880E4F, "Week Color", group=groupLvl, inline="wc")
 
 //=====================
 // FOOTPRINT (real intrabar bid/ask delta)
@@ -206,6 +207,7 @@ string groupTable = "Table"
 bool showMlTable = input.bool(false, "Show ML Table", group=groupTable)
 string tablePositionInput = input.string("Bottom Left", "Table Position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=groupTable)
 string tableTextSizeInput = input.string("Small", "Table Text Size", options=["Tiny", "Small", "Large"], group=groupTable)
+string riskModeInput = input.string("Throughput", "Risk Mode", options=["Throughput", "Balanced", "Conservative"], group=groupTable)
 
 //=====================
 // FIB VISUAL SETTINGS (Source A — PROTECTED draw span)
@@ -232,18 +234,18 @@ string fib500Style = input.string("Dashed", "", options=["Solid", "Dashed", "Dot
 color fib618ColorInput = input.color(COLOR_ANCHOR, ".618", inline="fib_618", group=groupViz)
 int fib618WidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_618", group=groupViz)
 string fib618Style = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_618", group=groupViz)
-color fib786ColorInput = input.color(#0097A7, ".786", inline="fib_786", group=groupViz)
+color fib786ColorInput = input.color(COLOR_RETRACEMENT, ".786", inline="fib_786", group=groupViz)
 int fib786WidthInput = input.int(WIDTH_RETRACEMENT, "", minval=1, maxval=5, inline="fib_786", group=groupViz)
-string fib786Style = input.string("Dotted", "", options=["Solid", "Dashed", "Dotted"], inline="fib_786", group=groupViz)
+string fib786Style = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_786", group=groupViz)
 color fibOneColorInput = input.color(COLOR_ANCHOR, "1.000", inline="fib_1000", group=groupViz)
 int fibOneWidthInput = input.int(WIDTH_ANCHOR, "", minval=1, maxval=5, inline="fib_1000", group=groupViz)
-string fibOneStyle = input.string("Dotted", "", options=["Solid", "Dashed", "Dotted"], inline="fib_1000", group=groupViz)
-color fibPivotColorInput = input.color(COLOR_PIVOT, "Pivot Zone", inline="fib_pivot", group=groupViz)
+string fibOneStyle = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_1000", group=groupViz)
+color fibPivotColorInput = input.color(COLOR_ANCHOR, "Pivot Zone", inline="fib_pivot", group=groupViz)
 int fibPivotWidthInput = input.int(WIDTH_PIVOT, "", minval=1, maxval=5, inline="fib_pivot", group=groupViz)
 string fibPivotStyle = input.string("Dashed", "", options=["Solid", "Dashed", "Dotted"], inline="fib_pivot", group=groupViz)
-color fibTargetColorInput = input.color(#E91E63, "Targets / TP", inline="fib_target", group=groupViz)
+color fibTargetColorInput = input.color(#0097A7, "Targets / TP", inline="fib_target", group=groupViz)
 int fibTargetWidthInput = input.int(WIDTH_TARGET, "", minval=1, maxval=5, inline="fib_target", group=groupViz)
-string fibTargetStyle = input.string("Dotted", "", options=["Solid", "Dashed", "Dotted"], inline="fib_target", group=groupViz)
+string fibTargetStyle = input.string("Solid", "", options=["Solid", "Dashed", "Dotted"], inline="fib_target", group=groupViz)
 bool showFibLevelLabelsInput = input.bool(true, "Show Fib Level Labels", group=groupViz)
 int fibLabelOffsetBarsInput = input.int(8, "Fib Label Offset (bars)", minval=0, maxval=30, group=groupViz)
 string fibLabelSizeInput = input.string("Normal", "Fib Label Size", options=["Tiny", "Small", "Normal", "Large"], group=groupViz)
@@ -560,6 +562,8 @@ float pT1 = fibPrice(FIB_T1)
 float p1382 = fibPrice(FIB_W1382)
 float p150 = fibPrice(FIB_W150)
 float pT2 = fibPrice(FIB_T2)
+float pT3 = fibPrice(FIB_T3)
+float pT4 = fibPrice(FIB_T4)
 
 float zoneUpper = math.max(p618, p786)
 float zoneLower = math.min(p618, p786)
@@ -594,6 +598,14 @@ var int tradeSide = 0
 var float tradeEntryPrice = na
 var float tradeStopPrice = na
 var float tradeTargetPrice = na
+// Freeze the full TP ladder at entry so active-trade fibs remain true to the
+// entry fib geometry even if the hidden structural fib recalculates mid-trade.
+var float tradeTp1Price = na  // 1.000
+var float tradeTp2Price = na  // 1.236
+var float tradeTp3Price = na  // 1.618
+var float tradeTp4Price = na  // 2.000
+var float tradeTp5Price = na  // 2.236
+var int tradeDrawLeftBar = na
 var int tradeEntryBar = na
 var int tradeClosedCount = 0
 var int tradeWinCount = 0
@@ -661,6 +673,16 @@ if not tradeActive
         tradeEntryPrice := entryLevel
         tradeStopPrice := longStopCandidate
         tradeTargetPrice := longTargetCandidate
+        tradeTp1Price := pOne
+        tradeTp2Price := pT1
+        tradeTp3Price := pT2
+        tradeTp4Price := pT3
+        tradeTp5Price := pT4
+        int entryFallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
+        bool entryAnchorBarsReady = not na(anchorHighBar) and not na(anchorLowBar)
+        int entryAnchorStartBar = entryAnchorBarsReady ? int(math.max(0, math.min(anchorHighBar, anchorLowBar))) : entryFallbackLeftBar
+        int entryDrawLeftBarBase = useConfluenceAnchorSpan ? entryAnchorStartBar : entryFallbackLeftBar
+        tradeDrawLeftBar := int(math.max(entryDrawLeftBarBase, entryAnchorStartBar))
         tradeEntryBar := bar_index
     else if qualifiedShort and not na(entryLevel) and not na(shortStopCandidate) and not na(shortTargetCandidate)
         tradeActive := true
@@ -668,6 +690,16 @@ if not tradeActive
         tradeEntryPrice := entryLevel
         tradeStopPrice := shortStopCandidate
         tradeTargetPrice := shortTargetCandidate
+        tradeTp1Price := pOne
+        tradeTp2Price := pT1
+        tradeTp3Price := pT2
+        tradeTp4Price := pT3
+        tradeTp5Price := pT4
+        int entryFallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
+        bool entryAnchorBarsReady = not na(anchorHighBar) and not na(anchorLowBar)
+        int entryAnchorStartBar = entryAnchorBarsReady ? int(math.max(0, math.min(anchorHighBar, anchorLowBar))) : entryFallbackLeftBar
+        int entryDrawLeftBarBase = useConfluenceAnchorSpan ? entryAnchorStartBar : entryFallbackLeftBar
+        tradeDrawLeftBar := int(math.max(entryDrawLeftBarBase, entryAnchorStartBar))
         tradeEntryBar := bar_index
 
 if tradeActive and not na(tradeEntryBar) and bar_index > tradeEntryBar
@@ -703,6 +735,12 @@ if tradeActive and not na(tradeEntryBar) and bar_index > tradeEntryBar
         tradeEntryPrice := na
         tradeStopPrice := na
         tradeTargetPrice := na
+        tradeTp1Price := na
+        tradeTp2Price := na
+        tradeTp3Price := na
+        tradeTp4Price := na
+        tradeTp5Price := na
+        tradeDrawLeftBar := na
         tradeEntryBar := na
 
 int tradeBarsActive = tradeActive and not na(tradeEntryBar) ? bar_index - tradeEntryBar : 0
@@ -716,7 +754,7 @@ bool entryShortTrigger = tradeActive and not tradeActivePrev and tradeSide == -1
 //=====================
 fibLabelSize = f_label_size(fibLabelSizeInput)
 
-// Fib lines (kept levels: 0, -.236, .236, .382, .500, .618, .786, 1.0, 1.236, 1.382, 1.5, 1.618 — nothing above 1.618)
+// Fib lines (kept levels: 0, -.236, .236, .382, .500, .618, .786, 1.0, 1.236, 1.382, 1.5, 1.618, 2.0, 2.236)
 var line lineZero = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
 var line lineNeg236 = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
 var line line236 = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
@@ -729,11 +767,18 @@ var line lineT1 = line.new(bar_index, close, bar_index, close, color=color(na), 
 var line line1382 = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
 var line line150 = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
 var line lineT2 = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line lineT3 = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line lineT4 = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
 
 // Trade lifecycle lines (reuse SAME plumbing/widths/colors as fibs)
 var line lineEntry = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
 var line lineSL    = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
 var line lineTP    = line.new(bar_index, close, bar_index, close, color=color(na), width=2)
+var line lineTP1   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineTP2   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineTP3   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineTP4   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
+var line lineTP5   = line.new(bar_index, close, bar_index, close, color=color(na), width=1)
 
 var box zoneBox = box.new(bar_index, close, bar_index, close, bgcolor=color(na), border_color=color(na))
 
@@ -749,9 +794,16 @@ var label _fibLblT1 = na
 var label _fibLbl1382 = na
 var label _fibLbl150 = na
 var label _fibLblT2 = na
+var label _fibLblT3 = na
+var label _fibLblT4 = na
 var label _entryLbl = na
 var label _slLbl = na
 var label _tpLbl = na
+var label _tp1Lbl = na
+var label _tp2Lbl = na
+var label _tp3Lbl = na
+var label _tp4Lbl = na
+var label _tp5Lbl = na
 
 int fallbackLeftBar = int(math.max(0, bar_index - targetLookbackBars))
 bool anchorBarsReady = not na(anchorHighBar) and not na(anchorLowBar)
@@ -761,7 +813,7 @@ int drawLeftBar = int(math.max(drawLeftBarBase, anchorStartBar))
 
 drawAnchoredLine(line id, bool visible, float price, color col, int width_, int leftBar, string styleName) =>
     if visible and not na(price)
-        int clampedLeftBar = int(math.max(leftBar, anchorStartBar))
+        int clampedLeftBar = int(math.max(leftBar, 0))
         int rightBar = extendLevelsRight ? bar_index + fibLabelOffsetBarsInput : bar_index
         line.set_xy1(id, clampedLeftBar, price)
         line.set_xy2(id, rightBar, price)
@@ -803,10 +855,18 @@ drawAnchoredLine(lineT1, fibsVisible, pT1, fibTargetColorInput, fibTargetWidthIn
 drawAnchoredLine(line1382, fibsVisible, p1382, fibRetracementColorInput, fibRetracementWidthInput, drawLeftBar, fibRetraceStyle)
 drawAnchoredLine(line150, fibsVisible, p150, fibRetracementColorInput, fibRetracementWidthInput, drawLeftBar, fibRetraceStyle)
 drawAnchoredLine(lineT2, fibsVisible, pT2, fibTargetColorInput, fibTargetWidthInput, drawLeftBar, fibTargetStyle)
+drawAnchoredLine(lineT3, fibsVisible, pT3, fibTargetColorInput, fibTargetWidthInput, drawLeftBar, fibTargetStyle)
+drawAnchoredLine(lineT4, fibsVisible, pT4, fibTargetColorInput, fibTargetWidthInput, drawLeftBar, fibTargetStyle)
 
-drawAnchoredLine(lineEntry, tradeActive, tradeEntryPrice, fibAnchorColorInput, fibAnchorWidthInput, drawLeftBar, fibAnchorStyle)
-drawAnchoredLine(lineSL, tradeActive, tradeStopPrice, fibStopColorInput, fibStopWidthInput, drawLeftBar, fibStopStyle)
-drawAnchoredLine(lineTP, tradeActive, tradeTargetPrice, fibTargetColorInput, fibTargetWidthInput, drawLeftBar, fibTargetStyle)
+int tradeLineLeftBar = tradeActive and not na(tradeDrawLeftBar) ? tradeDrawLeftBar : drawLeftBar
+drawAnchoredLine(lineEntry, tradeActive, tradeEntryPrice, fibAnchorColorInput, fibAnchorWidthInput, tradeLineLeftBar, fibAnchorStyle)
+drawAnchoredLine(lineSL, tradeActive, tradeStopPrice, fibStopColorInput, fibStopWidthInput, tradeLineLeftBar, fibStopStyle)
+drawAnchoredLine(lineTP, tradeActive, tradeTargetPrice, fibTargetColorInput, fibTargetWidthInput, tradeLineLeftBar, fibTargetStyle)
+drawAnchoredLine(lineTP1, tradeActive, tradeTp1Price, fibTargetColorInput, fibRetracementWidthInput, tradeLineLeftBar, fibTargetStyle)
+drawAnchoredLine(lineTP2, tradeActive, tradeTp2Price, fibTargetColorInput, fibRetracementWidthInput, tradeLineLeftBar, fibTargetStyle)
+drawAnchoredLine(lineTP3, tradeActive, tradeTp3Price, fibTargetColorInput, fibRetracementWidthInput, tradeLineLeftBar, fibTargetStyle)
+drawAnchoredLine(lineTP4, tradeActive, tradeTp4Price, fibTargetColorInput, fibRetracementWidthInput, tradeLineLeftBar, fibTargetStyle)
+drawAnchoredLine(lineTP5, tradeActive, tradeTp5Price, fibTargetColorInput, fibRetracementWidthInput, tradeLineLeftBar, fibTargetStyle)
 
 if fibsVisible and not na(zoneFillUpper) and not na(zoneFillLower)
     box.set_left(zoneBox, drawLeftBar)
@@ -832,11 +892,18 @@ if barstate.islast
     _fibLbl1382 := setFibLevelLabel(_fibLbl1382, showFibLevelLabelsInput and fibsVisible, p1382, "1.382", fibRetracementColorInput)
     _fibLbl150 := setFibLevelLabel(_fibLbl150, showFibLevelLabelsInput and fibsVisible, p150, "1.500", fibRetracementColorInput)
     _fibLblT2 := setFibLevelLabel(_fibLblT2, showFibLevelLabelsInput and fibsVisible, pT2, "T2", fibTargetColorInput)
+    _fibLblT3 := setFibLevelLabel(_fibLblT3, showFibLevelLabelsInput and fibsVisible, pT3, "T3", fibTargetColorInput)
+    _fibLblT4 := setFibLevelLabel(_fibLblT4, showFibLevelLabelsInput and fibsVisible, pT4, "T4", fibTargetColorInput)
     string _slLblText = "SL@" + str.tostring(tradeStopAtrMult, "#.#") + "x" + (slMultMode == "Auto" ? " (Auto)" : "")
     string _tpLblText = "TP@" + str.tostring(tradeTpRatio, "#.###") + (tpRatioMode == "Auto" ? " (Auto)" : "")
     _entryLbl := setFibLevelLabel(_entryLbl, tradeActive, tradeEntryPrice, "ENTRY",   fibAnchorColorInput)
     _slLbl    := setFibLevelLabel(_slLbl,    tradeActive, tradeStopPrice,  _slLblText, fibStopColorInput)
     _tpLbl    := setFibLevelLabel(_tpLbl,    tradeActive, tradeTargetPrice,_tpLblText, fibTargetColorInput)
+    _tp1Lbl   := setFibLevelLabel(_tp1Lbl,   tradeActive, tradeTp1Price,   "TP1 1.000", fibTargetColorInput)
+    _tp2Lbl   := setFibLevelLabel(_tp2Lbl,   tradeActive, tradeTp2Price,   "TP2 1.236", fibTargetColorInput)
+    _tp3Lbl   := setFibLevelLabel(_tp3Lbl,   tradeActive, tradeTp3Price,   "TP3 1.618", fibTargetColorInput)
+    _tp4Lbl   := setFibLevelLabel(_tp4Lbl,   tradeActive, tradeTp4Price,   "TP4 2.000", fibTargetColorInput)
+    _tp5Lbl   := setFibLevelLabel(_tp5Lbl,   tradeActive, tradeTp5Price,   "TP5 2.236", fibTargetColorInput)
 
 //=====================
 // Status table — black bg, white body, dark gray dividers; headers unchanged
@@ -906,6 +973,17 @@ string totalTradesText = str.tostring(tradeClosedCount)
 string winLossText = str.tostring(tradeWinCount) + " / " + str.tostring(tradeLossCount)
 string profitFactorText = na(profitFactor) ? "--" : str.tostring(profitFactor, "#.##")
 
+// Advisory OOS cohorts from locked_20260514_162025. Pine cannot run AG
+// inference or retrain; this setting only displays the selected cohort gate.
+float riskModeThreshold = riskModeInput == "Throughput" ? 0.45 : riskModeInput == "Conservative" ? 0.60 : 0.50
+float riskModeWrPct = riskModeInput == "Throughput" ? 68.34 : riskModeInput == "Conservative" ? 79.28 : 72.07
+float riskModePf = riskModeInput == "Throughput" ? 2.22 : riskModeInput == "Conservative" ? 2.95 : 2.43
+float riskModeEv = riskModeInput == "Throughput" ? 272.56 : riskModeInput == "Conservative" ? 322.66 : 289.84
+int riskModeTrades = riskModeInput == "Throughput" ? 1311 : riskModeInput == "Conservative" ? 753 : 1099
+string riskThresholdText = str.tostring(riskModeThreshold * 100.0, "#") + "%"
+string riskCohortText = str.tostring(riskModeWrPct, "#.##") + "% / " + str.tostring(riskModePf, "#.##")
+string riskEvText = "$" + str.tostring(riskModeEv, "#.##") + " / " + str.tostring(riskModeTrades)
+
 // Per-TF trend labels (same 5-grade f_xa_label scheme as cross-asset)
 string trend5Text = f_xa_label(tfTrend5Code)
 string trend15Text = f_xa_label(tfTrend15Code)
@@ -937,7 +1015,7 @@ f_cell_b(table t, int c, int r, string txt) =>
 
 var table mlTable = na
 if barstate.isfirst and showMlTable
-    mlTable := table.new(f_table_pos(tablePositionInput), 2, 19, bgcolor=color.new(TBL_BG_BODY, 0), border_color=color.new(TBL_BORDER, 0), border_width=1, frame_color=color.new(TBL_BORDER, 0), frame_width=1, force_overlay=true)
+    mlTable := table.new(f_table_pos(tablePositionInput), 2, 25, bgcolor=color.new(TBL_BG_BODY, 0), border_color=color.new(TBL_BORDER, 0), border_width=1, frame_color=color.new(TBL_BORDER, 0), frame_width=1, force_overlay=true)
 
 if showMlTable and not na(mlTable) and barstate.islast
     // TREND — chart symbol on 5m/15m/1h/4h (same 5-grade scale as XA)
@@ -982,6 +1060,19 @@ if showMlTable and not na(mlTable) and barstate.islast
     f_cell_b(mlTable, 1, 17, xaCorrText)
     f_cell_b(mlTable, 0, 18, "VOLUME PRESSURE")
     f_cell_b(mlTable, 1, 18, volPressureText)
+    // MODEL GATE — static locked-suite OOS cohorts for human review only
+    f_cell_h(mlTable, 0, 19, "MODEL GATE")
+    f_cell_h(mlTable, 1, 19, "")
+    f_cell_b(mlTable, 0, 20, "RISK MODE")
+    f_cell_b(mlTable, 1, 20, riskModeInput)
+    f_cell_b(mlTable, 0, 21, "MIN PROB")
+    f_cell_b(mlTable, 1, 21, riskThresholdText)
+    f_cell_b(mlTable, 0, 22, "OOS WR / PF")
+    f_cell_b(mlTable, 1, 22, riskCohortText)
+    f_cell_b(mlTable, 0, 23, "OOS EV / N")
+    f_cell_b(mlTable, 1, 23, riskEvText)
+    f_cell_b(mlTable, 0, 24, "SOURCE")
+    f_cell_b(mlTable, 1, 24, "OOS 20260514")
 
 //=====================
 // Alerts
@@ -1070,10 +1161,13 @@ plot(tradeEntryPrice, "ml_trade_entry", display=display.none, editable=false)
 plot(tradeStopPrice, "ml_trade_stop", display=display.none, editable=false)
 // Fib-ladder TPs (always emitted from current fib geometry; not live-trade-only).
 // Replaces the single `ml_trade_tp` plot 2026-05-12. The trainer reads these
-// three columns directly to size each (sl_mult, tp_ratio) combo's TP price
+// five columns directly to size each (sl_mult, tp_ratio) combo's TP price
 // without reconstruction via _tp_price_from_ratio. Fib levels 1.000 / 1.236 /
-// 1.618 map to DISCOVERABLE_TP_RATIOS in scripts/ag/train_v9_locked.py.
+// 1.618 / 2.000 / 2.236 map to DISCOVERABLE_TP_RATIOS in
+// scripts/ag/train_v9_locked.py.
 plot(pOne, "ml_trade_tp1", display=display.none, editable=false)
 plot(pT1,  "ml_trade_tp2", display=display.none, editable=false)
 plot(pT2,  "ml_trade_tp3", display=display.none, editable=false)
+plot(pT3,  "ml_trade_tp4", display=display.none, editable=false)
+plot(pT4,  "ml_trade_tp5", display=display.none, editable=false)
 plot(float(tradeLastExitOutcome), "ml_last_exit_outcome", display=display.none, editable=false)

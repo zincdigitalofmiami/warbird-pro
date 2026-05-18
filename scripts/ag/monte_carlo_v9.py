@@ -68,7 +68,7 @@ IS_END = pd.Timestamp("2024-12-31T23:59:59", tz="UTC")
 SUITE_HEADS: tuple[str, ...] = ("entry", "tp", "stop", "mfe", "mae")
 
 
-# Trade dataset semantics (3 TP × 3 SL grid, touch-event labels, same-bar
+# Trade dataset semantics (5 TP × 4 SL grid, touch-event labels, same-bar
 # collision = pessimistic loss) are defined in
 # scripts.ag.train_v9_locked.build_trade_dataset — do not reimplement.
 def _build_trades(df: pd.DataFrame) -> pd.DataFrame:

@@ -14,8 +14,8 @@ training-ag-feature-finder):
     (no internal IID bagging/stacking)
   - dynamic_stacking=False (explicit, reproducible)
   - time_limit=7200s (2 hours so NN_TORCH/FASTAI fully converge)
-  - chronological train/val/test split with 24-bar embargo
-    (FORWARD_SCAN_BARS = 24, EMBARGO_BARS = 25; enforced by
+  - chronological train/val/test split with chart-mirrored embargo
+    (FORWARD_SCAN_BARS = 10, EMBARGO_BARS = 11; enforced by
     scripts/duckdb_local/cpcv.py)
   - predictor.persist() after fit for fast repeated prediction
   - leaderboard(extra_info=True) for hyperparameter visibility
@@ -71,16 +71,15 @@ OUTPUT_ROOT = REPO_ROOT / "models/warbird_pro_v9"
 # Features matching the locked Warbird Pro V9 Core surface.
 # Missing columns are fatal. The Core trainer must not silently fall back to an
 # older replay/export schema because that masks stale feature contracts.
+#
+# Policy lock: AG does not train on protected fib-engine logic/settings or on
+# color/visual settings. Fib ladder prices remain required label inputs so the
+# trainer can score TP families, but they are not ML_FEATURES.
 ML_FEATURES = [
-    # indicator profile / Pine input knobs (NQ + 6E only after 2026-05-12 cut).
-    # Removed in the 2026-05-12 lean-cut: knob_zn_symbol, knob_vix_*,
-    # knob_use_footprint, knob_fp_* (14 knobs).
-    "knob_auto_tune_zz", "knob_fib_deviation_manual",
-    "knob_fib_depth_manual", "knob_fib_threshold_floor_pct",
-    "knob_min_fib_range_atr", "knob_fib_hysteresis_pct",
-    "knob_htf_conf_tol_pct",
+    # Non-fib, non-color Pine input knobs (NQ + 6E only after 2026-05-12 cut).
     "knob_use_pattern_confirm", "knob_use_liq_gate",
     "knob_liq_recency_bars", "knob_trade_stop_atr_mult",
+    "knob_trade_max_hold_bars",
     "knob_use_ma_gate", "knob_length_ema", "knob_length_ma",
     "knob_rsi_length", "knob_rsi_overbought", "knob_rsi_oversold",
     "knob_liq_lookback_bars", "knob_eqh_tol_pct",
@@ -89,25 +88,20 @@ ML_FEATURES = [
     "knob_use_xa_gate", "knob_nq_symbol",
     "knob_6e_symbol", "knob_corr_length",
     "knob_xa_min_agreement",
+    "knob_use_footprint", "knob_fp_ticks_per_row",
+    "knob_fp_va_pct", "knob_fp_imbalance_pct",
+    "knob_fp_absorption_delta_pct", "knob_fp_flush_delta_pct",
+    "knob_fp_event_vol_spike", "knob_fp_compressed_range_atr",
     # single-source trade trigger and entry context. `ml_trade_tp` (single
     # live TP) was retired 2026-05-12 — Pine now emits the full fib ladder
-    # via `ml_trade_tp1` / `ml_trade_tp2` / `ml_trade_tp3`, which are
+    # via `ml_trade_tp1` / `ml_trade_tp2` / `ml_trade_tp3` / `ml_trade_tp4` /
+    # `ml_trade_tp5`, which are
     # required label-construction inputs (see REQUIRED_INPUT_COLUMNS) but
     # NOT model features.
     "ml_entry_long_trigger", "ml_entry_short_trigger",
     "ml_trade_entry", "ml_trade_stop",
-    # Fib: ordinal touch code + geometry (the redundant 6 binary fib touch
-    # flags were dropped 2026-05-12 — ml_fib_touch_level_code carries the
-    # same information as a single ordinal).
-    "ml_fib_touch_level_code",
-    "ml_fib_entry_dist_atr", "ml_fib_pierce_atr",
-    "ml_fib_close_reclaim_atr", "ml_fib_reaction_body_ratio",
-    "ml_fib_reaction_upper_wick_ratio",
-    "ml_fib_reaction_lower_wick_ratio", "ml_fib_reaction_code",
-    # structural / regime
-    "ml_atr14", "ml_dir", "ml_fib_range",
-    "ml_pivot_dist_atr", "ml_p618_dist_atr",
-    "ml_bars_since_break", "ml_break_in_dir",
+    # structural / volatility regime (fib internals intentionally excluded)
+    "ml_atr14",
     # momentum
     "ml_rsi_value", "ml_rsi_stance_code", "ml_ma_bias",
     "ml_ma_slow_dist_atr", "ml_ma_fast_dist_atr",
@@ -135,40 +129,44 @@ ML_FEATURES = [
     # cross-asset continuous (NQ + 6E only)
     "ml_xa_nq_rel_strength_atr",
     "ml_xa_6e_momentum_zscore",
-    # HTF confluence
-    "ml_htf_conf_total",
-    # volume (bar-level spike ratio, the one footprint-adjacent signal kept
-    # after the 2026-05-12 footprint-surface cut)
-    "ml_volume_spike_ratio",
+    # footprint/order-flow and volume pressure (non-fib signal surface)
+    "ml_fp_delta_pct", "ml_fp_poc_dist_atr", "ml_fp_va_position",
+    "ml_delta_acceleration", "ml_aggressor_pulse",
+    "ml_absorption_candidate", "ml_flush_candidate",
+    "ml_volume_spike_ratio", "ml_poc_shift",
 ]
 
 # Trade-surface discoverables (derived at label-build time).
 # TP families use fib ladder ratios relative to entry anchor.
 DISCOVERABLE_SL_ATR_MULTS: tuple[float, ...] = (0.75, 1.0, 1.5, 2.0)
-DISCOVERABLE_TP_RATIOS: tuple[float, ...] = (1.0, 1.236, 1.618)
+DISCOVERABLE_TP_RATIOS: tuple[float, ...] = (1.0, 1.236, 1.618, 2.0, 2.236)
 
 # Per-combo TP price source columns (emitted by Pine 2026-05-12). One-to-one
 # with DISCOVERABLE_TP_RATIOS by index: tp_family_code 1 -> ml_trade_tp1
-# (fib 1.000), 2 -> ml_trade_tp2 (fib 1.236), 3 -> ml_trade_tp3 (fib 1.618).
+# (fib 1.000), 2 -> ml_trade_tp2 (fib 1.236), 3 -> ml_trade_tp3
+# (fib 1.618), 4 -> ml_trade_tp4 (fib 2.000), 5 -> ml_trade_tp5
+# (fib 2.236).
 # These are label-construction inputs only (see REQUIRED_INPUT_COLUMNS).
 LABEL_INPUT_TP_COLUMNS: tuple[str, ...] = (
     "ml_trade_tp1",
     "ml_trade_tp2",
     "ml_trade_tp3",
+    "ml_trade_tp4",
+    "ml_trade_tp5",
 )
 
-# 24-bar forward-scan contract (ES 15m entry-precision priority, 2026-05-12).
-# Every triple-barrier label is computed over the same 24-bar window:
-#   - TP touched before SL within 24 bars     -> winner_tp_before_sl = 1
-#   - SL touched before TP within 24 bars     -> winner_tp_before_sl = 0
+# 10-bar forward-scan contract mirrors the current canonical chart setting.
+# Every triple-barrier label is computed over the same 10-bar window:
+#   - TP touched before SL within 10 bars     -> winner_tp_before_sl = 1
+#   - SL touched before TP within 10 bars     -> winner_tp_before_sl = 0
 #   - Same-bar TP+SL collision                -> winner_tp_before_sl = 0
-#   - Neither barrier touched within 24 bars  -> winner_tp_before_sl = 0
-#   - Fewer than 24 future bars available     -> entry is DROPPED
+#   - Neither barrier touched within 10 bars  -> winner_tp_before_sl = 0
+#   - Fewer than 10 future bars available     -> entry is DROPPED
 # Pine's `tradeMaxHoldBars` must mirror this constant so the live chart and
 # the trainer answer the same trade-duration question.
-FORWARD_SCAN_BARS: int = 24
-MIN_FUTURE_BARS: int = 24
-EMBARGO_BARS: int = 25
+FORWARD_SCAN_BARS: int = 10
+MIN_FUTURE_BARS: int = 10
+EMBARGO_BARS: int = 11
 
 TRADE_DISCOVERABLE_FEATURES = [
     "sl_atr_mult",
@@ -240,23 +238,26 @@ def validate_trade_features(trades: pd.DataFrame) -> None:
 def build_trade_dataset(df: pd.DataFrame) -> pd.DataFrame:
     """Build TP×SL discoverable triple-barrier labels at entry bars.
 
-    Each entry candidate expands into a 4×3 grid:
+    Each entry candidate expands into a 4×5 grid:
       - SL ATR multiples: {0.75, 1.0, 1.5, 2.0}   ATR-based stop, multiples of
                                                   the entry-bar `ml_atr14`.
-      - TP ratios:        {1.000, 1.236, 1.618}   fib-ladder extensions read
+      - TP ratios:        {1.000, 1.236, 1.618, 2.000, 2.236}
+                                                  fib-ladder extensions read
                                                   directly from Pine's per-row
                                                   `ml_trade_tp1` /
                                                   `ml_trade_tp2` /
-                                                  `ml_trade_tp3` (one column
+                                                  `ml_trade_tp3` /
+                                                  `ml_trade_tp4` /
+                                                  `ml_trade_tp5` (one column
                                                   per ratio, same index order
                                                   as DISCOVERABLE_TP_RATIOS).
 
-    Forward-scan window is fixed at `FORWARD_SCAN_BARS = 24` bars (the ES 15m
-    entry-precision contract). Every label is computed over that same 24-bar
+    Forward-scan window is fixed at `FORWARD_SCAN_BARS = 10` bars (the current
+    canonical chart max-hold setting). Every label is computed over that same 10-bar
     window: entry classifier, tp_hit, stop_hit, MFE, MAE. Entries closer
-    than `MIN_FUTURE_BARS = 24` bars to end-of-data are DROPPED because they
+    than `MIN_FUTURE_BARS = 10` bars to end-of-data are DROPPED because they
     cannot be fairly assessed. Embargo for the train/val/test split is
-    `EMBARGO_BARS = 25` (label horizon + 1).
+    `EMBARGO_BARS = 11` (label horizon + 1).
 
     Three label columns are emitted per combo row:
 
@@ -264,14 +265,14 @@ def build_trade_dataset(df: pd.DataFrame) -> pd.DataFrame:
         Pessimistic resolution outcome FOR THE SPECIFIC (sl_mult, tp_ratio)
         combo encoded in this row.
           1 iff this combo's TP price touched strictly before its SL price
-            within the 24-bar window.
+            within the 10-bar window.
           0 if SL touched first, both touched same bar (intrabar sequencing
-            unobservable -> pessimistic loss), OR neither touched within 24
+            unobservable -> pessimistic loss), OR neither touched within 10
             bars (sideways / avoid).
         This is the entry classifier's supervision target —
         production-faithful: the model trains on the same fib-ladder TP ×
         ATR-based SL exit family the Pine indicator live-trades, with the
-        same 24-bar quality window.
+        same 10-bar quality window.
 
       tp_hit (TP_LABEL_COL), stop_hit (STOP_LABEL_COL):
         TOUCH EVENTS at the resolution bar — NOT resolution outcomes. tp_hit=1
@@ -302,7 +303,7 @@ def build_trade_dataset(df: pd.DataFrame) -> pd.DataFrame:
         if "ml_trade_entry" in df.columns
         else np.full(len(df), np.nan)
     )
-    # Per-combo TP price columns, indexed by tp_family_code (1/2/3).
+    # Per-combo TP price columns, indexed by tp_family_code (1..5).
     # Required-input contract — Pine emits these from current fib geometry
     # on every bar; missing-column at this stage is a fatal validation error.
     tp_arrays_by_code: dict[int, np.ndarray] = {
@@ -408,7 +409,7 @@ def build_trade_dataset(df: pd.DataFrame) -> pd.DataFrame:
                         resolution_bar = j
                         break
                 else:
-                    # Neither barrier touched within the 24-bar window.
+                    # Neither barrier touched within the 10-bar window.
                     # Label = 0 (sideways / avoid). Resolution sentinel =
                     # FORWARD_SCAN_BARS + 1 so embargo math and resolution
                     # diagnostics treat this row as a full-window miss.
@@ -660,9 +661,9 @@ def main() -> int:
     if trades[LABEL_COL].nunique() != 2:
         raise RuntimeError(f"{LABEL_COL} must contain both classes")
 
-    # Label-horizon-aware embargo. Fixed 24-bar forward-scan contract:
-    # every label is computed over the same 24-bar window, so the embargo is
-    # the constant EMBARGO_BARS (= FORWARD_SCAN_BARS + 1 = 25).
+    # Label-horizon-aware embargo. Fixed chart-mirrored forward-scan contract:
+    # every label is computed over the same 10-bar window, so the embargo is
+    # the constant EMBARGO_BARS (= FORWARD_SCAN_BARS + 1 = 11).
     label_horizon_bars = FORWARD_SCAN_BARS
     embargo_bars = EMBARGO_BARS
 

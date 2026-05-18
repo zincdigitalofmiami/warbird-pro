@@ -168,6 +168,11 @@ Allowed tuning scope while locked:
 
 Feature scope is indicator-only.
 
+Current V9 Core AG feature policy: train on non-fib/non-color indicator
+settings and MA/RSI/liquidity/NQ+6E/footprint signal evidence. Do **not** train
+on protected fib-engine settings, fib internals, or visual/color inputs. Pine
+fib ladder prices remain required label-construction inputs only.
+
 Admitted feature families:
 
 - Pine input settings
@@ -203,6 +208,11 @@ Allowed labels:
 - TP/SL-style state outcomes emitted by the active Pine indicator
 - derived binary or multiclass labels computed from exported Pine trade/state
   fields
+
+Current V9 Core TP/SL label grid: each admitted entry expands to 20 combos
+(4 SL ATR multiples × 5 TP fib-extension prices). TP prices are read from
+`ml_trade_tp1` through `ml_trade_tp5` for fib 1.000 / 1.236 / 1.618 / 2.000 /
+2.236 and are not ML features.
 
 Any label must be tied to the export manifest and cannot use future columns not
 available in the Pine/TradingView output.

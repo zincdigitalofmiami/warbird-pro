@@ -100,7 +100,7 @@ def _resolve_shap_model(predictor: Any) -> str:
     )
 
 
-# Trade dataset semantics (3 TP × 3 SL grid, touch-event labels, same-bar
+# Trade dataset semantics (5 TP × 4 SL grid, touch-event labels, same-bar
 # collision = pessimistic loss) are defined in
 # scripts.ag.train_v9_locked.build_trade_dataset — do not reimplement.
 def _build_trade_dataset(df: pd.DataFrame) -> pd.DataFrame:

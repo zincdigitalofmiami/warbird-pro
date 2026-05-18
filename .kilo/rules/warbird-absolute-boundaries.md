@@ -76,12 +76,19 @@ exist to prevent stale architecture drift.
 ## Cloud And Database Boundaries
 
 - Cloud Supabase is runtime/support/serving only.
+- Supabase Edge Functions run on Deno. Do not inject Node-native module
+  assumptions or `node_modules`-style backend patterns into `supabase/functions/**`.
+- Keep Next.js as client/UI integration surface; do not migrate backend
+  automation logic from Supabase into app/server routes unless explicitly
+  approved.
 - Do not send raw trials, labels, full research datasets, or raw SHAP payloads to
   cloud Supabase.
 - Cloud DDL belongs in `supabase/migrations/`.
 - Legacy local warehouse DDL belongs in `local_warehouse/migrations/` only if that
   surface is explicitly reopened.
 - No Prisma, Drizzle, or ORM.
+- Keep SQL lanes separated: DuckDB SQL in Python local modeling lanes, Postgres
+  SQL in Supabase OLTP lanes.
 
 ## TradingView Boundary
 

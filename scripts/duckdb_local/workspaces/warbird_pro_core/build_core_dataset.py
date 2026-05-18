@@ -2,15 +2,13 @@
 """Build the Warbird Pro V9 Core training dataset.
 
 This is the AG/Core ETL surface, not a Pine edit. It builds manifest-backed
-ES rows at 5m or 15m with the locked V9 feature schema, Yahoo DXY parity,
-VIX movement pressure fallback, and optional Databento trade-side order-flow
-reconstruction for CVD/divergence/absorption.
+ES rows at 5m or 15m with the locked V9 feature schema, NQ + 6E cross-asset
+context, and optional Databento trade-side order-flow reconstruction for
+CVD/divergence/absorption.
 
 Core mode:
   - bars: ES OHLCV, normalized to selected timeframe (5m or 15m)
-  - cross-asset: NQ/ZN from local Databento 1h bars when available
-  - DXY: Yahoo Finance DX-Y.NYB, aligned to the selected bar clock
-  - VIX: movement pressure from VIXCLS daily close fallback when available
+  - cross-asset: NQ + 6E from local Databento 1h bars when available
   - order flow: Databento trades zip, outright contract rows for the selected symbol root only
   - labels are built by scripts/ag/train_v9_locked.py, not here
 
@@ -68,38 +66,40 @@ FIB_786 = 0.786
 FIB_ONE = 1.0
 FIB_T1 = 1.236
 FIB_T2 = 1.618
+FIB_T3 = 2.0
+FIB_T4 = 2.236
 
 FIB_DEVIATION = 3.0
 FIB_DEPTH = 10
-FIB_THRESHOLD_FLOOR_PCT = 0.15
+FIB_THRESHOLD_FLOOR_PCT = 0.25
 MIN_FIB_RANGE_ATR = 0.5
 FIB_HYSTERESIS_PCT = 2.0
 HTF_CONF_TOL_PCT = 1.5
 
 USE_MA_GATE = True
 MA_FAST_BASE = 21
-MA_SLOW_BASE = 50
-MA_FAST_GRID = tuple(range(MA_FAST_BASE - 10, MA_FAST_BASE + 11))
-MA_SLOW_GRID = tuple(range(MA_SLOW_BASE - 10, MA_SLOW_BASE + 11))
+MA_SLOW_BASE = 9
+MA_FAST_GRID = tuple(range(max(1, MA_FAST_BASE - 10), MA_FAST_BASE + 11))
+MA_SLOW_GRID = tuple(range(max(1, MA_SLOW_BASE - 5), MA_SLOW_BASE + 6))
 MA_FAST_LEN = MA_FAST_BASE
 MA_SLOW_LEN = MA_SLOW_BASE
-XA_MIN_AGREEMENT = 3
+XA_MIN_AGREEMENT = 2
 VIX_PRESSURE_BAND = 0.35
-RSI_LEN = 14
-RSI_OVERBOUGHT = 75.0
-RSI_OVERSOLD = 25.0
-LIQ_LOOKBACK_BARS = 20
-LIQ_RECENCY_BARS = 8
+RSI_LEN = 11
+RSI_OVERBOUGHT = 80.0
+RSI_OVERSOLD = 20.0
+LIQ_LOOKBACK_BARS = 10
+LIQ_RECENCY_BARS = 1
 EQH_TOL_PCT = 5
 EQH_MIN_TAPS = 2
-EQH_LOOKBACK = 100
-VOL_Z_LEN = 20
-CORR_LEN = 20
+EQH_LOOKBACK = 50
+VOL_Z_LEN = 10
+CORR_LEN = 5
 VIX_MOVE_BARS = 3
 VIX_ATR_LEN = 14
-ORDERFLOW_ROLLING_LEN = 20
-ORDERFLOW_ABSORPTION_DELTA_PCT = 35.0
-ORDERFLOW_FLUSH_DELTA_PCT = 35.0
+ORDERFLOW_ROLLING_LEN = VOL_Z_LEN
+ORDERFLOW_ABSORPTION_DELTA_PCT = 20.0
+ORDERFLOW_FLUSH_DELTA_PCT = 20.0
 ORDERFLOW_EVENT_VOLUME_SPIKE = 1.5
 ORDERFLOW_COMPRESSED_RANGE_ATR = 0.75
 
@@ -112,12 +112,12 @@ DEFAULT_INDICATOR_KNOBS: dict[str, Any] = {
     "knob_fib_hysteresis_pct": FIB_HYSTERESIS_PCT,
     "knob_htf_conf_tol_pct": HTF_CONF_TOL_PCT,
     "knob_use_pattern_confirm": False,
-    "knob_use_liq_gate": False,  # locked 2026-05-11: gate-as-feature pivot; liquidity is ML features only
+    "knob_use_liq_gate": True,
     "knob_liq_recency_bars": LIQ_RECENCY_BARS,
-    "knob_trade_stop_atr_mult": 1.50,
-    # Pinned to 24 bars 2026-05-12 to mirror Pine's `tradeMaxHoldBars` and the
-    # trainer's FORWARD_SCAN_BARS contract (ES 15m entry-precision).
-    "knob_trade_max_hold_bars": 24,
+    "knob_trade_stop_atr_mult": 1.0,
+    # Mirrors Pine's canonical `tradeMaxHoldBars` and the trainer's
+    # FORWARD_SCAN_BARS contract.
+    "knob_trade_max_hold_bars": 10,
     "knob_use_ma_gate": True,
     "knob_length_ema": MA_FAST_BASE,
     "knob_length_ma": MA_SLOW_BASE,
@@ -130,7 +130,7 @@ DEFAULT_INDICATOR_KNOBS: dict[str, Any] = {
     "knob_eqh_lookback": EQH_LOOKBACK,
     "knob_vol_z_length": VOL_Z_LEN,
     "knob_use_session_vwap": True,
-    "knob_use_xa_gate": False,  # locked 2026-05-11: gate-as-feature pivot; XA is now ML features only
+    "knob_use_xa_gate": True,
     "knob_nq_symbol": "CME_MINI:NQ1!",
     "knob_zn_symbol": "CBOT:ZN1!",
     "knob_6e_symbol": "CME:6E1!",
@@ -168,11 +168,8 @@ DROPPED_FEATURES_2026_05_12: tuple[str, ...] = (
     "ml_fib_touch_786_long",
     "ml_fib_touch_500_short", "ml_fib_touch_618_short",
     "ml_fib_touch_786_short",
-    # footprint surface
-    "ml_fp_delta_pct", "ml_fp_poc_dist_atr", "ml_fp_va_position",
-    "ml_delta_imbalance_pct", "ml_delta_acceleration",
-    "ml_aggressor_pulse", "ml_absorption_candidate",
-    "ml_flush_candidate", "ml_poc_shift",
+    # footprint diagnostic kept out of the active feature surface
+    "ml_delta_imbalance_pct",
     # CVD divergence
     "ml_cvd_div_bull", "ml_cvd_div_bear",
     # ZN / VIX / HG cross-asset (NQ + 6E only after the cut)
@@ -183,10 +180,6 @@ DROPPED_FEATURES_2026_05_12: tuple[str, ...] = (
     "knob_zn_symbol", "knob_zn_gate_direction",
     "knob_vix_symbol", "knob_vix_move_bars",
     "knob_vix_atr_length", "knob_vix_pressure_band",
-    "knob_use_footprint", "knob_fp_ticks_per_row",
-    "knob_fp_va_pct", "knob_fp_imbalance_pct",
-    "knob_fp_absorption_delta_pct", "knob_fp_flush_delta_pct",
-    "knob_fp_event_vol_spike", "knob_fp_compressed_range_atr",
 )
 
 LOCKED_DUCKDB_VERSION = "1.5.2"
@@ -214,7 +207,7 @@ def generate_indicator_profiles(profile_mode: str = "base") -> list[dict[str, An
         raise ValueError(f"Unsupported profile mode: {profile_mode!r}")
     if mode == "base":
         profile = dict(DEFAULT_INDICATOR_KNOBS)
-        profile["profile_id"] = "base_ema21_sma50"
+        profile["profile_id"] = "base_ema21_ema9"
         profile["profile_mode"] = "base"
         profile["profile_is_ma_base"] = True
         profile["profile_ema_offset"] = 0
@@ -227,7 +220,7 @@ def generate_indicator_profiles(profile_mode: str = "base") -> list[dict[str, An
             profile = dict(DEFAULT_INDICATOR_KNOBS)
             profile["knob_length_ema"] = int(ema_len)
             profile["knob_length_ma"] = int(ma_len)
-            profile["profile_id"] = f"ma_grid_ema{ema_len}_sma{ma_len}"
+            profile["profile_id"] = f"ma_grid_ema{ema_len}_ema{ma_len}"
             profile["profile_mode"] = "ma-grid"
             profile["profile_is_ma_base"] = ema_len == MA_FAST_BASE and ma_len == MA_SLOW_BASE
             profile["profile_ema_offset"] = int(ema_len - MA_FAST_BASE)
@@ -671,11 +664,11 @@ def compute_base_features(df_5m: pd.DataFrame, knobs: dict[str, Any] | None = No
     rsi_len = int(_knob(knobs, "knob_rsi_length"))
     rsi_overbought = float(_knob(knobs, "knob_rsi_overbought"))
     rsi_oversold = float(_knob(knobs, "knob_rsi_oversold"))
-    slow_ma = sma(close, int(_knob(knobs, "knob_length_ma")))
     fast_ma = ema(close, int(_knob(knobs, "knob_length_ema")))
+    slow_ma = ema(fast_ma, int(_knob(knobs, "knob_length_ma")))
     rsi14 = rsi_rma(close, rsi_len)
-    ma_bull = fast_ma > slow_ma
-    ma_bear = fast_ma < slow_ma
+    ma_bull = (close > fast_ma) & (close > slow_ma)
+    ma_bear = (close < fast_ma) & (close < slow_ma)
     plus_di, minus_di, adx = dmi_adx(high, low, close, 14)
 
     bar_range = high - low
@@ -728,12 +721,14 @@ def compute_base_features(df_5m: pd.DataFrame, knobs: dict[str, Any] | None = No
     p_pivot = fib_price(FIB_PIVOT)
     p_618 = fib_price(FIB_618)
     p_786 = fib_price(FIB_786)
-    # Full ladder TPs at fib 1.000 / 1.236 / 1.618 — emitted as
-    # ml_trade_tp1 / ml_trade_tp2 / ml_trade_tp3 (label-construction inputs
-    # mirroring indicators/warbird-pro-v9.pine's pOne/pT1/pT2 plots).
+    # Full ladder TPs at fib 1.000 / 1.236 / 1.618 / 2.000 / 2.236 —
+    # emitted as ml_trade_tp1..5 (label-construction inputs mirroring
+    # indicators/warbird-pro-v9.pine's pOne/pT1/pT2/pT3/pT4 plots).
     p_one = fib_price(FIB_ONE)
     p_t1 = fib_price(FIB_T1)
     p_t2 = fib_price(FIB_T2)
+    p_t3 = fib_price(FIB_T3)
+    p_t4 = fib_price(FIB_T4)
 
     zone_upper = np.maximum(p_618, p_786)
     zone_lower = np.minimum(p_618, p_786)
@@ -864,6 +859,8 @@ def compute_base_features(df_5m: pd.DataFrame, knobs: dict[str, Any] | None = No
             "ml_trade_tp1": p_one,
             "ml_trade_tp2": p_t1,
             "ml_trade_tp3": p_t2,
+            "ml_trade_tp4": p_t3,
+            "ml_trade_tp5": p_t4,
             "ml_fib_touch_level_code": fib_touch_level_code,
             "ml_fib_touch_500_long": touched500_long.astype(float),
             "ml_fib_touch_618_long": touched618_long.astype(float),
@@ -1474,24 +1471,23 @@ def validate_core_frame(df: pd.DataFrame, gate_mode: str) -> None:
         if all_null:
             raise RuntimeError(f"all-null feature columns: {all_null}")
     if gate_mode == "strict":
-        # Under the gate-as-feature architecture (locked 2026-05-11), entry
-        # triggers are MA-filtered fib triggers (XA + liq are features, not
-        # gates). The floor moves from 25 (legacy gated-entries semantics) to
-        # 250 — for a 1y 15m build, this should be in the low thousands.
+        # Current chart-canonical entries are fib triggers filtered by MA,
+        # liquidity recency, and NQ/6E agreement. This check only prevents
+        # near-dead entry output after contract/default changes.
         entries = int(df["ml_entry_long_trigger"].sum() + df["ml_entry_short_trigger"].sum())
         if entries < 250:
             raise RuntimeError(f"strict gate failed: only {entries} MA-filtered fib trigger candidates (floor 250)")
         if "_nq_close" not in df.columns or df["_nq_close"].isna().all():
             raise RuntimeError("strict gate failed: NQ close unavailable for ml_xa_corr_nq")
-        # 2026-05-12 lean-cut: footprint surface removed; the all-zero-delta
-        # strict check is retired with it.
+        if float(df["ml_fp_delta_pct"].abs().sum()) == 0.0:
+            raise RuntimeError("strict gate failed: footprint delta feature is all zero")
 
 
 def validate_export_with_pandera(df: pd.DataFrame) -> None:
     # Label-construction inputs (not ML_FEATURES, per the Option-B contract
-    # locked 2026-05-12). The three fib-ladder TPs are required in the export
+    # locked 2026-05-12). The five fib-ladder TPs are required in the export
     # CSV so train_v9_locked.build_trade_dataset can size combos directly.
-    label_input_cols = ["ml_trade_tp1", "ml_trade_tp2", "ml_trade_tp3"]
+    label_input_cols = ["ml_trade_tp1", "ml_trade_tp2", "ml_trade_tp3", "ml_trade_tp4", "ml_trade_tp5"]
     required_cols = ["ts", "open", "high", "low", "close", "volume",
                      *label_input_cols, *ML_FEATURES]
     missing = [col for col in required_cols if col not in df.columns]
@@ -1505,6 +1501,7 @@ def validate_export_with_pandera(df: pd.DataFrame) -> None:
         "knob_use_ma_gate",
         "knob_use_session_vwap",
         "knob_use_xa_gate",
+        "knob_use_footprint",
         "profile_is_ma_base",
     }
     string_cols = {
@@ -1554,6 +1551,8 @@ def validate_export_with_pandera(df: pd.DataFrame) -> None:
         "ml_trade_tp1",
         "ml_trade_tp2",
         "ml_trade_tp3",
+        "ml_trade_tp4",
+        "ml_trade_tp5",
     ]
     missing_policy = [col for col in required_label_policy if col not in validated.columns]
     if missing_policy:
@@ -1788,8 +1787,8 @@ def main() -> int:
             "ma_fast_grid": MA_FAST_GRID,
             "ma_slow_grid": MA_SLOW_GRID,
             "warnings": warnings,
-            "architecture": "gate_as_feature_2026_05_11",
-            "entry_qualification_rule": "fib_trigger_AND_ma_bias",
+            "architecture": "chart_canonical_settings_2026_05_16",
+            "entry_qualification_rule": "fib_trigger_AND_ma_bias_AND_liquidity_AND_nq_6e_agreement",
             "xa_zn_rate_pressure_denominator": "rolling_20bar_return_stdev",
             "orderflow_candidate_thresholds": {
                 "rolling_len": ORDERFLOW_ROLLING_LEN,
@@ -1815,6 +1814,8 @@ def main() -> int:
                 "ml_trade_tp1",
                 "ml_trade_tp2",
                 "ml_trade_tp3",
+                "ml_trade_tp4",
+                "ml_trade_tp5",
             ],
         },
     )

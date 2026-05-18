@@ -1,0 +1,48 @@
+{
+  "name": "warbird-hermes",
+  "displayName": "Warbird Hermes",
+  "description": "Dedicated Warbird Hermes ACP launcher.",
+  "version": "0.1.0",
+  "publisher": "zincdigital",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onCommand:warbirdHermes.launchAcp",
+    "onView:warbird-hermes-launcher"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "warbirdHermes.launchAcp",
+        "title": "Warbird Hermes: Launch ACP",
+        "icon": "$(sparkle)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "warbird-hermes",
+          "title": "Hermes",
+          "icon": "resources/hermes.svg"
+        }
+      ]
+    },
+    "views": {
+      "warbird-hermes": [
+        {
+          "id": "warbird-hermes-launcher",
+          "name": "Hermes ACP"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "warbird-hermes-launcher",
+        "contents": "[Launch Hermes ACP](command:warbirdHermes.launchAcp)\n\nThis opens the ACP Client and connects to the configured Hermes Agent when ACP supports direct command arguments."
+      }
+    ]
+  }
+}

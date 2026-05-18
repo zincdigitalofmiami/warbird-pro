@@ -28,23 +28,23 @@ def test_trade_dataset_uses_emitted_entry_tp_stop_and_adds_tp_sl_sidecar_labels(
 
     Trade-surface contract (locked 2026-05-12, ES 15m entry-precision):
       - Each entry candidate fans out to (#SL × #TP) combos.
-      - Forward-scan window is fixed at FORWARD_SCAN_BARS = 24 bars; entries
-        with fewer than MIN_FUTURE_BARS = 24 future bars are DROPPED.
-      - Within the 24-bar window: TP-first -> winner=1; SL-first / same-bar /
+      - Forward-scan window is fixed at FORWARD_SCAN_BARS = 10 bars; entries
+        with fewer than MIN_FUTURE_BARS = 10 future bars are DROPPED.
+      - Within the 10-bar window: TP-first -> winner=1; SL-first / same-bar /
         neither -> winner=0 (not dropped).
       - Each combo row carries the 6 TRADE_DISCOVERABLE_FEATURES so AG can
         learn per-combo trade geometry as a model input.
     """
-    # Fixture must supply >= 25 bars so the entry at index 0 has >= 24 future
-    # bars and passes the MIN_FUTURE_BARS gate. Bar 1 reaches 108.5 (hits the
-    # 1.000 and 1.236 fib TPs); bar 2 reaches 113.5 (hits the 1.618 fib TP).
-    # Bars 3..24 are quiet filler so no further TP/SL touches occur.
+    # Fixture must supply >= 11 bars so the entry at index 0 has >= 10 future
+    # bars and passes the MIN_FUTURE_BARS gate. Bar 1 reaches TP1/TP2, bar 2
+    # reaches TP3, and bar 3 reaches TP4/TP5 — giving the full 4x5 winning grid.
     fixture: list[tuple[float, float, float]] = [
         (101.0, 99.0, 100.0),
         (108.5, 99.5, 108.0),
         (113.5, 100.0, 113.0),
+        (120.5, 100.0, 120.0),
     ]
-    fixture.extend([(113.0, 100.0, 112.0)] * 22)
+    fixture.extend([(120.0, 100.0, 119.0)] * 8)
 
     rows = []
     for i, (high, low, close) in enumerate(fixture):
@@ -59,12 +59,13 @@ def test_trade_dataset_uses_emitted_entry_tp_stop_and_adds_tp_sl_sidecar_labels(
                 "ml_entry_short_trigger": 0.0,
                 "ml_trade_entry": 100.0 if i == 0 else 0.0,
                 # Pine-emitted fib-ladder TPs (label-construction inputs only):
-                # 1.000 / 1.236 / 1.618 extensions. Sized so bar 1 (high=108.5)
-                # hits TP1 + TP2 and bar 2 (high=113.5) hits TP3 — giving the
-                # full 4x3 grid of winning combos for the assertion below.
+                # 1.000 / 1.236 / 1.618 / 2.000 / 2.236 extensions. Sized so
+                # the forward window hits every TP family.
                 "ml_trade_tp1": 104.0 if i == 0 else 0.0,
                 "ml_trade_tp2": 108.0 if i == 0 else 0.0,
                 "ml_trade_tp3": 112.0 if i == 0 else 0.0,
+                "ml_trade_tp4": 116.0 if i == 0 else 0.0,
+                "ml_trade_tp5": 120.0 if i == 0 else 0.0,
                 "ml_trade_stop": 97.0 if i == 0 else 0.0,
             }
         )
@@ -73,10 +74,10 @@ def test_trade_dataset_uses_emitted_entry_tp_stop_and_adds_tp_sl_sidecar_labels(
 
     trades = build_trade_dataset(df)
 
-    # Combo expansion: 1 entry × #SL × #TP combos. Under the 24-bar contract,
+    # Combo expansion: 1 entry × #SL × #TP combos. Under the 10-bar contract,
     # all combos for an admitted entry become rows (neither-hit are labeled 0,
     # not dropped). This bullish fixture is constructed so every TP family
-    # touches within 24 bars and no SL is breached, giving the full grid.
+    # touches within 10 bars and no SL is breached, giving the full grid.
     n_tp = len(DISCOVERABLE_TP_RATIOS)
     n_sl = len(DISCOVERABLE_SL_ATR_MULTS)
     assert len(trades) == n_tp * n_sl, (

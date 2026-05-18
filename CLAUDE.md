@@ -385,6 +385,23 @@ local.
 Quality workbook runtime lanes are decommissioned. Warbird quality now runs
 through Hermes guardrails and native repo validators only.
 
+### Hermes ACP Status (2026-05-18)
+
+- Hermes is installed locally and managed at `~/.hermes/hermes-agent`.
+- The VS Code ACP Client extension `formulahendry.acp-client` is installed.
+- Workspace `.vscode/settings.json` registers `acp.agents.Hermes Agent` with
+  the absolute Hermes path and the 109-skill preload string.
+- `hermes acp --check`, `hermes config check`, `hermes doctor`,
+  `hermes hooks doctor`, and `tc_validator --fast` pass in the current
+  environment.
+- Current blocker: the configured primary model
+  `nousresearch/hermes-3-llama-3.1-405b` via OpenRouter does not support the
+  Hermes tool exposure active in this environment. Fresh smoke tests fall back
+  to `deepseek/deepseek-r1`; fallback is not proof the primary is ready.
+- Current gap: VS Code ACP panel connection is still unverified. Do not claim
+  Hermes ACP is end-to-end ready until an ACP session returns the exact reply
+  `VSCODE_ACP_READY`.
+
 Before claiming completion on Hermes/Kilo/guardrail work, run:
 
 1. `kilo debug config`
@@ -393,6 +410,10 @@ Before claiming completion on Hermes/Kilo/guardrail work, run:
 4. `hermes memory status`
 5. `hermes lsp status`
 6. `hermes hooks doctor`
+7. For primary-model readiness claims, run the exact Hermes smoke path being
+   claimed and confirm it does not fall back.
+8. For VS Code ACP readiness claims, verify the ACP Client panel connects and
+   returns `VSCODE_ACP_READY`.
 
 Quality workbook runtime/artifact surfaces were removed. Do not route new
 execution through quality-playbook phase runners.

@@ -55,15 +55,7 @@ REQUIRED_FEATURES = {
     "ml_trade_entry",
     "ml_trade_stop",
     # `ml_trade_tp` retired 2026-05-12 — Pine emits the fib ladder via
-    # ml_trade_tp1/2/3 which are label-construction inputs (not ML_FEATURES).
-    "ml_fib_touch_level_code",
-    "ml_fib_entry_dist_atr",
-    "ml_fib_pierce_atr",
-    "ml_fib_close_reclaim_atr",
-    "ml_fib_reaction_body_ratio",
-    "ml_fib_reaction_upper_wick_ratio",
-    "ml_fib_reaction_lower_wick_ratio",
-    "ml_fib_reaction_code",
+    # ml_trade_tp1..5 which are label-construction inputs (not ML_FEATURES).
     "ml_recent_liq_bull",
     "ml_recent_liq_bear",
     "ml_liq_bars_since_bull",
@@ -75,6 +67,42 @@ REQUIRED_FEATURES = {
     "ml_xa_6e_code",
     "ml_xa_nq_rel_strength_atr",
     "ml_xa_6e_momentum_zscore",
+    # Footprint/order-flow surface retained as non-fib signal evidence.
+    "ml_fp_delta_pct",
+    "ml_fp_poc_dist_atr",
+    "ml_fp_va_position",
+    "ml_delta_acceleration",
+    "ml_aggressor_pulse",
+    "ml_absorption_candidate",
+    "ml_flush_candidate",
+    "ml_volume_spike_ratio",
+    "ml_poc_shift",
+}
+
+
+PROTECTED_FIB_FEATURES_MUST_BE_ABSENT = {
+    "knob_auto_tune_zz",
+    "knob_fib_deviation_manual",
+    "knob_fib_depth_manual",
+    "knob_fib_threshold_floor_pct",
+    "knob_min_fib_range_atr",
+    "knob_fib_hysteresis_pct",
+    "knob_htf_conf_tol_pct",
+    "ml_fib_touch_level_code",
+    "ml_fib_entry_dist_atr",
+    "ml_fib_pierce_atr",
+    "ml_fib_close_reclaim_atr",
+    "ml_fib_reaction_body_ratio",
+    "ml_fib_reaction_upper_wick_ratio",
+    "ml_fib_reaction_lower_wick_ratio",
+    "ml_fib_reaction_code",
+    "ml_dir",
+    "ml_fib_range",
+    "ml_pivot_dist_atr",
+    "ml_p618_dist_atr",
+    "ml_bars_since_break",
+    "ml_break_in_dir",
+    "ml_htf_conf_total",
 }
 
 
@@ -95,15 +123,7 @@ LEAN_CUT_DROPS_MUST_BE_ABSENT = {
     "ml_fib_touch_500_short",
     "ml_fib_touch_618_short",
     "ml_fib_touch_786_short",
-    "ml_fp_delta_pct",
-    "ml_fp_poc_dist_atr",
-    "ml_fp_va_position",
     "ml_delta_imbalance_pct",
-    "ml_delta_acceleration",
-    "ml_aggressor_pulse",
-    "ml_absorption_candidate",
-    "ml_flush_candidate",
-    "ml_poc_shift",
     "ml_cvd_div_bull",
     "ml_cvd_div_bear",
     "ml_xa_zn_code",
@@ -117,7 +137,7 @@ def test_all_model_affecting_indicator_inputs_are_knob_columns():
     assert REQUIRED_KNOBS.issubset(set(core.KNOB_COLUMNS))
 
 
-def test_entry_fib_liquidity_symbol_context_is_in_ag_features():
+def test_entry_liquidity_symbol_context_is_in_ag_features():
     assert REQUIRED_FEATURES.issubset(set(ML_FEATURES))
 
 
@@ -126,8 +146,12 @@ def test_trade_discoverables_are_in_model_feature_surface():
 
 
 def test_v9_feature_surface_counts_are_locked():
-    assert len(ML_FEATURES) == 82
-    assert len(MODEL_FEATURES) == 88
+    assert len(ML_FEATURES) == 77
+    assert len(MODEL_FEATURES) == 83
+
+
+def test_protected_fib_logic_is_not_in_ag_feature_surface():
+    assert not (set(ML_FEATURES) & PROTECTED_FIB_FEATURES_MUST_BE_ABSENT)
 
 
 def test_lean_cut_keeper_agreement_features_are_present():
