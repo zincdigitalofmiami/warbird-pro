@@ -1,0 +1,19 @@
+{
+    "openclaw.chat.thinkingLevel": "high",
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.terminal.activateEnvironment": true,
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}"
+    ],
+    "terminal.integrated.cwd": "${workspaceFolder}",
+    "acp.agents": {
+        "Hermes Agent": {
+            "command": "/Users/zincdigital/bin/hermes",
+            "args": [
+                "--skills",
+                "hermes-agent,pre-commit-verify,task-completion,github-auth,github-code-review,github-pr-workflow,github-repo-management,codebase-inspection,native-mcp,systematic-debugging,test-driven-development,writing-plans,plan,debugging-hermes-tui-commands,hermes-agent-skill-authoring,pine-script-ai-coding-agent,tc-tracker,tc-advanced-pine,tc-alerts,tc-bar-coloring,tc-example-strategies,tc-indicators-basics,tc-math,tc-operators,tc-plots,tc-strategies-backtesting,tc-technical-analysis,tc-visual-output,tradingview-indicator-contract-audit,tradingview-indicator-lifecycle,tradingview-indicator-operations,warbird-phase-execution,databento-research,qa-gatekeeper,guardrail-loop,requesting-code-review,subagent-driven-development,python-debugpy,node-inspect-debugger,spike",
+                "acp"
+            ]
+        }
+    }
+}
